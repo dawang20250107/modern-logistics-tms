@@ -7,6 +7,8 @@ case "$ROLE" in
   web)
     echo "[entrypoint] applying migrations..."
     python manage.py migrate --noinput
+    echo "[entrypoint] initializing LangGraph agent (checkpointer tables)..."
+    python manage.py agent_setup || true
     echo "[entrypoint] collecting static (admin)..."
     python manage.py collectstatic --noinput || true
     echo "[entrypoint] starting ASGI server (uvicorn)..."
@@ -15,6 +17,8 @@ case "$ROLE" in
   web-prod)
     echo "[entrypoint] applying migrations..."
     python manage.py migrate --noinput
+    echo "[entrypoint] initializing LangGraph agent (checkpointer tables)..."
+    python manage.py agent_setup || true
     echo "[entrypoint] collecting static..."
     python manage.py collectstatic --noinput || true
     echo "[entrypoint] starting gunicorn (uvicorn workers)..."

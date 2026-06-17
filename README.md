@@ -17,7 +17,7 @@
 - **控制塔与实时**：KPI 态势、轨迹**队列削峰 + Celery 批量落库**、ETA/回单定时扫描预警、**SSE 实时事件流**。
 - **异常与回单**：异常闭环（分级/指派/处理/关闭 + 费用责任）、回单上传 + **可插拔 OCR**。
 - **费用与开放平台**：费用字典、报价规则、应收/应付自动归集、费用/付款接口、**Webhook 网关（HMAC + 重试）**。
-- **AI 工作台**：DeepSeek 客户端 + Agent 工具注册表（ETA风险/回单/费用风控/调度建议/异常分析/客服话术），证据链 + **人工确认闭环**，AI 只建议不自动执行高风险动作。
+- **AI 工作台**：**LangGraph ReAct Agent**（DeepSeek 作为 OpenAI 兼容 LLM）自动编排工具注册表（ETA风险/回单/费用风控/调度建议/异常分析/客服话术），**Postgres checkpointer** 持久化多轮对话状态，**SSE 流式**逐段输出并对接控制塔实时事件流；证据链 + **人工确认闭环**，AI 只建议不自动执行高风险动作。底层工具仍保留 REST 端点向后兼容。
 - **工程化**：Docker 编排、生产 Nginx+gunicorn 编排、GitHub Actions CI、drf-spectacular OpenAPI、k6 压测脚手架。
 
 ## 本地一键运行（Docker）

@@ -244,3 +244,11 @@ DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY", default="")
 DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", default="https://api.deepseek.com")
 DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", default="deepseek-v4-pro")
 DEEPSEEK_TIMEOUT_SECONDS = env.int("DEEPSEEK_TIMEOUT_SECONDS", default=60)
+
+# ── LangGraph Agent ─────────────────────────────────────
+# ReAct 编排：DeepSeek（OpenAI 兼容）作为 LLM，状态持久化到 Postgres（checkpointer）。
+AGENT_LLM_TEMPERATURE = env.float("AGENT_LLM_TEMPERATURE", default=0.2)
+AGENT_MAX_TOOL_LOOPS = env.int("AGENT_MAX_TOOL_LOOPS", default=8)
+# checkpointer 连接池（复用主库 DATABASE_URL；空则回退内存 saver，仅供无 PG 的本地/测试）
+AGENT_CHECKPOINT_ENABLED = env.bool("AGENT_CHECKPOINT_ENABLED", default=True)
+AGENT_CHECKPOINT_POOL_MAX = env.int("AGENT_CHECKPOINT_POOL_MAX", default=10)

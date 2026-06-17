@@ -20,3 +20,6 @@ REST_FRAMEWORK = {  # noqa: F405
 # 测试内联执行 Celery 任务（OCR/落库等），保证确定性
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
+
+# Agent 用内存 checkpointer，避免依赖 Postgres 连接池、保证用例隔离
+AGENT_CHECKPOINT_ENABLED = False

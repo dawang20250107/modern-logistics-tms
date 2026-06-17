@@ -12,9 +12,22 @@ from django.utils import timezone
 
 from apps.core.exceptions import AppError
 
-from .models import Order, Waybill
+from .models import Order, OrderEvent, Waybill
 from .numbering import order_no as gen_order_no
 from .numbering import waybill_no as gen_waybill_no
+
+
+def record_order_event(order, event_type, *, actor=None, from_status="", to_status="", source="system", **payload):
+    """记录订单事件（溯源）。actor 仅在已认证时落库。"""
+    OrderEvent.objects.create(
+        order=order,
+        event_type=event_type,
+        from_status=from_status,
+        to_status=to_status,
+        actor=actor if actor and getattr(actor, "is_authenticated", False) else None,
+        source=source,
+        payload=payload,
+    )
 
 _PHONE = re.compile(r"1[3-9]\d{9}")
 _WEIGHT = re.compile(r"(\d+(?:\.\d+)?)\s*(?:吨|t|T)")
@@ -116,26 +129,34 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
         parse_meta=parse_meta,
         **clean,
     )
+    record_order_event(
+        order, "created", actor=operator, to_status=order.status,
+        source="ai" if parse_meta.get("source") == "deepseek" else "cs", channel=channel,
+    )
     return order
 
 
-def confirm_order(order: Order) -> Order:
+def confirm_order(order: Order, *, operator=None) -> Order:
     if order.status not in (Order.STATUS_PENDING_CONFIRM, Order.STATUS_CONFIRMED):
         raise AppError("INVALID_ORDER_STATUS", "仅待确认订单可确认。", status=409)
+    prev = order.status
     order.status = Order.STATUS_CONFIRMED
     order.save(update_fields=["status", "updated_at"])
+    record_order_event(order, "confirmed", actor=operator, from_status=prev, to_status=order.status, source="cs")
     return order
 
 
-def pool_order(order: Order) -> Order:
+def pool_order(order: Order, *, operator=None) -> Order:
     """订单进池：确认后投入调度池，实时通知调度。"""
     from apps.core.redis import publish_event
 
     if order.status not in (Order.STATUS_CONFIRMED, Order.STATUS_PENDING_CONFIRM):
         raise AppError("INVALID_ORDER_STATUS", "仅已确认/待确认订单可进池。", status=409)
+    prev = order.status
     order.status = Order.STATUS_POOLED
     order.pooled_at = timezone.now()
     order.save(update_fields=["status", "pooled_at", "updated_at"])
+    record_order_event(order, "pooled", actor=operator, from_status=prev, to_status=order.status, source="cs")
     publish_event("order_pooled", {
         "order_no": order.order_no, "origin": order.origin, "destination": order.destination,
         "priority": order.priority, "business_type": order.business_type,
@@ -143,11 +164,13 @@ def pool_order(order: Order) -> Order:
     return order
 
 
-def cancel_order(order: Order) -> Order:
+def cancel_order(order: Order, *, operator=None) -> Order:
     if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED):
         raise AppError("INVALID_ORDER_STATUS", "已派单/已完成订单不可取消。", status=409)
+    prev = order.status
     order.status = Order.STATUS_CANCELLED
     order.save(update_fields=["status", "updated_at"])
+    record_order_event(order, "cancelled", actor=operator, from_status=prev, to_status=order.status, source="cs")
     return order
 
 

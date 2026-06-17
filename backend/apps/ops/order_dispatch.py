@@ -10,8 +10,14 @@ from django.utils import timezone
 from apps.core.exceptions import AppError
 from apps.core.redis import publish_event
 
-from .intake import convert_order_to_waybill
+from .intake import convert_order_to_waybill, record_order_event
 from .models import Order, Waybill
+
+# 占用运力的运单状态（视为不可再次派给同一车辆/司机）
+_BUSY_STATUSES = [
+    Waybill.STATUS_DISPATCHED, Waybill.STATUS_LOADED, Waybill.STATUS_DEPARTED,
+    Waybill.STATUS_IN_TRANSIT, Waybill.STATUS_PENDING_DISPATCH,
+]
 
 
 def claim_order(order_id, dispatcher) -> Order:
@@ -26,6 +32,7 @@ def claim_order(order_id, dispatcher) -> Order:
         order.claimed_at = timezone.now()
         order.status = Order.STATUS_DISPATCHING
         order.save(update_fields=["claimed_by", "claimed_at", "status", "updated_at"])
+        record_order_event(order, "claimed", actor=dispatcher, to_status=order.status, source="dispatch")
     publish_event("order_claimed", {"order_no": order.order_no, "dispatcher": getattr(dispatcher, "username", "")})
     return order
 
@@ -42,15 +49,39 @@ def release_order(order, dispatcher=None) -> Order:
     return order
 
 
+def _assert_resource_free(vehicle, driver):
+    """校验车辆/司机未被占用（已在调用方持有行锁，保证并发不重复派）。"""
+    if vehicle and Waybill.objects.filter(vehicle=vehicle, status__in=_BUSY_STATUSES).exists():
+        raise AppError("VEHICLE_BUSY", f"车辆 {vehicle.plate_no} 已被占用，不可重复派单。", status=409)
+    if driver and Waybill.objects.filter(driver=driver, status__in=_BUSY_STATUSES).exists():
+        raise AppError("DRIVER_BUSY", f"司机 {driver.name} 已被占用，不可重复派单。", status=409)
+
+
 def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None, operator=None):
-    """派单：生成运单并落承运信息与派单类型，回写订单为已派单。"""
+    """派单：生成运单并落承运信息与派单类型，回写订单为已派单。
+
+    并发安全：锁定车辆/司机行后校验占用，避免两名调度把同一车/司机重复派出。
+    """
     if dispatch_type not in dict(Waybill.DISPATCH_TYPE_CHOICES):
         raise AppError("INVALID_DISPATCH_TYPE", "派单类型非法。", status=400)
     if order.status not in (Order.STATUS_POOLED, Order.STATUS_DISPATCHING, Order.STATUS_CONFIRMED):
         raise AppError("ORDER_NOT_DISPATCHABLE", "订单当前状态不可派单。", status=409)
-    waybill = convert_order_to_waybill(
-        order, carrier=carrier, vehicle=vehicle, driver=driver, dispatch_type=dispatch_type, operator=operator
-    )
+
+    with transaction.atomic():
+        from apps.masterdata.models import Driver, Vehicle
+
+        if vehicle:
+            vehicle = Vehicle.objects.select_for_update().get(id=vehicle.id)
+        if driver:
+            driver = Driver.objects.select_for_update().get(id=driver.id)
+        _assert_resource_free(vehicle, driver)
+        waybill = convert_order_to_waybill(
+            order, carrier=carrier, vehicle=vehicle, driver=driver, dispatch_type=dispatch_type, operator=operator
+        )
+        record_order_event(
+            order, "dispatched", actor=operator, to_status=order.status, source="dispatch",
+            waybill_no=waybill.waybill_no, dispatch_type=dispatch_type,
+        )
     publish_event("order_dispatched", {
         "order_no": order.order_no, "waybill_no": waybill.waybill_no, "dispatch_type": dispatch_type,
     })

@@ -6,6 +6,7 @@
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.core.models import BaseModel, OrgScopedModel, SoftDeleteModel
 
@@ -151,6 +152,31 @@ class Order(BaseModel, SoftDeleteModel):
 
     def __str__(self) -> str:
         return self.order_no
+
+
+class OrderEvent(BaseModel):
+    """订单全生命周期事件溯源：建单/确认/进池/认领/派单/完成/取消等留痕。"""
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="events")
+    event_type = models.CharField(max_length=48)
+    from_status = models.CharField(max_length=32, blank=True)
+    to_status = models.CharField(max_length=32, blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="order_events"
+    )
+    source = models.CharField(max_length=24, blank=True, help_text="cs/dispatch/system/ai")
+    payload = models.JSONField(default=dict, blank=True)
+    event_time = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = "ops_order_event"
+        ordering = ["event_time"]
+        indexes = [models.Index(fields=["order", "event_time"])]
+        verbose_name = "订单事件"
+        verbose_name_plural = "订单事件"
+
+    def __str__(self) -> str:
+        return f"{self.order_id}:{self.event_type}"
 
 
 class Waybill(BaseModel, OrgScopedModel):

@@ -233,13 +233,13 @@ class OrderViewSet(viewsets.ModelViewSet):
     def pool(self, request, pk=None):
         from .intake import pool_order
 
-        return Response(OrderSerializer(pool_order(self.get_object())).data)
+        return Response(OrderSerializer(pool_order(self.get_object(), operator=request.user)).data)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
         from .intake import cancel_order
 
-        return Response(OrderSerializer(cancel_order(self.get_object())).data)
+        return Response(OrderSerializer(cancel_order(self.get_object(), operator=request.user)).data)
 
     @action(detail=False, methods=["post"], url_path="batch")
     def batch(self, request):
@@ -311,11 +311,19 @@ class OrderViewSet(viewsets.ModelViewSet):
         meta = parsed.pop("_meta", {})
         return Response({"fields": parsed, "meta": meta})
 
+    @action(detail=True, methods=["get"], url_path="timeline")
+    def timeline(self, request, pk=None):
+        """订单全生命周期事件时间线。"""
+        from .serializers import OrderEventSerializer
+
+        order = self.get_object()
+        return Response(OrderEventSerializer(order.events.all(), many=True).data)
+
     @action(detail=True, methods=["post"], url_path="confirm")
     def confirm(self, request, pk=None):
         from .intake import confirm_order
 
-        return Response(OrderSerializer(confirm_order(self.get_object())).data)
+        return Response(OrderSerializer(confirm_order(self.get_object(), operator=request.user)).data)
 
     @action(detail=True, methods=["post"], url_path="convert")
     def convert(self, request, pk=None):

@@ -1,7 +1,15 @@
 from rest_framework import serializers
 
-from .models import ExceptionRecord, Order, Receipt, TrackingPoint, Waybill, WaybillEvent
+from .models import ExceptionRecord, Order, OrderEvent, Receipt, TrackingPoint, Waybill, WaybillEvent
 from .services import allowed_next
+
+
+class OrderEventSerializer(serializers.ModelSerializer):
+    actor_name = serializers.CharField(source="actor.username", read_only=True, default="")
+
+    class Meta:
+        model = OrderEvent
+        fields = ["id", "event_type", "from_status", "to_status", "actor_name", "source", "payload", "event_time"]
 
 
 class WaybillEventSerializer(serializers.ModelSerializer):

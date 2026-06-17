@@ -81,8 +81,15 @@ def _complete_order_on_delivery(waybill, to_status):
     order = waybill.order
     if order is None or order.status == Order.STATUS_COMPLETED:
         return
+    from .intake import record_order_event
+
+    prev = order.status
     order.status = Order.STATUS_COMPLETED
     order.save(update_fields=["status", "updated_at"])
+    record_order_event(
+        order, "completed", from_status=prev, to_status=order.status, source="system",
+        waybill_no=waybill.waybill_no, trigger=to_status,
+    )
     publish_event("order_completed", {"order_no": order.order_no, "waybill_no": waybill.waybill_no})
 
 

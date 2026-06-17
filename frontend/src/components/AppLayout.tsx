@@ -32,7 +32,11 @@ export function AppLayout() {
       </aside>
       <main className="main">
         <header className="topbar">
-          <div className="topbar-title">现代化物流控制塔</div>
+          <div className="topbar-title">
+            AI 物流中台
+            <span className="sub">TMS · CRM · ERP</span>
+            <span className="ai-pill">AI 加持</span>
+          </div>
           <div className="topbar-user">
             <span>{user?.nickname || user?.username}</span>
             <button className="btn-ghost" onClick={logout}>

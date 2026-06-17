@@ -12,13 +12,21 @@ from apps.core.exceptions import AppError
 
 _REGISTRY: dict = {}
 
+# 风险分级（分级闸门）：
+# - "low"：只读/分析/落建议等不直接变更核心业务状态的动作，agent 可自动执行；
+# - "high"：会真正写入/执行高风险动作（改运单状态、发起付款、对外承诺等），
+#   必须经人工确认闭环（落 AgentSuggestion 等待 confirm），agent 不得自动落地。
+RISK_LOW = "low"
+RISK_HIGH = "high"
 
-def tool(name: str, description: str, input_schema: dict):
+
+def tool(name: str, description: str, input_schema: dict, risk: str = RISK_LOW):
     def decorator(fn):
         _REGISTRY[name] = {
             "name": name,
             "description": description,
             "input_schema": input_schema,
+            "risk": risk,
             "fn": fn,
         }
         return fn

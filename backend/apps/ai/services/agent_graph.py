@@ -20,6 +20,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from apps.core.exceptions import AppError
 
 from .langchain_tools import build_langchain_tools
+from .mcp_tools import build_mcp_tools
 
 SYSTEM_PROMPT = (
     "你是现代化物流 TMS 平台的智能助手，服务于控制塔与运营/财务/客服团队。"
@@ -83,7 +84,8 @@ def _build_checkpointer():
 
 def _build_graph(checkpointer):
     llm = _build_llm()
-    tools = build_langchain_tools()
+    # 内置业务工具 + 外部 MCP 工具，绑定进同一张图，agent 统一编排调用
+    tools = [*build_langchain_tools(), *build_mcp_tools()]
     llm_with_tools = llm.bind_tools(tools)
     system = SystemMessage(content=SYSTEM_PROMPT)
 

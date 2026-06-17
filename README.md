@@ -18,6 +18,7 @@
 - **异常与回单**：异常闭环（分级/指派/处理/关闭 + 费用责任）、回单上传 + **可插拔 OCR**。
 - **费用与开放平台**：费用字典、报价规则、应收/应付自动归集、费用/付款接口、**Webhook 网关（HMAC + 重试）**。
 - **AI 工作台**：**LangGraph ReAct Agent**（DeepSeek 作为 OpenAI 兼容 LLM）自动编排工具注册表（ETA风险/回单/费用风控/调度建议/异常分析/客服话术），**Postgres checkpointer** 持久化多轮对话状态，**SSE 流式**逐段输出并对接控制塔实时事件流；证据链 + **人工确认闭环**，AI 只建议不自动执行高风险动作。底层工具仍保留 REST 端点向后兼容。
+- **可扩展 Agent**：工具支持 **per-tool 参数 schema**（接入参数各异的大量 API 无需改图）、**风险分级闸门**（低风险自动执行 / 高风险落建议待人工确认）、以及 **MCP 接入**（`AGENT_MCP_SERVERS` 配置外部 MCP server，工具与内置工具一起绑定进同一张图）。
 - **工程化**：Docker 编排、生产 Nginx+gunicorn 编排、GitHub Actions CI、drf-spectacular OpenAPI、k6 压测脚手架。
 
 ## 本地一键运行（Docker）

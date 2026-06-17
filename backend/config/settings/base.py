@@ -252,3 +252,6 @@ AGENT_MAX_TOOL_LOOPS = env.int("AGENT_MAX_TOOL_LOOPS", default=8)
 # checkpointer 连接池（复用主库 DATABASE_URL；空则回退内存 saver，仅供无 PG 的本地/测试）
 AGENT_CHECKPOINT_ENABLED = env.bool("AGENT_CHECKPOINT_ENABLED", default=True)
 AGENT_CHECKPOINT_POOL_MAX = env.int("AGENT_CHECKPOINT_POOL_MAX", default=10)
+# 外部 MCP server 连接表（JSON），用于后期接入大量 API/MCP 工具；空则不加载。
+# 例：{"weather": {"url": "http://mcp:8000/mcp", "transport": "streamable_http"}}
+AGENT_MCP_SERVERS = env.json("AGENT_MCP_SERVERS", default={})

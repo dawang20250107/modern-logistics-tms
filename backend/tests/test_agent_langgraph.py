@@ -7,7 +7,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 from apps.ai.models import AgentSuggestion
 from apps.ai.services import agent_graph
-from apps.ai.services.langchain_tools import build_langchain_tools
+from apps.ai.services import tools as tool_registry
+from apps.ai.services.langchain_tools import _schema_to_model, build_langchain_tools
+from apps.ai.services.mcp_tools import build_mcp_tools
 from apps.ops.models import Waybill
 
 
@@ -41,6 +43,47 @@ def test_build_langchain_tools_normalizes_names():
     names = {t.name for t in tools}
     assert "logistics__eta_risk_analysis" in names
     assert all("." not in n for n in names)  # OpenAI function name 不允许点号
+
+
+def test_schema_to_model_supports_per_tool_fields():
+    schema = {
+        "type": "object",
+        "required": ["waybill_no"],
+        "properties": {
+            "waybill_no": {"type": "string"},
+            "amount": {"type": "number"},
+            "force": {"type": "boolean"},
+        },
+    }
+    model = _schema_to_model("finance.payout", schema)
+    fields = model.model_fields
+    assert fields["waybill_no"].is_required()
+    assert not fields["amount"].is_required()  # 非 required → 可选
+    assert not fields["force"].is_required()
+
+
+def test_high_risk_tool_flags_confirmation_in_description():
+    # 临时注册一个高风险写工具，验证风险等级会下沉到 LLM 可见描述
+    @tool_registry.tool(
+        "test.write_action",
+        "执行某高风险写操作。",
+        {"type": "object", "required": ["waybill_no"], "properties": {"waybill_no": {"type": "string"}}},
+        risk=tool_registry.RISK_HIGH,
+    )
+    def _write(args):  # pragma: no cover - 不会被实际调用
+        return {"summary": "ok"}
+
+    try:
+        built = {t.name: t for t in build_langchain_tools()}
+        assert "test__write_action" in built
+        assert "高风险" in built["test__write_action"].description
+    finally:
+        tool_registry._REGISTRY.pop("test.write_action", None)
+
+
+def test_build_mcp_tools_noop_without_config():
+    # 未配置 AGENT_MCP_SERVERS 时零开销返回空列表，不影响内置工具
+    assert build_mcp_tools() == []
 
 
 # transaction=True：LangGraph 同步执行在工作线程跑节点，工具的 ORM 查询走独立连接，

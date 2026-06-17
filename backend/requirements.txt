@@ -17,8 +17,10 @@ gunicorn>=22,<24
 uvicorn[standard]>=0.30,<0.40
 
 # LangGraph AI Agent（ReAct 编排 + Postgres 状态持久化，DeepSeek 作为 OpenAI 兼容 LLM）
+# + MCP 适配器（接入外部 MCP server 工具）。统一 langchain 1.x 线以避免依赖冲突。
 langgraph>=1.0,<2
 langgraph-checkpoint-postgres>=2.0,<3
-langchain-core>=0.3,<1
-langchain-openai>=0.3,<1
+langchain-core>=1.0,<2
+langchain-openai>=1.0,<2
+langchain-mcp-adapters>=0.3,<1
 psycopg-pool>=3.2,<4

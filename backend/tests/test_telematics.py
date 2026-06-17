@@ -1,5 +1,7 @@
 """车联网监控与报警中心测试。"""
 
+from datetime import UTC
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -7,8 +9,15 @@ from rest_framework.test import APIClient
 
 from apps.masterdata.models import Carrier, Vehicle
 from apps.ops.models import TrackingPoint, Waybill
-from apps.telematics.models import Alert, Device, VehicleState
-from apps.telematics.services import evaluate_telemetry, persist_reports, raise_alert, scan_offline_devices
+from apps.telematics.geo import analyze_trajectory, distance_to_polyline_m, point_in_circle, point_in_polygon
+from apps.telematics.models import Alert, Device, Geofence, VehicleState
+from apps.telematics.services import (
+    evaluate_geofences,
+    evaluate_telemetry,
+    persist_reports,
+    raise_alert,
+    scan_offline_devices,
+)
 
 
 @pytest.fixture
@@ -125,6 +134,77 @@ def test_ai_vehicle_alert_summary_tool():
     assert result["risk_detected"] is True
     assert result["evidence"]["open_alert_count"] == 1
     assert result["suggestion"] is not None  # 高危报警生成待确认建议
+
+
+def test_geo_point_in_circle_and_polygon():
+    # 上海人民广场附近
+    assert point_in_circle(121.4737, 31.2304, 121.4737, 31.2304, 500) is True
+    assert point_in_circle(121.60, 31.40, 121.4737, 31.2304, 500) is False
+    square = [[0, 0], [0, 10], [10, 10], [10, 0]]
+    assert point_in_polygon(5, 5, square) is True
+    assert point_in_polygon(15, 5, square) is False
+
+
+def test_geo_distance_to_polyline():
+    line = [[0, 0], [0, 1]]  # 沿经线
+    d = distance_to_polyline_m(0.01, 0.5, line)
+    assert 1000 < d < 1300  # ~0.01° 经度 ≈ 1.1km
+
+
+def test_analyze_trajectory_detects_stop_and_overspeed():
+    from datetime import datetime, timedelta
+
+    base = datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
+    points = [
+        {"lng": 121.0, "lat": 31.0, "speed_kmh": 0, "reported_at": base},
+        {"lng": 121.0001, "lat": 31.0001, "speed_kmh": 0, "reported_at": base + timedelta(minutes=15)},
+        {"lng": 121.5, "lat": 31.2, "speed_kmh": 120, "reported_at": base + timedelta(minutes=40)},
+        {"lng": 121.6, "lat": 31.3, "speed_kmh": 130, "reported_at": base + timedelta(minutes=50)},
+        {"lng": 121.7, "lat": 31.4, "speed_kmh": 60, "reported_at": base + timedelta(minutes=60)},
+    ]
+    result = analyze_trajectory(points, speed_limit=90)
+    assert len(result["stops"]) == 1  # 前两点同地停留 15min
+    assert result["stops"][0]["duration_seconds"] == 900
+    assert len(result["overspeed_segments"]) == 1  # 中间连续两点超速
+    assert result["overspeed_segments"][0]["max_speed"] == 130
+
+
+@pytest.mark.django_db
+def test_geofence_enter_exit_raises_alerts():
+    vehicle = Vehicle.objects.create(plate_no="沪G0001")
+    fence = Geofence.objects.create(
+        name="上海仓", shape=Geofence.SHAPE_CIRCLE, center_lng=121.0, center_lat=31.0, radius_m=1000
+    )
+    now = timezone.now()
+    # 首次在外（建立初始状态，不报警）
+    evaluate_geofences(vehicle, 122.0, 32.0, None, now)
+    assert Alert.objects.filter(alert_type=Alert.TYPE_GEOFENCE).count() == 0
+    # 进入围栏 → 报警
+    evaluate_geofences(vehicle, 121.0005, 31.0005, None, now, [fence])
+    # 离开围栏 → 报警
+    evaluate_geofences(vehicle, 122.0, 32.0, None, now, [fence])
+    alerts = Alert.objects.filter(alert_type=Alert.TYPE_GEOFENCE).order_by("created_at")
+    assert alerts.count() == 2
+    assert alerts.first().detail["action"] == "enter"
+    assert alerts.last().detail["action"] == "exit"
+
+
+@pytest.mark.django_db
+def test_trajectory_endpoint(admin_client):
+    from datetime import datetime, timedelta
+
+    wb = Waybill.objects.create(waybill_no="WBTRAJ", route_name="沪-蓉")
+    base = datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
+    for i, sp in enumerate([0, 120, 130, 60]):
+        TrackingPoint.objects.create(
+            waybill=wb, lng=121 + i * 0.1, lat=31 + i * 0.1, speed_kmh=sp,
+            reported_at=base + timedelta(minutes=i * 10),
+        )
+    resp = admin_client.get("/api/v1/telematics/waybills/WBTRAJ/trajectory?speed_limit=90")
+    assert resp.status_code == 200, resp.content
+    data = resp.json()["data"]
+    assert data["total_points"] == 4
+    assert len(data["overspeed_segments"]) == 1
 
 
 @pytest.mark.django_db

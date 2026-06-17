@@ -12,7 +12,8 @@ from django.utils.dateparse import parse_datetime
 
 from apps.core.redis import publish_event
 
-from .models import Alert, Device, VehicleState
+from .geo import point_in_circle, point_in_polygon
+from .models import Alert, Device, Geofence, GeofenceState, VehicleState
 
 # 设备上报事件码 → (报警类型, 等级)
 _EVENT_ALERT_MAP = {
@@ -122,6 +123,50 @@ def raise_alert(spec: dict, *, vehicle=None, device=None, waybill=None, triggere
     return alert
 
 
+def point_in_geofence(geofence: Geofence, lng: float, lat: float) -> bool:
+    if geofence.shape == Geofence.SHAPE_CIRCLE and geofence.center_lng is not None:
+        return point_in_circle(
+            lng, lat, float(geofence.center_lng), float(geofence.center_lat), float(geofence.radius_m)
+        )
+    if geofence.shape == Geofence.SHAPE_POLYGON:
+        return point_in_polygon(lng, lat, geofence.polygon or [])
+    return False
+
+
+def evaluate_geofences(vehicle, lng: float, lat: float, waybill, reported_at, geofences=None) -> int:
+    """检测车辆相对各围栏的进出跳变，跳变时报警。返回新增报警数。"""
+    if vehicle is None:
+        return 0
+    if geofences is None:
+        geofences = list(Geofence.objects.filter(is_active=True))
+    raised = 0
+    for fence in geofences:
+        inside_now = point_in_geofence(fence, lng, lat)
+        state, _ = GeofenceState.objects.get_or_create(vehicle=vehicle, geofence=fence)
+        if inside_now == state.inside and state.since is not None:
+            continue  # 状态未变化
+        transitioned = state.since is not None and inside_now != state.inside
+        state.inside = inside_now
+        state.since = reported_at
+        state.save(update_fields=["inside", "since", "updated_at"])
+        if transitioned:
+            action = "进入" if inside_now else "离开"
+            raise_alert(
+                {
+                    "alert_type": Alert.TYPE_GEOFENCE,
+                    "level": Alert.LEVEL_HIGH if fence.purpose == Geofence.PURPOSE_RESTRICTED else Alert.LEVEL_INFO,
+                    "message": f"{action}围栏「{fence.name}」",
+                    "detail": {"geofence": fence.name, "action": "enter" if inside_now else "exit"},
+                },
+                vehicle=vehicle,
+                waybill=waybill,
+                triggered_at=reported_at,
+                dedup=False,
+            )
+            raised += 1
+    return raised
+
+
 def persist_reports(parsed: list[dict]) -> dict:
     """批量处理上报：更新设备/车辆实时状态、续轨迹点、触发报警。返回各项计数。"""
     from apps.masterdata.models import Vehicle
@@ -134,6 +179,7 @@ def persist_reports(parsed: list[dict]) -> dict:
     vehicles = {v.plate_no: v for v in Vehicle.objects.filter(plate_no__in=plates)}
     devices = {d.device_no: d for d in Device.objects.filter(device_no__in=device_nos)}
     waybills = {w.waybill_no: w for w in Waybill.objects.filter(waybill_no__in=wbnos)}
+    geofences = list(Geofence.objects.filter(is_active=True))
 
     counts = {"states": 0, "points": 0, "alerts": 0, "devices": 0}
     track_objs = []
@@ -183,6 +229,11 @@ def persist_reports(parsed: list[dict]) -> dict:
         for spec in evaluate_telemetry(report):
             if raise_alert(spec, vehicle=vehicle, device=device, waybill=waybill, triggered_at=reported_at):
                 counts["alerts"] += 1
+
+        if vehicle is not None and report.get("lng") is not None and report.get("lat") is not None:
+            counts["alerts"] += evaluate_geofences(
+                vehicle, float(report["lng"]), float(report["lat"]), waybill, reported_at, geofences
+            )
 
     if track_objs:
         TrackingPoint.objects.bulk_create(track_objs, batch_size=500)

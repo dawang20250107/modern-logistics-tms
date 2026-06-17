@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import Alert, Device, VehicleState
+from .models import Alert, Device, Geofence, VehicleState
+
+
+@admin.register(Geofence)
+class GeofenceAdmin(admin.ModelAdmin):
+    list_display = ("name", "shape", "purpose", "is_active")
+    list_filter = ("shape", "purpose", "is_active")
+    search_fields = ("name",)
 
 
 @admin.register(Device)

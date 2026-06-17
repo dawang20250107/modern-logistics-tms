@@ -83,6 +83,56 @@ class VehicleState(BaseModel):
         return f"{self.vehicle_id}@({self.lat},{self.lng})"
 
 
+class Geofence(BaseModel):
+    SHAPE_CIRCLE = "circle"
+    SHAPE_POLYGON = "polygon"
+    SHAPE_CHOICES = [(SHAPE_CIRCLE, "圆形"), (SHAPE_POLYGON, "多边形")]
+
+    PURPOSE_WAREHOUSE = "warehouse"
+    PURPOSE_ROUTE = "route"
+    PURPOSE_RESTRICTED = "restricted"
+    PURPOSE_CHOICES = [
+        (PURPOSE_WAREHOUSE, "仓库/卸货点"),
+        (PURPOSE_ROUTE, "线路区域"),
+        (PURPOSE_RESTRICTED, "限行区域"),
+    ]
+
+    name = models.CharField(max_length=120)
+    shape = models.CharField(max_length=16, choices=SHAPE_CHOICES, default=SHAPE_CIRCLE)
+    purpose = models.CharField(max_length=16, choices=PURPOSE_CHOICES, default=PURPOSE_WAREHOUSE)
+    center_lng = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    center_lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    radius_m = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    polygon = models.JSONField(default=list, blank=True, help_text="多边形顶点 [[lng,lat], ...]")
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        db_table = "tel_geofence"
+        ordering = ["name"]
+        verbose_name = "电子围栏"
+        verbose_name_plural = "电子围栏"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class GeofenceState(BaseModel):
+    """车辆相对围栏的进出状态，用于检测进出跳变。"""
+
+    vehicle = models.ForeignKey(
+        "masterdata.Vehicle", on_delete=models.CASCADE, related_name="geofence_states"
+    )
+    geofence = models.ForeignKey(Geofence, on_delete=models.CASCADE, related_name="vehicle_states")
+    inside = models.BooleanField(default=False)
+    since = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "tel_geofence_state"
+        unique_together = [("vehicle", "geofence")]
+        verbose_name = "围栏进出状态"
+        verbose_name_plural = "围栏进出状态"
+
+
 class Alert(BaseModel):
     TYPE_OVERSPEED = "overspeed"
     TYPE_FATIGUE = "fatigue"

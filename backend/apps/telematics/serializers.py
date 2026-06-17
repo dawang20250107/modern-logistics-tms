@@ -1,6 +1,15 @@
 from rest_framework import serializers
 
-from .models import Alert, Device, VehicleState
+from .models import Alert, Device, Geofence, VehicleState
+
+
+class GeofenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Geofence
+        fields = [
+            "id", "name", "shape", "purpose", "center_lng", "center_lat",
+            "radius_m", "polygon", "is_active", "created_at",
+        ]
 
 
 class DeviceSerializer(serializers.ModelSerializer):

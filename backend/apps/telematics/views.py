@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
@@ -9,8 +10,9 @@ from rest_framework.views import APIView
 from apps.core.exceptions import AppError
 from apps.core.redis import get_redis
 
-from .models import Alert, Device, VehicleState
-from .serializers import AlertSerializer, DeviceSerializer, VehicleStateSerializer
+from .geo import analyze_trajectory
+from .models import Alert, Device, Geofence, VehicleState
+from .serializers import AlertSerializer, DeviceSerializer, GeofenceSerializer, VehicleStateSerializer
 from .tasks import TELEMETRY_QUEUE, flush_telemetry
 
 
@@ -19,6 +21,44 @@ class DeviceViewSet(viewsets.ModelViewSet):
     serializer_class = DeviceSerializer
     filterset_fields = ["device_type", "status", "vehicle"]
     search_fields = ["device_no", "sim_no"]
+
+
+class GeofenceViewSet(viewsets.ModelViewSet):
+    queryset = Geofence.objects.all()
+    serializer_class = GeofenceSerializer
+    filterset_fields = ["shape", "purpose", "is_active"]
+    search_fields = ["name"]
+
+
+class WaybillTrajectoryView(APIView):
+    """轨迹回放：返回运单历史轨迹点 + 停留点 + 超速段。"""
+
+    def get(self, request, waybill_no):
+        from apps.ops.models import TrackingPoint, Waybill
+
+        if not Waybill.objects.filter(waybill_no=waybill_no).exists():
+            raise AppError("WAYBILL_NOT_FOUND", "运单不存在。", status=404)
+        qs = TrackingPoint.objects.filter(waybill__waybill_no=waybill_no).order_by("reported_at")
+        start, end = request.query_params.get("from"), request.query_params.get("to")
+        if start:
+            qs = qs.filter(reported_at__gte=start)
+        if end:
+            qs = qs.filter(reported_at__lte=end)
+        points = [
+            {"lng": float(p.lng), "lat": float(p.lat), "speed_kmh": float(p.speed_kmh), "reported_at": p.reported_at}
+            for p in qs
+        ]
+        speed_limit = float(request.query_params.get("speed_limit") or settings.ALERT_SPEED_LIMIT_KMH)
+        analysis = analyze_trajectory(points, speed_limit=speed_limit)
+        return Response({
+            "waybill_no": waybill_no,
+            "points": [{**p, "reported_at": p["reported_at"].isoformat()} for p in points],
+            "stops": [{**s, "from": s["from"].isoformat(), "to": s["to"].isoformat()} for s in analysis["stops"]],
+            "overspeed_segments": [
+                {**s, "from": s["from"].isoformat(), "to": s["to"].isoformat()} for s in analysis["overspeed_segments"]
+            ],
+            "total_points": analysis["total_points"],
+        })
 
 
 class LiveVehicleView(APIView):

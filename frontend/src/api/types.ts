@@ -134,3 +134,58 @@ export const STATUS_LABEL: Record<string, string> = {
   cancelled: "已取消",
   voided: "已作废",
 };
+
+// ── 车联网监控 ──────────────────────────────────────────
+export interface VehicleState {
+  id: string;
+  vehicle: string;
+  vehicle_plate: string;
+  vehicle_type: string;
+  waybill: string | null;
+  waybill_no: string;
+  lng: string;
+  lat: string;
+  speed_kmh: string;
+  heading: number;
+  mileage_km: string;
+  temperature_c: string | null;
+  fuel_pct: string | null;
+  online: boolean;
+  reported_at: string | null;
+}
+
+export type AlertType =
+  | "overspeed" | "fatigue" | "deviation" | "abnormal_stop"
+  | "geofence" | "temperature" | "fuel" | "offline";
+export type AlertLevel = "info" | "medium" | "high";
+export type AlertStatus = "open" | "acknowledged" | "closed";
+
+export interface Alert {
+  id: string;
+  alert_type: AlertType;
+  level: AlertLevel;
+  status: AlertStatus;
+  vehicle: string | null;
+  vehicle_plate: string;
+  device_no: string;
+  waybill: string | null;
+  waybill_no: string;
+  message: string;
+  value: string | null;
+  threshold: string | null;
+  detail: Record<string, unknown>;
+  triggered_at: string;
+  handled_at: string | null;
+  created_at: string;
+}
+
+export const ALERT_TYPE_LABEL: Record<AlertType, string> = {
+  overspeed: "超速",
+  fatigue: "疲劳驾驶",
+  deviation: "偏航",
+  abnormal_stop: "异常停车",
+  geofence: "围栏进出",
+  temperature: "温度异常",
+  fuel: "油量异常",
+  offline: "设备离线",
+};

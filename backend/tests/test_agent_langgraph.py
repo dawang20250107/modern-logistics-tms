@@ -39,9 +39,10 @@ def _reset_graph():
 
 def test_build_langchain_tools_normalizes_names():
     tools = build_langchain_tools()
-    assert len(tools) == 6
+    assert len(tools) == 7
     names = {t.name for t in tools}
     assert "logistics__eta_risk_analysis" in names
+    assert "telematics__vehicle_alert_summary" in names
     assert all("." not in n for n in names)  # OpenAI function name 不允许点号
 
 

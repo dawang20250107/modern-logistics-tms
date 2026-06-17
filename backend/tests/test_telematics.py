@@ -110,6 +110,24 @@ def test_alert_ack_and_close_endpoint(admin_client):
 
 
 @pytest.mark.django_db
+def test_ai_vehicle_alert_summary_tool():
+    from apps.ai.services.tools import execute_tool
+
+    vehicle = Vehicle.objects.create(plate_no="沪F0001")
+    wb = Waybill.objects.create(waybill_no="WBT9", route_name="沪-蓉", vehicle=vehicle)
+    Alert.objects.create(
+        alert_type=Alert.TYPE_OVERSPEED, level=Alert.LEVEL_HIGH, vehicle=vehicle, waybill=wb,
+        message="超速", triggered_at=timezone.now(),
+    )
+
+    result = execute_tool("telematics.vehicle_alert_summary", {"waybill_no": "WBT9"})
+
+    assert result["risk_detected"] is True
+    assert result["evidence"]["open_alert_count"] == 1
+    assert result["suggestion"] is not None  # 高危报警生成待确认建议
+
+
+@pytest.mark.django_db
 def test_live_vehicles_endpoint(admin_client):
     vehicle = Vehicle.objects.create(plate_no="沪E0001")
     VehicleState.objects.create(vehicle=vehicle, online=True, lat=31.2, lng=121.4, reported_at=timezone.now())

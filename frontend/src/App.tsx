@@ -4,9 +4,11 @@ import { AppLayout } from "./components/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./auth/auth";
 import { AiWorkbenchPage } from "./pages/AiWorkbenchPage";
+import { AlertsPage } from "./pages/AlertsPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MonitorPage } from "./pages/MonitorPage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
 import { WaybillsPage } from "./pages/WaybillsPage";
 
@@ -21,6 +23,8 @@ export function App() {
               <Route index element={<ControlTowerPage />} />
               <Route path="waybills" element={<WaybillsPage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
+              <Route path="monitor" element={<MonitorPage />} />
+              <Route path="alerts" element={<AlertsPage />} />
               <Route path="exceptions" element={<ExceptionsPage />} />
               <Route path="ai" element={<AiWorkbenchPage />} />
             </Route>

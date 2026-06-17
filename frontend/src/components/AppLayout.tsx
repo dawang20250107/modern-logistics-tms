@@ -5,6 +5,8 @@ import { useAuth } from "../auth/auth";
 const NAV = [
   { to: "/", label: "控制塔", end: true },
   { to: "/waybills", label: "运单", end: false },
+  { to: "/monitor", label: "监控", end: false },
+  { to: "/alerts", label: "报警", end: false },
   { to: "/exceptions", label: "异常", end: false },
   { to: "/ai", label: "AI", end: false },
 ];

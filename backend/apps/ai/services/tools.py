@@ -346,3 +346,51 @@ def customer_reply_draft(arguments):
         "source": source,
         "suggestion": suggestion,
     }
+
+
+@tool(
+    "telematics.vehicle_alert_summary",
+    "汇总运单关联车辆的未处理车联网报警（超速/温度/油量/离线/疲劳等），用于风险归因。",
+    _WAYBILL_SCHEMA,
+)
+def vehicle_alert_summary(arguments):
+    from apps.telematics.models import Alert
+
+    waybill = _get_waybill(arguments)
+    alerts = list(
+        Alert.objects.filter(waybill=waybill, status=Alert.STATUS_OPEN).order_by("-triggered_at")[:20]
+    )
+    by_type: dict = {}
+    for a in alerts:
+        by_type[a.alert_type] = by_type.get(a.alert_type, 0) + 1
+    high = [a for a in alerts if a.level == Alert.LEVEL_HIGH]
+    evidence = {
+        "waybill_no": waybill.waybill_no,
+        "open_alert_count": len(alerts),
+        "high_count": len(high),
+        "by_type": by_type,
+        "recent": [
+            {"type": a.alert_type, "level": a.level, "message": a.message, "at": a.triggered_at.isoformat()}
+            for a in alerts[:5]
+        ],
+    }
+    risk_detected = bool(high)
+    if alerts:
+        body = f"{waybill.waybill_no} 关联车辆有 {len(alerts)} 条未处理报警（高危 {len(high)}）：{by_type}。"
+    else:
+        body = f"{waybill.waybill_no} 关联车辆当前无未处理报警。"
+    suggestion = (
+        _create_suggestion(
+            waybill, "vehicle_alert", "车辆报警待核实", body, evidence, "telematics.vehicle_alert_summary"
+        )
+        if risk_detected
+        else None
+    )
+    return {
+        "tool_name": "telematics.vehicle_alert_summary",
+        "waybill_no": waybill.waybill_no,
+        "risk_detected": risk_detected,
+        "summary": body,
+        "evidence": evidence,
+        "suggestion": suggestion,
+    }

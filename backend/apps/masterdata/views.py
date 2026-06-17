@@ -60,7 +60,7 @@ class ExpiringCredentialsView(APIView):
 
     def get(self, request):
         days = int(request.query_params.get("days") or 30)
-        deadline = timezone.now().date() + timedelta(days=days)
+        deadline = timezone.localdate() + timedelta(days=days)
 
         vehicles = []
         vq = Vehicle.objects.filter(is_active=True)

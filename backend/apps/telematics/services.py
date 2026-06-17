@@ -120,7 +120,35 @@ def raise_alert(spec: dict, *, vehicle=None, device=None, waybill=None, triggere
             "waybill_no": waybill.waybill_no if waybill else None,
         },
     )
+    _maybe_open_exception(alert, waybill)
     return alert
+
+
+# 高危报警自动转异常工单的类型
+_EXCEPTION_ALERT_TYPES = {
+    Alert.TYPE_DEVIATION, Alert.TYPE_OFFLINE, Alert.TYPE_TEMPERATURE,
+    Alert.TYPE_FATIGUE, Alert.TYPE_ABNORMAL_STOP,
+}
+
+
+def _maybe_open_exception(alert, waybill):
+    """高危报警关联运单时，自动生成异常工单（去重：同运单同类型已有未关闭则跳过）。"""
+    if waybill is None or alert.level != Alert.LEVEL_HIGH or alert.alert_type not in _EXCEPTION_ALERT_TYPES:
+        return
+    from apps.ops.models import ExceptionRecord
+
+    exists = ExceptionRecord.objects.filter(
+        waybill=waybill, exception_type=alert.alert_type
+    ).exclude(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED]).exists()
+    if exists:
+        return
+    ExceptionRecord.objects.create(
+        waybill=waybill,
+        exception_type=alert.alert_type,
+        level="high",
+        source="track",
+        description=f"[自动] {alert.message}",
+    )
 
 
 def point_in_geofence(geofence: Geofence, lng: float, lat: float) -> bool:

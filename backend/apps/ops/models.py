@@ -365,6 +365,8 @@ class Receipt(BaseModel):
     ocr_result = models.JSONField(default=dict, blank=True)
     signatory = models.CharField(max_length=80, blank=True)
     signed_at = models.DateTimeField(null=True, blank=True)
+    signature = models.TextField(blank=True, help_text="电子签名（dataURL/base64）")
+    sign_source = models.CharField(max_length=16, blank=True, help_text="driver/customer")
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="uploaded_receipts"
     )

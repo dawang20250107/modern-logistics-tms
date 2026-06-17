@@ -72,6 +72,35 @@ def transition_waybill(waybill: Waybill, to_status: str, *, operator=None, remar
     return waybill
 
 
+def sign_waybill(waybill, *, signatory="", signature="", file_url="", sign_source="driver", operator=None):
+    """司机/客户签收回传（e-POD）：落回单 + 一步推进到已签收（触发订单完成）。"""
+    from .models import Receipt
+
+    if waybill.status in (Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_SETTLED):
+        raise AppError("ALREADY_SIGNED", "运单已签收。", status=409)
+    if waybill.status not in (Waybill.STATUS_IN_TRANSIT, Waybill.STATUS_ARRIVED):
+        raise AppError("NOT_SIGNABLE", "仅在途/已到达运单可签收。", status=409)
+
+    receipt = Receipt.objects.create(
+        waybill=waybill,
+        receipt_type="signed_pod",
+        status="confirmed",
+        file_url=file_url,
+        signatory=signatory,
+        signature=signature,
+        sign_source=sign_source,
+        signed_at=timezone.now(),
+        uploaded_by=operator if operator and getattr(operator, "is_authenticated", False) else None,
+    )
+    # 推进状态机：在途→到达→签收（签收触发订单完成回写）
+    if waybill.status == Waybill.STATUS_IN_TRANSIT:
+        transition_waybill(waybill, Waybill.STATUS_ARRIVED, operator=operator, remark="签收回传自动到达")
+    transition_waybill(waybill, Waybill.STATUS_SIGNED, operator=operator, remark=f"签收人 {signatory}")
+    waybill.receipt_status = "received"
+    waybill.save(update_fields=["receipt_status", "updated_at"])
+    return receipt
+
+
 def _complete_order_on_delivery(waybill, to_status):
     """运单签收/送达/结算时，把关联订单回写为已完成（幂等），打通订单全流程闭环。"""
     from .models import Order

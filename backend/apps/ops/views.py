@@ -29,7 +29,7 @@ from .serializers import (
     WaybillSerializer,
     WaybillWriteSerializer,
 )
-from .services import merge_waybills, split_waybill, transition_waybill
+from .services import merge_waybills, sign_waybill, split_waybill, transition_waybill
 from .tasks import TRACKING_QUEUE, flush_tracking_points, process_receipt_ocr
 
 
@@ -69,6 +69,7 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         "merge": "waybill.manage",
         "dispatch_recommendation": "waybill.view",
         "dispatch_plan": "waybill.view",
+        "sign": "waybill.manage",
     }
     lookup_field = "waybill_no"
     lookup_value_regex = "[^/]+"
@@ -154,6 +155,22 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
             raise AppError("TO_STATUS_REQUIRED", "to_status 必填。", status=400)
         transition_waybill(waybill, to_status, operator=request.user, remark=request.data.get("remark", ""))
         return Response(WaybillDetailSerializer(waybill).data)
+
+    @action(detail=True, methods=["post"], url_path="sign")
+    def sign(self, request, waybill_no=None):
+        """司机/客户签收回传（e-POD）：电子签名 + 回单，推进到已签收并触发订单完成。"""
+        waybill = self.get_object()
+        receipt = sign_waybill(
+            waybill,
+            signatory=request.data.get("signatory", ""),
+            signature=request.data.get("signature", ""),
+            file_url=request.data.get("file_url", ""),
+            sign_source=request.data.get("sign_source", "driver"),
+            operator=request.user,
+        )
+        from .serializers import ReceiptSerializer
+
+        return Response({"waybill_no": waybill.waybill_no, "status": waybill.status, "receipt": ReceiptSerializer(receipt).data}, status=201)
 
     @action(detail=True, methods=["get"], url_path="tracking")
     def tracking(self, request, waybill_no=None):

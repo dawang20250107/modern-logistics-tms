@@ -24,3 +24,6 @@ langchain-core>=1.0,<2
 langchain-openai>=1.0,<2
 langchain-mcp-adapters>=0.3,<1
 psycopg-pool>=3.2,<4
+
+# IoT 终端接入网关（MQTT）
+paho-mqtt>=2,<3

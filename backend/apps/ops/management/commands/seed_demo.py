@@ -112,7 +112,9 @@ class Command(BaseCommand):
             self._refresh_related(waybill)
 
         self.stdout.write(self.style.SUCCESS(f"Seeded {len(seeded)} waybills."))
-        self.stdout.write("Demo 用户：dispatcher/Dispatch123!（上海网点，可管运单）、viewer/Viewer123!（只读）。")
+        self.stdout.write(
+            "Demo 用户：admin/Admin12345!（超管）、dispatcher/Dispatch123!（上海网点，可管运单）、viewer/Viewer123!（只读）。"
+        )
 
     def _seed_rbac(self):
         user_model = get_user_model()
@@ -148,6 +150,9 @@ class Command(BaseCommand):
         )
         viewer_role.permissions.set([perms["waybill.view"]])
 
+        # 超管账号（与 README 文档一致）
+        self._ensure_user(user_model, "admin", "Admin12345!", group, "系统管理员", is_superuser=True)
+
         # 演示用户（非超管，用于演示权限点与数据域）
         dispatcher = self._ensure_user(user_model, "dispatcher", "Dispatch123!", self.org_sh, "上海调度")
         viewer = self._ensure_user(user_model, "viewer", "Viewer123!", self.org_sh, "只读用户")
@@ -155,7 +160,7 @@ class Command(BaseCommand):
         RoleAssignment.objects.update_or_create(user=viewer, role=viewer_role, organization=self.org_sh)
 
     @staticmethod
-    def _ensure_user(user_model, username, password, org, nickname=""):
+    def _ensure_user(user_model, username, password, org, nickname="", is_superuser=False):
         user, created = user_model.objects.get_or_create(
             username=username, defaults={"nickname": nickname, "organization": org}
         )
@@ -165,6 +170,10 @@ class Command(BaseCommand):
             changed = True
         if created:
             user.set_password(password)
+            changed = True
+        if is_superuser and not (user.is_superuser and user.is_staff):
+            user.is_superuser = True
+            user.is_staff = True
             changed = True
         if changed:
             user.save()

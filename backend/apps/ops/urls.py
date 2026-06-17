@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ExceptionViewSet,
     OrderViewSet,
+    PublicTrackingView,
     ReceiptViewSet,
     TrackingIngestView,
     WaybillViewSet,
@@ -18,4 +19,5 @@ router.register("receipts", ReceiptViewSet, basename="receipt")
 urlpatterns = [
     *router.urls,
     path("tracking/points", TrackingIngestView.as_view(), name="tracking-ingest"),
+    path("track", PublicTrackingView.as_view(), name="public-track"),
 ]

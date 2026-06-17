@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -437,3 +437,61 @@ class TrackingIngestView(APIView):
         if queued:
             flush_tracking_points.delay()
         return Response({"queued": queued, "status": "queued_for_async_persist"}, status=202)
+
+
+class PublicTrackingView(APIView):
+    """客户自助订单跟踪（免登录）：订单号 + 手机号验证，返回脱敏进度。"""
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    @staticmethod
+    def _phone_ok(order, phone):
+        if not phone:
+            return False
+        for cand in (order.contact_phone, order.pickup_contact_phone, order.delivery_contact_phone):
+            if cand and (cand == phone or (len(phone) >= 4 and cand.endswith(phone))):
+                return True
+        return False
+
+    def get(self, request):
+        order_no = (request.query_params.get("order_no") or "").strip()
+        phone = (request.query_params.get("phone") or "").strip()
+        if not order_no or not phone:
+            raise AppError("TRACK_PARAMS", "order_no 与 phone 必填。", status=400)
+        order = Order.objects.filter(order_no=order_no).first()
+        if order is None or not self._phone_ok(order, phone):
+            raise AppError("TRACK_NOT_FOUND", "未找到匹配的订单，请核对订单号与手机号。", status=404)
+
+        milestones = [
+            {"event": e.event_type, "time": e.event_time.isoformat()}
+            for e in order.events.all()
+            if e.event_type in {"created", "confirmed", "pooled", "dispatched", "completed"}
+        ]
+        shipment = None
+        waybill = order.waybills.order_by("-created_at").first()
+        if waybill is not None:
+            position = None
+            if waybill.vehicle_id:
+                from apps.telematics.models import VehicleState
+
+                state = VehicleState.objects.filter(vehicle_id=waybill.vehicle_id).first()
+                if state and state.reported_at:
+                    position = {"lat": float(state.lat), "lng": float(state.lng), "at": state.reported_at.isoformat()}
+            shipment = {
+                "waybill_no": waybill.waybill_no,
+                "status": waybill.get_status_display(),
+                "estimated_arrival": waybill.estimated_arrival.isoformat() if waybill.estimated_arrival else None,
+                "receipt_status": waybill.receipt_status,
+                "position": position,
+            }
+        return Response({
+            "order_no": order.order_no,
+            "status": dict(Order.STATUS_CHOICES).get(order.status, order.status),
+            "business_type": order.get_business_type_display(),
+            "origin": order.origin,
+            "destination": order.destination,
+            "created_at": order.created_at.isoformat(),
+            "milestones": milestones,
+            "shipment": shipment,
+        })

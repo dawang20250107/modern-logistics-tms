@@ -15,6 +15,7 @@ import { MonitorPage } from "./pages/MonitorPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderIntakePage } from "./pages/OrderIntakePage";
 import { ReconciliationPage } from "./pages/ReconciliationPage";
+import { TrackingPage } from "./pages/TrackingPage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
 import { WaybillsPage } from "./pages/WaybillsPage";
 
@@ -24,6 +25,7 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/track" element={<TrackingPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />

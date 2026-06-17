@@ -188,7 +188,18 @@ class Waybill(BaseModel, OrgScopedModel):
     RISK_NONE = "none"
     RISK_CHOICES = [(RISK_HIGH, "高"), (RISK_MEDIUM, "中"), (RISK_LOW, "低"), (RISK_NONE, "无")]
 
+    # 派单类型：自有单车 / 自有车队 / 三方承运商
+    DISPATCH_OWN = "own_vehicle"
+    DISPATCH_FLEET = "fleet"
+    DISPATCH_THIRD_PARTY = "third_party"
+    DISPATCH_TYPE_CHOICES = [
+        (DISPATCH_OWN, "自有单车"),
+        (DISPATCH_FLEET, "自有车队"),
+        (DISPATCH_THIRD_PARTY, "三方承运商"),
+    ]
+
     waybill_no = models.CharField(max_length=40, unique=True)
+    dispatch_type = models.CharField(max_length=16, choices=DISPATCH_TYPE_CHOICES, blank=True)
     order = models.ForeignKey(
         Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )

@@ -252,6 +252,53 @@ class OrderViewSet(viewsets.ModelViewSet):
             raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
         return Response(batch_orders(action_name, ids, operator=request.user))
 
+    @action(detail=False, methods=["get"], url_path="pool")
+    def pool_list(self, request):
+        """订单池：在池待派订单，按优先级与进池时间排序。"""
+        qs = self.get_queryset().filter(status=Order.STATUS_POOLED).order_by("-priority", "pooled_at")
+        page = self.paginate_queryset(qs)
+        ser = OrderSerializer(page if page is not None else qs, many=True)
+        return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
+
+    @action(detail=True, methods=["post"], url_path="claim")
+    def claim(self, request, pk=None):
+        """调度认领（并发安全，行锁防抢单）。"""
+        from .order_dispatch import claim_order
+
+        order = claim_order(pk, request.user)
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="release")
+    def release(self, request, pk=None):
+        from .order_dispatch import release_order
+
+        return Response(OrderSerializer(release_order(self.get_object(), request.user)).data)
+
+    @action(detail=True, methods=["get"], url_path="dispatch-suggestion")
+    def dispatch_suggestion(self, request, pk=None):
+        """AI 派单建议：运力候选 + 承运商比价 + 外部信号 + 派单类型建议。"""
+        from .order_dispatch import recommend_dispatch_for_order
+
+        return Response(recommend_dispatch_for_order(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="dispatch")
+    def dispatch_order_action(self, request, pk=None):
+        """派单：指派承运商/车辆/司机 + 派单类型，生成运单。"""
+        from apps.masterdata.models import Carrier, Driver, Vehicle
+
+        from .order_dispatch import dispatch_order
+
+        order = self.get_object()
+        data = request.data
+        carrier = Carrier.objects.filter(id=data["carrier"]).first() if data.get("carrier") else None
+        vehicle = Vehicle.objects.filter(id=data["vehicle"]).first() if data.get("vehicle") else None
+        driver = Driver.objects.filter(id=data["driver"]).first() if data.get("driver") else None
+        waybill = dispatch_order(
+            order, dispatch_type=data.get("dispatch_type", ""), carrier=carrier,
+            vehicle=vehicle, driver=driver, operator=request.user,
+        )
+        return Response(WaybillSerializer(waybill).data, status=201)
+
     @action(detail=False, methods=["post"], url_path="parse-preview")
     def parse_preview(self, request):
         """仅解析预览，不落库（供前端 AI 建单先看结果再确认）。"""

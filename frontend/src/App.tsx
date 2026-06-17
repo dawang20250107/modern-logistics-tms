@@ -8,6 +8,7 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DispatchBoardPage } from "./pages/DispatchBoardPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
@@ -26,6 +27,7 @@ export function App() {
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />
               <Route path="intake" element={<OrderIntakePage />} />
+              <Route path="dispatch-board" element={<DispatchBoardPage />} />
               <Route path="waybills" element={<WaybillsPage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
               <Route path="command" element={<CommandCenterPage />} />

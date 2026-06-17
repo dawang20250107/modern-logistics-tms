@@ -172,10 +172,11 @@ def batch_orders(action: str, ids: list, *, operator=None) -> dict:
     return {"action": action, "ok": ok, "failed": failed, "ok_count": len(ok)}
 
 
-def convert_order_to_waybill(order: Order, *, operator=None) -> Waybill:
-    """订单转运单（人工确认后）。生成运单并回写订单为已转。"""
-    if order.status == Order.STATUS_CONVERTED:
-        raise AppError("ORDER_ALREADY_CONVERTED", "订单已转运单。", status=409)
+def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver=None,
+                             dispatch_type="", operator=None) -> Waybill:
+    """订单转运单（人工确认/派单后）。可带承运商/车辆/司机与派单类型，回写订单为已派单。"""
+    if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED):
+        raise AppError("ORDER_ALREADY_CONVERTED", "订单已派单/完成。", status=409)
     if order.status == Order.STATUS_CANCELLED:
         raise AppError("ORDER_CANCELLED", "订单已取消。", status=409)
 
@@ -184,6 +185,10 @@ def convert_order_to_waybill(order: Order, *, operator=None) -> Waybill:
         waybill_no=gen_waybill_no(timezone.now()),
         order=order,
         customer=order.customer,
+        carrier=carrier,
+        vehicle=vehicle,
+        driver=driver,
+        dispatch_type=dispatch_type,
         route_name=route_name,
         origin=order.origin,
         destination=order.destination,

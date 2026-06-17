@@ -199,6 +199,10 @@ export interface Order {
   customer_name: string;
   channel: OrderChannel;
   source: string;
+  source_type: string;
+  business_type: string;
+  priority: string;
+  settlement_type: string;
   status: string;
   contact_name: string;
   contact_phone: string;
@@ -208,10 +212,35 @@ export interface Order {
   cargo_quantity: number;
   cargo_weight_ton: string;
   cargo_volume_cbm: string;
+  cargo_value: string;
+  is_hazardous: boolean;
+  temperature_range: string;
+  claimed_by_name: string;
+  created_by_name: string;
   raw_text: string;
   parse_meta: Record<string, unknown>;
   created_at: string;
 }
+
+export interface DispatchSuggestion {
+  order_no: string;
+  vehicle_candidates: Array<{ plate_no: string; utilization: number }>;
+  carrier_quotes: Array<{ carrier: string; quote: number }>;
+  external_signals: Array<{ type: string; level: string; note: string }>;
+  suggested_dispatch_type: string;
+  best_vehicle: { plate_no: string } | null;
+  best_carrier: { carrier: string; quote: number } | null;
+}
+
+export const BUSINESS_TYPE_LABEL: Record<string, string> = {
+  ftl: "整车", ltl: "零担", express: "快递", coldchain: "冷链",
+};
+export const PRIORITY_LABEL: Record<string, string> = {
+  normal: "普通", urgent: "加急", vip: "VIP",
+};
+export const DISPATCH_TYPE_LABEL: Record<string, string> = {
+  own_vehicle: "自有单车", fleet: "自有车队", third_party: "三方承运商",
+};
 export interface ParsedOrder {
   fields: Record<string, string | number>;
   meta: { source?: string };
@@ -224,9 +253,13 @@ export const ORDER_CHANNEL_LABEL: Record<OrderChannel, string> = {
   api: "开放API",
 };
 export const ORDER_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
   pending_confirm: "待确认",
   confirmed: "已确认",
-  converted: "已转运单",
+  pooled: "订单池",
+  dispatching: "调度中",
+  converted: "已派单",
+  completed: "已完成",
   cancelled: "已取消",
 };
 
@@ -280,3 +313,4 @@ export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   order: "订单 / 渠道",
   finance: "财务 / 对账",
 };
+export interface Vehicle { id: string; plate_no: string; vehicle_type: string; }

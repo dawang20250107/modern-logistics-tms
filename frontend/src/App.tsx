@@ -11,6 +11,7 @@ import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
 import { OrderIntakePage } from "./pages/OrderIntakePage";
+import { ReconciliationPage } from "./pages/ReconciliationPage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
 import { WaybillsPage } from "./pages/WaybillsPage";
 
@@ -30,6 +31,7 @@ export function App() {
               <Route path="monitor" element={<MonitorPage />} />
               <Route path="alerts" element={<AlertsPage />} />
               <Route path="exceptions" element={<ExceptionsPage />} />
+              <Route path="reconciliation" element={<ReconciliationPage />} />
               <Route path="ai" element={<AiWorkbenchPage />} />
             </Route>
           </Route>

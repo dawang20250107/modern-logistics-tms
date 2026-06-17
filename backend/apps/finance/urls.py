@@ -7,6 +7,7 @@ from .views import (
     PaymentRequestViewSet,
     PaymentResultView,
     PricingRuleViewSet,
+    StatementViewSet,
     WebhookDeliveryViewSet,
     WebhookViewSet,
 )
@@ -18,6 +19,7 @@ router.register("payment-requests", PaymentRequestViewSet, basename="payment-req
 router.register("pricing-rules", PricingRuleViewSet, basename="pricing-rule")
 router.register("webhooks", WebhookViewSet, basename="webhook")
 router.register("webhook-deliveries", WebhookDeliveryViewSet, basename="webhook-delivery")
+router.register("statements", StatementViewSet, basename="statement")
 
 urlpatterns = [
     *router.urls,

@@ -229,3 +229,38 @@ export const ORDER_STATUS_LABEL: Record<string, string> = {
   converted: "已转运单",
   cancelled: "已取消",
 };
+
+// ── 对账单 ──────────────────────────────────────────────
+export interface StatementLine {
+  id: string;
+  waybill_no: string;
+  expense_item_code: string;
+  amount: string;
+  occurred_at: string | null;
+}
+export interface Statement {
+  id: string;
+  statement_no: string;
+  direction: "receivable" | "payable";
+  counterparty_type: "customer" | "carrier";
+  counterparty_id: string;
+  counterparty_name: string;
+  period_start: string;
+  period_end: string;
+  total_amount: string;
+  item_count: number;
+  external_total: string;
+  diff: string;
+  status: string;
+  created_at: string;
+  lines?: StatementLine[];
+}
+export const STATEMENT_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
+  confirmed: "已确认",
+  settled: "已结算",
+};
+
+// ── 主数据(精简) ───────────────────────────────────────
+export interface Customer { id: string; code: string; name: string; }
+export interface Carrier { id: string; code: string; name: string; }

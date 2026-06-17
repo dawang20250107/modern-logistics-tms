@@ -7,6 +7,8 @@ from .models import (
     ExpenseRecord,
     PaymentRequest,
     PricingRule,
+    Statement,
+    StatementLine,
     Webhook,
     WebhookDelivery,
 )
@@ -74,3 +76,28 @@ class WebhookDeliverySerializer(serializers.ModelSerializer):
     class Meta:
         model = WebhookDelivery
         fields = ["id", "webhook", "event_type", "payload", "status", "response_code", "attempts", "created_at"]
+
+
+class StatementLineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StatementLine
+        fields = ["id", "waybill_no", "expense_item_code", "amount", "occurred_at"]
+
+
+class StatementSerializer(serializers.ModelSerializer):
+    diff = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    lines = StatementLineSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Statement
+        fields = [
+            "id", "statement_no", "direction", "counterparty_type", "counterparty_id", "counterparty_name",
+            "period_start", "period_end", "total_amount", "item_count", "external_total", "diff",
+            "status", "confirmed_at", "created_at", "lines",
+        ]
+        read_only_fields = ["status", "total_amount", "item_count", "confirmed_at"]
+
+
+class StatementListSerializer(StatementSerializer):
+    class Meta(StatementSerializer.Meta):
+        fields = [f for f in StatementSerializer.Meta.fields if f != "lines"]

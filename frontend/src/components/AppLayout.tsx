@@ -10,6 +10,7 @@ const NAV = [
   { to: "/monitor", label: "监控", end: false },
   { to: "/alerts", label: "报警", end: false },
   { to: "/exceptions", label: "异常", end: false },
+  { to: "/reconciliation", label: "对账", end: false },
   { to: "/ai", label: "AI", end: false },
 ];
 

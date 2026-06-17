@@ -5,6 +5,7 @@
 
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 
 from apps.core.models import BaseModel
@@ -161,3 +162,62 @@ class WebhookDelivery(BaseModel):
         indexes = [models.Index(fields=["status"])]
         verbose_name = "Webhook 投递"
         verbose_name_plural = "Webhook 投递"
+
+
+class Statement(BaseModel):
+    """对账单：按客户(应收)/承运商(应付)在账期内归集费用，供生成→确认→结算。"""
+
+    DIRECTION_RECEIVABLE = "receivable"
+    DIRECTION_PAYABLE = "payable"
+    DIRECTION_CHOICES = [(DIRECTION_RECEIVABLE, "应收"), (DIRECTION_PAYABLE, "应付")]
+
+    CP_CUSTOMER = "customer"
+    CP_CARRIER = "carrier"
+    CP_CHOICES = [(CP_CUSTOMER, "客户"), (CP_CARRIER, "承运商")]
+
+    STATUS_DRAFT = "draft"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_SETTLED = "settled"
+    STATUS_CHOICES = [(STATUS_DRAFT, "草稿"), (STATUS_CONFIRMED, "已确认"), (STATUS_SETTLED, "已结算")]
+
+    statement_no = models.CharField(max_length=40, unique=True)
+    direction = models.CharField(max_length=16, choices=DIRECTION_CHOICES)
+    counterparty_type = models.CharField(max_length=16, choices=CP_CHOICES)
+    counterparty_id = models.CharField(max_length=64, blank=True)
+    counterparty_name = models.CharField(max_length=160, blank=True)
+    period_start = models.DateField()
+    period_end = models.DateField()
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    item_count = models.IntegerField(default=0)
+    external_total = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="对方提供金额，用于差异稽核")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="confirmed_statements"
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "fin_statement"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["direction", "status"]), models.Index(fields=["counterparty_type", "counterparty_id"])]
+        verbose_name = "对账单"
+        verbose_name_plural = "对账单"
+
+    @property
+    def diff(self):
+        return self.total_amount - self.external_total
+
+    def __str__(self) -> str:
+        return self.statement_no
+
+
+class StatementLine(BaseModel):
+    statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name="lines")
+    waybill_no = models.CharField(max_length=40, blank=True)
+    expense_item_code = models.CharField(max_length=64, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    occurred_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "fin_statement_line"
+        ordering = ["occurred_at"]

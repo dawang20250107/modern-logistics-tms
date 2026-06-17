@@ -6,6 +6,7 @@ const NAV = [
   { to: "/", label: "控制塔", end: true },
   { to: "/intake", label: "建单", end: false },
   { to: "/waybills", label: "运单", end: false },
+  { to: "/command", label: "指挥中心", end: false },
   { to: "/monitor", label: "监控", end: false },
   { to: "/alerts", label: "报警", end: false },
   { to: "/exceptions", label: "异常", end: false },

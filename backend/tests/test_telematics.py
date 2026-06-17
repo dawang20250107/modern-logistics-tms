@@ -244,6 +244,22 @@ def test_trajectory_endpoint(admin_client):
 
 
 @pytest.mark.django_db
+def test_command_center_summary(admin_client):
+    v = Vehicle.objects.create(plate_no="沪K0001")
+    VehicleState.objects.create(vehicle=v, online=True, reported_at=timezone.now())
+    Waybill.objects.create(waybill_no="CC1", route_name="r", status=Waybill.STATUS_PENDING_DISPATCH)
+    Alert.objects.create(alert_type=Alert.TYPE_OVERSPEED, level=Alert.LEVEL_HIGH, message="超速", triggered_at=timezone.now())
+
+    resp = admin_client.get("/api/v1/telematics/command-center/summary")
+    assert resp.status_code == 200, resp.content
+    data = resp.json()["data"]
+    assert data["online_vehicles"] == 1
+    assert data["pending_dispatch"] == 1
+    assert data["open_alerts"] == 1
+    assert data["high_alerts"] == 1
+
+
+@pytest.mark.django_db
 def test_live_vehicles_endpoint(admin_client):
     vehicle = Vehicle.objects.create(plate_no="沪E0001")
     VehicleState.objects.create(vehicle=vehicle, online=True, lat=31.2, lng=121.4, reported_at=timezone.now())

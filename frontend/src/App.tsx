@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./auth/auth";
 import { AiWorkbenchPage } from "./pages/AiWorkbenchPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -25,6 +26,7 @@ export function App() {
               <Route path="intake" element={<OrderIntakePage />} />
               <Route path="waybills" element={<WaybillsPage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
+              <Route path="command" element={<CommandCenterPage />} />
               <Route path="monitor" element={<MonitorPage />} />
               <Route path="alerts" element={<AlertsPage />} />
               <Route path="exceptions" element={<ExceptionsPage />} />

@@ -61,6 +61,22 @@ class WaybillTrajectoryView(APIView):
         })
 
 
+class CommandCenterSummaryView(APIView):
+    """调度指挥中心摘要：在线运力 / 待调度 / 在途 / 报警 一屏 KPI。"""
+
+    def get(self, request):
+        from apps.ops.models import Waybill
+
+        return Response({
+            "online_vehicles": VehicleState.objects.filter(online=True).count(),
+            "offline_vehicles": VehicleState.objects.filter(online=False).count(),
+            "pending_dispatch": Waybill.objects.filter(status=Waybill.STATUS_PENDING_DISPATCH).count(),
+            "in_transit": Waybill.objects.filter(status=Waybill.STATUS_IN_TRANSIT).count(),
+            "open_alerts": Alert.objects.filter(status=Alert.STATUS_OPEN).count(),
+            "high_alerts": Alert.objects.filter(status=Alert.STATUS_OPEN, level=Alert.LEVEL_HIGH).count(),
+        })
+
+
 class LiveVehicleView(APIView):
     """实时车辆位置列表（实时定位视图数据源）。?online=true 仅看在线。"""
 

@@ -12,6 +12,7 @@ import { DispatchBoardPage } from "./pages/DispatchBoardPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
+import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderIntakePage } from "./pages/OrderIntakePage";
 import { ReconciliationPage } from "./pages/ReconciliationPage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
@@ -27,6 +28,7 @@ export function App() {
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />
               <Route path="intake" element={<OrderIntakePage />} />
+              <Route path="orders/:id" element={<OrderDetailPage />} />
               <Route path="dispatch-board" element={<DispatchBoardPage />} />
               <Route path="waybills" element={<WaybillsPage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />

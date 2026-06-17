@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "../auth/auth";
+import { NotificationBell } from "./NotificationBell";
 
 const NAV = [
   { to: "/", label: "控制塔", end: true },
@@ -43,6 +44,7 @@ export function AppLayout() {
             <span className="ai-pill">AI 加持</span>
           </div>
           <div className="topbar-user">
+            <NotificationBell />
             <span>{user?.nickname || user?.username}</span>
             <button className="btn-ghost" onClick={logout}>
               退出

@@ -314,3 +314,30 @@ export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   finance: "财务 / 对账",
 };
 export interface Vehicle { id: string; plate_no: string; vehicle_type: string; }
+
+// ── 通知 / 订单事件 ─────────────────────────────────────
+export interface Notification {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  level: "info" | "warning" | "critical";
+  link_type: string;
+  link_id: string;
+  is_read: boolean;
+  created_at: string;
+}
+export interface OrderEvent {
+  id: string;
+  event_type: string;
+  from_status: string;
+  to_status: string;
+  actor_name: string;
+  source: string;
+  payload: Record<string, unknown>;
+  event_time: string;
+}
+export const ORDER_EVENT_LABEL: Record<string, string> = {
+  created: "建单", confirmed: "确认", pooled: "进池", claimed: "调度认领",
+  dispatched: "派单", completed: "完成", cancelled: "取消",
+};

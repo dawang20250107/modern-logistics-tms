@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
 import type { Order, OrderChannel, Paginated, ParsedOrder } from "../api/types";
@@ -120,7 +121,7 @@ export function OrderIntakePage() {
             <tbody>
               {items.map((o) => (
                 <tr key={o.id}>
-                  <td className="mono">{o.order_no}</td>
+                  <td className="mono"><Link className="link" to={`/orders/${o.id}`}>{o.order_no}</Link></td>
                   <td>{ORDER_CHANNEL_LABEL[o.channel]}</td>
                   <td>{o.origin} → {o.destination}</td>
                   <td>{o.cargo_weight_ton}吨 / {o.cargo_quantity}件</td>

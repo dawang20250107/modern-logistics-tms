@@ -67,6 +67,8 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         "events": "waybill.manage",
         "split": "waybill.manage",
         "merge": "waybill.manage",
+        "dispatch_recommendation": "waybill.view",
+        "dispatch_plan": "waybill.view",
     }
     lookup_field = "waybill_no"
     lookup_value_regex = "[^/]+"
@@ -171,6 +173,24 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         splits = request.data.get("splits") or []
         children = split_waybill(waybill, splits, operator=request.user)
         return Response({"parent": waybill.waybill_no, "children": WaybillSerializer(children, many=True).data}, status=201)
+
+    @action(detail=True, methods=["get"], url_path="dispatch-recommendation")
+    def dispatch_recommendation(self, request, waybill_no=None):
+        from .dispatch import recommend_dispatch
+
+        waybill = self.get_object()
+        return Response(recommend_dispatch(waybill))
+
+    @action(detail=False, methods=["post"], url_path="dispatch-plan")
+    def dispatch_plan(self, request):
+        from .dispatch import plan_dispatch
+
+        nos = request.data.get("waybill_nos") or []
+        if nos:
+            waybills = list(self.get_queryset().filter(waybill_no__in=nos))
+        else:
+            waybills = list(self.get_queryset().filter(status=Waybill.STATUS_PENDING_DISPATCH)[:200])
+        return Response(plan_dispatch(waybills))
 
     @action(detail=False, methods=["post"], url_path="merge")
     def merge(self, request):

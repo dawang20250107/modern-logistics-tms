@@ -22,6 +22,7 @@ class VehicleSerializer(serializers.ModelSerializer):
         model = Vehicle
         fields = [
             "id", "plate_no", "vehicle_type", "ownership_type", "carrier", "carrier_name",
+            "load_capacity_ton", "volume_capacity_cbm",
             "road_transport_cert_no", "inspection_expiry", "insurance_expiry", "maintenance_due_date",
             "is_active",
         ]

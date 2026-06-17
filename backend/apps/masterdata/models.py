@@ -45,6 +45,8 @@ class Vehicle(BaseModel, SoftDeleteModel):
     plate_no = models.CharField(max_length=32, unique=True)
     vehicle_type = models.CharField(max_length=64, blank=True)
     ownership_type = models.CharField(max_length=32, blank=True)
+    load_capacity_ton = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="核载吨位")
+    volume_capacity_cbm = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="容积(方)")
     carrier = models.ForeignKey(
         Carrier, null=True, blank=True, on_delete=models.SET_NULL, related_name="vehicles"
     )

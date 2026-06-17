@@ -1,5 +1,7 @@
 """运单状态机与执行服务。"""
 
+from decimal import Decimal
+
 from django.utils import timezone
 
 from apps.core.exceptions import AppError
@@ -66,3 +68,89 @@ def transition_waybill(waybill: Waybill, to_status: str, *, operator=None, remar
 
     emit_event("waybill.status_changed", {"waybill_no": waybill.waybill_no, "from": from_status, "to": to_status})
     return waybill
+
+
+# 仅待调度前可拆/合
+_SPLITTABLE_FROM = {Waybill.STATUS_DRAFT, Waybill.STATUS_PENDING_DISPATCH}
+
+
+def _copy_fields(src: Waybill) -> dict:
+    return {
+        "order": src.order,
+        "customer": src.customer,
+        "carrier": src.carrier,
+        "route_name": src.route_name,
+        "planned_route": src.planned_route,
+        "origin": src.origin,
+        "destination": src.destination,
+        "organization": src.organization,
+    }
+
+
+def split_waybill(waybill: Waybill, splits: list[dict], *, operator=None) -> list[Waybill]:
+    """把一张运单按货量拆成多张子单；原单作废，子单指向原单（血缘）。"""
+    if waybill.status not in _SPLITTABLE_FROM:
+        raise AppError("INVALID_SPLIT", "仅待调度前的运单可拆单。", status=409)
+    if not splits or len(splits) < 2:
+        raise AppError("INVALID_SPLIT", "拆单至少需要 2 个子单。", status=400)
+
+    now = timezone.now()
+    children = []
+    for idx, part in enumerate(splits, 1):
+        child = Waybill.objects.create(
+            waybill_no=f"{waybill.waybill_no}-S{idx}",
+            parent=waybill,
+            status=Waybill.STATUS_PENDING_DISPATCH,
+            cargo_quantity=part.get("cargo_quantity", 0),
+            cargo_weight_ton=part.get("cargo_weight_ton", 0),
+            cargo_volume_cbm=part.get("cargo_volume_cbm", 0),
+            **_copy_fields(waybill),
+        )
+        WaybillEvent.objects.create(
+            waybill=child, event_type="split_from", event_time=now, resource=waybill.waybill_no,
+            source="split", payload={"parent": waybill.waybill_no},
+        )
+        children.append(child)
+
+    waybill.status = Waybill.STATUS_VOIDED
+    waybill.save(update_fields=["status", "updated_at"])
+    WaybillEvent.objects.create(
+        waybill=waybill, event_type="split", event_time=now, resource=waybill.waybill_no,
+        source="split", payload={"children": [c.waybill_no for c in children]},
+    )
+    publish_event("waybill_split", {"waybill_no": waybill.waybill_no, "children": [c.waybill_no for c in children]})
+    return children
+
+
+def merge_waybills(waybills: list[Waybill], *, operator=None, route_name: str = "") -> Waybill:
+    """把多张运单合并为一张；源单作废并指向合并单（血缘），货量汇总。"""
+    if len(waybills) < 2:
+        raise AppError("INVALID_MERGE", "合单至少需要 2 张运单。", status=400)
+    for w in waybills:
+        if w.status not in _SPLITTABLE_FROM:
+            raise AppError("INVALID_MERGE", f"{w.waybill_no} 非待调度前状态，不可合单。", status=409)
+
+    now = timezone.now()
+    first = waybills[0]
+    merged = Waybill.objects.create(
+        waybill_no=f"{first.waybill_no}-M",
+        status=Waybill.STATUS_PENDING_DISPATCH,
+        cargo_quantity=sum(w.cargo_quantity for w in waybills),
+        cargo_weight_ton=sum((w.cargo_weight_ton for w in waybills), start=Decimal("0")),
+        cargo_volume_cbm=sum((w.cargo_volume_cbm for w in waybills), start=Decimal("0")),
+        **{**_copy_fields(first), "route_name": route_name or first.route_name},
+    )
+    for w in waybills:
+        w.status = Waybill.STATUS_VOIDED
+        w.parent = merged
+        w.save(update_fields=["status", "parent", "updated_at"])
+        WaybillEvent.objects.create(
+            waybill=w, event_type="merged_into", event_time=now, resource=merged.waybill_no,
+            source="merge", payload={"merged": merged.waybill_no},
+        )
+    WaybillEvent.objects.create(
+        waybill=merged, event_type="merge", event_time=now, resource=merged.waybill_no,
+        source="merge", payload={"sources": [w.waybill_no for w in waybills]},
+    )
+    publish_event("waybill_merge", {"waybill_no": merged.waybill_no, "sources": [w.waybill_no for w in waybills]})
+    return merged

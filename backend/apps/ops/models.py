@@ -85,6 +85,10 @@ class Waybill(BaseModel, OrgScopedModel):
     planned_route = models.ForeignKey(
         "masterdata.Route", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children",
+        help_text="拆单/合单血缘：拆出的子单指向原单；合并的源单指向合并单",
+    )
     origin = models.CharField(max_length=80, blank=True)
     destination = models.CharField(max_length=80, blank=True)
     status = models.CharField(max_length=32, default=STATUS_PENDING_DISPATCH, choices=STATUS_CHOICES)

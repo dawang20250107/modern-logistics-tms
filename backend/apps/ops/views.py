@@ -29,7 +29,7 @@ from .serializers import (
     WaybillSerializer,
     WaybillWriteSerializer,
 )
-from .services import transition_waybill
+from .services import merge_waybills, split_waybill, transition_waybill
 from .tasks import TRACKING_QUEUE, flush_tracking_points, process_receipt_ocr
 
 
@@ -65,6 +65,8 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         "tracking": "waybill.view",
         "gen_costs": "waybill.manage",
         "events": "waybill.manage",
+        "split": "waybill.manage",
+        "merge": "waybill.manage",
     }
     lookup_field = "waybill_no"
     lookup_value_regex = "[^/]+"
@@ -162,6 +164,24 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         waybill = self.get_object()
         result = generate_costs(waybill)
         return Response({"waybill_no": waybill.waybill_no, "generated": result})
+
+    @action(detail=True, methods=["post"], url_path="split")
+    def split(self, request, waybill_no=None):
+        waybill = self.get_object()
+        splits = request.data.get("splits") or []
+        children = split_waybill(waybill, splits, operator=request.user)
+        return Response({"parent": waybill.waybill_no, "children": WaybillSerializer(children, many=True).data}, status=201)
+
+    @action(detail=False, methods=["post"], url_path="merge")
+    def merge(self, request):
+        nos = request.data.get("waybill_nos") or []
+        if len(nos) < 2:
+            raise AppError("INVALID_MERGE", "waybill_nos 至少 2 个。", status=400)
+        waybills = list(self.get_queryset().filter(waybill_no__in=nos))
+        if len(waybills) != len(set(nos)):
+            raise AppError("WAYBILL_NOT_FOUND", "部分运单不存在或无权限。", status=404)
+        merged = merge_waybills(waybills, operator=request.user, route_name=request.data.get("route_name", ""))
+        return Response(WaybillSerializer(merged).data, status=201)
 
 
 class OrderViewSet(viewsets.ModelViewSet):

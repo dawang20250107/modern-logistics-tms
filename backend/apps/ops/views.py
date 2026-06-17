@@ -205,11 +205,11 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.select_related("customer").all()
+    queryset = Order.objects.select_related("customer", "created_by", "claimed_by").all()
     serializer_class = OrderSerializer
-    filterset_fields = ["status", "channel"]
+    filterset_fields = ["status", "channel", "source_type", "business_type", "priority"]
     search_fields = ["order_no", "remark", "contact_phone", "origin", "destination"]
-    ordering_fields = ["created_at", "order_no"]
+    ordering_fields = ["created_at", "order_no", "priority"]
 
     @action(detail=False, methods=["post"], url_path="intake")
     def intake(self, request):
@@ -225,8 +225,32 @@ class OrderViewSet(viewsets.ModelViewSet):
             fields=fields,
             channel=request.data.get("channel", Order.CHANNEL_CS),
             source=request.data.get("source", ""),
+            operator=request.user,
         )
         return Response(OrderSerializer(order).data, status=201)
+
+    @action(detail=True, methods=["post"], url_path="pool")
+    def pool(self, request, pk=None):
+        from .intake import pool_order
+
+        return Response(OrderSerializer(pool_order(self.get_object())).data)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        from .intake import cancel_order
+
+        return Response(OrderSerializer(cancel_order(self.get_object())).data)
+
+    @action(detail=False, methods=["post"], url_path="batch")
+    def batch(self, request):
+        """批量操作：{action: confirm|pool|cancel|delete, ids: [...]}。"""
+        from .intake import batch_orders
+
+        action_name = request.data.get("action")
+        ids = request.data.get("ids") or []
+        if not ids:
+            raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
+        return Response(batch_orders(action_name, ids, operator=request.user))
 
     @action(detail=False, methods=["post"], url_path="parse-preview")
     def parse_preview(self, request):

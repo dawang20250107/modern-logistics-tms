@@ -112,12 +112,21 @@ class ReceiptSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
+    claimed_by_name = serializers.CharField(source="claimed_by.username", read_only=True, default="")
 
     class Meta:
         model = Order
         fields = [
-            "id", "order_no", "customer", "customer_name", "channel", "source", "status",
-            "contact_name", "contact_phone", "origin", "destination", "cargo_desc",
-            "cargo_quantity", "cargo_weight_ton", "cargo_volume_cbm",
-            "expected_pickup_at", "expected_delivery_at", "raw_text", "parse_meta", "remark", "created_at",
+            "id", "order_no", "customer", "customer_name", "channel", "source",
+            "source_type", "business_type", "priority", "settlement_type", "status",
+            "contact_name", "contact_phone", "origin", "destination",
+            "pickup_address", "pickup_contact_name", "pickup_contact_phone",
+            "delivery_address", "delivery_contact_name", "delivery_contact_phone",
+            "cargo_desc", "cargo_quantity", "cargo_weight_ton", "cargo_volume_cbm",
+            "cargo_value", "package_type", "is_hazardous", "temperature_range", "quoted_amount",
+            "expected_pickup_at", "expected_delivery_at",
+            "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
+            "created_by", "created_by_name", "raw_text", "parse_meta", "remark", "created_at",
         ]
+        read_only_fields = ["claimed_by", "claimed_at", "pooled_at", "created_by"]

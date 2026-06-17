@@ -394,3 +394,38 @@ def vehicle_alert_summary(arguments):
         "evidence": evidence,
         "suggestion": suggestion,
     }
+
+
+@tool(
+    "analytics.query_metric",
+    "查询经营/运营指标（运单量/在途/准时率/风险率/运力在线率/利用率/报警数/订单量/转化率/应收/应付/对账差异等）。",
+    {
+        "type": "object",
+        "required": ["metric_code"],
+        "properties": {
+            "metric_code": {"type": "string", "description": "指标 code，如 ops.on_time_rate"},
+            "days": {"type": "integer", "description": "统计区间天数，默认 30"},
+        },
+    },
+)
+def query_metric(arguments):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.analytics.registry import compute_metric
+
+    code = arguments["metric_code"]
+    days = arguments.get("days") or 30
+    end = timezone.now().date()
+    start = end - timedelta(days=days)
+    result = compute_metric(code, start=start, end=end)
+    return {
+        "tool_name": "analytics.query_metric",
+        "metric_code": code,
+        "value": result["value"],
+        "unit": result.get("unit", ""),
+        "summary": f"{result['name']}（近{days}天）= {result['value']}{result.get('unit', '')}",
+        "evidence": result,
+        "suggestion": None,
+    }

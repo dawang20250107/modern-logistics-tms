@@ -11,6 +11,7 @@ const NAV = [
   { to: "/alerts", label: "报警", end: false },
   { to: "/exceptions", label: "异常", end: false },
   { to: "/reconciliation", label: "对账", end: false },
+  { to: "/dashboard", label: "看板", end: false },
   { to: "/ai", label: "AI", end: false },
 ];
 

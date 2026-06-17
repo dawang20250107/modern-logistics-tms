@@ -49,6 +49,7 @@ LOCAL_APPS = [
     "apps.finance",
     "apps.ai",
     "apps.telematics",
+    "apps.analytics",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -188,6 +189,7 @@ CELERY_BEAT_SCHEDULE = {
     "scan-receipt-reminders": {"task": "ops.scan_receipt_reminders", "schedule": 120.0},
     "flush-telemetry": {"task": "telematics.flush_telemetry", "schedule": 5.0},
     "scan-offline-devices": {"task": "telematics.scan_offline_devices", "schedule": 60.0},
+    "materialize-metrics": {"task": "analytics.materialize_metrics", "schedule": 3600.0},
 }
 
 # ── CORS ────────────────────────────────────────────────

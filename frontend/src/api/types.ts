@@ -264,3 +264,19 @@ export const STATEMENT_STATUS_LABEL: Record<string, string> = {
 // ── 主数据(精简) ───────────────────────────────────────
 export interface Customer { id: string; code: string; name: string; }
 export interface Carrier { id: string; code: string; name: string; }
+
+// ── 指标中台 ────────────────────────────────────────────
+export interface MetricCard {
+  code: string;
+  name: string;
+  unit: string;
+  domain: string;
+  value: number;
+  breakdown?: Array<{ key: string; value: number }>;
+}
+export const METRIC_DOMAIN_LABEL: Record<string, string> = {
+  ops: "运单 / 履约",
+  fleet: "运力 / 车辆",
+  order: "订单 / 渠道",
+  finance: "财务 / 对账",
+};

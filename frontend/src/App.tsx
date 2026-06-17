@@ -7,6 +7,7 @@ import { AiWorkbenchPage } from "./pages/AiWorkbenchPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
@@ -32,6 +33,7 @@ export function App() {
               <Route path="alerts" element={<AlertsPage />} />
               <Route path="exceptions" element={<ExceptionsPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />
+              <Route path="dashboard" element={<DashboardPage />} />
               <Route path="ai" element={<AiWorkbenchPage />} />
             </Route>
           </Route>

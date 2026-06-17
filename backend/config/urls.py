@@ -22,6 +22,7 @@ urlpatterns = [
     path("api/v1/finance/", include("apps.finance.urls")),
     path("api/v1/", include("apps.ai.urls")),
     path("api/v1/telematics/", include("apps.telematics.urls")),
+    path("api/v1/analytics/", include("apps.analytics.urls")),
     # 实时事件流（SSE）
     path("api/v1/stream/events", event_stream, name="event-stream"),
 ]

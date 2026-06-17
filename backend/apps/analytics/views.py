@@ -1,0 +1,43 @@
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.core.exceptions import AppError
+
+from .registry import compute_metric, list_metrics
+from .services import build_dashboard, metric_trend
+
+
+class MetricCatalogView(APIView):
+    """指标目录：列出所有可查询指标定义（口径/主题域/维度）。"""
+
+    def get(self, request):
+        return Response({"metrics": list_metrics(request.query_params.get("domain"))})
+
+
+class MetricQueryView(APIView):
+    """指标查询：按 codes + 时间范围 + 维度计算（多指标一次取）。"""
+
+    def post(self, request):
+        codes = request.data.get("codes") or []
+        if not isinstance(codes, list) or not codes:
+            raise AppError("CODES_REQUIRED", "codes 必须是非空数组。", status=400)
+        start = request.data.get("start")
+        end = request.data.get("end")
+        dimension = request.data.get("dimension")
+        results = [compute_metric(c, start=start, end=end, dimension=dimension) for c in codes]
+        return Response({"results": results})
+
+
+class DashboardView(APIView):
+    """经营看板：一次返回核心经营/运营指标。"""
+
+    def get(self, request):
+        return Response(build_dashboard(request.query_params.get("start"), request.query_params.get("end")))
+
+
+class MetricTrendView(APIView):
+    """指标趋势：从物化快照取近 N 天序列。"""
+
+    def get(self, request, code):
+        days = int(request.query_params.get("days") or 14)
+        return Response(metric_trend(code, days))

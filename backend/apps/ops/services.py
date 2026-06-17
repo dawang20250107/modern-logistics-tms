@@ -63,11 +63,27 @@ def transition_waybill(waybill: Waybill, to_status: str, *, operator=None, remar
         "waybill_status",
         {"waybill_no": waybill.waybill_no, "from": from_status, "to": to_status},
     )
+    # 签收/送达 → 回写订单完成，闭环到对账
+    _complete_order_on_delivery(waybill, to_status)
     # 对外 Webhook 事件（懒导入避免应用间循环依赖）
     from apps.finance.services import emit_event
 
     emit_event("waybill.status_changed", {"waybill_no": waybill.waybill_no, "from": from_status, "to": to_status})
     return waybill
+
+
+def _complete_order_on_delivery(waybill, to_status):
+    """运单签收/送达/结算时，把关联订单回写为已完成（幂等），打通订单全流程闭环。"""
+    from .models import Order
+
+    if to_status not in (Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_SETTLED):
+        return
+    order = waybill.order
+    if order is None or order.status == Order.STATUS_COMPLETED:
+        return
+    order.status = Order.STATUS_COMPLETED
+    order.save(update_fields=["status", "updated_at"])
+    publish_event("order_completed", {"order_no": order.order_no, "waybill_no": waybill.waybill_no})
 
 
 # 仅待调度前可拆/合

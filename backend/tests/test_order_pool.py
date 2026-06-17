@@ -97,6 +97,21 @@ def test_pool_and_claim_endpoints(admin_client):
 
 
 @pytest.mark.django_db
+def test_signing_completes_order():
+    from apps.ops.services import transition_waybill
+
+    carrier = Carrier.objects.create(code="C7", name="承运丙")
+    order = _pooled_order(cargo_weight_ton=5)
+    waybill = dispatch_order(order, dispatch_type=Waybill.DISPATCH_THIRD_PARTY, carrier=carrier)
+    # 推进到已到达，再签收回传 → 订单回写完成
+    waybill.status = Waybill.STATUS_ARRIVED
+    waybill.save()
+    transition_waybill(waybill, Waybill.STATUS_SIGNED)
+    order.refresh_from_db()
+    assert order.status == Order.STATUS_COMPLETED
+
+
+@pytest.mark.django_db
 def test_dispatch_endpoint(admin_client):
     carrier = Carrier.objects.create(code="C8", name="承运乙")
     order = _pooled_order(cargo_weight_ton=5)

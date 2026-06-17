@@ -11,17 +11,57 @@ from apps.core.models import BaseModel, OrgScopedModel
 
 
 class Order(BaseModel):
+    # 建单渠道（多渠道统一入口）
+    CHANNEL_CS = "cs"
+    CHANNEL_SELF = "self"
+    CHANNEL_MINIPROGRAM = "miniprogram"
+    CHANNEL_WECHAT_GROUP = "wechat_group"
+    CHANNEL_API = "api"
+    CHANNEL_CHOICES = [
+        (CHANNEL_CS, "客服代下"),
+        (CHANNEL_SELF, "客户自助"),
+        (CHANNEL_MINIPROGRAM, "小程序"),
+        (CHANNEL_WECHAT_GROUP, "微信群"),
+        (CHANNEL_API, "开放API"),
+    ]
+
+    STATUS_PENDING_CONFIRM = "pending_confirm"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_CONVERTED = "converted"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_PENDING_CONFIRM, "待确认"),
+        (STATUS_CONFIRMED, "已确认"),
+        (STATUS_CONVERTED, "已转运单"),
+        (STATUS_CANCELLED, "已取消"),
+    ]
+
     order_no = models.CharField(max_length=40, unique=True)
     customer = models.ForeignKey(
         "masterdata.Customer", null=True, blank=True, on_delete=models.SET_NULL, related_name="orders"
     )
-    source = models.CharField(max_length=32, blank=True)
-    status = models.CharField(max_length=32, default="open")
+    channel = models.CharField(max_length=24, choices=CHANNEL_CHOICES, default=CHANNEL_CS, db_index=True)
+    source = models.CharField(max_length=32, blank=True, help_text="渠道内来源标识，如群名/坐席")
+    status = models.CharField(max_length=32, default=STATUS_PENDING_CONFIRM)
+    # 业务要素
+    contact_name = models.CharField(max_length=64, blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+    origin = models.CharField(max_length=120, blank=True)
+    destination = models.CharField(max_length=120, blank=True)
+    cargo_desc = models.CharField(max_length=255, blank=True)
+    cargo_quantity = models.IntegerField(default=0)
+    cargo_weight_ton = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cargo_volume_cbm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    expected_pickup_at = models.DateTimeField(null=True, blank=True)
+    expected_delivery_at = models.DateTimeField(null=True, blank=True)
+    raw_text = models.TextField(blank=True, help_text="原始消息（微信群/自然语言建单）")
+    parse_meta = models.JSONField(default=dict, blank=True, help_text="AI 解析来源与置信信息")
     remark = models.CharField(max_length=255, blank=True)
 
     class Meta:
         db_table = "ops_order"
         ordering = ["-created_at"]
+        indexes = [models.Index(fields=["channel", "status"])]
         verbose_name = "订单"
         verbose_name_plural = "订单"
 

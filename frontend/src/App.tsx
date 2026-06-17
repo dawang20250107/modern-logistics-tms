@@ -9,6 +9,7 @@ import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
+import { OrderIntakePage } from "./pages/OrderIntakePage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
 import { WaybillsPage } from "./pages/WaybillsPage";
 
@@ -21,6 +22,7 @@ export function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />
+              <Route path="intake" element={<OrderIntakePage />} />
               <Route path="waybills" element={<WaybillsPage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
               <Route path="monitor" element={<MonitorPage />} />

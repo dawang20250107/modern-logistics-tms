@@ -207,9 +207,51 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.select_related("customer").all()
     serializer_class = OrderSerializer
-    filterset_fields = ["status"]
-    search_fields = ["order_no", "remark"]
+    filterset_fields = ["status", "channel"]
+    search_fields = ["order_no", "remark", "contact_phone", "origin", "destination"]
     ordering_fields = ["created_at", "order_no"]
+
+    @action(detail=False, methods=["post"], url_path="intake")
+    def intake(self, request):
+        """多渠道建单入口：传 text(自然语言/微信群) 或 fields(结构化)。"""
+        from .intake import create_order_from_intake
+
+        text = (request.data.get("text") or "").strip()
+        fields = request.data.get("fields")
+        if not text and not fields:
+            raise AppError("INTAKE_EMPTY", "text 或 fields 至少其一。", status=400)
+        order = create_order_from_intake(
+            text=text,
+            fields=fields,
+            channel=request.data.get("channel", Order.CHANNEL_CS),
+            source=request.data.get("source", ""),
+        )
+        return Response(OrderSerializer(order).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="parse-preview")
+    def parse_preview(self, request):
+        """仅解析预览，不落库（供前端 AI 建单先看结果再确认）。"""
+        from .intake import parse_order_text
+
+        text = (request.data.get("text") or "").strip()
+        if not text:
+            raise AppError("INTAKE_EMPTY", "text 必填。", status=400)
+        parsed = parse_order_text(text)
+        meta = parsed.pop("_meta", {})
+        return Response({"fields": parsed, "meta": meta})
+
+    @action(detail=True, methods=["post"], url_path="confirm")
+    def confirm(self, request, pk=None):
+        from .intake import confirm_order
+
+        return Response(OrderSerializer(confirm_order(self.get_object())).data)
+
+    @action(detail=True, methods=["post"], url_path="convert")
+    def convert(self, request, pk=None):
+        from .intake import convert_order_to_waybill
+
+        waybill = convert_order_to_waybill(self.get_object(), operator=request.user)
+        return Response(WaybillSerializer(waybill).data, status=201)
 
 
 class ExceptionViewSet(viewsets.ModelViewSet):

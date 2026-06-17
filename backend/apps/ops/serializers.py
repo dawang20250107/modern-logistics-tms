@@ -115,4 +115,9 @@ class OrderSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = ["id", "order_no", "customer", "customer_name", "source", "status", "remark", "created_at"]
+        fields = [
+            "id", "order_no", "customer", "customer_name", "channel", "source", "status",
+            "contact_name", "contact_phone", "origin", "destination", "cargo_desc",
+            "cargo_quantity", "cargo_weight_ton", "cargo_volume_cbm",
+            "expected_pickup_at", "expected_delivery_at", "raw_text", "parse_meta", "remark", "created_at",
+        ]

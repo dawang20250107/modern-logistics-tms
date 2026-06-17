@@ -189,3 +189,43 @@ export const ALERT_TYPE_LABEL: Record<AlertType, string> = {
   fuel: "油量异常",
   offline: "设备离线",
 };
+
+// ── 多渠道订单 ──────────────────────────────────────────
+export type OrderChannel = "cs" | "self" | "miniprogram" | "wechat_group" | "api";
+export interface Order {
+  id: string;
+  order_no: string;
+  customer: string | null;
+  customer_name: string;
+  channel: OrderChannel;
+  source: string;
+  status: string;
+  contact_name: string;
+  contact_phone: string;
+  origin: string;
+  destination: string;
+  cargo_desc: string;
+  cargo_quantity: number;
+  cargo_weight_ton: string;
+  cargo_volume_cbm: string;
+  raw_text: string;
+  parse_meta: Record<string, unknown>;
+  created_at: string;
+}
+export interface ParsedOrder {
+  fields: Record<string, string | number>;
+  meta: { source?: string };
+}
+export const ORDER_CHANNEL_LABEL: Record<OrderChannel, string> = {
+  cs: "客服代下",
+  self: "客户自助",
+  miniprogram: "小程序",
+  wechat_group: "微信群",
+  api: "开放API",
+};
+export const ORDER_STATUS_LABEL: Record<string, string> = {
+  pending_confirm: "待确认",
+  confirmed: "已确认",
+  converted: "已转运单",
+  cancelled: "已取消",
+};

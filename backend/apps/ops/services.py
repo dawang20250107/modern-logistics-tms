@@ -91,6 +91,16 @@ def _complete_order_on_delivery(waybill, to_status):
         waybill_no=waybill.waybill_no, trigger=to_status,
     )
     publish_event("order_completed", {"order_no": order.order_no, "waybill_no": waybill.waybill_no})
+    # 持久化通知：完成→提醒建单客服
+    if order.created_by_id:
+        from apps.notifications.services import notify_users
+
+        notify_users(
+            [order.created_by_id], category="order_completed",
+            title=f"订单已完成：{order.order_no}",
+            body=f"运单 {waybill.waybill_no} 已签收/送达，可进入对账。",
+            link_type="order", link_id=str(order.id),
+        )
 
 
 # 仅待调度前可拆/合

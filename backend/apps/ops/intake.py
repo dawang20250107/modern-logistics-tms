@@ -161,6 +161,16 @@ def pool_order(order: Order, *, operator=None) -> Order:
         "order_no": order.order_no, "origin": order.origin, "destination": order.destination,
         "priority": order.priority, "business_type": order.business_type,
     })
+    # 持久化通知：进池→提醒调度员
+    from apps.notifications.services import notify_role
+
+    notify_role(
+        "dispatcher", category="order_pooled",
+        title=f"新订单进池：{order.order_no}",
+        body=f"{order.origin}→{order.destination} · {order.get_business_type_display()} · {order.get_priority_display()}",
+        level="warning" if order.priority in ("urgent", "vip") else "info",
+        link_type="order", link_id=str(order.id),
+    )
     return order
 
 

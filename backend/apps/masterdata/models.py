@@ -48,6 +48,11 @@ class Vehicle(BaseModel, SoftDeleteModel):
     carrier = models.ForeignKey(
         Carrier, null=True, blank=True, on_delete=models.SET_NULL, related_name="vehicles"
     )
+    # 证件 / 维保
+    road_transport_cert_no = models.CharField(max_length=64, blank=True, help_text="道路运输证号")
+    inspection_expiry = models.DateField(null=True, blank=True, help_text="年检到期日")
+    insurance_expiry = models.DateField(null=True, blank=True, help_text="保险到期日")
+    maintenance_due_date = models.DateField(null=True, blank=True, help_text="下次维保日期")
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -65,6 +70,10 @@ class Driver(BaseModel, SoftDeleteModel):
     phone = models.CharField(max_length=32, blank=True, db_index=True)
     id_no = models.CharField(max_length=32, blank=True)
     license_no = models.CharField(max_length=32, blank=True)
+    license_type = models.CharField(max_length=16, blank=True, help_text="准驾车型，如 A2")
+    license_expiry = models.DateField(null=True, blank=True, help_text="驾照到期日")
+    qualification_cert_no = models.CharField(max_length=64, blank=True, help_text="从业资格证号")
+    qualification_expiry = models.DateField(null=True, blank=True, help_text="从业资格证到期日")
     carrier = models.ForeignKey(
         Carrier, null=True, blank=True, on_delete=models.SET_NULL, related_name="drivers"
     )
@@ -78,3 +87,25 @@ class Driver(BaseModel, SoftDeleteModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class Route(BaseModel, SoftDeleteModel):
+    """线路：规划路径与允许偏航走廊，用于偏航判定与 ETA。"""
+
+    code = models.CharField(max_length=32, unique=True)
+    name = models.CharField(max_length=160)
+    origin = models.CharField(max_length=80, blank=True)
+    destination = models.CharField(max_length=80, blank=True)
+    waypoints = models.JSONField(default=list, blank=True, help_text="规划路径点 [[lng,lat], ...]")
+    corridor_m = models.DecimalField(max_digits=10, decimal_places=2, default=2000, help_text="允许偏航走廊(米)")
+    distance_km = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "md_route"
+        ordering = ["code"]
+        verbose_name = "线路"
+        verbose_name_plural = "线路"
+
+    def __str__(self) -> str:
+        return f"{self.code} {self.name}"

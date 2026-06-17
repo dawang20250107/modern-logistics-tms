@@ -82,6 +82,9 @@ class Waybill(BaseModel, OrgScopedModel):
     )
 
     route_name = models.CharField(max_length=160)
+    planned_route = models.ForeignKey(
+        "masterdata.Route", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
+    )
     origin = models.CharField(max_length=80, blank=True)
     destination = models.CharField(max_length=80, blank=True)
     status = models.CharField(max_length=32, default=STATUS_PENDING_DISPATCH, choices=STATUS_CHOICES)

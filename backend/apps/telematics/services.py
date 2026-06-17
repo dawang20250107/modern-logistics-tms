@@ -12,7 +12,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.core.redis import publish_event
 
-from .geo import point_in_circle, point_in_polygon
+from .geo import distance_to_polyline_m, point_in_circle, point_in_polygon
 from .models import Alert, Device, Geofence, GeofenceState, VehicleState
 
 # 设备上报事件码 → (报警类型, 等级)
@@ -167,6 +167,30 @@ def evaluate_geofences(vehicle, lng: float, lat: float, waybill, reported_at, ge
     return raised
 
 
+def evaluate_deviation(vehicle, lng: float, lat: float, waybill, reported_at) -> int:
+    """运单绑定规划线路时，检测实际位置是否偏离走廊；偏离则报警。返回新增报警数。"""
+    route = getattr(waybill, "planned_route", None) if waybill else None
+    if route is None or not route.waypoints:
+        return 0
+    dist = distance_to_polyline_m(lng, lat, route.waypoints)
+    if dist <= float(route.corridor_m):
+        return 0
+    raised = raise_alert(
+        {
+            "alert_type": Alert.TYPE_DEVIATION,
+            "level": Alert.LEVEL_HIGH,
+            "message": f"偏离规划线路「{route.name}」约 {dist / 1000:.1f} km",
+            "value": round(dist, 2),
+            "threshold": float(route.corridor_m),
+            "detail": {"route": route.code},
+        },
+        vehicle=vehicle,
+        waybill=waybill,
+        triggered_at=reported_at,
+    )
+    return 1 if raised else 0
+
+
 def persist_reports(parsed: list[dict]) -> dict:
     """批量处理上报：更新设备/车辆实时状态、续轨迹点、触发报警。返回各项计数。"""
     from apps.masterdata.models import Vehicle
@@ -178,7 +202,10 @@ def persist_reports(parsed: list[dict]) -> dict:
 
     vehicles = {v.plate_no: v for v in Vehicle.objects.filter(plate_no__in=plates)}
     devices = {d.device_no: d for d in Device.objects.filter(device_no__in=device_nos)}
-    waybills = {w.waybill_no: w for w in Waybill.objects.filter(waybill_no__in=wbnos)}
+    waybills = {
+        w.waybill_no: w
+        for w in Waybill.objects.select_related("planned_route").filter(waybill_no__in=wbnos)
+    }
     geofences = list(Geofence.objects.filter(is_active=True))
 
     counts = {"states": 0, "points": 0, "alerts": 0, "devices": 0}
@@ -231,9 +258,9 @@ def persist_reports(parsed: list[dict]) -> dict:
                 counts["alerts"] += 1
 
         if vehicle is not None and report.get("lng") is not None and report.get("lat") is not None:
-            counts["alerts"] += evaluate_geofences(
-                vehicle, float(report["lng"]), float(report["lat"]), waybill, reported_at, geofences
-            )
+            lng_f, lat_f = float(report["lng"]), float(report["lat"])
+            counts["alerts"] += evaluate_geofences(vehicle, lng_f, lat_f, waybill, reported_at, geofences)
+            counts["alerts"] += evaluate_deviation(vehicle, lng_f, lat_f, waybill, reported_at)
 
     if track_objs:
         TrackingPoint.objects.bulk_create(track_objs, batch_size=500)

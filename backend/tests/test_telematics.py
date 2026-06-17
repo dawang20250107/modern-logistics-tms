@@ -12,6 +12,7 @@ from apps.ops.models import TrackingPoint, Waybill
 from apps.telematics.geo import analyze_trajectory, distance_to_polyline_m, point_in_circle, point_in_polygon
 from apps.telematics.models import Alert, Device, Geofence, VehicleState
 from apps.telematics.services import (
+    evaluate_deviation,
     evaluate_geofences,
     evaluate_telemetry,
     persist_reports,
@@ -187,6 +188,41 @@ def test_geofence_enter_exit_raises_alerts():
     assert alerts.count() == 2
     assert alerts.first().detail["action"] == "enter"
     assert alerts.last().detail["action"] == "exit"
+
+
+@pytest.mark.django_db
+def test_deviation_alert_when_off_route():
+    from apps.masterdata.models import Route
+
+    vehicle = Vehicle.objects.create(plate_no="沪H0001")
+    route = Route.objects.create(
+        code="R1", name="沪-蓉", waypoints=[[121.0, 31.0], [121.0, 31.5]], corridor_m=2000
+    )
+    wb = Waybill.objects.create(waybill_no="WBDEV", route_name="沪-蓉", vehicle=vehicle, planned_route=route)
+    now = timezone.now()
+    # 在走廊内 → 不报警
+    assert evaluate_deviation(vehicle, 121.001, 31.2, wb, now) == 0
+    # 明显偏离（经度偏 0.1° ≈ 9km）→ 报警
+    assert evaluate_deviation(vehicle, 121.1, 31.2, wb, now) == 1
+    assert Alert.objects.filter(alert_type=Alert.TYPE_DEVIATION, waybill=wb).count() == 1
+
+
+@pytest.mark.django_db
+def test_route_crud_and_expiring_credentials(admin_client):
+    from datetime import date, timedelta
+
+    resp = admin_client.post(
+        "/api/v1/routes",
+        {"code": "R9", "name": "沪-蓉", "waypoints": [[121, 31], [104, 30]], "corridor_m": "2000"},
+        format="json",
+    )
+    assert resp.status_code == 201, resp.content
+
+    Vehicle.objects.create(plate_no="沪Z9999", inspection_expiry=date.today() + timedelta(days=10))
+    resp = admin_client.get("/api/v1/credentials/expiring?days=30")
+    assert resp.status_code == 200, resp.content
+    plates = [v["plate_no"] for v in resp.json()["data"]["vehicles"]]
+    assert "沪Z9999" in plates
 
 
 @pytest.mark.django_db

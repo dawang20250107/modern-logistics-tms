@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+db.sqlite3
+db.sqlite3-journal
+
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
+
+# Env / secrets
+.env
+deploy/.env
+*.local.env
+
+# Docker
+.docker/
+
+# Logs / runtime
+*.log
+output/*.log
+.playwright-cli/
+staticfiles/
+backend/staticfiles/
+media/
+backend/media/
+celerybeat-schedule*
+
+# Scratch / research artifacts (not part of the project)
+output/
+outputs/
+tmp/
+tools/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

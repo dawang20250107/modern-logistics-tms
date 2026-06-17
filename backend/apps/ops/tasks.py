@@ -1,0 +1,133 @@
+"""轨迹削峰落库与在途预警的异步任务。"""
+
+import json
+
+from celery import shared_task
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+
+from apps.core.redis import get_redis, publish_event
+
+from .models import TrackingPoint, Waybill
+
+TRACKING_QUEUE = "tms:tracking:queue"
+
+
+@shared_task(name="ops.flush_tracking_points")
+def flush_tracking_points(batch: int = 1000) -> int:
+    """从 Redis 队列批量取出轨迹点并落库（削峰）。"""
+    r = get_redis()
+    items = r.lpop(TRACKING_QUEUE, batch)
+    if not items:
+        return 0
+    if isinstance(items, str):
+        items = [items]
+
+    parsed = [json.loads(i) for i in items]
+    wbnos = {p.get("waybill_no") for p in parsed if p.get("waybill_no")}
+    waybills = {w.waybill_no: w for w in Waybill.objects.filter(waybill_no__in=wbnos)}
+
+    objs = []
+    for p in parsed:
+        waybill = waybills.get(p.get("waybill_no"))
+        if waybill is None:
+            continue
+        objs.append(
+            TrackingPoint(
+                waybill=waybill,
+                lng=p.get("lng"),
+                lat=p.get("lat"),
+                speed_kmh=p.get("speed_kmh") or 0,
+                reported_at=parse_datetime(p.get("reported_at") or "") or timezone.now(),
+                provider=p.get("provider", ""),
+            )
+        )
+    TrackingPoint.objects.bulk_create(objs, batch_size=500)
+    return len(objs)
+
+
+@shared_task(name="ops.scan_eta_risks")
+def scan_eta_risks(medium_minutes: int = 120, high_minutes: int = 240) -> int:
+    """扫描在途运单，按 ETA 偏移更新风险等级并生成预警建议。"""
+    from apps.ai.models import AgentSuggestion
+
+    risky = Waybill.objects.filter(
+        status=Waybill.STATUS_IN_TRANSIT, eta_drift_minutes__gte=medium_minutes
+    )
+    created = 0
+    for waybill in risky:
+        level = Waybill.RISK_HIGH if waybill.eta_drift_minutes >= high_minutes else Waybill.RISK_MEDIUM
+        if waybill.risk_level != level:
+            waybill.risk_level = level
+            waybill.save(update_fields=["risk_level", "updated_at"])
+
+        if AgentSuggestion.objects.filter(
+            waybill=waybill, suggestion_type="eta_risk", status=AgentSuggestion.STATUS_PENDING
+        ).exists():
+            continue
+
+        AgentSuggestion.objects.create(
+            waybill=waybill,
+            suggestion_type="eta_risk",
+            title="ETA 风险预警",
+            body=f"{waybill.waybill_no} ETA 偏移 {waybill.eta_drift_minutes} 分钟，建议核实并通知客户。",
+            tool_name="scan.eta",
+            evidence={"waybill_no": waybill.waybill_no, "eta_drift_minutes": waybill.eta_drift_minutes},
+        )
+        publish_event(
+            "risk",
+            {"waybill_no": waybill.waybill_no, "risk_level": level, "eta_drift_minutes": waybill.eta_drift_minutes},
+        )
+        created += 1
+    return created
+
+
+@shared_task(name="ops.scan_receipt_reminders")
+def scan_receipt_reminders() -> int:
+    """扫描待回单运单，生成回单催收建议。"""
+    from apps.ai.models import AgentSuggestion
+
+    created = 0
+    for waybill in Waybill.objects.filter(receipt_status="pending"):
+        if AgentSuggestion.objects.filter(
+            waybill=waybill, suggestion_type="receipt_reminder", status=AgentSuggestion.STATUS_PENDING
+        ).exists():
+            continue
+        AgentSuggestion.objects.create(
+            waybill=waybill,
+            suggestion_type="receipt_reminder",
+            title="回单催收",
+            body=f"{waybill.waybill_no} 回单待上传，建议提醒承运商上传并触发 OCR。",
+            tool_name="scan.receipt",
+            evidence={"receipt_status": waybill.receipt_status},
+        )
+        created += 1
+    return created
+
+
+@shared_task(name="ops.process_receipt_ocr")
+def process_receipt_ocr(receipt_id: str) -> bool:
+    """异步处理回单 OCR（可插拔引擎）。"""
+    from .models import Receipt
+    from .ocr import run_ocr
+
+    receipt = Receipt.objects.filter(id=receipt_id).select_related("waybill").first()
+    if receipt is None:
+        return False
+    receipt.ocr_status = "processing"
+    receipt.save(update_fields=["ocr_status", "updated_at"])
+    try:
+        result = run_ocr(receipt)
+        receipt.ocr_result = result
+        receipt.signatory = result.get("fields", {}).get("signatory", "") or receipt.signatory
+        receipt.ocr_status = "done"
+        receipt.save(update_fields=["ocr_result", "signatory", "ocr_status", "updated_at"])
+        publish_event(
+            "receipt_ocr",
+            {"waybill_no": receipt.waybill.waybill_no, "receipt_id": str(receipt.id), "status": "done"},
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        receipt.ocr_status = "failed"
+        receipt.save(update_fields=["ocr_status", "updated_at"])
+        return False

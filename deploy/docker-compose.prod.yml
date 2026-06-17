@@ -1,0 +1,97 @@
+# 生产编排（本地预演 / 腾讯云 CVM 单机起步）。
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --build
+# 生产务必设置强随机 DJANGO_SECRET_KEY、真实 ALLOWED_HOSTS / CSRF / DB 口令，
+# 并在网关启用 TLS（DJANGO_SSL_REDIRECT=true）。托管 PG/Redis/COS 时改用对应 URL 即可。
+
+x-backend: &backend
+  build:
+    context: ../backend
+    dockerfile: Dockerfile
+  image: tms-backend:prod
+  environment: &backend-env
+    DJANGO_SETTINGS_MODULE: config.settings.production
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-CHANGE-ME-IN-PRODUCTION-USE-32BYTES+}
+    DJANGO_DEBUG: "false"
+    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+    DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+    DJANGO_SSL_REDIRECT: ${DJANGO_SSL_REDIRECT:-false}
+    DJANGO_CORS_ORIGINS: ${DJANGO_CORS_ORIGINS:-}
+    LOG_FORMAT: json
+    DATABASE_URL: ${DATABASE_URL:-postgres://tms:tms_prod_pwd@db:5432/tms}
+    REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+    CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+    WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+    DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+    DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
+  restart: always
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tms}
+      POSTGRES_USER: ${POSTGRES_USER:-tms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tms_prod_pwd}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tms} -d ${POSTGRES_DB:-tms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: always
+
+  backend:
+    <<: *backend
+    command: ["web-prod"]
+    volumes:
+      - staticfiles:/app/staticfiles
+      - media:/app/media
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    <<: *backend
+    command: ["worker"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  beat:
+    <<: *backend
+    command: ["beat"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    image: tms-frontend:prod
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  pgdata:
+  redisdata:
+  staticfiles:
+  media:

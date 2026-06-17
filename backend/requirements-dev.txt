@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# 开发/测试/质量
+pytest>=8.3,<9
+pytest-django>=4.9,<5
+factory-boy>=3.3,<4
+ruff>=0.7,<1

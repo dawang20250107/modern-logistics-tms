@@ -1,0 +1,251 @@
+openapi: 3.1.0
+info:
+  title: Modern Logistics Platform API
+  version: 0.1.0
+  description: API-first specification for a modern logistics control tower. Reimbursement UI is intentionally excluded; finance workflows are handled through external integration APIs.
+servers:
+  - url: http://127.0.0.1:8000/api/v1
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Service status
+  /waybills:
+    get:
+      summary: List waybills
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: risk_level
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Waybill list
+    post:
+      summary: Create waybill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWaybillRequest"
+      responses:
+        "200":
+          description: Created waybill
+  /waybills/{waybill_no}:
+    get:
+      summary: Get waybill detail
+      parameters:
+        - $ref: "#/components/parameters/WaybillNo"
+      responses:
+        "200":
+          description: Waybill detail
+  /waybills/{waybill_no}/dispatch:
+    post:
+      summary: Dispatch waybill
+      parameters:
+        - $ref: "#/components/parameters/WaybillNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispatchRequest"
+      responses:
+        "200":
+          description: Dispatch accepted
+  /waybills/{waybill_no}/events:
+    post:
+      summary: Append waybill event
+      parameters:
+        - $ref: "#/components/parameters/WaybillNo"
+      responses:
+        "200":
+          description: Event accepted
+  /waybills/{waybill_no}/costs:
+    get:
+      summary: Get waybill receivables, payables, external expenses, and margin
+      parameters:
+        - $ref: "#/components/parameters/WaybillNo"
+      responses:
+        "200":
+          description: Cost summary
+  /waybills/{waybill_no}/eta:
+    get:
+      summary: Get ETA and ETA drift
+      parameters:
+        - $ref: "#/components/parameters/WaybillNo"
+      responses:
+        "200":
+          description: ETA response
+  /tracking/points:
+    post:
+      summary: Ingest tracking points
+      responses:
+        "200":
+          description: Tracking points queued
+  /exceptions:
+    post:
+      summary: Create exception
+      responses:
+        "200":
+          description: Exception created
+  /finance/expense-records:
+    post:
+      summary: Create external expense record
+      description: Receives cost records from OA, ERP, driver app, OCR, or partner systems. This replaces an internal reimbursement module.
+      responses:
+        "200":
+          description: Expense recorded
+  /finance/payment-requests:
+    post:
+      summary: Create payment request for external workflow
+      responses:
+        "200":
+          description: Payment request created
+  /finance/payment-results:
+    post:
+      summary: Receive external payment result
+      responses:
+        "200":
+          description: Payment result recorded
+  /ai/query-waybill:
+    post:
+      summary: Natural-language waybill query
+      responses:
+        "200":
+          description: AI response with evidence
+  /ai/deepseek/status:
+    get:
+      summary: Get reserved DeepSeek V4 integration status
+      responses:
+        "200":
+          description: DeepSeek provider configuration without exposing the API key
+  /ai/deepseek/chat:
+    post:
+      summary: Reserved DeepSeek V4 chat completion bridge
+      description: Calls DeepSeek only when DEEPSEEK_API_KEY is configured. Uses OpenAI-compatible chat-completions format.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeepSeekChatRequest"
+      responses:
+        "200":
+          description: DeepSeek response
+        "503":
+          description: DeepSeek API key is not configured
+  /agent/tools:
+    get:
+      summary: List callable agent tools
+      description: Returns server-owned tool definitions that an LLM or workflow engine can call.
+      responses:
+        "200":
+          description: Agent tool definitions
+  /agent/tools/execute:
+    post:
+      summary: Execute one server-owned agent tool
+      description: Runs logistics or finance tool logic and returns evidence. Some tools create AgentSuggestion records for auditability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentToolExecuteRequest"
+      responses:
+        "200":
+          description: Tool execution result
+        "400":
+          description: Invalid tool arguments
+        "404":
+          description: Tool or waybill not found
+components:
+  parameters:
+    WaybillNo:
+      name: waybill_no
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    CreateWaybillRequest:
+      type: object
+      required: [customer_code, stops, cargo_items]
+      properties:
+        external_id: { type: string }
+        customer_code: { type: string }
+        project_code: { type: string }
+        route_name: { type: string }
+        required_vehicle_type: { type: string }
+        receipt_type: { type: string }
+        cargo_items:
+          type: array
+          items:
+            type: object
+            properties:
+              cargo_name: { type: string }
+              quantity: { type: number }
+              weight_ton: { type: number }
+              volume_cbm: { type: number }
+        stops:
+          type: array
+          items:
+            type: object
+            properties:
+              stop_type: { type: string, enum: [pickup, delivery] }
+              address: { type: string }
+              contact_name: { type: string }
+              contact_phone: { type: string }
+              planned_time: { type: string, format: date-time }
+    DispatchRequest:
+      type: object
+      properties:
+        vehicle_plate: { type: string }
+        trailer_plate: { type: string }
+        main_driver_phone: { type: string }
+        assistant_driver_phone: { type: string }
+        carrier_code: { type: string }
+        dispatch_source: { type: string, enum: [manual, ai_recommendation, partner_api] }
+    DeepSeekChatRequest:
+      type: object
+      required: [messages]
+      properties:
+        model:
+          type: string
+          enum: [deepseek-v4-flash, deepseek-v4-pro]
+        reasoning_effort:
+          type: string
+          enum: [high, max]
+        thinking:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [enabled, disabled]
+        messages:
+          type: array
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role: { type: string, enum: [system, user, assistant, tool] }
+              content: { type: string }
+    AgentToolExecuteRequest:
+      type: object
+      required: [tool_name, arguments]
+      properties:
+        tool_name:
+          type: string
+          enum:
+            - logistics.eta_risk_analysis
+            - logistics.receipt_reminder
+            - finance.expense_risk_check
+        arguments:
+          type: object
+          properties:
+            waybill_no: { type: string }

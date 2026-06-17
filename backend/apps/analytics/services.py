@@ -45,7 +45,7 @@ def build_dashboard(start=None, end=None) -> dict:
 
 def materialize_daily(target_date=None) -> int:
     """把当日指标值落快照（幂等 upsert）。返回写入指标数。"""
-    day = target_date or timezone.now().date()
+    day = target_date or timezone.localdate()
     count = 0
     for code in MATERIALIZE_METRICS:
         result = compute_metric(code, start=day, end=day)
@@ -58,7 +58,7 @@ def materialize_daily(target_date=None) -> int:
 
 
 def metric_trend(code: str, days: int = 14) -> dict:
-    end = timezone.now().date()
+    end = timezone.localdate()
     start = end - timedelta(days=days)
     rows = (
         MetricSnapshot.objects.filter(metric_code=code, dimension_key="", stat_date__gte=start, stat_date__lte=end)

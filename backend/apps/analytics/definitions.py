@@ -30,7 +30,8 @@ def _as_date(value, default):
 
 
 def _range(start, end):
-    end_d = _as_date(end, timezone.now().date())
+    # 用 localdate()（项目时区）与 created_at__date 等查询口径一致，避免跨 UTC/本地日界丢数据
+    end_d = _as_date(end, timezone.localdate())
     start_d = _as_date(start, end_d - timedelta(days=30))
     return start_d, end_d
 

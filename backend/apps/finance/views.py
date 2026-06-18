@@ -117,3 +117,16 @@ class WebhookDeliveryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, v
     queryset = WebhookDelivery.objects.select_related("webhook").all()
     serializer_class = WebhookDeliverySerializer
     filterset_fields = ["status", "event_type", "webhook"]
+
+
+class AgingView(APIView):
+    """应收/应付账龄：?direction=receivable|payable。"""
+
+    def get(self, request):
+        from .models import ExpenseRecord
+        from .services import aging_report
+
+        direction = request.query_params.get("direction", ExpenseRecord.DIRECTION_RECEIVABLE)
+        if direction not in (ExpenseRecord.DIRECTION_RECEIVABLE, ExpenseRecord.DIRECTION_PAYABLE):
+            raise AppError("INVALID_DIRECTION", "direction 必须是 receivable 或 payable。", status=400)
+        return Response(aging_report(direction))

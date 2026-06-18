@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AgingView,
     ExpenseItemViewSet,
     ExpenseRecordViewSet,
     PaymentRequestViewSet,
@@ -24,4 +25,5 @@ router.register("statements", StatementViewSet, basename="statement")
 urlpatterns = [
     *router.urls,
     path("payment-results", PaymentResultView.as_view(), name="payment-results"),
+    path("aging", AgingView.as_view(), name="aging"),
 ]

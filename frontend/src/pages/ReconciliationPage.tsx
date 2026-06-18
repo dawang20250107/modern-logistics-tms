@@ -23,6 +23,13 @@ export function ReconciliationPage() {
     queryKey: ["statements"],
     queryFn: () => apiGet<Paginated<Statement>>("/finance/statements?page_size=50"),
   });
+  const aging = useQuery({
+    queryKey: ["aging", direction],
+    queryFn: () => apiGet<{
+      rows: Array<{ counterparty_name: string; b0_30: number; b31_60: number; b61_90: number; b90: number; total: number }>;
+      totals: { b0_30: number; b31_60: number; b61_90: number; b90: number; total: number };
+    }>(`/finance/aging?direction=${direction}`),
+  });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["statements"] });
 
   const generate = useMutation({
@@ -68,6 +75,43 @@ export function ReconciliationPage() {
             {generate.isPending ? "生成中…" : "生成"}
           </button>
         </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">账龄分析 · {direction === "receivable" ? "应收" : "应付"}</div>
+        {aging.isLoading ? (
+          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        ) : (aging.data?.rows.length ?? 0) === 0 ? (
+          <div className="muted" style={{ padding: 16 }}>暂无账龄数据</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>对手方</th><th>0-30天</th><th>31-60天</th><th>61-90天</th><th>90天+</th><th>合计</th></tr>
+            </thead>
+            <tbody>
+              {(aging.data?.rows ?? []).map((r, i) => (
+                <tr key={i}>
+                  <td>{r.counterparty_name || "-"}</td>
+                  <td>¥{r.b0_30.toLocaleString()}</td>
+                  <td>¥{r.b31_60.toLocaleString()}</td>
+                  <td>¥{r.b61_90.toLocaleString()}</td>
+                  <td style={r.b90 > 0 ? { color: "var(--red)" } : {}}>¥{r.b90.toLocaleString()}</td>
+                  <td><b>¥{r.total.toLocaleString()}</b></td>
+                </tr>
+              ))}
+              {aging.data && (
+                <tr style={{ background: "var(--panel-2)", fontWeight: 700 }}>
+                  <td>合计</td>
+                  <td>¥{aging.data.totals.b0_30.toLocaleString()}</td>
+                  <td>¥{aging.data.totals.b31_60.toLocaleString()}</td>
+                  <td>¥{aging.data.totals.b61_90.toLocaleString()}</td>
+                  <td style={aging.data.totals.b90 > 0 ? { color: "var(--red)" } : {}}>¥{aging.data.totals.b90.toLocaleString()}</td>
+                  <td>¥{aging.data.totals.total.toLocaleString()}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="panel">

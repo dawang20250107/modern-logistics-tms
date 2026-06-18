@@ -147,3 +147,45 @@ def confirm_statement(statement, *, operator=None):
     statement.confirmed_at = timezone.now()
     statement.save(update_fields=["status", "confirmed_by", "confirmed_at", "updated_at"])
     return statement
+
+
+def aging_report(direction: str) -> dict:
+    """应收(客户)/应付(承运商)账龄：按对手方 + 账龄桶(0-30/31-60/61-90/90+)汇总。"""
+    from django.utils import timezone
+
+    from apps.masterdata.models import Carrier, Customer
+
+    is_receivable = direction == ExpenseRecord.DIRECTION_RECEIVABLE
+    cp_field = "waybill__customer_id" if is_receivable else "waybill__carrier_id"
+    today = timezone.localdate()
+
+    rows: dict = {}
+    qs = ExpenseRecord.objects.filter(direction=direction).values(cp_field, "occurred_at", "amount")
+    for rec in qs:
+        cp_id = rec[cp_field]
+        if cp_id is None:
+            continue
+        occurred = rec["occurred_at"]
+        age = (today - occurred.date()).days if occurred else 0
+        bucket = "b0_30" if age <= 30 else "b31_60" if age <= 60 else "b61_90" if age <= 90 else "b90"
+        row = rows.setdefault(cp_id, {"b0_30": Decimal("0"), "b31_60": Decimal("0"), "b61_90": Decimal("0"), "b90": Decimal("0")})
+        row[bucket] += rec["amount"]
+
+    model = Customer if is_receivable else Carrier
+    names = {str(c.id): c.name for c in model.objects.filter(id__in=list(rows.keys()))}
+    result = []
+    totals = {"b0_30": 0.0, "b31_60": 0.0, "b61_90": 0.0, "b90": 0.0, "total": 0.0}
+    for cp_id, row in rows.items():
+        total = sum(row.values())
+        item = {
+            "counterparty_id": str(cp_id),
+            "counterparty_name": names.get(str(cp_id), ""),
+            **{k: float(v) for k, v in row.items()},
+            "total": float(total),
+        }
+        for k in ("b0_30", "b31_60", "b61_90", "b90"):
+            totals[k] += float(row[k])
+        totals["total"] += float(total)
+        result.append(item)
+    result.sort(key=lambda x: x["total"], reverse=True)
+    return {"direction": direction, "rows": result, "totals": totals}

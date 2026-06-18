@@ -1,7 +1,20 @@
+import { useEffect } from "react";
+
 import { useConfirm } from "../api/confirm";
 
 export function ConfirmDialog() {
   const { request, resolve } = useConfirm();
+
+  useEffect(() => {
+    if (!request) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") resolve(false);
+      if (e.key === "Enter") resolve(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [request, resolve]);
+
   if (!request) return null;
   return (
     <div className="modal-overlay" onClick={() => resolve(false)}>

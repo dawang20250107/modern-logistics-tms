@@ -21,12 +21,31 @@ def _match_rules(waybill, price_type) -> list[PricingRule]:
     return matched
 
 
-def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0) -> dict:
-    """录单自动报价：按收入计价规则对订单货量估价，返回最优（最高优先级）匹配。
+# 抛重系数：1 立方米 ≈ 0.333 吨（抛比约 1:3，泡货按体积重计费）
+VOLUMETRIC_FACTOR_TON_PER_CBM = Decimal("0.333")
 
-    匹配条件：客户/线路通配；命中多条按 priority 取最高。返回 {amount, rule_name, matched}。
+
+def chargeable_weight(weight_ton, volume_cbm, factor=VOLUMETRIC_FACTOR_TON_PER_CBM) -> Decimal:
+    """计费重量：取实际重量与体积重（抛重）的较大值，避免泡货按净重少收。"""
+    actual = Decimal(str(weight_ton or 0))
+    volumetric = Decimal(str(volume_cbm or 0)) * factor
+    return max(actual, volumetric)
+
+
+def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0, volume_cbm=0) -> dict:
+    """录单自动报价：按收入计价规则对订单计费重量估价，返回最优（最高优先级）匹配。
+
+    计费重量取实际重量与抛重的较大值（泡货按体积重）。匹配条件：客户/线路通配，按 priority 取最高。
     """
     cust = str(customer_id) if customer_id else ""
+    cw = chargeable_weight(weight_ton, volume_cbm)
+    volumetric = Decimal(str(volume_cbm or 0)) * VOLUMETRIC_FACTOR_TON_PER_CBM
+    base = {
+        "actual_weight": float(weight_ton or 0),
+        "volumetric_weight": round(float(volumetric), 3),
+        "chargeable_weight": float(cw),
+        "by_volume": volumetric > Decimal(str(weight_ton or 0)),
+    }
     best = None
     for rule in PricingRule.objects.filter(
         is_active=True, price_type=PricingRule.PRICE_TYPE_INCOME
@@ -38,8 +57,8 @@ def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0) -> di
         best = rule
         break
     if best is None:
-        return {"amount": 0.0, "rule_name": "", "matched": False}
-    return {"amount": float(best.quote(weight_ton)), "rule_name": best.name, "matched": True}
+        return {"amount": 0.0, "rule_name": "", "matched": False, **base}
+    return {"amount": float(best.quote(cw)), "rule_name": best.name, "matched": True, **base}
 
 
 def generate_costs(waybill) -> dict:

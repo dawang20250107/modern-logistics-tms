@@ -131,16 +131,18 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   });
 
   const quote = useMutation({
-    mutationFn: () => apiPost<{ amount: number; matched: boolean; rule_name: string }>("/orders/quote", {
+    mutationFn: () => apiPost<{ amount: number; matched: boolean; rule_name: string; chargeable_weight: number; by_volume: boolean }>("/orders/quote", {
       customer: form.customer || undefined, origin: form.origin, destination: form.destination,
       cargo_weight_ton: cleanCargo().reduce((s, c) => s + (Number(c.weight_ton) || 0), 0),
+      cargo_volume_cbm: cleanCargo().reduce((s, c) => s + (Number(c.volume_cbm) || 0), 0),
     }),
     onSuccess: (d) => {
+      const cw = d.by_volume ? `（按抛重 ${d.chargeable_weight} 吨）` : "";
       if (d.matched) {
         set("quoted_amount", String(d.amount));
-        toast.success(`已按「${d.rule_name}」估价 ${fmtMoney(d.amount)}`);
+        toast.success(`已按「${d.rule_name}」估价 ${fmtMoney(d.amount)}${cw}`);
       } else {
-        toast.info("未匹配到计价规则，请手工填写报价");
+        toast.info(`未匹配到计价规则，请手工填写报价${cw}`);
       }
     },
   });
@@ -162,7 +164,10 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   };
 
   const totalWeight = cleanCargo().reduce((s, c) => s + (Number(c.weight_ton) || 0), 0);
+  const totalVolume = cleanCargo().reduce((s, c) => s + (Number(c.volume_cbm) || 0), 0);
   const totalQty = cleanCargo().reduce((s, c) => s + (Number(c.quantity) || 0), 0);
+  const volumetric = totalVolume * 0.333;
+  const chargeable = Math.max(totalWeight, volumetric);
   const valid = form.origin.trim() && form.destination.trim();
 
   return (
@@ -264,7 +269,10 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
       {/* 货物明细 */}
       <div className="form-section">
-        <div className="section-label">货物明细（一单多货）· 合计 {totalQty} 件 / {totalWeight.toFixed(2)} 吨</div>
+        <div className="section-label">
+          货物明细（一单多货）· 合计 {totalQty} 件 / {totalWeight.toFixed(2)} 吨 / {totalVolume.toFixed(2)} 方
+          {volumetric > totalWeight && <span className="tag tag-medium">抛重 {chargeable.toFixed(2)} 吨 计费</span>}
+        </div>
         {cargo.map((c, i) => (
           <div key={i} className="line-row">
             <input placeholder="品名" style={{ flex: 2 }} value={c.name} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />

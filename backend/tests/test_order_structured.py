@@ -46,6 +46,20 @@ def test_estimate_order_quote_matches_rule():
 
 
 @pytest.mark.django_db
+def test_quote_uses_volumetric_weight_for_bulky_cargo():
+    cust = Customer.objects.create(code="CV1", name="泡货客户")
+    PricingRule.objects.create(
+        name="泡货线", price_type=PricingRule.PRICE_TYPE_INCOME, expense_item_code="FREIGHT",
+        customer=cust, base_price=0, price_per_ton=100, priority=10,
+    )
+    # 实际 1 吨，但 30 方泡货 → 体积重 30*0.333≈10 吨，应按抛重计费
+    q = estimate_order_quote(customer_id=cust.id, route_name="x", weight_ton=1, volume_cbm=30)
+    assert q["by_volume"] is True
+    assert q["chargeable_weight"] == pytest.approx(9.99, abs=0.01)
+    assert q["amount"] == pytest.approx(999.0, abs=1.0)  # 100 * 9.99
+
+
+@pytest.mark.django_db
 def test_estimate_order_quote_no_match():
     q = estimate_order_quote(customer_id=None, route_name="x", weight_ton=5)
     assert q["matched"] is False

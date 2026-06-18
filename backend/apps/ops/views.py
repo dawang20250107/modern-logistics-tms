@@ -313,10 +313,12 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         data = request.data
         weight = data.get("cargo_weight_ton") or data.get("weight_ton") or 0
+        volume = data.get("cargo_volume_cbm") or data.get("volume_cbm") or 0
         result = estimate_order_quote(
             customer_id=data.get("customer") or None,
             route_name=f"{data.get('origin', '')}→{data.get('destination', '')}",
             weight_ton=weight,
+            volume_cbm=volume,
         )
         return Response(result)
 

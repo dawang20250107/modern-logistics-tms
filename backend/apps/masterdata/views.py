@@ -35,7 +35,7 @@ class VehicleViewSet(viewsets.ModelViewSet):
     queryset = Vehicle.objects.select_related("carrier").all()
     serializer_class = VehicleSerializer
     search_fields = ["plate_no", "vehicle_type"]
-    filterset_fields = ["is_active", "carrier"]
+    filterset_fields = ["is_active", "carrier", "vehicle_class"]
     ordering_fields = ["plate_no", "created_at"]
 
 
@@ -43,7 +43,7 @@ class DriverViewSet(viewsets.ModelViewSet):
     queryset = Driver.objects.select_related("carrier").all()
     serializer_class = DriverSerializer
     search_fields = ["name", "phone"]
-    filterset_fields = ["is_active", "carrier"]
+    filterset_fields = ["is_active", "carrier", "employment_type"]
     ordering_fields = ["name", "created_at"]
 
 

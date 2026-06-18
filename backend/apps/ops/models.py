@@ -378,6 +378,10 @@ class Waybill(BaseModel, OrgScopedModel):
     driver = models.ForeignKey(
         "masterdata.Driver", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )
+    trailer = models.ForeignKey(
+        "masterdata.Vehicle", null=True, blank=True, on_delete=models.SET_NULL, related_name="trailer_waybills",
+        help_text="挂车（牵引车 vehicle + 挂车 trailer）",
+    )
 
     route_name = models.CharField(max_length=160)
     planned_route = models.ForeignKey(
@@ -415,6 +419,40 @@ class Waybill(BaseModel, OrgScopedModel):
 
     def __str__(self) -> str:
         return self.waybill_no
+
+
+class WaybillDriver(BaseModel):
+    """运单司机分配：支持多司机同行（主驾/副驾/接力）。primary driver 仍保留在 Waybill.driver。"""
+
+    ROLE_MAIN = "main"
+    ROLE_CO = "co"
+    ROLE_RELAY = "relay"
+    ROLE_CHOICES = [
+        (ROLE_MAIN, "主驾"),
+        (ROLE_CO, "副驾"),
+        (ROLE_RELAY, "接力"),
+    ]
+
+    waybill = models.ForeignKey(Waybill, on_delete=models.CASCADE, related_name="driver_assignments")
+    driver = models.ForeignKey("masterdata.Driver", on_delete=models.CASCADE, related_name="waybill_assignments")
+    role = models.CharField(max_length=12, choices=ROLE_CHOICES, default=ROLE_MAIN, db_index=True)
+    note = models.CharField(max_length=120, blank=True, help_text="负责区间/备注，如 武汉→成都")
+
+    class Meta:
+        db_table = "ops_waybill_driver"
+        ordering = ["role", "created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["waybill", "driver"], name="uniq_waybill_driver"),
+        ]
+        verbose_name = "运单司机"
+        verbose_name_plural = "运单司机"
+
+    def __str__(self) -> str:
+        return f"{self.waybill_no}:{self.driver_id}:{self.role}"
+
+    @property
+    def waybill_no(self) -> str:
+        return self.waybill.waybill_no if self.waybill_id else ""
 
 
 class WaybillEvent(BaseModel):

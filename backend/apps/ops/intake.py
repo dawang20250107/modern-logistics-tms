@@ -520,8 +520,10 @@ def batch_orders(action: str, ids: list, *, operator=None) -> dict:
 
 
 def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver=None,
-                             dispatch_type="", operator=None) -> Waybill:
-    """订单转运单（人工确认/派单后）。可带承运商/车辆/司机与派单类型，回写订单为已派单。"""
+                             trailer=None, co_drivers=None, dispatch_type="", operator=None) -> Waybill:
+    """订单转运单（人工确认/派单后）。可带承运商/牵引车/挂车/主副驾与派单类型，回写订单为已派单。"""
+    from .models import WaybillDriver
+
     if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED):
         raise AppError("ORDER_ALREADY_CONVERTED", "订单已派单/完成。", status=409)
     if order.status == Order.STATUS_CANCELLED:
@@ -535,6 +537,7 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         carrier=carrier,
         vehicle=vehicle,
         driver=driver,
+        trailer=trailer,
         dispatch_type=dispatch_type,
         route_name=route_name,
         origin=order.origin,
@@ -544,6 +547,14 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         cargo_volume_cbm=order.cargo_volume_cbm,
         status=Waybill.STATUS_PENDING_DISPATCH,
     )
+    # 司机分配：主驾 + 多名同行司机（副驾/接力）
+    if driver:
+        WaybillDriver.objects.create(waybill=waybill, driver=driver, role=WaybillDriver.ROLE_MAIN)
+    for co in co_drivers or []:
+        if co and co.id != getattr(driver, "id", None):
+            WaybillDriver.objects.get_or_create(
+                waybill=waybill, driver=co, defaults={"role": WaybillDriver.ROLE_CO}
+            )
     order.status = Order.STATUS_CONVERTED
     order.save(update_fields=["status", "updated_at"])
     return waybill

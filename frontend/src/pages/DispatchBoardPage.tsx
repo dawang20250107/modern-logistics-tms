@@ -31,6 +31,8 @@ export function DispatchBoardPage() {
   const [carrierId, setCarrierId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [driverId, setDriverId] = useState("");
+  const [trailerId, setTrailerId] = useState("");
+  const [coDriverIds, setCoDriverIds] = useState<string[]>([]);
   const [mineOnly, setMineOnly] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [plan, setPlan] = useState<PlanResult | null>(null);
@@ -109,6 +111,8 @@ export function DispatchBoardPage() {
         carrier: carrierId || undefined,
         vehicle: vehicleId || undefined,
         driver: driverId || undefined,
+        trailer: trailerId || undefined,
+        co_drivers: coDriverIds.filter((x) => x && x !== driverId),
       }),
     onSuccess: () => {
       setActive(null);
@@ -116,6 +120,8 @@ export function DispatchBoardPage() {
       setVehicleId("");
       setCarrierId("");
       setDriverId("");
+      setTrailerId("");
+      setCoDriverIds([]);
       toast.success("派单成功，已生成运单");
       invalidate();
     },
@@ -174,7 +180,7 @@ export function DispatchBoardPage() {
                     <td className="row-actions">
                       {!claimed && <button className="btn-ghost" disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>认领</button>}
                       {claimed && <button className="btn-ghost" disabled={release.isPending} onClick={() => release.mutate(o.id)}>退回</button>}
-                      <button className="btn-ghost" onClick={() => { setActive(o); setSuggestion(null); setVehicleId(""); setCarrierId(""); setDriverId(""); suggest.mutate(o.id); }}>派单</button>
+                      <button className="btn-ghost" onClick={() => { setActive(o); setSuggestion(null); setVehicleId(""); setCarrierId(""); setDriverId(""); setTrailerId(""); setCoDriverIds([]); suggest.mutate(o.id); }}>派单</button>
                     </td>
                   </tr>
                   );
@@ -255,12 +261,33 @@ export function DispatchBoardPage() {
                 ) : (
                   <>
                     <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
-                      <option value="">选车辆</option>
-                      {(vehicles.data?.items ?? []).map((v) => <option key={v.id} value={v.id}>{v.plate_no}</option>)}
+                      <option value="">选牵引车/单体车</option>
+                      {(vehicles.data?.items ?? []).filter((v) => v.vehicle_class !== "trailer").map((v) => (
+                        <option key={v.id} value={v.id}>{v.plate_no}{v.vehicle_class_label ? ` · ${v.vehicle_class_label}` : ""}</option>
+                      ))}
+                    </select>
+                    <select value={trailerId} onChange={(e) => setTrailerId(e.target.value)}>
+                      <option value="">选挂车（可选）</option>
+                      {(vehicles.data?.items ?? []).filter((v) => v.vehicle_class === "trailer").map((v) => (
+                        <option key={v.id} value={v.id}>{v.plate_no}</option>
+                      ))}
                     </select>
                     <select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
-                      <option value="">选司机（可选）</option>
-                      {(drivers.data?.items ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      <option value="">选主驾（可选）</option>
+                      {(drivers.data?.items ?? []).map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}{d.employment_label ? ` · ${d.employment_label}` : ""}</option>
+                      ))}
+                    </select>
+                    <select
+                      multiple
+                      value={coDriverIds}
+                      title="随车司机（副驾/接力，可多选）"
+                      style={{ minWidth: 140, height: 64 }}
+                      onChange={(e) => setCoDriverIds(Array.from(e.target.selectedOptions, (o) => o.value))}
+                    >
+                      {(drivers.data?.items ?? []).filter((d) => d.id !== driverId).map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
                     </select>
                   </>
                 )}

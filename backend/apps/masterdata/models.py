@@ -42,7 +42,20 @@ class Carrier(BaseModel, SoftDeleteModel):
 
 
 class Vehicle(BaseModel, SoftDeleteModel):
+    CLASS_TRACTOR = "tractor"
+    CLASS_TRAILER = "trailer"
+    CLASS_RIGID = "rigid"
+    VEHICLE_CLASS_CHOICES = [
+        (CLASS_TRACTOR, "牵引车"),
+        (CLASS_TRAILER, "挂车"),
+        (CLASS_RIGID, "单体车"),
+    ]
+
     plate_no = models.CharField(max_length=32, unique=True)
+    vehicle_class = models.CharField(
+        max_length=16, choices=VEHICLE_CLASS_CHOICES, default=CLASS_RIGID, db_index=True,
+        help_text="牵引车/挂车/单体车",
+    )
     vehicle_type = models.CharField(max_length=64, blank=True)
     ownership_type = models.CharField(max_length=32, blank=True)
     load_capacity_ton = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="核载吨位")
@@ -68,7 +81,22 @@ class Vehicle(BaseModel, SoftDeleteModel):
 
 
 class Driver(BaseModel, SoftDeleteModel):
+    EMP_EMPLOYEE = "employee"
+    EMP_OUTSOURCED = "outsourced"
+    EMP_CARRIER = "carrier_driver"
+    EMP_TEMP = "temp"
+    EMPLOYMENT_CHOICES = [
+        (EMP_EMPLOYEE, "自有员工"),
+        (EMP_OUTSOURCED, "外协外调"),
+        (EMP_CARRIER, "承运商司机"),
+        (EMP_TEMP, "临时"),
+    ]
+
     name = models.CharField(max_length=64)
+    employment_type = models.CharField(
+        max_length=16, choices=EMPLOYMENT_CHOICES, default=EMP_EMPLOYEE, db_index=True,
+        help_text="雇佣关系：员工/外调/承运商司机/临时，决定结算路径",
+    )
     phone = models.CharField(max_length=32, blank=True, db_index=True)
     id_no = models.CharField(max_length=32, blank=True)
     license_no = models.CharField(max_length=32, blank=True)

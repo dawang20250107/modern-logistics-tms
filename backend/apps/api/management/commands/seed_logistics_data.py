@@ -37,19 +37,23 @@ class Command(BaseCommand):
 
         vehicle_1, _ = Vehicle.objects.update_or_create(
             plate_no="\u5dddA****1",
-            defaults={"vehicle_type": "17.5m", "carrier": carrier},
+            defaults={"vehicle_type": "17.5m", "vehicle_class": Vehicle.CLASS_TRACTOR, "carrier": carrier},
         )
         vehicle_2, _ = Vehicle.objects.update_or_create(
             plate_no="\u6caaB****2",
-            defaults={"vehicle_type": "\u51b7\u94fe", "carrier": carrier},
+            defaults={"vehicle_type": "\u51b7\u94fe", "vehicle_class": Vehicle.CLASS_RIGID, "carrier": carrier},
+        )
+        Vehicle.objects.update_or_create(
+            plate_no="\u5dddA****1\u6302",
+            defaults={"vehicle_type": "13m \u5e73\u677f\u6302", "vehicle_class": Vehicle.CLASS_TRAILER, "carrier": carrier},
         )
         driver_1, _ = Driver.objects.update_or_create(
             phone="13800000001",
-            defaults={"name": "\u793a\u4f8b\u53f8\u673aA", "carrier": carrier},
+            defaults={"name": "\u793a\u4f8b\u53f8\u673aA", "employment_type": Driver.EMP_EMPLOYEE, "carrier": carrier},
         )
         driver_2, _ = Driver.objects.update_or_create(
             phone="13800000002",
-            defaults={"name": "\u793a\u4f8b\u53f8\u673aB", "carrier": backup_carrier},
+            defaults={"name": "\u793a\u4f8b\u53f8\u673aB", "employment_type": Driver.EMP_OUTSOURCED, "carrier": backup_carrier},
         )
 
         waybills = [

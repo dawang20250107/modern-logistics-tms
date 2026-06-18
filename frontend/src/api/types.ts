@@ -11,13 +11,27 @@ export interface CurrentUser {
   roles: string[];
 }
 
+export interface WaybillDriverRow {
+  id: string;
+  name: string;
+  phone: string;
+  role: string;
+  role_label: string;
+  employment: string;
+  note: string;
+}
+
 export interface Waybill {
   id: string;
   waybill_no: string;
   customer_name: string;
   carrier_name: string;
   vehicle_plate: string;
+  trailer_plate: string;
   driver_name: string;
+  driver_phone: string;
+  driver_employment: string;
+  drivers: WaybillDriverRow[];
   route_name: string;
   origin: string;
   destination: string;
@@ -432,8 +446,8 @@ export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   order: "订单 / 渠道",
   finance: "财务 / 对账",
 };
-export interface Vehicle { id: string; plate_no: string; vehicle_type: string; }
-export interface Driver { id: string; name: string; phone: string; }
+export interface Vehicle { id: string; plate_no: string; vehicle_type: string; vehicle_class?: string; vehicle_class_label?: string; }
+export interface Driver { id: string; name: string; phone: string; employment_type?: string; employment_label?: string; }
 
 // ── 通知 / 订单事件 ─────────────────────────────────────
 export interface Notification {

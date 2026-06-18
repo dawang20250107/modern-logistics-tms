@@ -12,6 +12,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DataCatalogPage } from "./pages/DataCatalogPage";
 import { DispatchBoardPage } from "./pages/DispatchBoardPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
+import { FleetPage } from "./pages/FleetPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
@@ -38,6 +39,7 @@ export function App() {
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
               <Route path="command" element={<CommandCenterPage />} />
               <Route path="monitor" element={<MonitorPage />} />
+              <Route path="fleet" element={<FleetPage />} />
               <Route path="alerts" element={<AlertsPage />} />
               <Route path="exceptions" element={<ExceptionsPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />

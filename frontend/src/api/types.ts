@@ -301,6 +301,27 @@ export const STATEMENT_STATUS_LABEL: Record<string, string> = {
   settled: "已结算",
 };
 
+// ── 车队合规预警 ────────────────────────────────────────
+export type CredSeverity = "expired" | "critical" | "warning";
+export interface CredentialRow {
+  subject: string;
+  plate_no?: string;
+  name?: string;
+  credential: string;
+  expiry: string;
+  days_left: number;
+  severity: CredSeverity;
+}
+export interface ExpiringCredentials {
+  days: number;
+  summary: { total: number; expired: number; critical: number; warning: number };
+  vehicles: CredentialRow[];
+  drivers: CredentialRow[];
+}
+export const CRED_SEVERITY_LABEL: Record<CredSeverity, string> = {
+  expired: "已过期", critical: "紧急", warning: "临期",
+};
+
 // ── 主数据(精简) ───────────────────────────────────────
 export interface Customer { id: string; code: string; name: string; }
 export interface Carrier { id: string; code: string; name: string; }

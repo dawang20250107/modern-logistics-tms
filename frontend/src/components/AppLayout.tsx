@@ -12,6 +12,7 @@ const NAV: NavItem[] = [
   { to: "/waybills", label: "运单", icon: "🚚", end: false },
   { to: "/command", label: "指挥中心", icon: "🛰️", end: false },
   { to: "/monitor", label: "监控", icon: "📍", end: false },
+  { to: "/fleet", label: "车队", icon: "🚛", end: false },
   { to: "/alerts", label: "报警", icon: "🚨", end: false },
   { to: "/exceptions", label: "异常", icon: "⚠️", end: false },
   { to: "/reconciliation", label: "对账", icon: "🧾", end: false },

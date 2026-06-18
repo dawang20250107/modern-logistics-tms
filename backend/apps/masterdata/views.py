@@ -56,15 +56,26 @@ class RouteViewSet(viewsets.ModelViewSet):
 
 
 class ExpiringCredentialsView(APIView):
-    """证件到期预警：返回 N 天内到期（或已过期）的车辆/司机证件。?days=30"""
+    """证件到期预警：返回 N 天内到期（或已过期）的车辆/司机证件。?days=30
+
+    每条含 days_left（负数=已过期）与 severity（expired/critical/warning），
+    并按紧迫度（已过期/天数升序）排序，便于车队合规台一眼锁定风险。
+    """
 
     def get(self, request):
         days = int(request.query_params.get("days") or 30)
-        deadline = timezone.localdate() + timedelta(days=days)
+        today = timezone.localdate()
+        deadline = today + timedelta(days=days)
+
+        def severity(days_left: int) -> str:
+            if days_left < 0:
+                return "expired"
+            if days_left <= 7:
+                return "critical"
+            return "warning"
 
         vehicles = []
-        vq = Vehicle.objects.filter(is_active=True)
-        for v in vq:
+        for v in Vehicle.objects.filter(is_active=True):
             for field, label in [
                 ("inspection_expiry", "年检"),
                 ("insurance_expiry", "保险"),
@@ -72,13 +83,38 @@ class ExpiringCredentialsView(APIView):
             ]:
                 expiry = getattr(v, field)
                 if expiry and expiry <= deadline:
-                    vehicles.append({"plate_no": v.plate_no, "credential": label, "expiry": expiry.isoformat()})
+                    days_left = (expiry - today).days
+                    vehicles.append({
+                        "subject": v.plate_no,
+                        "plate_no": v.plate_no,
+                        "credential": label,
+                        "expiry": expiry.isoformat(),
+                        "days_left": days_left,
+                        "severity": severity(days_left),
+                    })
 
         drivers = []
         for d in Driver.objects.filter(is_active=True):
             for field, label in [("license_expiry", "驾照"), ("qualification_expiry", "从业资格")]:
                 expiry = getattr(d, field)
                 if expiry and expiry <= deadline:
-                    drivers.append({"name": d.name, "credential": label, "expiry": expiry.isoformat()})
+                    days_left = (expiry - today).days
+                    drivers.append({
+                        "subject": d.name,
+                        "name": d.name,
+                        "credential": label,
+                        "expiry": expiry.isoformat(),
+                        "days_left": days_left,
+                        "severity": severity(days_left),
+                    })
 
-        return Response({"days": days, "vehicles": vehicles, "drivers": drivers})
+        vehicles.sort(key=lambda r: r["days_left"])
+        drivers.sort(key=lambda r: r["days_left"])
+        rows = vehicles + drivers
+        summary = {
+            "total": len(rows),
+            "expired": sum(1 for r in rows if r["severity"] == "expired"),
+            "critical": sum(1 for r in rows if r["severity"] == "critical"),
+            "warning": sum(1 for r in rows if r["severity"] == "warning"),
+        }
+        return Response({"days": days, "summary": summary, "vehicles": vehicles, "drivers": drivers})

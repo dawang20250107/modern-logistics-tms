@@ -96,6 +96,30 @@ def test_parse_preview_endpoint(admin_client):
 
 
 @pytest.mark.django_db
+def test_parse_preview_flags_duplicate_orders(admin_client):
+    # 先建一单（同电话同线路）
+    create_order_from_intake(
+        text="上海到成都 10吨 电话13800001234", channel=Order.CHANNEL_CS
+    )
+    resp = admin_client.post(
+        "/api/v1/orders/parse-preview", {"text": "上海到成都 8吨 电话13800001234"}, format="json"
+    )
+    dups = resp.json()["data"]["duplicates"]
+    assert len(dups) == 1
+    assert dups[0]["contact_phone"] == "13800001234"
+
+
+@pytest.mark.django_db
+def test_find_duplicate_orders_ignores_cancelled():
+    from apps.ops.intake import cancel_order, find_duplicate_orders
+
+    o = create_order_from_intake(text="北京到广州 5吨 电话13900002222", channel=Order.CHANNEL_CS)
+    assert len(find_duplicate_orders(contact_phone="13900002222")) == 1
+    cancel_order(o)
+    assert find_duplicate_orders(contact_phone="13900002222") == []
+
+
+@pytest.mark.django_db
 def test_parse_preview_flags_missing_fields(admin_client):
     # 只给始发+货量，缺目的地与电话 → AI 提示补充
     resp = admin_client.post("/api/v1/orders/parse-preview", {"text": "上海 10吨"}, format="json")

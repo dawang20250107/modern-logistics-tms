@@ -336,7 +336,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="parse-preview")
     def parse_preview(self, request):
         """仅解析预览，不落库（供前端 AI 建单先看结果再确认）。"""
-        from .intake import parse_order_text
+        from .intake import find_duplicate_orders, parse_order_text
 
         text = (request.data.get("text") or "").strip()
         if not text:
@@ -346,7 +346,21 @@ class OrderViewSet(viewsets.ModelViewSet):
         # AI 赋能客服：指出关键信息缺口，建议补全
         important = {"origin": "始发地", "destination": "目的地", "contact_phone": "联系电话", "cargo_weight_ton": "货量"}
         missing = [{"field": f, "label": label} for f, label in important.items() if not parsed.get(f)]
-        return Response({"fields": parsed, "meta": meta, "missing": missing})
+        # AI 赋能客服：近 24h 同电话/同线路查重，防重复下单
+        dups = find_duplicate_orders(
+            contact_phone=parsed.get("contact_phone", ""),
+            origin=parsed.get("origin", ""),
+            destination=parsed.get("destination", ""),
+        )
+        duplicates = [
+            {
+                "id": str(o.id), "order_no": o.order_no, "status": o.status,
+                "origin": o.origin, "destination": o.destination,
+                "contact_phone": o.contact_phone, "created_at": o.created_at.isoformat(),
+            }
+            for o in dups
+        ]
+        return Response({"fields": parsed, "meta": meta, "missing": missing, "duplicates": duplicates})
 
     @action(detail=True, methods=["get"], url_path="timeline")
     def timeline(self, request, pk=None):

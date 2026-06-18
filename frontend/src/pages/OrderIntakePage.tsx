@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
-import type { Order, OrderChannel, Paginated, ParsedOrder } from "../api/types";
+import type { DuplicateOrder, Order, OrderChannel, Paginated, ParsedOrder } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
 
 type Fields = Record<string, string | number>;
@@ -26,6 +26,7 @@ export function OrderIntakePage() {
   const [fields, setFields] = useState<Fields>({});
   const [parseSource, setParseSource] = useState("");
   const [missing, setMissing] = useState<Array<{ field: string; label: string }>>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateOrder[]>([]);
 
   const orders = useQuery({
     queryKey: ["orders"],
@@ -39,6 +40,7 @@ export function OrderIntakePage() {
       setFields(data.fields ?? {});
       setParseSource(data.meta?.source ?? "");
       setMissing(data.missing ?? []);
+      setDuplicates(data.duplicates ?? []);
     },
   });
 
@@ -48,6 +50,8 @@ export function OrderIntakePage() {
       setText("");
       setFields({});
       setParseSource("");
+      setMissing([]);
+      setDuplicates([]);
       invalidate();
     },
   });
@@ -131,6 +135,19 @@ export function OrderIntakePage() {
             {missing.map((m) => (
               <span key={m.field} className="tag tag-medium">{m.label}</span>
             ))}
+          </div>
+        )}
+
+        {duplicates.length > 0 && (
+          <div style={{ padding: "0 18px 16px" }}>
+            <div className="tag tag-high" style={{ marginBottom: 8 }}>⚠ 疑似重复下单（近 24h 同电话/同线路 {duplicates.length} 单）</div>
+            <div className="stack" style={{ gap: 6 }}>
+              {duplicates.map((d) => (
+                <Link key={d.id} to={`/orders/${d.id}`} className="link mono small">
+                  {d.order_no} · {d.origin}→{d.destination} · {ORDER_STATUS_LABEL[d.status] ?? d.status} · {new Date(d.created_at).toLocaleString()}
+                </Link>
+              ))}
+            </div>
           </div>
         )}
       </div>

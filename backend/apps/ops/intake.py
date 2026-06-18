@@ -152,6 +152,24 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
     return order
 
 
+def find_duplicate_orders(*, contact_phone="", origin="", destination="", within_hours=24, limit=5) -> list[Order]:
+    """建单查重：近 within_hours 内、同电话或同线路的活跃订单（防客服/客户重复下单）。
+
+    匹配优先级：同电话最强；否则同始发+目的地。已取消订单不计。
+    """
+    from datetime import timedelta
+
+    if not (contact_phone or (origin and destination)):
+        return []
+    since = timezone.now() - timedelta(hours=within_hours)
+    qs = Order.objects.exclude(status=Order.STATUS_CANCELLED).filter(created_at__gte=since)
+    if contact_phone:
+        qs = qs.filter(contact_phone=contact_phone)
+    else:
+        qs = qs.filter(origin=origin, destination=destination)
+    return list(qs.select_related("customer", "created_by").order_by("-created_at")[:limit])
+
+
 def import_orders(rows: list, *, channel: str = Order.CHANNEL_CS, source: str = "", operator=None) -> dict:
     """批量建单：每行一个结构化 fields，逐行建单，失败隔离并返回逐行结果。"""
     if not isinstance(rows, list) or not rows:

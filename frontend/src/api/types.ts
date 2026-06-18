@@ -248,10 +248,20 @@ export const PRIORITY_LABEL: Record<string, string> = {
 export const DISPATCH_TYPE_LABEL: Record<string, string> = {
   own_vehicle: "自有单车", fleet: "自有车队", third_party: "三方承运商",
 };
+export interface DuplicateOrder {
+  id: string;
+  order_no: string;
+  status: string;
+  origin: string;
+  destination: string;
+  contact_phone: string;
+  created_at: string;
+}
 export interface ParsedOrder {
   fields: Record<string, string | number>;
   meta: { source?: string };
   missing?: Array<{ field: string; label: string }>;
+  duplicates?: DuplicateOrder[];
 }
 export const ORDER_CHANNEL_LABEL: Record<OrderChannel, string> = {
   cs: "客服代下",

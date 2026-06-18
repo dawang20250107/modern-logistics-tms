@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
+import { fmtMoney } from "../api/format";
 import type { Order, OrderEvent } from "../api/types";
 import {
   BUSINESS_TYPE_LABEL,
@@ -86,7 +87,7 @@ export function OrderDetailPage() {
             {kv("线路", `${o.origin} → ${o.destination}`)}
             {kv("货物", o.cargo_desc)}
             {kv("货量", `${o.cargo_weight_ton}吨 / ${o.cargo_quantity}件`)}
-            {kv("货值", o.cargo_value !== "0.00" ? `¥${o.cargo_value}` : "")}
+            {kv("货值", o.cargo_value !== "0.00" ? fmtMoney(o.cargo_value) : "")}
             {kv("危险品", o.is_hazardous ? "是" : "否")}
             {kv("温区", o.temperature_range)}
             {kv("发货联系", `${o.contact_name} ${o.contact_phone}`)}

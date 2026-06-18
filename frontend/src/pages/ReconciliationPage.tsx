@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, Statement } from "../api/types";
 import { STATEMENT_STATUS_LABEL } from "../api/types";
@@ -93,21 +94,21 @@ export function ReconciliationPage() {
               {(aging.data?.rows ?? []).map((r, i) => (
                 <tr key={i}>
                   <td>{r.counterparty_name || "-"}</td>
-                  <td>¥{r.b0_30.toLocaleString()}</td>
-                  <td>¥{r.b31_60.toLocaleString()}</td>
-                  <td>¥{r.b61_90.toLocaleString()}</td>
-                  <td style={r.b90 > 0 ? { color: "var(--red)" } : {}}>¥{r.b90.toLocaleString()}</td>
-                  <td><b>¥{r.total.toLocaleString()}</b></td>
+                  <td>{fmtMoney(r.b0_30)}</td>
+                  <td>{fmtMoney(r.b31_60)}</td>
+                  <td>{fmtMoney(r.b61_90)}</td>
+                  <td style={r.b90 > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(r.b90)}</td>
+                  <td><b>{fmtMoney(r.total)}</b></td>
                 </tr>
               ))}
               {aging.data && (
                 <tr style={{ background: "var(--panel-2)", fontWeight: 700 }}>
                   <td>合计</td>
-                  <td>¥{aging.data.totals.b0_30.toLocaleString()}</td>
-                  <td>¥{aging.data.totals.b31_60.toLocaleString()}</td>
-                  <td>¥{aging.data.totals.b61_90.toLocaleString()}</td>
-                  <td style={aging.data.totals.b90 > 0 ? { color: "var(--red)" } : {}}>¥{aging.data.totals.b90.toLocaleString()}</td>
-                  <td>¥{aging.data.totals.total.toLocaleString()}</td>
+                  <td>{fmtMoney(aging.data.totals.b0_30)}</td>
+                  <td>{fmtMoney(aging.data.totals.b31_60)}</td>
+                  <td>{fmtMoney(aging.data.totals.b61_90)}</td>
+                  <td style={aging.data.totals.b90 > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(aging.data.totals.b90)}</td>
+                  <td>{fmtMoney(aging.data.totals.total)}</td>
                 </tr>
               )}
             </tbody>
@@ -139,10 +140,10 @@ export function ReconciliationPage() {
                     <td>{s.direction === "receivable" ? "应收" : "应付"}</td>
                     <td>{s.counterparty_name}</td>
                     <td className="small">{s.period_start} ~ {s.period_end}</td>
-                    <td>¥{s.total_amount}</td>
+                    <td>{fmtMoney(s.total_amount)}</td>
                     <td>{s.item_count}</td>
                     <td className={Number(s.diff) !== 0 ? "" : "muted"} style={Number(s.diff) !== 0 ? { color: "var(--red)" } : {}}>
-                      {Number(s.diff) !== 0 ? `¥${s.diff}` : "—"}
+                      {Number(s.diff) !== 0 ? fmtMoney(s.diff) : "—"}
                     </td>
                     <td><span className={`tag tag-${s.status === "confirmed" || s.status === "settled" ? "low" : "medium"}`}>{STATEMENT_STATUS_LABEL[s.status] ?? s.status}</span></td>
                     <td>
@@ -164,7 +165,7 @@ export function ReconciliationPage() {
                                 <tr key={l.id}>
                                   <td className="mono">{l.waybill_no}</td>
                                   <td>{l.expense_item_code}</td>
-                                  <td>¥{l.amount}</td>
+                                  <td>{fmtMoney(l.amount)}</td>
                                   <td className="small">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
                                 </tr>
                               ))}

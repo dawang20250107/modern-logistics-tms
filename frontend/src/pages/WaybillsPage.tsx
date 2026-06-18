@@ -11,11 +11,14 @@ import { Link } from "react-router-dom";
 
 import { apiGet } from "../api/client";
 import type { Paginated, Waybill } from "../api/types";
+import { STATUS_LABEL } from "../api/types";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
+const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
 
 export function WaybillsPage() {
   const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const query = useQuery({
     queryKey: ["waybills", "table"],
     queryFn: () => apiGet<Paginated<Waybill>>("/waybills?page_size=100"),
@@ -33,7 +36,14 @@ export function WaybillsPage() {
         ),
       },
       { accessorKey: "route_name", header: "线路" },
-      { accessorKey: "status", header: "状态" },
+      {
+        accessorKey: "status",
+        header: "状态",
+        cell: (ctx) => {
+          const v = ctx.getValue<string>();
+          return <span className="status-pill">{STATUS_LABEL[v] ?? v}</span>;
+        },
+      },
       {
         accessorKey: "risk_level",
         header: "风险",
@@ -50,8 +60,10 @@ export function WaybillsPage() {
     [],
   );
 
+  const items = query.data?.items ?? [];
+  const rows = statusFilter ? items.filter((w) => w.status === statusFilter) : items;
   const table = useReactTable({
-    data: query.data?.items ?? [],
+    data: rows,
     columns,
     state: { globalFilter: filter },
     onGlobalFilterChange: setFilter,
@@ -70,6 +82,14 @@ export function WaybillsPage() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
+        </div>
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <button className={`chip${statusFilter === "" ? " chip-on" : ""}`} onClick={() => setStatusFilter("")}>全部</button>
+          {STATUS_CHIPS.map((s) => (
+            <button key={s} className={`chip${statusFilter === s ? " chip-on" : ""}`} onClick={() => setStatusFilter(s)}>
+              {STATUS_LABEL[s] ?? s}
+            </button>
+          ))}
         </div>
         {query.isLoading ? (
           <div className="muted">加载中…</div>
@@ -99,7 +119,9 @@ export function WaybillsPage() {
             </tbody>
           </table>
         )}
-        <div className="muted small">共 {query.data?.total ?? 0} 条</div>
+        <div className="muted small">
+          显示 {table.getRowModel().rows.length} 条{statusFilter || filter ? ` · 共 ${query.data?.total ?? 0} 条` : ""}
+        </div>
       </div>
     </div>
   );

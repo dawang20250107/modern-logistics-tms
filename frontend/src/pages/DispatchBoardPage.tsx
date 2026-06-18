@@ -9,6 +9,20 @@ import type { Carrier, DispatchSuggestion, Driver, Order, Paginated, Vehicle } f
 import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, PRIORITY_LABEL, SLA_STATUS_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 
+interface PlanAssignment {
+  order_id: string;
+  order_no: string;
+  route: string;
+  weight_ton: number;
+  vehicle: { vehicle_id: string; plate_no: string; utilization: number; compliance_ok?: boolean };
+}
+interface PlanResult {
+  assigned_count: number;
+  unassigned_count: number;
+  assignments: PlanAssignment[];
+  unassigned: Array<{ order_id: string; order_no: string }>;
+}
+
 export function DispatchBoardPage() {
   const queryClient = useQueryClient();
   const [active, setActive] = useState<Order | null>(null);
@@ -18,6 +32,8 @@ export function DispatchBoardPage() {
   const [vehicleId, setVehicleId] = useState("");
   const [driverId, setDriverId] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [plan, setPlan] = useState<PlanResult | null>(null);
 
   const pool = useQuery({
     queryKey: ["pool", mineOnly],
@@ -42,6 +58,31 @@ export function DispatchBoardPage() {
     mutationFn: (id: string) => apiPost(`/orders/${id}/release`, {}),
     onSuccess: () => { toast.success("已退回订单池"); invalidate(); },
   });
+
+  const togglePick = (id: string) => setPicked((s) => {
+    const n = new Set(s);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    return n;
+  });
+  const makePlan = useMutation({
+    mutationFn: () => apiPost<PlanResult>("/orders/dispatch-plan", { ids: [...picked] }),
+    onSuccess: (d) => { setPlan(d); toast.success(`已排线：分配 ${d.assigned_count} 单，${d.unassigned_count} 单待三方`); },
+  });
+  const planDispatch = useMutation({
+    mutationFn: (a: { order_id: string; vehicle_id: string }) =>
+      apiPost(`/orders/${a.order_id}/dispatch`, { dispatch_type: "own_vehicle", vehicle: a.vehicle_id }),
+  });
+  const confirmPlan = async () => {
+    if (!plan) return;
+    for (const a of plan.assignments) {
+      await planDispatch.mutateAsync({ order_id: a.order_id, vehicle_id: a.vehicle.vehicle_id });
+    }
+    toast.success(`已按排线派单 ${plan.assignments.length} 单`);
+    setPlan(null);
+    setPicked(new Set());
+    invalidate();
+  };
   const suggest = useMutation({
     mutationFn: (id: string) => apiGet<DispatchSuggestion>(`/orders/${id}/dispatch-suggestion`),
     onSuccess: (data) => {
@@ -94,6 +135,13 @@ export function DispatchBoardPage() {
               <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> 仅看我认领
             </label>
           </div>
+          {picked.size > 0 && (
+            <div className="batch-bar">
+              <span>已选 {picked.size} 单</span>
+              <button className="btn-primary" disabled={makePlan.isPending} onClick={() => makePlan.mutate()}>🧭 智能排线</button>
+              <button className="btn-ghost" onClick={() => { setPicked(new Set()); setPlan(null); }}>清除</button>
+            </div>
+          )}
           {pool.isLoading ? (
             <div className="muted" style={{ padding: 16 }}>加载中…</div>
           ) : orders.length === 0 ? (
@@ -101,7 +149,7 @@ export function DispatchBoardPage() {
           ) : (
             <table className="table">
               <thead>
-                <tr><th>订单号</th><th>来源</th><th>线路</th><th>类型</th><th>优先级</th><th>货量</th><th>等待/时效</th><th>认领</th><th>操作</th></tr>
+                <tr><th style={{ width: 32 }}></th><th>订单号</th><th>来源</th><th>线路</th><th>类型</th><th>优先级</th><th>货量</th><th>等待/时效</th><th>认领</th><th>操作</th></tr>
               </thead>
               <tbody>
                 {orders.map((o) => {
@@ -109,6 +157,7 @@ export function DispatchBoardPage() {
                   const urgent = o.sla_status === "breached" || o.sla_status === "at_risk" || o.priority === "vip";
                   return (
                   <tr key={o.id} style={active?.id === o.id ? { background: "#f1f5fb" } : urgent ? { background: "#fff7f7" } : {}}>
+                    <td><input type="checkbox" checked={picked.has(o.id)} onChange={() => togglePick(o.id)} /></td>
                     <td className="mono small">{o.order_no}</td>
                     <td className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</td>
                     <td>{o.origin} → {o.destination}</td>
@@ -232,6 +281,40 @@ export function DispatchBoardPage() {
           ) : null}
         </div>
       </div>
+
+      {plan && (
+        <div className="panel">
+          <div className="panel-head">
+            智能排线结果 · 分配 {plan.assigned_count} / 待三方 {plan.unassigned_count}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn-primary" disabled={planDispatch.isPending || plan.assignments.length === 0} onClick={confirmPlan}>
+                {planDispatch.isPending ? "派单中…" : `一键派单 ${plan.assignments.length} 单`}
+              </button>
+              <button className="btn-ghost" onClick={() => setPlan(null)}>关闭</button>
+            </div>
+          </div>
+          <table className="table">
+            <thead><tr><th>订单号</th><th>线路</th><th>货量</th><th>分配车辆</th><th>装载率</th></tr></thead>
+            <tbody>
+              {plan.assignments.map((a) => (
+                <tr key={a.order_id}>
+                  <td className="mono small">{a.order_no}</td>
+                  <td>{a.route}</td>
+                  <td>{a.weight_ton}吨</td>
+                  <td>{a.vehicle.plate_no}{a.vehicle.compliance_ok === false && <span className="tag tag-high" style={{ marginLeft: 4 }}>证件过期</span>}</td>
+                  <td>{Math.round(a.vehicle.utilization * 100)}%</td>
+                </tr>
+              ))}
+              {plan.unassigned.map((u) => (
+                <tr key={u.order_id} style={{ background: "#fff7f7" }}>
+                  <td className="mono small">{u.order_no}</td>
+                  <td colSpan={4} className="muted small">无合适自有车，建议改三方承运</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

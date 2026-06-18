@@ -458,6 +458,19 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(recommend_dispatch_for_order(self.get_object()))
 
+    @action(detail=False, methods=["post"], url_path="dispatch-plan")
+    def dispatch_plan(self, request):
+        """订单池批量智能排线：传 {ids:[...]}，返回每单的自有车分配建议（不落库）。"""
+        from .order_dispatch import plan_dispatch_orders
+
+        ids = request.data.get("ids") or []
+        if not ids:
+            raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
+        orders = list(
+            self.get_queryset().filter(id__in=ids, status__in=[Order.STATUS_POOLED, Order.STATUS_DISPATCHING])
+        )
+        return Response(plan_dispatch_orders(orders))
+
     @action(detail=True, methods=["post"], url_path="dispatch")
     def dispatch_order_action(self, request, pk=None):
         """派单：指派承运商/车辆/司机 + 派单类型，生成运单。"""

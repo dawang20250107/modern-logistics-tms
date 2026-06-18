@@ -119,6 +119,21 @@ def test_pool_and_claim_endpoints(admin_client):
 
 
 @pytest.mark.django_db
+def test_dispatch_plan_assigns_vehicles(admin_client):
+    Vehicle.objects.create(plate_no="排线A", load_capacity_ton=20)
+    Vehicle.objects.create(plate_no="排线B", load_capacity_ton=20)
+    o1 = _pooled_order(cargo_weight_ton=15)
+    o2 = _pooled_order(cargo_weight_ton=8)
+    o3 = _pooled_order(cargo_weight_ton=5)
+    resp = admin_client.post("/api/v1/orders/dispatch-plan", {"ids": [str(o1.id), str(o2.id), str(o3.id)]}, format="json")
+    assert resp.status_code == 200, resp.content
+    data = resp.json()["data"]
+    assert data["assigned_count"] == 2  # 仅 2 辆车
+    assert data["unassigned_count"] == 1
+    assert all("vehicle" in a for a in data["assignments"])
+
+
+@pytest.mark.django_db
 def test_signing_completes_order():
     from apps.ops.services import transition_waybill
 

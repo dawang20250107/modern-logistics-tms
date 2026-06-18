@@ -39,12 +39,20 @@ def _current_user_or_none(request):
 
 
 def _expense_payload(item):
+    from apps.finance.cost_items import item_label, payee_label
+
     return {
         "id": str(item.id),
         "direction": item.direction,
         "expense_item_code": item.expense_item_code,
+        "item_label": item_label(item.expense_item_code),
         "amount": float(item.amount),
         "risk_status": item.risk_status,
+        "payee_type": item.payee_type,
+        "payee_label": payee_label(item.payee_type),
+        "payee_ref": item.payee_ref,
+        "source_system": item.source_system,
+        "remark": item.remark,
     }
 
 
@@ -120,16 +128,60 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
         rt, pt, et = total(receivables), total(payables), total(external)
         gross = rt - pt - et
+        # 应付按收款方归集（上下游结算视角）
+        from apps.finance.cost_items import payee_label
+
+        by_payee: dict = {}
+        for i in payables:
+            key = i.payee_type or "other"
+            row = by_payee.setdefault(key, {"payee_type": key, "payee_label": payee_label(key), "amount": 0.0})
+            row["amount"] += float(i.amount)
         return Response(
             {
                 "waybill_no": waybill.waybill_no,
                 "receivables": [_expense_payload(i) for i in receivables],
                 "payables": [_expense_payload(i) for i in payables],
                 "external_expenses": [_expense_payload(i) for i in external],
+                "payables_by_payee": list(by_payee.values()),
+                "receivable_total": float(rt),
+                "payable_total": float(pt),
                 "gross_profit": float(gross),
                 "gross_margin": float(gross / rt) if rt else 0,
             }
         )
+
+    @action(detail=True, methods=["post"], url_path="add-expense")
+    def add_expense(self, request, waybill_no=None):
+        """新增结构化费用明细（运费/油卡/过路/装卸/押车/信息/回单/扣款）+ 收款方。"""
+        from apps.finance.cost_items import ALL_ITEM_LABELS
+
+        waybill = self.get_object()
+        data = request.data
+        direction = data.get("direction")
+        code = data.get("expense_item_code")
+        if direction not in (ExpenseRecord.DIRECTION_RECEIVABLE, ExpenseRecord.DIRECTION_PAYABLE):
+            raise AppError("INVALID_DIRECTION", "direction 取值 receivable|payable。", status=400)
+        if code not in ALL_ITEM_LABELS:
+            raise AppError("INVALID_EXPENSE_ITEM", "费用科目非法。", status=400)
+        try:
+            amount = Decimal(str(data.get("amount") or "0"))
+        except (TypeError, ValueError, ArithmeticError) as err:
+            raise AppError("INVALID_AMOUNT", "金额非法。", status=400) from err
+        ExpenseRecord.objects.create(
+            waybill=waybill, direction=direction, expense_item_code=code, amount=amount,
+            payee_type=data.get("payee_type", ""), payee_ref=data.get("payee_ref", ""),
+            remark=data.get("remark", ""), source_system="manual",
+        )
+        return Response({"ok": True}, status=201)
+
+    @action(detail=False, methods=["get"], url_path="cost-catalog")
+    def cost_catalog(self, request):
+        """费用科目与收款方目录（供前端录入下拉）。"""
+        from apps.finance.cost_items import COST_ITEMS, INCOME_ITEMS, PAYEE_LABELS
+
+        return Response({
+            "cost_items": COST_ITEMS, "income_items": INCOME_ITEMS, "payees": PAYEE_LABELS,
+        })
 
     @action(detail=True, methods=["get"], url_path="eta")
     def eta(self, request, waybill_no=None):

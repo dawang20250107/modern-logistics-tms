@@ -179,5 +179,6 @@ class OrderSerializer(serializers.ModelSerializer):
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
             "created_by", "created_by_name", "raw_text", "parse_meta", "remark", "created_at",
             "waybill_nos", "cargo_items", "stops",
+            "approval_status", "approval_remark", "approved_at",
         ]
         read_only_fields = ["claimed_by", "claimed_at", "pooled_at", "created_by"]

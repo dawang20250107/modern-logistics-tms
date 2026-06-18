@@ -8,6 +8,7 @@ import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Order, OrderEvent } from "../api/types";
 import {
+  APPROVAL_STATUS_LABEL,
   BUSINESS_TYPE_LABEL,
   ORDER_CHANNEL_LABEL,
   ORDER_EVENT_LABEL,
@@ -42,6 +43,10 @@ export function OrderDetailPage() {
   const save = useMutation({
     mutationFn: () => apiPost(`/orders/${id}/edit`, { fields: edit }),
     onSuccess: () => { toast.success("已保存"); setEditing(false); invalidate(); },
+  });
+  const approval = useMutation({
+    mutationFn: (v: { action: "approve" | "reject"; remark: string }) => apiPost(`/orders/${id}/${v.action}`, { remark: v.remark }),
+    onSuccess: (_d, v) => { toast.success(v.action === "approve" ? "已审批通过" : "已驳回"); invalidate(); },
   });
 
   const o = order.data;
@@ -101,6 +106,28 @@ export function OrderDetailPage() {
           )}
         </div>
       </div>
+
+      {o.approval_status !== "none" && (
+        <div className="panel" style={{ borderLeft: `4px solid ${o.approval_status === "rejected" ? "var(--red)" : o.approval_status === "approved" ? "var(--green)" : "var(--amber, #e8a33d)"}` }}>
+          <div className="form-actions" style={{ borderBottom: "none" }}>
+            <span className={`tag tag-${o.approval_status === "approved" ? "low" : o.approval_status === "rejected" ? "high" : "medium"}`}>
+              审批：{APPROVAL_STATUS_LABEL[o.approval_status]}
+            </span>
+            <span className="muted small">高价值订单需主管审批后方可进池派单</span>
+            {o.approval_remark && <span className="muted small">· {o.approval_remark}</span>}
+            <span style={{ flex: 1 }} />
+            {o.approval_status === "pending" && (
+              <>
+                <button className="btn-primary" disabled={approval.isPending} onClick={() => approval.mutate({ action: "approve", remark: "" })}>审批通过</button>
+                <button className="btn-danger" disabled={approval.isPending} onClick={async () => {
+                  const ok = await confirmAction({ message: `确定驳回订单 ${o.order_no}？`, tone: "danger", confirmText: "驳回" });
+                  if (ok) approval.mutate({ action: "reject", remark: "" });
+                }}>驳回</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="wb-grid">
         <div className="stack">

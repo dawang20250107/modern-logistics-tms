@@ -150,6 +150,45 @@ def test_export_csv(admin_client):
 
 
 @pytest.mark.django_db
+def test_high_value_order_requires_approval():
+    from apps.core.exceptions import AppError
+    from apps.ops.intake import approve_order, pool_order
+    from apps.ops.models import Order
+
+    order = create_order_from_intake(fields={"origin": "上海", "destination": "成都", "quoted_amount": "80000"})
+    assert order.approval_status == Order.APPROVAL_PENDING  # 高价值自动进入待审批
+    with pytest.raises(AppError) as exc:
+        pool_order(order)
+    assert exc.value.code == "ORDER_NEEDS_APPROVAL"
+    # 审批通过后可进池
+    approve_order(order, remark="同意")
+    order.refresh_from_db()
+    pooled = pool_order(order)
+    assert pooled.status == Order.STATUS_POOLED
+
+
+@pytest.mark.django_db
+def test_reject_blocks_pool(admin_client):
+    from apps.ops.models import Order
+
+    order = create_order_from_intake(fields={"origin": "上海", "destination": "成都", "cargo_value": "800000"})
+    assert order.approval_status == Order.APPROVAL_PENDING
+    resp = admin_client.post(f"/api/v1/orders/{order.id}/reject", {"remark": "超预算"}, format="json")
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["data"]["approval_status"] == "rejected"
+    r2 = admin_client.post(f"/api/v1/orders/{order.id}/pool")
+    assert r2.status_code == 409
+
+
+@pytest.mark.django_db
+def test_normal_order_no_approval():
+    from apps.ops.models import Order
+
+    order = create_order_from_intake(fields={"origin": "上海", "destination": "成都", "quoted_amount": "3000"})
+    assert order.approval_status == Order.APPROVAL_NONE
+
+
+@pytest.mark.django_db
 def test_customer_addresses_book(admin_client):
     cust = Customer.objects.create(code="CA1", name="海尔")
     o1 = create_order_from_intake(fields={"origin": "青岛", "destination": "上海"}, customer=cust)

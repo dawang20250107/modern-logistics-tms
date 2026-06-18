@@ -140,6 +140,24 @@ class Order(BaseModel, SoftDeleteModel):
     sla_status = models.CharField(max_length=16, choices=SLA_CHOICES, default=SLA_PENDING, db_index=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
 
+    # 审批流：高价值/特殊订单需主管审批后方可进池派单
+    APPROVAL_NONE = "none"
+    APPROVAL_PENDING = "pending"
+    APPROVAL_APPROVED = "approved"
+    APPROVAL_REJECTED = "rejected"
+    APPROVAL_CHOICES = [
+        (APPROVAL_NONE, "无需审批"),
+        (APPROVAL_PENDING, "待审批"),
+        (APPROVAL_APPROVED, "已通过"),
+        (APPROVAL_REJECTED, "已驳回"),
+    ]
+    approval_status = models.CharField(max_length=16, choices=APPROVAL_CHOICES, default=APPROVAL_NONE, db_index=True)
+    approval_remark = models.CharField(max_length=255, blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="approved_orders"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
     # 调度池认领（多调度并发，乐观+悲观锁保护）
     claimed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="claimed_orders"

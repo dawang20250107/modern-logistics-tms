@@ -298,6 +298,22 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
         return Response(OrderSerializer(order).data)
 
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, pk=None):
+        """主管审批通过高价值订单。"""
+        from .intake import approve_order
+
+        order = approve_order(self.get_object(), operator=request.user, remark=request.data.get("remark", ""))
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, pk=None):
+        """主管驳回高价值订单。"""
+        from .intake import reject_order
+
+        order = reject_order(self.get_object(), operator=request.user, remark=request.data.get("remark", ""))
+        return Response(OrderSerializer(order).data)
+
     @action(detail=True, methods=["post"], url_path="clone")
     def clone(self, request, pk=None):
         """复制建单：以现有订单为蓝本生成新草稿。"""

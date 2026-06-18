@@ -126,6 +126,20 @@ class Order(BaseModel, SoftDeleteModel):
     expected_pickup_at = models.DateTimeField(null=True, blank=True)
     expected_delivery_at = models.DateTimeField(null=True, blank=True)
 
+    # SLA 时效
+    SLA_PENDING = "pending"
+    SLA_AT_RISK = "at_risk"
+    SLA_ON_TIME = "on_time"
+    SLA_BREACHED = "breached"
+    SLA_CHOICES = [
+        (SLA_PENDING, "进行中"),
+        (SLA_AT_RISK, "临期"),
+        (SLA_ON_TIME, "准时"),
+        (SLA_BREACHED, "超时"),
+    ]
+    sla_status = models.CharField(max_length=16, choices=SLA_CHOICES, default=SLA_PENDING, db_index=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+
     # 调度池认领（多调度并发，乐观+悲观锁保护）
     claimed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="claimed_orders"

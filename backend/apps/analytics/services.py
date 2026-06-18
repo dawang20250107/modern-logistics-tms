@@ -18,6 +18,7 @@ DASHBOARD_METRICS = [
     "fleet.alert_count",
     "order.count",
     "order.conversion_rate",
+    "order.sla_on_time_rate",
     "finance.receivable_total",
     "finance.payable_total",
     "finance.statement_diff_total",

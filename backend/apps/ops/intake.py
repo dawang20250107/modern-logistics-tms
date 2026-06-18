@@ -90,6 +90,21 @@ def _extract_json(content: str) -> str:
     return content[start : end + 1]
 
 
+def _coerce_datetimes(data: dict):
+    """把 ISO 字符串的时间字段解析为 aware datetime，保证内存对象与库一致。"""
+    from django.utils import timezone as tz
+    from django.utils.dateparse import parse_datetime
+
+    for field in ("expected_pickup_at", "expected_delivery_at"):
+        val = data.get(field)
+        if isinstance(val, str):
+            dt = parse_datetime(val)
+            if dt is not None:
+                data[field] = tz.make_aware(dt) if tz.is_naive(dt) else dt
+            else:
+                data.pop(field, None)
+
+
 # 可由解析/手填写入订单的业务字段白名单
 _ORDER_FIELDS = (
     "contact_name", "contact_phone", "origin", "destination",
@@ -117,6 +132,7 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
         data.update(explicit)  # 显式字段覆盖解析结果
 
     clean = {k: data[k] for k in _ORDER_FIELDS if k in data and data[k] not in (None, "")}
+    _coerce_datetimes(clean)
     operator_user = operator if operator and getattr(operator, "is_authenticated", False) else None
     order = Order.objects.create(
         order_no=gen_order_no(timezone.now()),

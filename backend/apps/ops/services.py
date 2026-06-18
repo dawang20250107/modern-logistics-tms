@@ -113,11 +113,16 @@ def _complete_order_on_delivery(waybill, to_status):
     from .intake import record_order_event
 
     prev = order.status
+    now = timezone.now()
     order.status = Order.STATUS_COMPLETED
-    order.save(update_fields=["status", "updated_at"])
+    order.delivered_at = now
+    # SLA 判定：有承诺到达时间则比对实际完成时间
+    if order.expected_delivery_at:
+        order.sla_status = Order.SLA_ON_TIME if now <= order.expected_delivery_at else Order.SLA_BREACHED
+    order.save(update_fields=["status", "delivered_at", "sla_status", "updated_at"])
     record_order_event(
         order, "completed", from_status=prev, to_status=order.status, source="system",
-        waybill_no=waybill.waybill_no, trigger=to_status,
+        waybill_no=waybill.waybill_no, trigger=to_status, sla_status=order.sla_status,
     )
     publish_event("order_completed", {"order_no": order.order_no, "waybill_no": waybill.waybill_no})
     # 持久化通知：完成→提醒建单客服

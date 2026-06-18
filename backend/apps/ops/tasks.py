@@ -131,3 +131,43 @@ def process_receipt_ocr(receipt_id: str) -> bool:
         receipt.ocr_status = "failed"
         receipt.save(update_fields=["ocr_status", "updated_at"])
         return False
+
+
+@shared_task(name="ops.scan_sla_breaches")
+def scan_sla_breaches(at_risk_minutes: int = 120) -> int:
+    """扫描进行中订单的 SLA：超过承诺到达时间标超时、临近标临期，并通知建单人。"""
+    from datetime import timedelta
+
+    from apps.notifications.services import notify_users
+
+    from .models import Order
+
+    now = timezone.now()
+    in_progress = [Order.STATUS_POOLED, Order.STATUS_DISPATCHING, Order.STATUS_CONVERTED]
+    changed = 0
+    qs = Order.objects.filter(
+        status__in=in_progress, expected_delivery_at__isnull=False,
+        sla_status__in=[Order.SLA_PENDING, Order.SLA_AT_RISK],
+    )
+    for order in qs:
+        if now > order.expected_delivery_at:
+            new_status = Order.SLA_BREACHED
+        elif now > order.expected_delivery_at - timedelta(minutes=at_risk_minutes):
+            new_status = Order.SLA_AT_RISK
+        else:
+            continue
+        if order.sla_status == new_status:
+            continue
+        order.sla_status = new_status
+        order.save(update_fields=["sla_status", "updated_at"])
+        publish_event("order_sla", {"order_no": order.order_no, "sla_status": new_status})
+        if order.created_by_id:
+            notify_users(
+                [order.created_by_id], category="order_sla",
+                title=f"订单时效{'超时' if new_status == Order.SLA_BREACHED else '临期'}：{order.order_no}",
+                body=f"承诺到达 {order.expected_delivery_at:%Y-%m-%d %H:%M}",
+                level="critical" if new_status == Order.SLA_BREACHED else "warning",
+                link_type="order", link_id=str(order.id),
+            )
+        changed += 1
+    return changed

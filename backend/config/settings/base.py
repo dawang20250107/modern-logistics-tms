@@ -188,6 +188,7 @@ CELERY_BEAT_SCHEDULE = {
     "flush-tracking-points": {"task": "ops.flush_tracking_points", "schedule": 5.0},
     "scan-eta-risks": {"task": "ops.scan_eta_risks", "schedule": 60.0},
     "scan-receipt-reminders": {"task": "ops.scan_receipt_reminders", "schedule": 120.0},
+    "scan-sla-breaches": {"task": "ops.scan_sla_breaches", "schedule": 300.0},
     "flush-telemetry": {"task": "telematics.flush_telemetry", "schedule": 5.0},
     "scan-offline-devices": {"task": "telematics.scan_offline_devices", "schedule": 60.0},
     "materialize-metrics": {"task": "analytics.materialize_metrics", "schedule": 3600.0},

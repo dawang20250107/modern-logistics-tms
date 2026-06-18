@@ -133,7 +133,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivery_address", "delivery_contact_name", "delivery_contact_phone",
             "cargo_desc", "cargo_quantity", "cargo_weight_ton", "cargo_volume_cbm",
             "cargo_value", "package_type", "is_hazardous", "temperature_range", "quoted_amount",
-            "expected_pickup_at", "expected_delivery_at",
+            "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
             "created_by", "created_by_name", "raw_text", "parse_meta", "remark", "created_at",
         ]

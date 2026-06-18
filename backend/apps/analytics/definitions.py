@@ -138,6 +138,21 @@ def order_count(*, start, end, dimension, filters):
     return result
 
 
+@metric("order.sla_on_time_rate", "SLA 准时率", DOMAIN_ORDER, unit="%",
+        description="已完成且有承诺时效的订单中准时占比")
+def order_sla_on_time_rate(*, start, end, dimension, filters):
+    from apps.ops.models import Order
+
+    s, e = _range(start, end)
+    done = Order.objects.filter(
+        status=Order.STATUS_COMPLETED, delivered_at__date__gte=s, delivered_at__date__lte=e,
+        sla_status__in=[Order.SLA_ON_TIME, Order.SLA_BREACHED],
+    )
+    total = done.count()
+    on_time = done.filter(sla_status=Order.SLA_ON_TIME).count()
+    return {"value": _rate(on_time, total), "numerator": on_time, "denominator": total}
+
+
 @metric("order.conversion_rate", "订单转化率", DOMAIN_ORDER, unit="%",
         description="转运单订单 / 订单总数")
 def order_conversion_rate(*, start, end, dimension, filters):

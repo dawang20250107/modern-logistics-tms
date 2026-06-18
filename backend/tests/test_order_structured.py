@@ -291,3 +291,29 @@ def test_order_detail_exposes_cargo_items_and_stops(admin_client):
     assert data["cargo_items"][0]["name"] == "钢材"
     assert len(data["stops"]) == 2
     assert data["stops"][1]["stop_type"] == "delivery"
+
+
+@pytest.mark.django_db
+def test_order_edit_records_field_level_diff():
+    from apps.ops.intake import update_order
+
+    order = create_order_from_intake(fields={"origin": "上海", "destination": "成都", "quoted_amount": "1000"})
+    update_order(order, fields={"destination": "重庆", "quoted_amount": "1500"})
+    ev = order.events.filter(event_type="updated").latest("event_time")
+    changes = {c["field"]: c for c in ev.payload.get("changes", [])}
+    assert changes["destination"]["from"] == "成都"
+    assert changes["destination"]["to"] == "重庆"
+    assert changes["destination"]["label"] == "目的地"
+    assert float(changes["quoted_amount"]["to"]) == 1500.0
+    # 未改的字段不应出现
+    assert "origin" not in changes
+
+
+@pytest.mark.django_db
+def test_order_edit_flags_changed_collections():
+    from apps.ops.intake import update_order
+
+    order = create_order_from_intake(fields={"origin": "A", "destination": "B"})
+    update_order(order, fields={}, stops=[{"seq": 1, "stop_type": "pickup", "city": "A"}])
+    ev = order.events.filter(event_type="updated").latest("event_time")
+    assert "站点" in ev.payload.get("changed_collections", [])

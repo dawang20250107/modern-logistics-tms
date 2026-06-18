@@ -332,6 +332,21 @@ export function OrderDetailPage() {
                       {new Date(e.event_time).toLocaleString()} · {e.actor_name || e.source}
                       {e.to_status && ` · → ${ORDER_STATUS_LABEL[e.to_status] ?? e.to_status}`}
                     </div>
+                    {(() => {
+                      const changes = (e.payload?.changes ?? []) as { field: string; label: string; from: unknown; to: unknown }[];
+                      const cols = (e.payload?.changed_collections ?? []) as string[];
+                      if (changes.length === 0 && cols.length === 0) return null;
+                      return (
+                        <div className="small" style={{ marginTop: 4 }}>
+                          {changes.map((c) => (
+                            <div key={c.field}>
+                              <b>{c.label}</b>：<span className="muted">{String(c.from ?? "—")}</span> → {String(c.to ?? "—")}
+                            </div>
+                          ))}
+                          {cols.length > 0 && <div className="muted">更新了 {cols.join("、")}</div>}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </li>
               ))}

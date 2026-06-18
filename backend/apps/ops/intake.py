@@ -222,23 +222,67 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
     return order
 
 
+_FIELD_LABELS = {
+    "contact_name": "联系人", "contact_phone": "联系电话", "origin": "始发地", "destination": "目的地",
+    "pickup_address": "提货地址", "delivery_address": "送货地址", "cargo_desc": "货物",
+    "cargo_quantity": "件数", "cargo_weight_ton": "重量(吨)", "cargo_volume_cbm": "体积(方)",
+    "cargo_value": "货值", "package_type": "包装", "is_hazardous": "危险品", "temperature_range": "温区",
+    "quoted_amount": "报价", "expected_pickup_at": "期望提货", "expected_delivery_at": "期望送达",
+    "priority": "优先级", "business_type": "业务类型", "settlement_type": "结算方式", "remark": "备注",
+}
+
+
+def _jsonable(v):
+    from datetime import date, datetime
+
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    return v
+
+
+def _diff_order_fields(order, clean: dict) -> list[dict]:
+    """对比编辑前后的字段，产出字段级变更快照（供审计/版本追溯）。"""
+    changes = []
+    for k, v in clean.items():
+        new = v if v not in (None, "") else getattr(order, k)
+        old = getattr(order, k)
+        if old != new:
+            changes.append({
+                "field": k, "label": _FIELD_LABELS.get(k, k),
+                "from": _jsonable(old), "to": _jsonable(new),
+            })
+    return changes
+
+
 def update_order(order, *, fields: dict, cargo_items=None, stops=None, operator=None) -> Order:
-    """编辑订单（草稿/待确认/已确认可改），支持替换货物明细与站点并重算货量。"""
+    """编辑订单（草稿/待确认/已确认可改），支持替换货物明细与站点并重算货量。
+
+    记录字段级变更快照（改了哪个字段、从什么改成什么）落事件 payload，满足审计与版本追溯。
+    """
     if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED, Order.STATUS_CANCELLED):
         raise AppError("ORDER_NOT_EDITABLE", "已派单/完成/取消的订单不可编辑。", status=409)
     if order.customer_id is None and fields.get("customer"):
         order.customer_id = fields.get("customer")
     clean = {k: fields[k] for k in _ORDER_FIELDS if k in fields}
     _coerce_datetimes(clean)
+    changes = _diff_order_fields(order, clean)  # 落库前快照
     for k, v in clean.items():
         setattr(order, k, v if v not in (None, "") else getattr(order, k))
     order.save()
+    extra = []
     if cargo_items is not None:
         _sync_cargo_items(order, cargo_items)
         recompute_cargo_totals(order)
+        extra.append("货物明细")
     if stops is not None:
         _sync_stops(order, stops)
-    record_order_event(order, "updated", actor=operator, to_status=order.status, source="cs")
+        extra.append("站点")
+    record_order_event(
+        order, "updated", actor=operator, to_status=order.status, source="cs",
+        changes=changes, changed_collections=extra,
+    )
     apply_approval_gate(order, operator=operator)
     return order
 

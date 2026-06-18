@@ -21,6 +21,26 @@ def _match_rules(waybill, price_type) -> list[PricingRule]:
     return matched
 
 
+def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0) -> dict:
+    """录单自动报价：按收入计价规则对订单货量估价，返回最优（最高优先级）匹配。
+
+    匹配条件：客户/线路通配；命中多条按 priority 取最高。返回 {amount, rule_name, matched}。
+    """
+    best = None
+    for rule in PricingRule.objects.filter(
+        is_active=True, price_type=PricingRule.PRICE_TYPE_INCOME
+    ).order_by("-priority"):
+        if rule.customer_id and rule.customer_id != customer_id:
+            continue
+        if rule.route_name and rule.route_name != route_name:
+            continue
+        best = rule
+        break
+    if best is None:
+        return {"amount": 0.0, "rule_name": "", "matched": False}
+    return {"amount": float(best.quote(weight_ton)), "rule_name": best.name, "matched": True}
+
+
 def generate_costs(waybill) -> dict:
     """按报价规则生成运单应收/应付（替换既往规则自动生成的记录）。"""
     waybill.expenses.filter(source_system="pricing").delete()

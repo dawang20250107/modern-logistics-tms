@@ -1,7 +1,42 @@
 from rest_framework import serializers
 
-from .models import ExceptionRecord, Order, OrderEvent, Receipt, TrackingPoint, Waybill, WaybillEvent
+from .models import (
+    ExceptionRecord,
+    Order,
+    OrderCargoItem,
+    OrderEvent,
+    OrderStop,
+    OrderTemplate,
+    Receipt,
+    TrackingPoint,
+    Waybill,
+    WaybillEvent,
+)
 from .services import allowed_next
+
+
+class OrderCargoItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderCargoItem
+        fields = ["id", "seq", "name", "quantity", "weight_ton", "volume_cbm", "package_type", "temperature_range", "remark"]
+
+
+class OrderStopSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderStop
+        fields = [
+            "id", "seq", "stop_type", "city", "address", "contact_name", "contact_phone",
+            "expected_start", "expected_end", "cargo_note",
+        ]
+
+
+class OrderTemplateSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
+
+    class Meta:
+        model = OrderTemplate
+        fields = ["id", "name", "payload", "created_by_name", "created_at"]
+        read_only_fields = ["created_by_name"]
 
 
 class OrderEventSerializer(serializers.ModelSerializer):
@@ -123,6 +158,8 @@ class OrderSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
     claimed_by_name = serializers.CharField(source="claimed_by.username", read_only=True, default="")
     waybill_nos = serializers.SerializerMethodField()
+    cargo_items = OrderCargoItemSerializer(many=True, read_only=True)
+    stops = OrderStopSerializer(many=True, read_only=True)
 
     def get_waybill_nos(self, obj) -> list[str]:
         # 依赖视图层 prefetch_related("waybills") 避免 N+1；拆单后可能多张
@@ -141,6 +178,6 @@ class OrderSerializer(serializers.ModelSerializer):
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
             "created_by", "created_by_name", "raw_text", "parse_meta", "remark", "created_at",
-            "waybill_nos",
+            "waybill_nos", "cargo_items", "stops",
         ]
         read_only_fields = ["claimed_by", "claimed_at", "pooled_at", "created_by"]

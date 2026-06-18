@@ -20,6 +20,20 @@ from .numbering import waybill_no as gen_waybill_no
 MAX_BATCH_SIZE = 500
 
 
+def recompute_cargo_totals(order) -> None:
+    """有货物明细行时，按明细汇总回写订单货量/件数/体积，保证总量一致。"""
+    from django.db.models import Sum
+
+    agg = order.cargo_items.aggregate(
+        q=Sum("quantity"), w=Sum("weight_ton"), v=Sum("volume_cbm")
+    )
+    if order.cargo_items.exists():
+        order.cargo_quantity = agg["q"] or 0
+        order.cargo_weight_ton = agg["w"] or 0
+        order.cargo_volume_cbm = agg["v"] or 0
+        order.save(update_fields=["cargo_quantity", "cargo_weight_ton", "cargo_volume_cbm", "updated_at"])
+
+
 def record_order_event(order, event_type, *, actor=None, from_status="", to_status="", source="system", **payload):
     """记录订单事件（溯源）。actor 仅在已认证时落库。"""
     OrderEvent.objects.create(

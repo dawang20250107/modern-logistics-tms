@@ -224,7 +224,7 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = (
         Order.objects.select_related("customer", "created_by", "claimed_by")
-        .prefetch_related("waybills")
+        .prefetch_related("waybills", "cargo_items", "stops")
         .all()
     )
     serializer_class = OrderSerializer
@@ -544,11 +544,11 @@ class WorkbenchView(APIView):
         today = timezone.localdate()
         open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
 
-        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills").filter(
+        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops").filter(
             created_by=user, status=Order.STATUS_PENDING_CONFIRM
         )
         pool = Order.objects.filter(status=Order.STATUS_POOLED)
-        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills").filter(
+        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops").filter(
             status=Order.STATUS_POOLED
         ).order_by("-priority", "pooled_at")[:5]
         return Response({

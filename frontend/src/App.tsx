@@ -8,6 +8,7 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DataCatalogPage } from "./pages/DataCatalogPage";
 import { DispatchBoardPage } from "./pages/DispatchBoardPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -40,6 +41,7 @@ export function App() {
               <Route path="exceptions" element={<ExceptionsPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />
               <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="catalog" element={<DataCatalogPage />} />
               <Route path="ai" element={<AiWorkbenchPage />} />
             </Route>
           </Route>

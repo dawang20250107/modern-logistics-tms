@@ -14,6 +14,7 @@ const NAV = [
   { to: "/exceptions", label: "异常", icon: "⚠️", end: false },
   { to: "/reconciliation", label: "对账", icon: "🧾", end: false },
   { to: "/dashboard", label: "看板", icon: "📊", end: false },
+  { to: "/catalog", label: "资产", icon: "🗂️", end: false },
   { to: "/ai", label: "AI", icon: "🤖", end: false },
 ];
 

@@ -347,3 +347,15 @@ export const ORDER_EVENT_LABEL: Record<string, string> = {
   created: "建单", confirmed: "确认", pooled: "进池", claimed: "调度认领",
   dispatched: "派单", completed: "完成", cancelled: "取消",
 };
+
+// ── 数据资产目录 ───────────────────────────────────────
+export interface DataAsset {
+  app: string;
+  domain: string;
+  model: string;
+  table: string;
+  verbose_name: string;
+  field_count: number;
+  row_count?: number | null;
+  fields: Array<{ name: string; type: string; help: string }>;
+}

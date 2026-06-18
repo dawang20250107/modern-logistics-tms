@@ -44,3 +44,18 @@ class MetricTrendView(APIView):
     def get(self, request, code):
         days = int(request.query_params.get("days") or 14)
         return Response(metric_trend(code, days))
+
+
+class DataCatalogView(APIView):
+    """数据资产目录：业务域 / 表 / 字段 / 记录数（数据治理 lite）。?counts=true"""
+
+    def get(self, request):
+        from .catalog import list_data_assets
+
+        with_counts = (request.query_params.get("counts") or "").lower() in ("1", "true", "yes")
+        assets = list_data_assets(with_counts=with_counts)
+        return Response({
+            "assets": assets,
+            "total_assets": len(assets),
+            "domains": sorted({a["domain"] for a in assets}),
+        })

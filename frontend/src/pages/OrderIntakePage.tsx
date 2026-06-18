@@ -31,6 +31,10 @@ export function OrderIntakePage() {
     mutationFn: (id: string) => apiPost<Order>(`/orders/${id}/clone`, {}),
     onSuccess: (o) => { toast.success(`已复制为草稿：${o.order_no}`); invalidate(); },
   });
+  const merge = useMutation({
+    mutationFn: (ids: string[]) => apiPost<Order>("/orders/merge", { ids }),
+    onSuccess: (o) => { toast.success(`已合单：${o.order_no}`); setSelected(new Set()); invalidate(); },
+  });
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -146,6 +150,9 @@ export function OrderIntakePage() {
             <span>已选 {selected.size} 单</span>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>批量确认</button>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>批量进池</button>
+            <button className="btn-ghost" disabled={merge.isPending || selected.size < 2} onClick={async () => {
+              if (await confirmAction({ message: `将选中的 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]);
+            }}>合单</button>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>批量取消</button>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("delete")}>批量删除</button>
             <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除选择</button>

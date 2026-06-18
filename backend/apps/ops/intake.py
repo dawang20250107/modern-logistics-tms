@@ -9,6 +9,7 @@ import json
 import re
 from decimal import Decimal
 
+from django.db import transaction
 from django.utils import timezone
 
 from apps.core.exceptions import AppError
@@ -251,6 +252,114 @@ def clone_order(order, *, operator=None) -> Order:
         fields=fields, channel=order.channel, source=order.source, customer=order.customer,
         operator=operator, cargo_items=items, stops=stops, status=Order.STATUS_DRAFT,
     )
+
+
+_NOT_SPLITTABLE = (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED, Order.STATUS_CANCELLED)
+
+
+def _copy_header(parent) -> dict:
+    return {k: getattr(parent, k) for k in _ORDER_FIELDS if getattr(parent, k) not in (None, "")}
+
+
+def _spawn_order(parent, *, status, operator=None, **overrides) -> Order:
+    """以蓝本订单的表头新建订单（不含货物/站点），供拆单/合单复用。"""
+    header = _copy_header(parent)
+    header.update(overrides)
+    user = operator if operator and getattr(operator, "is_authenticated", False) else None
+    child = Order.objects.create(
+        order_no=gen_order_no(timezone.now()), channel=parent.channel, source=parent.source,
+        customer=parent.customer, created_by=user, status=status, **header,
+    )
+    if status == Order.STATUS_POOLED:
+        child.pooled_at = timezone.now()
+        child.save(update_fields=["pooled_at", "updated_at"])
+    return child
+
+
+def _copy_stops(src, dst) -> None:
+    from .models import OrderStop
+
+    rows = [
+        OrderStop(order=dst, seq=st.seq, **{k: getattr(st, k) for k in _STOP_FIELDS})
+        for st in src.stops.all()
+    ]
+    if rows:
+        OrderStop.objects.bulk_create(rows)
+
+
+def split_order(order, groups: list, *, operator=None) -> list[Order]:
+    """订单拆单：按货物明细分组拆成多张子订单，各自独立派单；原单作废并留痕。
+
+    groups: [{"cargo_item_ids": [...]}, ...]，每组生成一张子订单，继承表头与站点。
+    需 ≥2 项货物明细且 ≥2 个有效分组。子订单沿用原单状态（在池则入池）。
+    """
+    from apps.core.redis import publish_event
+
+    from .models import OrderCargoItem
+
+    if order.status in _NOT_SPLITTABLE:
+        raise AppError("ORDER_NOT_SPLITTABLE", "已派单/完成/取消的订单不可拆单。", status=409)
+    items = {str(ci.id): ci for ci in order.cargo_items.all()}
+    if len(items) < 2:
+        raise AppError("SPLIT_NEEDS_ITEMS", "需至少 2 项货物明细才能拆单。", status=409)
+    valid = [g for g in groups if [i for i in (g.get("cargo_item_ids") or []) if i in items]]
+    if len(valid) < 2:
+        raise AppError("SPLIT_NEEDS_GROUPS", "至少拆成两组（每组至少一项货物）。", status=400)
+
+    children = []
+    with transaction.atomic():
+        for g in valid:
+            ids = [i for i in g["cargo_item_ids"] if i in items]
+            child = _spawn_order(order, status=order.status, operator=operator, quoted_amount=0)
+            OrderCargoItem.objects.filter(id__in=ids).update(order=child)
+            recompute_cargo_totals(child)
+            _copy_stops(order, child)
+            record_order_event(child, "created", actor=operator, to_status=child.status,
+                               source="split", split_from=order.order_no)
+            children.append(child)
+        prev = order.status
+        order.status = Order.STATUS_CANCELLED
+        order.save(update_fields=["status", "updated_at"])
+        record_order_event(order, "split", actor=operator, from_status=prev, source="ops",
+                           children=[c.order_no for c in children])
+    for c in children:
+        if c.status == Order.STATUS_POOLED:
+            publish_event("order_pooled", {"order_no": c.order_no, "origin": c.origin, "destination": c.destination,
+                                           "priority": c.priority, "business_type": c.business_type})
+    return children
+
+
+def merge_orders(order_ids: list, *, operator=None) -> Order:
+    """订单合单：把多张同向订单的货物/站点合并为一张，原单作废并留痕，便于配载。"""
+    from apps.core.redis import publish_event
+
+    from .models import OrderCargoItem
+
+    orders = list(Order.objects.filter(id__in=order_ids).prefetch_related("cargo_items", "stops"))
+    if len(orders) < 2:
+        raise AppError("MERGE_NEEDS_ORDERS", "至少选择 2 张订单合并。", status=400)
+    for o in orders:
+        if o.status in _NOT_SPLITTABLE:
+            raise AppError("ORDER_NOT_MERGEABLE", f"订单 {o.order_no} 当前状态不可合并。", status=409)
+    base = orders[0]
+    total_quote = sum((o.quoted_amount or 0) for o in orders)
+    with transaction.atomic():
+        merged = _spawn_order(base, status=base.status, operator=operator, quoted_amount=total_quote)
+        for o in orders:
+            OrderCargoItem.objects.filter(order=o).update(order=merged)
+            _copy_stops(o, merged)
+            prev = o.status
+            o.status = Order.STATUS_CANCELLED
+            o.save(update_fields=["status", "updated_at"])
+            record_order_event(o, "merged", actor=operator, from_status=prev, source="ops", into=merged.order_no)
+        recompute_cargo_totals(merged)
+        record_order_event(merged, "created", actor=operator, to_status=merged.status,
+                           source="merge", merged_from=[o.order_no for o in orders])
+    if merged.status == Order.STATUS_POOLED:
+        publish_event("order_pooled", {"order_no": merged.order_no, "origin": merged.origin,
+                                       "destination": merged.destination, "priority": merged.priority,
+                                       "business_type": merged.business_type})
+    return merged
 
 
 def find_duplicate_orders(*, contact_phone="", origin="", destination="", within_hours=24, limit=5) -> list[Order]:

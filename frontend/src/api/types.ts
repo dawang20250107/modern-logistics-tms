@@ -461,6 +461,7 @@ export const ORDER_EVENT_LABEL: Record<string, string> = {
   created: "建单", confirmed: "确认", pooled: "进池", claimed: "调度认领",
   dispatched: "派单", completed: "完成", cancelled: "取消", updated: "编辑",
   approval_required: "提交审批", approved: "审批通过", rejected: "审批驳回",
+  split: "拆单", merged: "合单",
 };
 export const APPROVAL_STATUS_LABEL: Record<string, string> = {
   none: "无需审批", pending: "待审批", approved: "已通过", rejected: "已驳回",

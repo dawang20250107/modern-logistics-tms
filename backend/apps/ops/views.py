@@ -347,6 +347,22 @@ class OrderViewSet(viewsets.ModelViewSet):
         order = clone_order(self.get_object(), operator=request.user)
         return Response(OrderSerializer(order).data, status=201)
 
+    @action(detail=True, methods=["post"], url_path="split")
+    def split(self, request, pk=None):
+        """订单拆单：{groups:[{cargo_item_ids:[...]}, ...]} 按货物明细拆成多张子订单。"""
+        from .intake import split_order
+
+        children = split_order(self.get_object(), request.data.get("groups") or [], operator=request.user)
+        return Response(OrderSerializer(children, many=True).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="merge")
+    def merge(self, request, pk=None):
+        """订单合单：{ids:[...]} 把多张订单合并为一张。"""
+        from .intake import merge_orders
+
+        merged = merge_orders(request.data.get("ids") or [], operator=request.user)
+        return Response(OrderSerializer(merged).data, status=201)
+
     @action(detail=False, methods=["post"], url_path="quote")
     def quote(self, request):
         """录单自动报价：按客户/线路/货量估价。"""

@@ -211,6 +211,57 @@ def test_order_attachment_upload_list_delete(admin_client):
 
 
 @pytest.mark.django_db
+def test_split_order_by_cargo_items(admin_client):
+    from apps.ops.models import Order
+
+    order = create_order_from_intake(fields={"origin": "上海", "destination": "成都"})
+    a = OrderCargoItem.objects.create(order=order, seq=1, name="钢材", quantity=10, weight_ton=5)
+    b = OrderCargoItem.objects.create(order=order, seq=2, name="木材", quantity=4, weight_ton=2)
+    resp = admin_client.post(f"/api/v1/orders/{order.id}/split", {
+        "groups": [{"cargo_item_ids": [str(a.id)]}, {"cargo_item_ids": [str(b.id)]}],
+    }, format="json")
+    assert resp.status_code == 201, resp.content
+    children = resp.json()["data"]
+    assert len(children) == 2
+    order.refresh_from_db()
+    assert order.status == Order.STATUS_CANCELLED  # 原单作废
+    weights = sorted(float(c["cargo_weight_ton"]) for c in children)
+    assert weights == [2.0, 5.0]
+
+
+@pytest.mark.django_db
+def test_split_requires_two_items():
+    from apps.core.exceptions import AppError
+    from apps.ops.intake import split_order
+
+    order = create_order_from_intake(fields={"origin": "A", "destination": "B"})
+    OrderCargoItem.objects.create(order=order, seq=1, name="单件", quantity=1, weight_ton=1)
+    with pytest.raises(AppError) as exc:
+        split_order(order, [{"cargo_item_ids": []}, {"cargo_item_ids": []}])
+    assert exc.value.code == "SPLIT_NEEDS_ITEMS"
+
+
+@pytest.mark.django_db
+def test_merge_orders(admin_client):
+    from apps.ops.models import Order
+
+    o1 = create_order_from_intake(fields={"origin": "上海", "destination": "成都", "quoted_amount": "1000"})
+    OrderCargoItem.objects.create(order=o1, seq=1, name="货1", quantity=2, weight_ton=3)
+    o2 = create_order_from_intake(fields={"origin": "上海", "destination": "成都", "quoted_amount": "2000"})
+    OrderCargoItem.objects.create(order=o2, seq=1, name="货2", quantity=1, weight_ton=4)
+    resp = admin_client.post("/api/v1/orders/merge", {"ids": [str(o1.id), str(o2.id)]}, format="json")
+    assert resp.status_code == 201, resp.content
+    merged = resp.json()["data"]
+    assert float(merged["cargo_weight_ton"]) == 7.0
+    assert len(merged["cargo_items"]) == 2
+    assert float(merged["quoted_amount"]) == 3000.0
+    o1.refresh_from_db()
+    o2.refresh_from_db()
+    assert o1.status == Order.STATUS_CANCELLED
+    assert o2.status == Order.STATUS_CANCELLED
+
+
+@pytest.mark.django_db
 def test_customer_addresses_book(admin_client):
     cust = Customer.objects.create(code="CA1", name="海尔")
     o1 = create_order_from_intake(fields={"origin": "青岛", "destination": "上海"}, customer=cust)

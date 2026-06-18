@@ -50,6 +50,20 @@ export function OrderDetailPage() {
     onSuccess: (_d, v) => { toast.success(v.action === "approve" ? "已审批通过" : "已驳回"); invalidate(); },
   });
   const [attKind, setAttKind] = useState("contract");
+  const [splitMode, setSplitMode] = useState(false);
+  const [groupOf, setGroupOf] = useState<Record<string, number>>({});
+  const split = useMutation({
+    mutationFn: () => {
+      const groups: Record<number, string[]> = {};
+      (order.data?.cargo_items ?? []).forEach((c) => {
+        const g = groupOf[c.id ?? ""] ?? 1;
+        (groups[g] ??= []).push(c.id ?? "");
+      });
+      const payload = Object.values(groups).filter((ids) => ids.length).map((ids) => ({ cargo_item_ids: ids }));
+      return apiPost(`/orders/${id}/split`, { groups: payload });
+    },
+    onSuccess: () => { toast.success("已拆单，原单作废，子订单已生成"); setSplitMode(false); navigate("/intake"); },
+  });
   const upload = useMutation({
     mutationFn: (file: File) => {
       const fd = new FormData();
@@ -200,15 +214,27 @@ export function OrderDetailPage() {
 
           {/* 货物明细 */}
           <div className="panel">
-            <div className="panel-head">货物明细 · 合计 {o.cargo_quantity}件 / {o.cargo_weight_ton}吨</div>
+            <div className="panel-head">
+              货物明细 · 合计 {o.cargo_quantity}件 / {o.cargo_weight_ton}吨
+              {editable && o.cargo_items.length >= 2 && !splitMode && (
+                <button className="btn-ghost" onClick={() => { setSplitMode(true); setGroupOf(Object.fromEntries(o.cargo_items.map((c) => [c.id ?? "", 1]))); }}>拆单</button>
+              )}
+            </div>
             {o.cargo_items.length > 0 ? (
               <table className="table">
-                <thead><tr><th>品名</th><th>件数</th><th>吨</th><th>方</th><th>包装</th><th>温区</th></tr></thead>
+                <thead><tr><th>品名</th><th>件数</th><th>吨</th><th>方</th><th>包装</th><th>温区</th>{splitMode && <th>拆分组</th>}</tr></thead>
                 <tbody>
                   {o.cargo_items.map((c) => (
                     <tr key={c.id}>
                       <td>{c.name}</td><td>{c.quantity}</td><td>{c.weight_ton}</td><td>{c.volume_cbm}</td>
                       <td>{c.package_type || "-"}</td><td>{c.temperature_range || "-"}</td>
+                      {splitMode && (
+                        <td>
+                          <select value={groupOf[c.id ?? ""] ?? 1} onChange={(e) => setGroupOf((m) => ({ ...m, [c.id ?? ""]: Number(e.target.value) }))}>
+                            {[1, 2, 3, 4].map((g) => <option key={g} value={g}>第 {g} 单</option>)}
+                          </select>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -222,6 +248,17 @@ export function OrderDetailPage() {
                 {kv("温区", o.temperature_range)}
               </div>
             )}
+            {splitMode && (() => {
+              const groupCount = new Set(o.cargo_items.map((c) => groupOf[c.id ?? ""] ?? 1)).size;
+              return (
+                <div className="form-actions">
+                  <span className="muted small">将按所选拆成 {groupCount} 张子订单（原单作废）</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="btn-primary" disabled={groupCount < 2 || split.isPending} onClick={() => split.mutate()}>确认拆单</button>
+                  <button className="btn-ghost" onClick={() => setSplitMode(false)}>取消</button>
+                </div>
+              );
+            })()}
           </div>
 
           {/* 时效 */}

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
+import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type { DuplicateOrder, Order, OrderChannel, Paginated, ParsedOrder } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
@@ -69,6 +70,39 @@ export function OrderIntakePage() {
       invalidate();
     },
   });
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const BATCH_LABEL: Record<string, string> = { confirm: "确认", pool: "进池", cancel: "取消", delete: "删除" };
+  const batch = useMutation({
+    mutationFn: (v: { action: string; ids: string[] }) =>
+      apiPost<{ ok_count: number; failed: Array<{ order_no: string; error: string }> }>("/orders/batch", v),
+    onSuccess: (r, v) => {
+      const failN = r.failed?.length ?? 0;
+      toast.success(`批量${BATCH_LABEL[v.action]}完成：成功 ${r.ok_count}${failN ? `，失败 ${failN}` : ""}`);
+      setSelected(new Set());
+      invalidate();
+    },
+  });
+  const runBatch = async (action: string) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (action === "cancel" || action === "delete") {
+      const ok = await confirmAction({
+        message: `确定批量${BATCH_LABEL[action]} ${ids.length} 个订单？此操作不可恢复。`,
+        tone: "danger",
+        confirmText: `批量${BATCH_LABEL[action]}`,
+      });
+      if (!ok) return;
+    }
+    batch.mutate({ action, ids });
+  };
 
   const [bulk, setBulk] = useState("");
   const importMut = useMutation({
@@ -203,6 +237,16 @@ export function OrderIntakePage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        {selected.size > 0 && (
+          <div className="batch-bar">
+            <span>已选 {selected.size} 单</span>
+            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>批量确认</button>
+            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>批量进池</button>
+            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>批量取消</button>
+            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("delete")}>批量删除</button>
+            <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除选择</button>
+          </div>
+        )}
         {orders.isLoading ? (
           <div className="muted" style={{ padding: 16 }}>加载中…</div>
         ) : items.length === 0 ? (
@@ -210,11 +254,21 @@ export function OrderIntakePage() {
         ) : (
           <table className="table">
             <thead>
-              <tr><th>订单号</th><th>渠道</th><th>线路</th><th>货量</th><th>状态</th><th>SLA</th><th>操作</th></tr>
+              <tr>
+                <th style={{ width: 36 }}>
+                  <input
+                    type="checkbox"
+                    checked={items.length > 0 && items.every((o) => selected.has(o.id))}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(items.map((o) => o.id)) : new Set())}
+                  />
+                </th>
+                <th>订单号</th><th>渠道</th><th>线路</th><th>货量</th><th>状态</th><th>SLA</th><th>操作</th>
+              </tr>
             </thead>
             <tbody>
               {items.map((o) => (
-                <tr key={o.id}>
+                <tr key={o.id} style={selected.has(o.id) ? { background: "#f1f5fb" } : {}}>
+                  <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} /></td>
                   <td className="mono"><Link className="link" to={`/orders/${o.id}`}>{o.order_no}</Link></td>
                   <td>{ORDER_CHANNEL_LABEL[o.channel]}</td>
                   <td>{o.origin} → {o.destination}</td>

@@ -287,3 +287,9 @@ button, select, input, textarea { font: inherit; color: inherit; }
 }
 .chip:hover { border-color: var(--brand); color: var(--brand); }
 .chip-on { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 4px 12px rgba(47, 107, 255, 0.28); }
+
+/* ── 批量操作条 ────────────────────────────────────────── */
+.batch-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 18px; flex-wrap: wrap;
+  background: #eef4ff; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink-2);
+}

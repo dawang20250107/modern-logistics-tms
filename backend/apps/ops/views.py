@@ -258,6 +258,19 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(OrderSerializer(cancel_order(self.get_object(), operator=request.user)).data)
 
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_rows(self, request):
+        """批量建单：{rows: [{origin, destination, ...}], channel}。"""
+        from .intake import import_orders
+
+        result = import_orders(
+            request.data.get("rows") or [],
+            channel=request.data.get("channel", Order.CHANNEL_CS),
+            source=request.data.get("source", ""),
+            operator=request.user,
+        )
+        return Response(result, status=201)
+
     @action(detail=False, methods=["post"], url_path="batch")
     def batch(self, request):
         """批量操作：{action: confirm|pool|cancel|delete, ids: [...]}。"""

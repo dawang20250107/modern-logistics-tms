@@ -152,6 +152,25 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
     return order
 
 
+def import_orders(rows: list, *, channel: str = Order.CHANNEL_CS, source: str = "", operator=None) -> dict:
+    """批量建单：每行一个结构化 fields，逐行建单，失败隔离并返回逐行结果。"""
+    if not isinstance(rows, list) or not rows:
+        raise AppError("IMPORT_EMPTY", "rows 必须是非空数组。", status=400)
+    ok, failed = [], []
+    for idx, row in enumerate(rows):
+        if not isinstance(row, dict):
+            failed.append({"row": idx, "error": "行数据必须是对象"})
+            continue
+        try:
+            order = create_order_from_intake(fields=row, channel=channel, source=source, operator=operator)
+            ok.append({"row": idx, "order_no": order.order_no})
+        except AppError as exc:
+            failed.append({"row": idx, "error": exc.message})
+        except Exception as exc:  # noqa: BLE001 - 单行异常不影响整批
+            failed.append({"row": idx, "error": str(exc)})
+    return {"ok": ok, "failed": failed, "ok_count": len(ok), "failed_count": len(failed)}
+
+
 def confirm_order(order: Order, *, operator=None) -> Order:
     if order.status not in (Order.STATUS_PENDING_CONFIRM, Order.STATUS_CONFIRMED):
         raise AppError("INVALID_ORDER_STATUS", "仅待确认订单可确认。", status=409)

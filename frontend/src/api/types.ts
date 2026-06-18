@@ -391,6 +391,27 @@ export const CRED_SEVERITY_LABEL: Record<CredSeverity, string> = {
   expired: "已过期", critical: "紧急", warning: "临期",
 };
 
+// ── 合同价 / 计价规则 ───────────────────────────────────
+export interface PricingRule {
+  id: string;
+  name: string;
+  price_type: "income" | "cost";
+  expense_item_code: string;
+  customer: string | null;
+  customer_name: string;
+  carrier: string | null;
+  carrier_name: string;
+  route_name: string;
+  vehicle_type: string;
+  base_price: string;
+  price_per_ton: string;
+  min_price: string;
+  priority: number;
+  is_active: boolean;
+  created_at: string;
+}
+export const PRICE_TYPE_LABEL: Record<string, string> = { income: "收入价（报给客户）", cost: "支出价（付给承运商）" };
+
 // ── 主数据(精简) ───────────────────────────────────────
 export interface Customer { id: string; code: string; name: string; }
 export interface Carrier { id: string; code: string; name: string; }

@@ -1,0 +1,174 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+
+import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
+import { confirmAction } from "../api/confirm";
+import { fmtMoney } from "../api/format";
+import { toast } from "../api/toast";
+import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
+import { PRICE_TYPE_LABEL } from "../api/types";
+import { EmptyState } from "../components/EmptyState";
+
+interface RuleForm {
+  name: string;
+  price_type: "income" | "cost";
+  expense_item_code: string;
+  customer: string;
+  carrier: string;
+  route_name: string;
+  base_price: string;
+  price_per_ton: string;
+  min_price: string;
+  priority: string;
+  is_active: boolean;
+}
+
+const EMPTY: RuleForm = {
+  name: "", price_type: "income", expense_item_code: "FREIGHT", customer: "", carrier: "",
+  route_name: "", base_price: "0", price_per_ton: "0", min_price: "0", priority: "0", is_active: true,
+};
+
+export function PricingPage() {
+  const queryClient = useQueryClient();
+  const [typeFilter, setTypeFilter] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [form, setForm] = useState<RuleForm>(EMPTY);
+  const set = <K extends keyof RuleForm>(k: K, v: RuleForm[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+  const rules = useQuery({
+    queryKey: ["pricing-rules", typeFilter],
+    queryFn: () => apiGet<Paginated<PricingRule>>(`/finance/pricing-rules?page_size=200${typeFilter ? `&price_type=${typeFilter}` : ""}`),
+  });
+  const customers = useQuery({ queryKey: ["customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=500") });
+  const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=500") });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["pricing-rules"] });
+
+  const payload = () => ({
+    name: form.name, price_type: form.price_type, expense_item_code: form.expense_item_code || "FREIGHT",
+    customer: form.customer || null, carrier: form.carrier || null, route_name: form.route_name,
+    base_price: form.base_price || 0, price_per_ton: form.price_per_ton || 0, min_price: form.min_price || 0,
+    priority: Number(form.priority) || 0, is_active: form.is_active,
+  });
+
+  const reset = () => { setEditing(null); setForm(EMPTY); };
+  const save = useMutation({
+    mutationFn: () => editing ? apiPatch(`/finance/pricing-rules/${editing}`, payload()) : apiPost("/finance/pricing-rules", payload()),
+    onSuccess: () => { toast.success(editing ? "已更新合同价" : "已新增合同价"); reset(); invalidate(); },
+  });
+  const patch = useMutation({
+    mutationFn: (v: { id: string; is_active: boolean }) => apiPatch(`/finance/pricing-rules/${v.id}`, { is_active: v.is_active }),
+    onSuccess: invalidate,
+    meta: { silent: true },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => apiDelete(`/finance/pricing-rules/${id}`),
+    onSuccess: () => { toast.success("已删除"); invalidate(); },
+  });
+
+  const startEdit = (r: PricingRule) => {
+    setEditing(r.id);
+    setForm({
+      name: r.name, price_type: r.price_type, expense_item_code: r.expense_item_code,
+      customer: r.customer ?? "", carrier: r.carrier ?? "", route_name: r.route_name,
+      base_price: r.base_price, price_per_ton: r.price_per_ton, min_price: r.min_price,
+      priority: String(r.priority), is_active: r.is_active,
+    });
+  };
+
+  const items = rules.data?.items ?? [];
+
+  return (
+    <div className="stack">
+      <div className="panel">
+        <div className="panel-head">
+          {editing ? "编辑合同价 / 计价规则" : "新增合同价 / 计价规则"}
+          <span className="ai-pill">驱动录单自动报价</span>
+        </div>
+        <div className="form-section" style={{ borderBottom: "none" }}>
+          <div className="grid-form">
+            <label>规则名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如：比亚迪-沪蓉整车" /></label>
+            <label>价格类型
+              <select value={form.price_type} onChange={(e) => set("price_type", e.target.value as "income" | "cost")}>
+                {Object.entries(PRICE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
+            <label>适用客户（空=通用）
+              <select value={form.customer} onChange={(e) => set("customer", e.target.value)}>
+                <option value="">全部客户</option>
+                {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label>适用承运商（空=通用）
+              <select value={form.carrier} onChange={(e) => set("carrier", e.target.value)}>
+                <option value="">全部承运商</option>
+                {(carriers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label>适用线路（空=通用）<input value={form.route_name} onChange={(e) => set("route_name", e.target.value)} placeholder="上海→成都" /></label>
+            <label>基础价(元)<input value={form.base_price} onChange={(e) => set("base_price", e.target.value)} /></label>
+            <label>每吨单价(元/吨)<input value={form.price_per_ton} onChange={(e) => set("price_per_ton", e.target.value)} /></label>
+            <label>最低价(元)<input value={form.min_price} onChange={(e) => set("min_price", e.target.value)} /></label>
+            <label>优先级（大者优先）<input value={form.priority} onChange={(e) => set("priority", e.target.value)} /></label>
+            <label className="check-label"><input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} /> 启用</label>
+          </div>
+          <div className="muted small" style={{ marginTop: 8 }}>
+            报价 = 基础价 + 每吨单价 × 计费重量（不低于最低价）。录单"自动报价"按客户/线路匹配优先级最高的收入价规则。
+          </div>
+        </div>
+        <div className="form-actions">
+          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
+            {editing ? "保存修改" : "新增规则"}
+          </button>
+          {editing && <button className="btn-ghost" onClick={reset}>取消编辑</button>}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">合同价目录 · {rules.data?.total ?? 0}</div>
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <button className={`chip${typeFilter === "" ? " chip-on" : ""}`} onClick={() => setTypeFilter("")}>全部</button>
+          <button className={`chip${typeFilter === "income" ? " chip-on" : ""}`} onClick={() => setTypeFilter("income")}>收入价</button>
+          <button className={`chip${typeFilter === "cost" ? " chip-on" : ""}`} onClick={() => setTypeFilter("cost")}>支出价</button>
+        </div>
+        {rules.isLoading ? (
+          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        ) : items.length === 0 ? (
+          <EmptyState title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>名称</th><th>类型</th><th>客户</th><th>承运商</th><th>线路</th><th>基础价</th><th>每吨</th><th>最低价</th><th>优先级</th><th>启用</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              {items.map((r) => (
+                <tr key={r.id} style={editing === r.id ? { background: "#f1f5fb" } : {}}>
+                  <td>{r.name}</td>
+                  <td><span className={`tag tag-${r.price_type === "income" ? "low" : "info"}`}>{r.price_type === "income" ? "收入" : "支出"}</span></td>
+                  <td>{r.customer_name || "通用"}</td>
+                  <td>{r.carrier_name || "通用"}</td>
+                  <td>{r.route_name || "通用"}</td>
+                  <td>{fmtMoney(r.base_price)}</td>
+                  <td>{fmtMoney(r.price_per_ton)}</td>
+                  <td>{fmtMoney(r.min_price)}</td>
+                  <td>{r.priority}</td>
+                  <td>
+                    <label className="switch-mini">
+                      <input type="checkbox" checked={r.is_active} onChange={() => patch.mutate({ id: r.id, is_active: !r.is_active })} />
+                      <span className={`tag tag-${r.is_active ? "low" : "none"}`}>{r.is_active ? "启用" : "停用"}</span>
+                    </label>
+                  </td>
+                  <td className="row-actions">
+                    <button className="btn-ghost" onClick={() => startEdit(r)}>编辑</button>
+                    <button className="btn-ghost" disabled={remove.isPending} onClick={async () => {
+                      if (await confirmAction({ message: `删除规则「${r.name}」？`, tone: "danger", confirmText: "删除" })) remove.mutate(r.id);
+                    }}>删除</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -17,6 +17,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderIntakePage } from "./pages/OrderIntakePage";
+import { PricingPage } from "./pages/PricingPage";
 import { ReconciliationPage } from "./pages/ReconciliationPage";
 import { TrackingPage } from "./pages/TrackingPage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
@@ -43,6 +44,7 @@ export function App() {
               <Route path="alerts" element={<AlertsPage />} />
               <Route path="exceptions" element={<ExceptionsPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />
+              <Route path="pricing" element={<PricingPage />} />
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="catalog" element={<DataCatalogPage />} />
               <Route path="audit" element={<AuditPage />} />

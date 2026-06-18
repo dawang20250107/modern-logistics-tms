@@ -97,6 +97,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export const apiGet = <T>(path: string): Promise<T> => api<T>(path);
 export const apiPost = <T>(path: string, body: unknown): Promise<T> =>
   api<T>(path, { method: "POST", body: JSON.stringify(body) });
+export const apiPatch = <T>(path: string, body: unknown): Promise<T> =>
+  api<T>(path, { method: "PATCH", body: JSON.stringify(body) });
 export const apiDelete = <T>(path: string): Promise<T> =>
   api<T>(path, { method: "DELETE" });
 

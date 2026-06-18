@@ -56,12 +56,15 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
 
 
 class PricingRuleSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
+    carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")
+
     class Meta:
         model = PricingRule
         fields = [
-            "id", "name", "price_type", "expense_item_code", "customer", "carrier", "route_name",
-            "vehicle_type", "base_price", "price_per_ton", "min_price", "priority", "is_active",
-            "created_at",
+            "id", "name", "price_type", "expense_item_code", "customer", "customer_name",
+            "carrier", "carrier_name", "route_name", "vehicle_type", "base_price", "price_per_ton",
+            "min_price", "priority", "is_active", "created_at",
         ]
 
 

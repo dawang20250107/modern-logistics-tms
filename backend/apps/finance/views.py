@@ -100,7 +100,7 @@ class PaymentResultView(APIView):
 
 
 class PricingRuleViewSet(viewsets.ModelViewSet):
-    queryset = PricingRule.objects.all()
+    queryset = PricingRule.objects.select_related("customer", "carrier").all()
     serializer_class = PricingRuleSerializer
     filterset_fields = ["price_type", "is_active", "customer", "carrier"]
     search_fields = ["name", "route_name", "expense_item_code"]

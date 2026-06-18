@@ -83,6 +83,17 @@ def test_dispatch_order_creates_waybill_with_type():
 
 
 @pytest.mark.django_db
+def test_dispatch_rejects_overloaded_vehicle():
+    order = _pooled_order(cargo_weight_ton=20)
+    small = Vehicle.objects.create(plate_no="小面包", load_capacity_ton=3)
+    with pytest.raises(AppError) as exc:
+        dispatch_order(order, dispatch_type=Waybill.DISPATCH_OWN, vehicle=small)
+    assert exc.value.code == "VEHICLE_OVERLOADED"
+    order.refresh_from_db()
+    assert order.status != Order.STATUS_CONVERTED  # 未误派
+
+
+@pytest.mark.django_db
 def test_pool_and_claim_endpoints(admin_client):
     _pooled_order()
     resp = admin_client.get("/api/v1/orders/pool")

@@ -222,8 +222,66 @@ export interface Order {
   raw_text: string;
   parse_meta: Record<string, unknown>;
   waybill_nos: string[];
+  cargo_items: OrderCargoItem[];
+  stops: OrderStop[];
+  attachments: OrderAttachment[];
+  approval_status: "none" | "pending" | "approved" | "rejected";
+  approval_remark: string;
+  approved_at: string | null;
+  quoted_amount: string;
+  package_type: string;
+  expected_pickup_at: string | null;
+  expected_delivery_at: string | null;
+  pickup_address: string;
+  delivery_address: string;
+  remark: string;
   created_at: string;
 }
+
+export interface OrderCargoItem {
+  id?: string;
+  seq?: number;
+  name: string;
+  quantity: number | string;
+  weight_ton: number | string;
+  volume_cbm: number | string;
+  package_type: string;
+  temperature_range: string;
+  remark: string;
+}
+export interface OrderStop {
+  id?: string;
+  seq?: number;
+  stop_type: "pickup" | "delivery";
+  city: string;
+  address: string;
+  contact_name: string;
+  contact_phone: string;
+  expected_start: string | null;
+  expected_end: string | null;
+  cargo_note: string;
+}
+export interface OrderTemplate {
+  id: string;
+  name: string;
+  payload: Record<string, unknown>;
+  created_by_name: string;
+  created_at: string;
+}
+export interface OrderAttachment {
+  id: string;
+  kind: string;
+  name: string;
+  file_display: string;
+  file_url: string;
+  uploaded_by_name: string;
+  created_at: string;
+}
+export const ATTACHMENT_KIND_LABEL: Record<string, string> = {
+  contract: "合同", authorization: "委托书", photo: "货物照片", other: "其他",
+};
+export const SETTLEMENT_LABEL: Record<string, string> = { monthly: "月结", cash: "现结", prepaid: "预付" };
+export const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个人", enterprise: "企业", government: "政府" };
 
 export const SLA_STATUS_LABEL: Record<string, string> = {
   pending: "进行中", at_risk: "临期", on_time: "准时", breached: "超时",
@@ -231,12 +289,12 @@ export const SLA_STATUS_LABEL: Record<string, string> = {
 
 export interface DispatchSuggestion {
   order_no: string;
-  vehicle_candidates: Array<{ plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean }>;
-  carrier_quotes: Array<{ carrier: string; quote: number }>;
+  vehicle_candidates: Array<{ vehicle_id?: string; plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean }>;
+  carrier_quotes: Array<{ carrier_id?: string; carrier: string; quote: number }>;
   external_signals: Array<{ type: string; level: string; note: string }>;
   suggested_dispatch_type: string;
-  best_vehicle: { plate_no: string; compliance?: string[]; compliance_ok?: boolean } | null;
-  best_carrier: { carrier: string; quote: number } | null;
+  best_vehicle: { vehicle_id?: string; plate_no: string; compliance?: string[]; compliance_ok?: boolean } | null;
+  best_carrier: { carrier_id?: string; carrier: string; quote: number } | null;
 }
 
 export const BUSINESS_TYPE_LABEL: Record<string, string> = {
@@ -333,6 +391,27 @@ export const CRED_SEVERITY_LABEL: Record<CredSeverity, string> = {
   expired: "已过期", critical: "紧急", warning: "临期",
 };
 
+// ── 合同价 / 计价规则 ───────────────────────────────────
+export interface PricingRule {
+  id: string;
+  name: string;
+  price_type: "income" | "cost";
+  expense_item_code: string;
+  customer: string | null;
+  customer_name: string;
+  carrier: string | null;
+  carrier_name: string;
+  route_name: string;
+  vehicle_type: string;
+  base_price: string;
+  price_per_ton: string;
+  min_price: string;
+  priority: number;
+  is_active: boolean;
+  created_at: string;
+}
+export const PRICE_TYPE_LABEL: Record<string, string> = { income: "收入价（报给客户）", cost: "支出价（付给承运商）" };
+
 // ── 主数据(精简) ───────────────────────────────────────
 export interface Customer { id: string; code: string; name: string; }
 export interface Carrier { id: string; code: string; name: string; }
@@ -378,7 +457,11 @@ export interface OrderEvent {
 }
 export const ORDER_EVENT_LABEL: Record<string, string> = {
   created: "建单", confirmed: "确认", pooled: "进池", claimed: "调度认领",
-  dispatched: "派单", completed: "完成", cancelled: "取消",
+  dispatched: "派单", completed: "完成", cancelled: "取消", updated: "编辑",
+  approval_required: "提交审批", approved: "审批通过", rejected: "审批驳回",
+};
+export const APPROVAL_STATUS_LABEL: Record<string, string> = {
+  none: "无需审批", pending: "待审批", approved: "已通过", rejected: "已驳回",
 };
 
 // ── 数据资产目录 ───────────────────────────────────────

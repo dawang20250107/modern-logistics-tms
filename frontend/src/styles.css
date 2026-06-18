@@ -245,3 +245,74 @@ button, select, input, textarea { font: inherit; color: inherit; }
 
 /* ── AI result ──────────────────────────────────────── */
 .result-box { margin: 0 18px 16px; padding: 14px; background: #0b1f33; color: #cfe2f5; border-radius: 10px; font-size: 12px; overflow: auto; max-height: 320px; }
+
+/* ── Toaster（全局操作反馈） ───────────────────────────── */
+.toaster { position: fixed; right: 20px; bottom: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; max-width: 380px; }
+.toast {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+  cursor: pointer; font-size: 13px; line-height: 1.5; animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.toast-error { border-left: 4px solid var(--red); }
+.toast-success { border-left: 4px solid var(--green); }
+.toast-info { border-left: 4px solid var(--brand); }
+.toast-icon { flex: none; }
+.toast-msg { flex: 1; color: var(--ink); word-break: break-word; }
+.toast-x { flex: none; color: var(--muted); font-size: 16px; line-height: 1; }
+
+/* ── 确认对话框 ────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center;
+  background: rgba(12, 19, 32, 0.42); backdrop-filter: blur(2px); animation: toast-in 0.15s ease-out;
+}
+.modal {
+  background: var(--panel); border-radius: 16px; box-shadow: var(--shadow-lg); width: min(420px, calc(100vw - 40px));
+  padding: 22px 24px; border: 1px solid var(--line);
+}
+.modal-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+.modal-body { color: var(--ink-2); line-height: 1.6; margin-bottom: 20px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.btn-danger {
+  padding: 9px 18px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-weight: 600;
+  color: #fff; background: var(--red); transition: transform var(--speed), filter var(--speed);
+}
+.btn-danger:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
+.btn-danger:disabled { opacity: 0.55; cursor: default; }
+
+/* ── 过滤 chip ─────────────────────────────────────────── */
+.chip {
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--panel);
+  color: var(--ink-2); font-size: 13px; cursor: pointer; transition: all var(--speed); white-space: nowrap;
+}
+.chip:hover { border-color: var(--brand); color: var(--brand); }
+.chip-on { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 4px 12px rgba(47, 107, 255, 0.28); }
+
+/* ── 批量操作条 ────────────────────────────────────────── */
+.batch-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 18px; flex-wrap: wrap;
+  background: #eef4ff; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink-2);
+}
+
+/* ── 空状态 ────────────────────────────────────────────── */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; }
+.empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.8; }
+.empty-title { font-weight: 600; font-size: 15px; color: var(--ink-2); }
+.empty-hint { margin-top: 6px; max-width: 360px; }
+
+/* ── 结构化录单表单 ────────────────────────────────────── */
+.form-section { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.section-label { font-weight: 650; font-size: 13px; color: var(--ink-2); margin-bottom: 10px; display: flex; gap: 8px; align-items: center; }
+.grid-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; }
+.grid-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.grid-form label input, .grid-form label select { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 13px; color: var(--ink); }
+.grid-form label input:focus, .grid-form label select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.16); }
+.check-label { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 13px !important; color: var(--ink) !important; align-self: end; }
+.line-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.line-row input, .line-row select { padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 13px; }
+.line-row input:focus, .line-row select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.16); }
+.form-actions { display: flex; gap: 10px; align-items: center; padding: 14px 18px; flex-wrap: wrap; }
+
+/* ── 迷你开关 ──────────────────────────────────────────── */
+.switch-mini { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.switch-mini input { cursor: pointer; }

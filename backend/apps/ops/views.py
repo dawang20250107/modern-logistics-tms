@@ -224,7 +224,7 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = (
         Order.objects.select_related("customer", "created_by", "claimed_by")
-        .prefetch_related("waybills")
+        .prefetch_related("waybills", "cargo_items", "stops", "attachments")
         .all()
     )
     serializer_class = OrderSerializer
@@ -234,21 +234,157 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="intake")
     def intake(self, request):
-        """多渠道建单入口：传 text(自然语言/微信群) 或 fields(结构化)。"""
+        """多渠道建单入口：传 text(自然语言/微信群) 或 fields(结构化)，可带货物明细/站点/草稿。"""
         from .intake import create_order_from_intake
 
         text = (request.data.get("text") or "").strip()
         fields = request.data.get("fields")
-        if not text and not fields:
-            raise AppError("INTAKE_EMPTY", "text 或 fields 至少其一。", status=400)
+        cargo_items = request.data.get("cargo_items")
+        stops = request.data.get("stops")
+        if not text and not fields and not cargo_items:
+            raise AppError("INTAKE_EMPTY", "text、fields 或 cargo_items 至少其一。", status=400)
+        customer = None
+        if fields and fields.get("customer"):
+            from apps.masterdata.models import Customer
+
+            customer = Customer.objects.filter(id=fields.get("customer")).first()
         order = create_order_from_intake(
             text=text,
             fields=fields,
             channel=request.data.get("channel", Order.CHANNEL_CS),
             source=request.data.get("source", ""),
+            customer=customer,
             operator=request.user,
+            cargo_items=cargo_items,
+            stops=stops,
+            status=request.data.get("status"),
         )
         return Response(OrderSerializer(order).data, status=201)
+
+    @action(detail=False, methods=["get"], url_path="customer-addresses")
+    def customer_addresses(self, request):
+        """客户地址簿：按历史订单站点/地址去重返回常用提货/送货地址，供录单快速带出。"""
+        from .models import OrderStop
+
+        cid = request.query_params.get("customer")
+        if not cid:
+            return Response({"pickup": [], "delivery": []})
+        seen, pickup, delivery = set(), [], []
+        stops = (
+            OrderStop.objects.filter(order__customer_id=cid)
+            .order_by("-created_at")
+            .values("stop_type", "city", "address", "contact_name", "contact_phone")[:200]
+        )
+        for s in stops:
+            key = (s["stop_type"], s["city"], s["address"])
+            if key in seen or not (s["address"] or s["city"]):
+                continue
+            seen.add(key)
+            item = {"city": s["city"], "address": s["address"], "contact_name": s["contact_name"], "contact_phone": s["contact_phone"]}
+            (pickup if s["stop_type"] == "pickup" else delivery).append(item)
+        return Response({"pickup": pickup[:10], "delivery": delivery[:10]})
+
+    @action(detail=True, methods=["post"], url_path="edit")
+    def edit(self, request, pk=None):
+        """编辑订单（含货物明细/站点替换），草稿/待确认/已确认可改。"""
+        from .intake import update_order
+
+        order = update_order(
+            self.get_object(),
+            fields=request.data.get("fields") or {},
+            cargo_items=request.data.get("cargo_items"),
+            stops=request.data.get("stops"),
+            operator=request.user,
+        )
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        """订单附件：GET 列表 / POST 上传（合同/委托书/货物照片）。"""
+        from .models import OrderAttachment
+        from .serializers import OrderAttachmentSerializer
+
+        order = self.get_object()
+        if request.method == "GET":
+            return Response(OrderAttachmentSerializer(order.attachments.all(), many=True).data)
+        att = OrderAttachment.objects.create(
+            order=order,
+            kind=request.data.get("kind", OrderAttachment.KIND_OTHER),
+            name=request.data.get("name", "") or (request.FILES.get("file").name if request.FILES.get("file") else ""),
+            file=request.FILES.get("file"),
+            file_url=request.data.get("file_url", ""),
+            uploaded_by=_current_user_or_none(request),
+        )
+        return Response(OrderAttachmentSerializer(att).data, status=201)
+
+    @action(detail=True, methods=["delete"], url_path="attachments/(?P<att_id>[^/]+)")
+    def delete_attachment(self, request, pk=None, att_id=None):
+        """删除订单附件。"""
+        self.get_object().attachments.filter(id=att_id).delete()
+        return Response(status=204)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, pk=None):
+        """主管审批通过高价值订单。"""
+        from .intake import approve_order
+
+        order = approve_order(self.get_object(), operator=request.user, remark=request.data.get("remark", ""))
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, pk=None):
+        """主管驳回高价值订单。"""
+        from .intake import reject_order
+
+        order = reject_order(self.get_object(), operator=request.user, remark=request.data.get("remark", ""))
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="clone")
+    def clone(self, request, pk=None):
+        """复制建单：以现有订单为蓝本生成新草稿。"""
+        from .intake import clone_order
+
+        order = clone_order(self.get_object(), operator=request.user)
+        return Response(OrderSerializer(order).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="quote")
+    def quote(self, request):
+        """录单自动报价：按客户/线路/货量估价。"""
+        from apps.finance.services import estimate_order_quote
+
+        data = request.data
+        weight = data.get("cargo_weight_ton") or data.get("weight_ton") or 0
+        volume = data.get("cargo_volume_cbm") or data.get("volume_cbm") or 0
+        result = estimate_order_quote(
+            customer_id=data.get("customer") or None,
+            route_name=f"{data.get('origin', '')}→{data.get('destination', '')}",
+            weight_ton=weight,
+            volume_cbm=volume,
+        )
+        return Response(result)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export(self, request):
+        """导出当前筛选的订单为 CSV。"""
+        import csv
+
+        from django.http import HttpResponse
+
+        qs = self.filter_queryset(self.get_queryset())[:5000]
+        resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+        resp["Content-Disposition"] = 'attachment; filename="orders.csv"'
+        resp.write("﻿")  # BOM，Excel 正确识别中文
+        writer = csv.writer(resp)
+        writer.writerow(["订单号", "客户", "渠道", "状态", "始发", "目的", "货量(吨)", "件数", "报价", "创建时间"])
+        status_map = dict(Order.STATUS_CHOICES)
+        channel_map = dict(Order.CHANNEL_CHOICES)
+        for o in qs:
+            writer.writerow([
+                o.order_no, o.customer.name if o.customer else "", channel_map.get(o.channel, o.channel),
+                status_map.get(o.status, o.status), o.origin, o.destination,
+                o.cargo_weight_ton, o.cargo_quantity, o.quoted_amount, o.created_at.strftime("%Y-%m-%d %H:%M"),
+            ])
+        return resp
 
     @action(detail=True, methods=["post"], url_path="pool")
     def pool(self, request, pk=None):
@@ -382,6 +518,27 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         waybill = convert_order_to_waybill(self.get_object(), operator=request.user)
         return Response(WaybillSerializer(waybill).data, status=201)
+
+
+class OrderTemplateViewSet(viewsets.ModelViewSet):
+    """录单模板：保存常用订单为模板，一键套用建单。"""
+
+    serializer_class = None  # set below to avoid import cycle at class-def time
+    search_fields = ["name"]
+    ordering_fields = ["created_at", "name"]
+
+    def get_queryset(self):
+        from .models import OrderTemplate
+
+        return OrderTemplate.objects.select_related("created_by").all()
+
+    def get_serializer_class(self):
+        from .serializers import OrderTemplateSerializer
+
+        return OrderTemplateSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=_current_user_or_none(self.request))
 
 
 class ExceptionViewSet(viewsets.ModelViewSet):
@@ -544,11 +701,11 @@ class WorkbenchView(APIView):
         today = timezone.localdate()
         open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
 
-        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills").filter(
+        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
             created_by=user, status=Order.STATUS_PENDING_CONFIRM
         )
         pool = Order.objects.filter(status=Order.STATUS_POOLED)
-        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills").filter(
+        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
             status=Order.STATUS_POOLED
         ).order_by("-priority", "pooled_at")[:5]
         return Response({

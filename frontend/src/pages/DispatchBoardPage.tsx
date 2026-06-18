@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { toast } from "../api/toast";
+import { EmptyState } from "../components/EmptyState";
 import type { Carrier, DispatchSuggestion, Order, Paginated, Vehicle } from "../api/types";
 import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, PRIORITY_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
@@ -30,7 +32,7 @@ export function DispatchBoardPage() {
 
   const claim = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/claim`, {}),
-    onSuccess: invalidate,
+    onSuccess: () => { toast.success("认领成功"); invalidate(); },
   });
   const suggest = useMutation({
     mutationFn: (id: string) => apiGet<DispatchSuggestion>(`/orders/${id}/dispatch-suggestion`),
@@ -40,6 +42,17 @@ export function DispatchBoardPage() {
       if (data.best_vehicle) setVehicleId("");
     },
   });
+  const adopt = () => {
+    if (!suggestion) return;
+    const type = suggestion.suggested_dispatch_type;
+    setDispatchType(type);
+    if (type === "third_party") {
+      setCarrierId(suggestion.best_carrier?.carrier_id ?? "");
+    } else {
+      setVehicleId(suggestion.best_vehicle?.vehicle_id ?? "");
+    }
+  };
+
   const dispatch = useMutation({
     mutationFn: (id: string) =>
       apiPost(`/orders/${id}/dispatch`, {
@@ -50,11 +63,14 @@ export function DispatchBoardPage() {
     onSuccess: () => {
       setActive(null);
       setSuggestion(null);
+      toast.success("派单成功，已生成运单");
       invalidate();
     },
   });
 
   const orders = pool.data?.items ?? [];
+  // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
+  const activeGone = Boolean(active) && !pool.isLoading && !orders.some((o) => o.id === active?.id);
 
   return (
     <div className="stack">
@@ -64,7 +80,7 @@ export function DispatchBoardPage() {
           {pool.isLoading ? (
             <div className="muted" style={{ padding: 16 }}>加载中…</div>
           ) : orders.length === 0 ? (
-            <div className="muted" style={{ padding: 16 }}>订单池为空</div>
+            <EmptyState icon="🅿️" title="订单池为空" hint="已确认订单进池后将在此等待派单" actionLabel="去建单" actionTo="/intake" />
           ) : (
             <table className="table">
               <thead>
@@ -95,7 +111,12 @@ export function DispatchBoardPage() {
             AI 派单建议
             {active && <span className="ai-pill">{active.order_no}</span>}
           </div>
-          {!active ? (
+          {active && activeGone ? (
+            <div style={{ padding: 16 }} className="stack">
+              <div className="tag tag-medium" style={{ alignSelf: "flex-start" }}>⚠ 订单 {active.order_no} 已被他人处理或离开订单池</div>
+              <button className="btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => { setActive(null); setSuggestion(null); }}>关闭</button>
+            </div>
+          ) : !active ? (
             <div className="muted small" style={{ padding: 16 }}>从订单池选「派单」查看 AI 建议</div>
           ) : suggest.isPending ? (
             <div className="muted" style={{ padding: 16 }}>分析中…</div>
@@ -124,6 +145,15 @@ export function DispatchBoardPage() {
                 <div><span>建议派单类型</span><b>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</b></div>
               </div>
 
+              <button
+                className="btn-ghost"
+                style={{ alignSelf: "flex-start" }}
+                disabled={suggestion.suggested_dispatch_type === "third_party" ? !suggestion.best_carrier : !suggestion.best_vehicle}
+                onClick={adopt}
+              >
+                ⚡ 采纳建议（自动回填运力）
+              </button>
+
               {suggestion.vehicle_candidates.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {suggestion.vehicle_candidates.map((v) => (
@@ -150,10 +180,19 @@ export function DispatchBoardPage() {
                     {(vehicles.data?.items ?? []).map((v) => <option key={v.id} value={v.id}>{v.plate_no}</option>)}
                   </select>
                 )}
-                <button className="btn-primary" disabled={dispatch.isPending} onClick={() => dispatch.mutate(active.id)}>
+                <button
+                  className="btn-primary"
+                  disabled={dispatch.isPending || (dispatchType === "third_party" ? !carrierId : !vehicleId)}
+                  onClick={() => dispatch.mutate(active.id)}
+                >
                   {dispatch.isPending ? "派单中…" : "确认派单"}
                 </button>
               </div>
+              {(dispatchType === "third_party" ? !carrierId : !vehicleId) && (
+                <div className="muted small" style={{ padding: 0 }}>
+                  请先选择{dispatchType === "third_party" ? "承运商" : "车辆"}再派单
+                </div>
+              )}
             </div>
           ) : null}
         </div>

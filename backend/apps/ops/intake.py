@@ -7,6 +7,7 @@ convert_order_to_waybill：人工确认后转运单（高风险写，经确认�
 
 import json
 import re
+from decimal import Decimal
 
 from django.utils import timezone
 
@@ -15,6 +16,23 @@ from apps.core.exceptions import AppError
 from .models import Order, OrderEvent, Waybill
 from .numbering import order_no as gen_order_no
 from .numbering import waybill_no as gen_waybill_no
+
+# 单次批量操作上限，避免误传超大列表拖垮请求（交付级输入边界防护）
+MAX_BATCH_SIZE = 500
+
+
+def recompute_cargo_totals(order) -> None:
+    """有货物明细行时，按明细汇总回写订单货量/件数/体积，保证总量一致。"""
+    from django.db.models import Sum
+
+    agg = order.cargo_items.aggregate(
+        q=Sum("quantity"), w=Sum("weight_ton"), v=Sum("volume_cbm")
+    )
+    if order.cargo_items.exists():
+        order.cargo_quantity = agg["q"] or 0
+        order.cargo_weight_ton = agg["w"] or 0
+        order.cargo_volume_cbm = agg["v"] or 0
+        order.save(update_fields=["cargo_quantity", "cargo_weight_ton", "cargo_volume_cbm", "updated_at"])
 
 
 def record_order_event(order, event_type, *, actor=None, from_status="", to_status="", source="system", **payload):
@@ -117,9 +135,53 @@ _ORDER_FIELDS = (
 )
 
 
+_CARGO_ITEM_FIELDS = ("name", "quantity", "weight_ton", "volume_cbm", "package_type", "temperature_range", "remark")
+_STOP_FIELDS = ("stop_type", "city", "address", "contact_name", "contact_phone",
+                "expected_start", "expected_end", "cargo_note")
+
+
+def _sync_cargo_items(order, items: list) -> None:
+    from .models import OrderCargoItem
+
+    order.cargo_items.all().delete()
+    rows = []
+    for i, raw in enumerate(items or []):
+        if not isinstance(raw, dict) or not (raw.get("name") or "").strip():
+            continue
+        clean = {k: raw[k] for k in _CARGO_ITEM_FIELDS if k in raw and raw[k] not in (None, "")}
+        rows.append(OrderCargoItem(order=order, seq=i + 1, **clean))
+    if rows:
+        OrderCargoItem.objects.bulk_create(rows)
+
+
+def _sync_stops(order, stops: list) -> None:
+    from django.utils.dateparse import parse_datetime
+
+    from .models import OrderStop
+
+    order.stops.all().delete()
+    rows = []
+    for i, raw in enumerate(stops or []):
+        if not isinstance(raw, dict) or not (raw.get("address") or raw.get("city")):
+            continue
+        clean = {k: raw[k] for k in _STOP_FIELDS if k in raw and raw[k] not in (None, "")}
+        for tf in ("expected_start", "expected_end"):
+            if isinstance(clean.get(tf), str):
+                dt = parse_datetime(clean[tf])
+                clean[tf] = (timezone.make_aware(dt) if dt and timezone.is_naive(dt) else dt) if dt else None
+        rows.append(OrderStop(order=order, seq=i + 1, **clean))
+    if rows:
+        OrderStop.objects.bulk_create(rows)
+
+
 def create_order_from_intake(*, text: str = "", fields: dict | None = None, channel: str = Order.CHANNEL_CS,
-                             source: str = "", customer=None, operator=None) -> Order:
-    """统一建单入口：先 AI/规则解析 text，再用显式 fields 覆盖（人工改优先），落待确认订单。"""
+                             source: str = "", customer=None, operator=None,
+                             cargo_items: list | None = None, stops: list | None = None,
+                             status: str | None = None) -> Order:
+    """统一建单入口：AI/规则解析 text → 显式 fields 覆盖 → 可带货物明细/站点，落单。
+
+    status 可指定 draft（草稿箱），默认待确认。有货物明细时按明细汇总回写货量。
+    """
     data: dict = {}
     parse_meta = {}
     if text:
@@ -134,22 +196,61 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
     clean = {k: data[k] for k in _ORDER_FIELDS if k in data and data[k] not in (None, "")}
     _coerce_datetimes(clean)
     operator_user = operator if operator and getattr(operator, "is_authenticated", False) else None
+    valid_status = status if status in dict(Order.STATUS_CHOICES) else Order.STATUS_PENDING_CONFIRM
     order = Order.objects.create(
         order_no=gen_order_no(timezone.now()),
         channel=channel,
         source=source,
-        status=Order.STATUS_PENDING_CONFIRM,
+        status=valid_status,
         customer=customer,
         created_by=operator_user,
         raw_text=text,
         parse_meta=parse_meta,
         **clean,
     )
+    if cargo_items:
+        _sync_cargo_items(order, cargo_items)
+        recompute_cargo_totals(order)
+    if stops:
+        _sync_stops(order, stops)
     record_order_event(
         order, "created", actor=operator, to_status=order.status,
         source="ai" if parse_meta.get("source") == "deepseek" else "cs", channel=channel,
     )
+    apply_approval_gate(order, operator=operator)
     return order
+
+
+def update_order(order, *, fields: dict, cargo_items=None, stops=None, operator=None) -> Order:
+    """编辑订单（草稿/待确认/已确认可改），支持替换货物明细与站点并重算货量。"""
+    if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED, Order.STATUS_CANCELLED):
+        raise AppError("ORDER_NOT_EDITABLE", "已派单/完成/取消的订单不可编辑。", status=409)
+    if order.customer_id is None and fields.get("customer"):
+        order.customer_id = fields.get("customer")
+    clean = {k: fields[k] for k in _ORDER_FIELDS if k in fields}
+    _coerce_datetimes(clean)
+    for k, v in clean.items():
+        setattr(order, k, v if v not in (None, "") else getattr(order, k))
+    order.save()
+    if cargo_items is not None:
+        _sync_cargo_items(order, cargo_items)
+        recompute_cargo_totals(order)
+    if stops is not None:
+        _sync_stops(order, stops)
+    record_order_event(order, "updated", actor=operator, to_status=order.status, source="cs")
+    apply_approval_gate(order, operator=operator)
+    return order
+
+
+def clone_order(order, *, operator=None) -> Order:
+    """复制建单：以现有订单为蓝本生成新草稿（含货物明细与站点），便于重复线路快速下单。"""
+    fields = {k: getattr(order, k) for k in _ORDER_FIELDS}
+    items = [{k: getattr(ci, k) for k in _CARGO_ITEM_FIELDS} for ci in order.cargo_items.all()]
+    stops = [{k: getattr(st, k) for k in _STOP_FIELDS} for st in order.stops.all()]
+    return create_order_from_intake(
+        fields=fields, channel=order.channel, source=order.source, customer=order.customer,
+        operator=operator, cargo_items=items, stops=stops, status=Order.STATUS_DRAFT,
+    )
 
 
 def find_duplicate_orders(*, contact_phone="", origin="", destination="", within_hours=24, limit=5) -> list[Order]:
@@ -174,6 +275,8 @@ def import_orders(rows: list, *, channel: str = Order.CHANNEL_CS, source: str = 
     """批量建单：每行一个结构化 fields，逐行建单，失败隔离并返回逐行结果。"""
     if not isinstance(rows, list) or not rows:
         raise AppError("IMPORT_EMPTY", "rows 必须是非空数组。", status=400)
+    if len(rows) > MAX_BATCH_SIZE:
+        raise AppError("BATCH_TOO_LARGE", f"单次最多导入 {MAX_BATCH_SIZE} 行，请分批。", status=400)
     ok, failed = [], []
     for idx, row in enumerate(rows):
         if not isinstance(row, dict):
@@ -199,12 +302,59 @@ def confirm_order(order: Order, *, operator=None) -> Order:
     return order
 
 
+# 审批阈值（元）：报价或货值达到即需主管审批
+APPROVAL_QUOTE_THRESHOLD = Decimal("50000")
+APPROVAL_VALUE_THRESHOLD = Decimal("500000")
+
+
+def needs_approval(order: Order) -> bool:
+    """高价值订单需审批：报价≥5万 或 货值≥50万。"""
+    quoted = Decimal(str(order.quoted_amount or 0))
+    value = Decimal(str(order.cargo_value or 0))
+    return quoted >= APPROVAL_QUOTE_THRESHOLD or value >= APPROVAL_VALUE_THRESHOLD
+
+
+def apply_approval_gate(order: Order, *, operator=None) -> None:
+    """建单/编辑后判定是否需要审批，需要则置为待审批。"""
+    if needs_approval(order) and order.approval_status == Order.APPROVAL_NONE:
+        order.approval_status = Order.APPROVAL_PENDING
+        order.save(update_fields=["approval_status", "updated_at"])
+        record_order_event(order, "approval_required", actor=operator, source="system",
+                           quoted_amount=str(order.quoted_amount), cargo_value=str(order.cargo_value))
+
+
+def approve_order(order: Order, *, operator=None, remark="") -> Order:
+    if order.approval_status != Order.APPROVAL_PENDING:
+        raise AppError("NOT_PENDING_APPROVAL", "订单不在待审批状态。", status=409)
+    order.approval_status = Order.APPROVAL_APPROVED
+    order.approval_remark = remark
+    order.approved_by = operator if operator and getattr(operator, "is_authenticated", False) else None
+    order.approved_at = timezone.now()
+    order.save(update_fields=["approval_status", "approval_remark", "approved_by", "approved_at", "updated_at"])
+    record_order_event(order, "approved", actor=operator, source="approval", remark=remark)
+    return order
+
+
+def reject_order(order: Order, *, operator=None, remark="") -> Order:
+    if order.approval_status != Order.APPROVAL_PENDING:
+        raise AppError("NOT_PENDING_APPROVAL", "订单不在待审批状态。", status=409)
+    order.approval_status = Order.APPROVAL_REJECTED
+    order.approval_remark = remark
+    order.save(update_fields=["approval_status", "approval_remark", "updated_at"])
+    record_order_event(order, "rejected", actor=operator, source="approval", remark=remark)
+    return order
+
+
 def pool_order(order: Order, *, operator=None) -> Order:
     """订单进池：确认后投入调度池，实时通知调度。"""
     from apps.core.redis import publish_event
 
     if order.status not in (Order.STATUS_CONFIRMED, Order.STATUS_PENDING_CONFIRM):
         raise AppError("INVALID_ORDER_STATUS", "仅已确认/待确认订单可进池。", status=409)
+    if order.approval_status == Order.APPROVAL_PENDING:
+        raise AppError("ORDER_NEEDS_APPROVAL", "订单需主管审批通过后方可进池。", status=409)
+    if order.approval_status == Order.APPROVAL_REJECTED:
+        raise AppError("ORDER_APPROVAL_REJECTED", "订单审批被驳回，不可进池。", status=409)
     prev = order.status
     order.status = Order.STATUS_POOLED
     order.pooled_at = timezone.now()
@@ -248,6 +398,8 @@ def batch_orders(action: str, ids: list, *, operator=None) -> dict:
     handler = handlers.get(action)
     if handler is None:
         raise AppError("INVALID_BATCH_ACTION", f"不支持的操作：{action}", status=400)
+    if len(ids) > MAX_BATCH_SIZE:
+        raise AppError("BATCH_TOO_LARGE", f"单次最多操作 {MAX_BATCH_SIZE} 单，请分批。", status=400)
     ok, failed = [], []
     for order in Order.objects.filter(id__in=ids):
         try:

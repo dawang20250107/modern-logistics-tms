@@ -140,6 +140,24 @@ class Order(BaseModel, SoftDeleteModel):
     sla_status = models.CharField(max_length=16, choices=SLA_CHOICES, default=SLA_PENDING, db_index=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
 
+    # 审批流：高价值/特殊订单需主管审批后方可进池派单
+    APPROVAL_NONE = "none"
+    APPROVAL_PENDING = "pending"
+    APPROVAL_APPROVED = "approved"
+    APPROVAL_REJECTED = "rejected"
+    APPROVAL_CHOICES = [
+        (APPROVAL_NONE, "无需审批"),
+        (APPROVAL_PENDING, "待审批"),
+        (APPROVAL_APPROVED, "已通过"),
+        (APPROVAL_REJECTED, "已驳回"),
+    ]
+    approval_status = models.CharField(max_length=16, choices=APPROVAL_CHOICES, default=APPROVAL_NONE, db_index=True)
+    approval_remark = models.CharField(max_length=255, blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="approved_orders"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
     # 调度池认领（多调度并发，乐观+悲观锁保护）
     claimed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="claimed_orders"
@@ -168,6 +186,109 @@ class Order(BaseModel, SoftDeleteModel):
 
     def __str__(self) -> str:
         return self.order_no
+
+
+class OrderCargoItem(BaseModel):
+    """订单货物明细行：支持一单多品类/多件型，汇总回写订单货量。"""
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="cargo_items")
+    seq = models.PositiveIntegerField(default=1)
+    name = models.CharField(max_length=120)
+    quantity = models.IntegerField(default=0)
+    weight_ton = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    volume_cbm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    package_type = models.CharField(max_length=32, blank=True)
+    temperature_range = models.CharField(max_length=32, blank=True)
+    remark = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "ops_order_cargo_item"
+        ordering = ["seq"]
+        verbose_name = "货物明细"
+        verbose_name_plural = "货物明细"
+
+    def __str__(self) -> str:
+        return f"{self.name} x{self.quantity}"
+
+
+class OrderStop(BaseModel):
+    """订单装卸站点：支持多提多送（多装多卸），按 seq 排序。"""
+
+    STOP_PICKUP = "pickup"
+    STOP_DELIVERY = "delivery"
+    STOP_TYPE_CHOICES = [(STOP_PICKUP, "提货"), (STOP_DELIVERY, "送货")]
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="stops")
+    seq = models.PositiveIntegerField(default=1)
+    stop_type = models.CharField(max_length=12, choices=STOP_TYPE_CHOICES, default=STOP_PICKUP)
+    city = models.CharField(max_length=80, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    contact_name = models.CharField(max_length=64, blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+    expected_start = models.DateTimeField(null=True, blank=True)
+    expected_end = models.DateTimeField(null=True, blank=True)
+    cargo_note = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "ops_order_stop"
+        ordering = ["seq"]
+        verbose_name = "装卸站点"
+        verbose_name_plural = "装卸站点"
+
+    def __str__(self) -> str:
+        return f"{self.get_stop_type_display()}#{self.seq} {self.city}"
+
+
+class OrderTemplate(BaseModel, SoftDeleteModel):
+    """录单模板：保存常用订单（字段+货物明细+站点）为模板，一键套用建单。"""
+
+    name = models.CharField(max_length=120)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="order_templates"
+    )
+    payload = models.JSONField(default=dict, help_text="订单字段 + 货物明细 + 站点 的快照")
+
+    class Meta:
+        db_table = "ops_order_template"
+        ordering = ["-created_at"]
+        verbose_name = "录单模板"
+        verbose_name_plural = "录单模板"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class OrderAttachment(BaseModel):
+    """订单附件：合同 / 委托书 / 货物照片 / 其他单据。"""
+
+    KIND_CONTRACT = "contract"
+    KIND_AUTHORIZATION = "authorization"
+    KIND_PHOTO = "photo"
+    KIND_OTHER = "other"
+    KIND_CHOICES = [
+        (KIND_CONTRACT, "合同"),
+        (KIND_AUTHORIZATION, "委托书"),
+        (KIND_PHOTO, "货物照片"),
+        (KIND_OTHER, "其他"),
+    ]
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="attachments")
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_OTHER)
+    name = models.CharField(max_length=160, blank=True)
+    file = models.FileField(upload_to="order_attachments/", null=True, blank=True)
+    file_url = models.URLField(blank=True, help_text="外部已上传文件 URL")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="order_attachments"
+    )
+
+    class Meta:
+        db_table = "ops_order_attachment"
+        ordering = ["-created_at"]
+        verbose_name = "订单附件"
+        verbose_name_plural = "订单附件"
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} {self.name}"
 
 
 class OrderEvent(BaseModel):

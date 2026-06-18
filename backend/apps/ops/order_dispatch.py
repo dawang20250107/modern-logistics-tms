@@ -57,6 +57,18 @@ def _assert_resource_free(vehicle, driver):
         raise AppError("DRIVER_BUSY", f"司机 {driver.name} 已被占用，不可重复派单。", status=409)
 
 
+def _assert_capacity_fit(vehicle, order):
+    """校验车辆核载/容积满足订单货量（运力未知则放行），避免误派超载车。"""
+    from .dispatch import vehicle_fit
+
+    if vehicle and vehicle_fit(vehicle, order) is None:
+        raise AppError(
+            "VEHICLE_OVERLOADED",
+            f"车辆 {vehicle.plate_no} 核载/容积不足以承运该订单货量，请改派更大车型。",
+            status=409,
+        )
+
+
 def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None, operator=None):
     """派单：生成运单并落承运信息与派单类型，回写订单为已派单。
 
@@ -75,6 +87,7 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
         if driver:
             driver = Driver.objects.select_for_update().get(id=driver.id)
         _assert_resource_free(vehicle, driver)
+        _assert_capacity_fit(vehicle, order)
         waybill = convert_order_to_waybill(
             order, carrier=carrier, vehicle=vehicle, driver=driver, dispatch_type=dispatch_type, operator=operator
         )

@@ -1,12 +1,25 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { ApiError } from "./api/client";
+import { toast } from "./api/toast";
 import { App } from "./App";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { Toaster } from "./components/Toaster";
 import "./styles.css";
 
+// 全局兜底：任何写操作失败都给用户明确反馈（交付级「无差错使用」）。
+// 组件可用 useMutation({ meta: { silent: true } }) 自行处理错误、跳过全局提示。
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
+  mutationCache: new MutationCache({
+    onError: (error, _vars, _ctx, mutation) => {
+      if (mutation.meta?.silent) return;
+      const msg = error instanceof ApiError ? error.message : "操作失败，请稍后重试";
+      toast.error(msg);
+    },
+  }),
 });
 
 const container = document.getElementById("root");
@@ -16,6 +29,8 @@ createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
+      <Toaster />
+      <ConfirmDialog />
     </QueryClientProvider>
   </StrictMode>,
 );

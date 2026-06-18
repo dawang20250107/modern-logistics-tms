@@ -33,6 +33,7 @@ export function AiWorkbenchPage() {
   const [chat, setChat] = useState<ChatMsg[]>([]);
 
   const ask = useMutation({
+    meta: { silent: true },
     mutationFn: (msg: string) => apiPost<AgentReply>("/agent/chat", { message: msg, thread_id: thread || undefined }),
     onSuccess: (d) => {
       setThread(d.thread_id);
@@ -62,6 +63,7 @@ export function AiWorkbenchPage() {
   });
 
   const run = useMutation({
+    meta: { silent: true },
     mutationFn: () =>
       apiPost<{ result: unknown }>("/agent/tools/execute", {
         tool_name: tool || tools.data?.tools[0]?.name,

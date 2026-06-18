@@ -299,3 +299,16 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.8; }
 .empty-title { font-weight: 600; font-size: 15px; color: var(--ink-2); }
 .empty-hint { margin-top: 6px; max-width: 360px; }
+
+/* ── 结构化录单表单 ────────────────────────────────────── */
+.form-section { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.section-label { font-weight: 650; font-size: 13px; color: var(--ink-2); margin-bottom: 10px; display: flex; gap: 8px; align-items: center; }
+.grid-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; }
+.grid-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.grid-form label input, .grid-form label select { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 13px; color: var(--ink); }
+.grid-form label input:focus, .grid-form label select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.16); }
+.check-label { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 13px !important; color: var(--ink) !important; align-self: end; }
+.line-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.line-row input, .line-row select { padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 13px; }
+.line-row input:focus, .line-row select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.16); }
+.form-actions { display: flex; gap: 10px; align-items: center; padding: 14px 18px; flex-wrap: wrap; }

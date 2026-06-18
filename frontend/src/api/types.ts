@@ -222,8 +222,50 @@ export interface Order {
   raw_text: string;
   parse_meta: Record<string, unknown>;
   waybill_nos: string[];
+  cargo_items: OrderCargoItem[];
+  stops: OrderStop[];
+  quoted_amount: string;
+  package_type: string;
+  expected_pickup_at: string | null;
+  expected_delivery_at: string | null;
+  pickup_address: string;
+  delivery_address: string;
+  remark: string;
   created_at: string;
 }
+
+export interface OrderCargoItem {
+  id?: string;
+  seq?: number;
+  name: string;
+  quantity: number | string;
+  weight_ton: number | string;
+  volume_cbm: number | string;
+  package_type: string;
+  temperature_range: string;
+  remark: string;
+}
+export interface OrderStop {
+  id?: string;
+  seq?: number;
+  stop_type: "pickup" | "delivery";
+  city: string;
+  address: string;
+  contact_name: string;
+  contact_phone: string;
+  expected_start: string | null;
+  expected_end: string | null;
+  cargo_note: string;
+}
+export interface OrderTemplate {
+  id: string;
+  name: string;
+  payload: Record<string, unknown>;
+  created_by_name: string;
+  created_at: string;
+}
+export const SETTLEMENT_LABEL: Record<string, string> = { monthly: "月结", cash: "现结", prepaid: "预付" };
+export const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个人", enterprise: "企业", government: "政府" };
 
 export const SLA_STATUS_LABEL: Record<string, string> = {
   pending: "进行中", at_risk: "临期", on_time: "准时", breached: "超时",

@@ -96,5 +96,18 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export const apiGet = <T>(path: string): Promise<T> => api<T>(path);
 export const apiPost = <T>(path: string, body: unknown): Promise<T> =>
   api<T>(path, { method: "POST", body: JSON.stringify(body) });
+
+// 下载（非 JSON，如 CSV 导出）：带鉴权 + 自动刷新，触发浏览器下载。
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const resp = await raw(path, {});
+  if (!resp.ok) throw new ApiError(String(resp.status), "导出失败");
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 export const apiUpload = <T>(path: string, form: FormData): Promise<T> =>
   api<T>(path, { method: "POST", body: form });

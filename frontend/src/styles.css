@@ -316,3 +316,14 @@ button, select, input, textarea { font: inherit; color: inherit; }
 /* ── 迷你开关 ──────────────────────────────────────────── */
 .switch-mini { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .switch-mini input { cursor: pointer; }
+
+/* ── 订单来源选择 ──────────────────────────────────────── */
+.source-tabs { display: flex; flex-wrap: wrap; gap: 10px; }
+.source-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 88px; padding: 12px 14px;
+  border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); cursor: pointer;
+  font-size: 13px; color: var(--ink-2); transition: all var(--speed);
+}
+.source-tab:hover { border-color: var(--brand); color: var(--brand); transform: translateY(-1px); }
+.source-tab.on { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 6px 16px rgba(47, 107, 255, 0.3); }
+.source-tab .st-icon { font-size: 22px; }

@@ -13,10 +13,11 @@ import { StructuredOrderForm } from "../components/StructuredOrderForm";
 export function OrderIntakePage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState("");
+  const [channelFilter, setChannelFilter] = useState("");
   const [search, setSearch] = useState("");
-  const filterQs = `${statusFilter ? `&status=${statusFilter}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
+  const filterQs = `${statusFilter ? `&status=${statusFilter}` : ""}${channelFilter ? `&channel=${channelFilter}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
   const orders = useQuery({
-    queryKey: ["orders", statusFilter, search],
+    queryKey: ["orders", statusFilter, channelFilter, search],
     queryFn: () => apiGet<Paginated<Order>>(`/orders?page_size=50&ordering=-created_at${filterQs}`),
   });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orders"] });
@@ -132,6 +133,13 @@ export function OrderIntakePage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+        </div>
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0 }}>
+          <span className="muted small">来源</span>
+          <button className={`chip${channelFilter === "" ? " chip-on" : ""}`} onClick={() => setChannelFilter("")}>全部</button>
+          {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => (
+            <button key={k} className={`chip${channelFilter === k ? " chip-on" : ""}`} onClick={() => setChannelFilter(k)}>{v}</button>
+          ))}
         </div>
         {selected.size > 0 && (
           <div className="batch-bar">

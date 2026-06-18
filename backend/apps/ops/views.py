@@ -261,6 +261,29 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
         return Response(OrderSerializer(order).data, status=201)
 
+    @action(detail=False, methods=["get"], url_path="customer-addresses")
+    def customer_addresses(self, request):
+        """客户地址簿：按历史订单站点/地址去重返回常用提货/送货地址，供录单快速带出。"""
+        from .models import OrderStop
+
+        cid = request.query_params.get("customer")
+        if not cid:
+            return Response({"pickup": [], "delivery": []})
+        seen, pickup, delivery = set(), [], []
+        stops = (
+            OrderStop.objects.filter(order__customer_id=cid)
+            .order_by("-created_at")
+            .values("stop_type", "city", "address", "contact_name", "contact_phone")[:200]
+        )
+        for s in stops:
+            key = (s["stop_type"], s["city"], s["address"])
+            if key in seen or not (s["address"] or s["city"]):
+                continue
+            seen.add(key)
+            item = {"city": s["city"], "address": s["address"], "contact_name": s["contact_name"], "contact_phone": s["contact_phone"]}
+            (pickup if s["stop_type"] == "pickup" else delivery).append(item)
+        return Response({"pickup": pickup[:10], "delivery": delivery[:10]})
+
     @action(detail=True, methods=["post"], url_path="edit")
     def edit(self, request, pk=None):
         """编辑订单（含货物明细/站点替换），草稿/待确认/已确认可改。"""

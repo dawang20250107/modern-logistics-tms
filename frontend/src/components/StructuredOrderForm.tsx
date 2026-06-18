@@ -55,6 +55,24 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   const customers = useQuery({ queryKey: ["customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=500") });
   const templates = useQuery({ queryKey: ["order-templates"], queryFn: () => apiGet<Paginated<OrderTemplate>>("/order-templates?page_size=100") });
 
+  interface AddrItem { city: string; address: string; contact_name: string; contact_phone: string }
+  const addressBook = useQuery({
+    queryKey: ["customer-addresses", form.customer],
+    queryFn: () => apiGet<{ pickup: AddrItem[]; delivery: AddrItem[] }>(`/orders/customer-addresses?customer=${form.customer}`),
+    enabled: Boolean(form.customer),
+  });
+
+  const fillStopFromBook = (type: "pickup" | "delivery", a: AddrItem) => {
+    setStops((prev) => {
+      const idx = prev.findIndex((s) => s.stop_type === type);
+      const filled = { ...emptyStop(type), city: a.city, address: a.address, contact_name: a.contact_name, contact_phone: a.contact_phone };
+      if (idx >= 0) return prev.map((s, j) => (j === idx ? filled : s));
+      return [...prev, filled];
+    });
+    if (type === "pickup" && a.city) set("origin", a.city);
+    if (type === "delivery" && a.city) set("destination", a.city);
+  };
+
   const reset = () => {
     setForm(EMPTY_FORM);
     setCargo([emptyCargo()]);
@@ -217,6 +235,17 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
           <label>始发城市 *<input value={form.origin} onChange={(e) => set("origin", e.target.value)} /></label>
           <label>目的城市 *<input value={form.destination} onChange={(e) => set("destination", e.target.value)} /></label>
         </div>
+        {form.customer && ((addressBook.data?.pickup.length ?? 0) > 0 || (addressBook.data?.delivery.length ?? 0) > 0) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "8px 0" }}>
+            <span className="muted small">📒 地址簿：</span>
+            {(addressBook.data?.pickup ?? []).map((a, i) => (
+              <button key={`p${i}`} className="chip" onClick={() => fillStopFromBook("pickup", a)}>提·{a.city}{a.address ? ` ${a.address.slice(0, 8)}` : ""}</button>
+            ))}
+            {(addressBook.data?.delivery ?? []).map((a, i) => (
+              <button key={`d${i}`} className="chip" onClick={() => fillStopFromBook("delivery", a)}>送·{a.city}{a.address ? ` ${a.address.slice(0, 8)}` : ""}</button>
+            ))}
+          </div>
+        )}
         {stops.map((s, i) => (
           <div key={i} className="line-row">
             <select value={s.stop_type} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, stop_type: e.target.value as "pickup" | "delivery" } : x))}>

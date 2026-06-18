@@ -136,6 +136,23 @@ def test_export_csv(admin_client):
 
 
 @pytest.mark.django_db
+def test_customer_addresses_book(admin_client):
+    cust = Customer.objects.create(code="CA1", name="海尔")
+    o1 = create_order_from_intake(fields={"origin": "青岛", "destination": "上海"}, customer=cust)
+    OrderStop.objects.create(order=o1, seq=1, stop_type=OrderStop.STOP_PICKUP, city="青岛", address="海尔工业园", contact_phone="13800001234")
+    OrderStop.objects.create(order=o1, seq=2, stop_type=OrderStop.STOP_DELIVERY, city="上海", address="浦东仓")
+    o2 = create_order_from_intake(fields={"origin": "青岛", "destination": "上海"}, customer=cust)
+    OrderStop.objects.create(order=o2, seq=1, stop_type=OrderStop.STOP_PICKUP, city="青岛", address="海尔工业园")  # 重复去重
+
+    resp = admin_client.get(f"/api/v1/orders/customer-addresses?customer={cust.id}")
+    assert resp.status_code == 200, resp.content
+    data = resp.json()["data"]
+    assert len(data["pickup"]) == 1  # 去重
+    assert data["pickup"][0]["address"] == "海尔工业园"
+    assert len(data["delivery"]) == 1
+
+
+@pytest.mark.django_db
 def test_order_detail_exposes_cargo_items_and_stops(admin_client):
     order = create_order_from_intake(fields={"origin": "上海", "destination": "成都"})
     OrderCargoItem.objects.create(order=order, seq=1, name="钢材", quantity=10, weight_ton=5)

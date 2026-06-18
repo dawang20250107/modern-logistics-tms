@@ -8,6 +8,7 @@ from .views import (
     ReceiptViewSet,
     TrackingIngestView,
     WaybillViewSet,
+    WorkbenchView,
 )
 
 router = DefaultRouter(trailing_slash=False)
@@ -20,4 +21,5 @@ urlpatterns = [
     *router.urls,
     path("tracking/points", TrackingIngestView.as_view(), name="tracking-ingest"),
     path("track", PublicTrackingView.as_view(), name="public-track"),
+    path("workbench", WorkbenchView.as_view(), name="workbench"),
 ]

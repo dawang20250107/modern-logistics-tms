@@ -2,7 +2,7 @@ import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import viewsets
@@ -507,4 +507,40 @@ class PublicTrackingView(APIView):
             "created_at": order.created_at.isoformat(),
             "milestones": milestones,
             "shipment": shipment,
+        })
+
+
+class WorkbenchView(APIView):
+    """个人工作台「我的待办」：按角色聚合当前用户最该处理的事项。"""
+
+    def get(self, request):
+        from django.utils import timezone
+
+        from apps.finance.models import Statement
+        from apps.notifications.models import Notification
+
+        user = request.user
+        today = timezone.localdate()
+        open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
+
+        my_pending = Order.objects.filter(created_by=user, status=Order.STATUS_PENDING_CONFIRM)
+        pool = Order.objects.filter(status=Order.STATUS_POOLED)
+        return Response({
+            "common": {
+                "unread_notifications": Notification.objects.filter(recipient=user, is_read=False).count(),
+                "my_open_exceptions": ExceptionRecord.objects.filter(open_exc, assignee=user).count(),
+            },
+            "cs": {
+                "my_orders_pending_confirm": my_pending.count(),
+                "my_orders_today": Order.objects.filter(created_by=user, created_at__date=today).count(),
+                "recent_pending": OrderSerializer(my_pending.order_by("-created_at")[:5], many=True).data,
+            },
+            "dispatch": {
+                "pool_count": pool.count(),
+                "my_claimed": Order.objects.filter(claimed_by=user, status=Order.STATUS_DISPATCHING).count(),
+                "pool_top": OrderSerializer(pool.order_by("-priority", "pooled_at")[:5], many=True).data,
+            },
+            "finance": {
+                "draft_statements": Statement.objects.filter(status=Statement.STATUS_DRAFT).count(),
+            },
         })

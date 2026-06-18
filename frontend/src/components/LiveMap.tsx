@@ -1,27 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 import type { VehicleState } from "../api/types";
-
-const AMAP_KEY = (import.meta.env.VITE_AMAP_KEY as string | undefined) ?? "";
-
-/** 动态加载高德 JS API（仅在配置了 Key 时）。返回 window.AMap 构造器。 */
-function useAmap(): unknown {
-  const [amap, setAmap] = useState<unknown>(null);
-  useEffect(() => {
-    if (!AMAP_KEY) return;
-    const w = window as unknown as { AMap?: unknown };
-    if (w.AMap) {
-      setAmap(w.AMap);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${AMAP_KEY}`;
-    script.async = true;
-    script.onload = () => setAmap((window as unknown as { AMap?: unknown }).AMap ?? null);
-    document.head.appendChild(script);
-  }, []);
-  return amap;
-}
+import { AMAP_KEY, useAmap } from "./useAmap";
 
 export function LiveMap({ vehicles, height = 420 }: { vehicles: VehicleState[]; height?: number }) {
   const amap = useAmap();

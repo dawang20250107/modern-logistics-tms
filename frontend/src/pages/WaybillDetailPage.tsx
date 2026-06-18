@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { STATUS_LABEL, type CostSummary, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
+import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
 
@@ -18,6 +19,10 @@ export function WaybillDetailPage() {
   const costs = useQuery({
     queryKey: ["waybill", no, "costs"],
     queryFn: () => apiGet<CostSummary>(`/waybills/${no}/costs`),
+  });
+  const traj = useQuery({
+    queryKey: ["waybill", no, "trajectory"],
+    queryFn: () => apiGet<Trajectory>(`/telematics/waybills/${no}/trajectory`),
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["waybill", no] });
@@ -100,6 +105,17 @@ export function WaybillDetailPage() {
             生成应收应付
           </button>
         </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">轨迹回放</div>
+        {traj.isLoading ? (
+          <div className="muted" style={{ padding: 16 }}>加载轨迹…</div>
+        ) : traj.data ? (
+          <TrajectoryMap traj={traj.data} />
+        ) : (
+          <div className="muted small" style={{ padding: 16 }}>暂无轨迹数据。</div>
+        )}
       </div>
 
       <div className="wb-grid">

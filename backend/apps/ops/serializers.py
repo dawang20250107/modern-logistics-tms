@@ -12,6 +12,7 @@ from .models import (
     TrackingPoint,
     Waybill,
     WaybillEvent,
+    WaybillStop,
 )
 from .services import allowed_next
 
@@ -103,6 +104,7 @@ class WaybillSerializer(serializers.ModelSerializer):
             "driver_name", "driver_phone", "driver_employment", "drivers",
             "route_name", "origin", "destination", "status", "dispatch_status", "risk_level",
             "receipt_status", "eta_drift_minutes", "planned_arrival", "estimated_arrival",
+            "loaded_at", "departed_at", "arrived_at", "signed_at",
             "cargo", "created_at",
         ]
 
@@ -124,13 +126,27 @@ class WaybillSerializer(serializers.ModelSerializer):
         }
 
 
+class WaybillStopSerializer(serializers.ModelSerializer):
+    stop_type_label = serializers.CharField(source="get_stop_type_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = WaybillStop
+        fields = [
+            "id", "seq", "stop_type", "stop_type_label", "city", "address", "contact_name", "contact_phone",
+            "lat", "lng", "radius_m", "planned_eta", "actual_arrival_at", "actual_depart_at",
+            "arrival_source", "status", "status_label", "note",
+        ]
+
+
 class WaybillDetailSerializer(WaybillSerializer):
     timeline = WaybillEventSerializer(source="events", many=True, read_only=True)
     agent_suggestions = _SuggestionSerializer(many=True, read_only=True)
     next_statuses = serializers.SerializerMethodField()
+    stops = WaybillStopSerializer(many=True, read_only=True)
 
     class Meta(WaybillSerializer.Meta):
-        fields = WaybillSerializer.Meta.fields + ["timeline", "agent_suggestions", "next_statuses"]
+        fields = WaybillSerializer.Meta.fields + ["timeline", "agent_suggestions", "next_statuses", "stops"]
 
     def get_next_statuses(self, obj):
         return allowed_next(obj.status)

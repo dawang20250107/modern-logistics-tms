@@ -43,6 +43,13 @@ def flush_tracking_points(batch: int = 1000) -> int:
             )
         )
     TrackingPoint.objects.bulk_create(objs, batch_size=500)
+    # 点位到达自动化：新轨迹点做围栏判定，盖到达/离开戳
+    try:
+        from .geofence import process_points
+
+        process_points([(o.waybill, o.lat, o.lng, o.reported_at) for o in objs])
+    except Exception:  # noqa: BLE001 — 围栏失败不阻断轨迹落库
+        pass
     return len(objs)
 
 

@@ -156,6 +156,37 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         transition_waybill(waybill, to_status, operator=request.user, remark=request.data.get("remark", ""))
         return Response(WaybillDetailSerializer(waybill).data)
 
+    @action(detail=True, methods=["post"], url_path="stop-event")
+    def stop_event(self, request, waybill_no=None):
+        """手动盖点位到达/离开戳（无 GPS 坐标时由司机/调度操作）：{seq, event: arrived|departed}。"""
+        from django.utils import timezone
+
+        from .models import WaybillEvent, WaybillStop
+
+        waybill = self.get_object()
+        seq = request.data.get("seq")
+        event = request.data.get("event")
+        stop = WaybillStop.objects.filter(waybill=waybill, seq=seq).first()
+        if stop is None:
+            raise AppError("STOP_NOT_FOUND", "点位不存在。", status=404)
+        now = timezone.now()
+        if event == "arrived":
+            stop.actual_arrival_at = now
+            stop.arrival_source = WaybillStop.SRC_MANUAL
+            stop.status = WaybillStop.STATUS_ARRIVED
+            stop.save(update_fields=["actual_arrival_at", "arrival_source", "status", "updated_at"])
+        elif event == "departed":
+            stop.actual_depart_at = now
+            stop.status = WaybillStop.STATUS_DEPARTED
+            stop.save(update_fields=["actual_depart_at", "status", "updated_at"])
+        else:
+            raise AppError("INVALID_STOP_EVENT", "event 取值 arrived|departed。", status=400)
+        WaybillEvent.objects.create(
+            waybill=waybill, event_type=f"stop_{event}", event_time=now,
+            resource=f"stop#{stop.seq}", source="manual", payload={"seq": stop.seq},
+        )
+        return Response(WaybillDetailSerializer(waybill).data)
+
     @action(detail=True, methods=["post"], url_path="sign")
     def sign(self, request, waybill_no=None):
         """司机/客户签收回传（e-POD）：电子签名 + 回单，推进到已签收并触发订单完成。"""

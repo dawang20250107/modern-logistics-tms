@@ -42,6 +42,10 @@ export interface Waybill {
   eta_drift_minutes: number;
   planned_arrival: string | null;
   estimated_arrival: string | null;
+  loaded_at: string | null;
+  departed_at: string | null;
+  arrived_at: string | null;
+  signed_at: string | null;
   cargo: { quantity: number; weight_ton: number; volume_cbm: number };
   created_at: string;
 }
@@ -80,10 +84,29 @@ export interface AgentSuggestion {
   created_at: string;
 }
 
+export interface WaybillStopRow {
+  id: string;
+  seq: number;
+  stop_type: string;
+  stop_type_label: string;
+  city: string;
+  address: string;
+  contact_name: string;
+  contact_phone: string;
+  planned_eta: string | null;
+  actual_arrival_at: string | null;
+  actual_depart_at: string | null;
+  arrival_source: string;
+  status: string;
+  status_label: string;
+  note: string;
+}
+
 export interface WaybillDetail extends Waybill {
   timeline: WaybillEvent[];
   agent_suggestions: AgentSuggestion[];
   next_statuses: string[];
+  stops: WaybillStopRow[];
 }
 
 export interface ExpenseLine {

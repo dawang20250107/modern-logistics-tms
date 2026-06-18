@@ -50,7 +50,19 @@ def transition_waybill(waybill: Waybill, to_status: str, *, operator=None, remar
         )
     from_status = waybill.status
     waybill.status = to_status
-    waybill.save(update_fields=["status", "updated_at"])
+    # 关键里程碑实际时间物化（事件日志仍是真相源）
+    now = timezone.now()
+    milestone_field = {
+        Waybill.STATUS_LOADED: "loaded_at",
+        Waybill.STATUS_DEPARTED: "departed_at",
+        Waybill.STATUS_ARRIVED: "arrived_at",
+        Waybill.STATUS_SIGNED: "signed_at",
+    }.get(to_status)
+    update_fields = ["status", "updated_at"]
+    if milestone_field and getattr(waybill, milestone_field) is None:
+        setattr(waybill, milestone_field, now)
+        update_fields.append(milestone_field)
+    waybill.save(update_fields=update_fields)
     WaybillEvent.objects.create(
         waybill=waybill,
         event_type=f"status_changed:{to_status}",

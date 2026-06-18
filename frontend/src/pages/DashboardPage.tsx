@@ -3,6 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "../api/client";
 import type { MetricCard } from "../api/types";
 import { METRIC_DOMAIN_LABEL } from "../api/types";
+import { Sparkline } from "../components/Sparkline";
+
+type Trends = Record<string, Array<{ date: string; value: number }>>;
 
 function formatValue(m: MetricCard): string {
   if (m.unit === "%") return `${(m.value * 100).toFixed(1)}%`;
@@ -16,11 +19,12 @@ const TONE: Record<string, string> = { ops: "blue", fleet: "blue", order: "amber
 export function DashboardPage() {
   const dash = useQuery({
     queryKey: ["analytics", "dashboard"],
-    queryFn: () => apiGet<{ metrics: MetricCard[] }>("/analytics/dashboard"),
+    queryFn: () => apiGet<{ metrics: MetricCard[]; trends?: Trends }>("/analytics/dashboard?trends=true"),
     refetchInterval: 30000,
   });
 
   const metrics = dash.data?.metrics ?? [];
+  const trends = dash.data?.trends ?? {};
   const grouped = DOMAIN_ORDER.map((d) => ({ domain: d, items: metrics.filter((m) => m.domain === d) })).filter(
     (g) => g.items.length > 0,
   );
@@ -48,6 +52,11 @@ export function DashboardPage() {
                 <div key={m.code} className={`kpi${TONE[g.domain] ? ` kpi-${TONE[g.domain]}` : ""}`}>
                   <div className="kpi-value">{formatValue(m)}</div>
                   <div className="kpi-label">{m.name}</div>
+                  {trends[m.code] && trends[m.code].length > 1 && (
+                    <div style={{ marginTop: 8 }}>
+                      <Sparkline values={trends[m.code].map((p) => p.value)} />
+                    </div>
+                  )}
                   {m.breakdown && m.breakdown.length > 0 && (
                     <div className="small muted" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {m.breakdown.slice(0, 4).map((b) => (

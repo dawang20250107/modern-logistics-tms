@@ -34,14 +34,23 @@ MATERIALIZE_METRICS = [
 ]
 
 
-def build_dashboard(start=None, end=None) -> dict:
+def build_dashboard(start=None, end=None, *, with_trends=False, trend_days=14) -> dict:
     cards = []
     for code in DASHBOARD_METRICS:
         try:
             cards.append(compute_metric(code, start=start, end=end))
         except Exception:  # noqa: BLE001 - 单指标异常不拖垮整盘
             continue
-    return {"metrics": cards}
+    result = {"metrics": cards}
+    if with_trends:
+        trends = {}
+        for code in MATERIALIZE_METRICS:
+            try:
+                trends[code] = metric_trend(code, trend_days)["series"]
+            except Exception:  # noqa: BLE001
+                continue
+        result["trends"] = trends
+    return result
 
 
 def materialize_daily(target_date=None) -> int:

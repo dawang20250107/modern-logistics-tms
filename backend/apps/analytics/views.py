@@ -32,7 +32,10 @@ class DashboardView(APIView):
     """经营看板：一次返回核心经营/运营指标。"""
 
     def get(self, request):
-        return Response(build_dashboard(request.query_params.get("start"), request.query_params.get("end")))
+        with_trends = (request.query_params.get("trends") or "").lower() in ("1", "true", "yes")
+        return Response(build_dashboard(
+            request.query_params.get("start"), request.query_params.get("end"), with_trends=with_trends,
+        ))
 
 
 class MetricTrendView(APIView):

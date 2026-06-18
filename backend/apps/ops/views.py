@@ -580,7 +580,7 @@ class OrderTemplateViewSet(viewsets.ModelViewSet):
 class ExceptionViewSet(viewsets.ModelViewSet):
     queryset = ExceptionRecord.objects.select_related("waybill", "assignee").all()
     serializer_class = ExceptionSerializer
-    filterset_fields = ["exception_type", "status", "level", "source"]
+    filterset_fields = ["exception_type", "status", "level", "source", "waybill"]
     search_fields = ["exception_type", "description"]
 
     @action(detail=True, methods=["post"], url_path="assign")

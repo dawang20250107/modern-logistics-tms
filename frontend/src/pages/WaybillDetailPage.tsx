@@ -3,11 +3,19 @@ import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
-import { STATUS_LABEL, type CostSummary, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
+import { toast } from "../api/toast";
+import { STATUS_LABEL, type CostSummary, type ExceptionRecord, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
+const EXC_TYPE_LABEL: Record<string, string> = {
+  transit_delay: "在途超时", route_deviation: "偏航", cargo_damage: "货损货差",
+  vehicle_breakdown: "车辆故障", detained: "扣车扣货", customer_complaint: "客户投诉", other: "其他",
+};
+const EXC_STATUS_LABEL: Record<string, string> = {
+  pending_handle: "待处理", handling: "处理中", pending_audit: "待审核", closed: "已关闭", rejected: "已驳回",
+};
 
 export function WaybillDetailPage() {
   const { no = "" } = useParams();
@@ -71,6 +79,25 @@ export function WaybillDetailPage() {
       return apiUpload<Receipt>("/receipts", fd);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["waybill", no, "receipts"] }),
+  });
+
+  const [excType, setExcType] = useState("transit_delay");
+  const [excLevel, setExcLevel] = useState("medium");
+  const [excDesc, setExcDesc] = useState("");
+  const exceptions = useQuery({
+    queryKey: ["waybill", no, "exceptions"],
+    queryFn: () => apiGet<Paginated<ExceptionRecord>>(`/exceptions?waybill=${detail.data?.id}&page_size=50`),
+    enabled: Boolean(detail.data?.id),
+  });
+  const reportExc = useMutation({
+    mutationFn: () => apiPost("/exceptions", {
+      waybill: detail.data!.id, exception_type: excType, level: excLevel, description: excDesc, source: "manual",
+    }),
+    onSuccess: () => {
+      setExcDesc("");
+      toast.success("异常已上报，进入处理队列");
+      queryClient.invalidateQueries({ queryKey: ["waybill", no, "exceptions"] });
+    },
   });
 
   if (detail.isLoading) return <div className="muted">加载中…</div>;
@@ -141,6 +168,36 @@ export function WaybillDetailPage() {
           </div>
         </div>
       )}
+
+      <div className="panel">
+        <div className="panel-head">在途异常 · 上报与处理</div>
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <select value={excType} onChange={(e) => setExcType(e.target.value)}>
+            {Object.entries(EXC_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <select value={excLevel} onChange={(e) => setExcLevel(e.target.value)}>
+            <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
+          </select>
+          <input className="search" style={{ flex: 1, minWidth: 200 }} placeholder="异常描述（如：高速拥堵预计延误2小时）" value={excDesc} onChange={(e) => setExcDesc(e.target.value)} />
+          <button className="btn-primary" disabled={reportExc.isPending || !excDesc.trim()} onClick={() => reportExc.mutate()}>上报异常</button>
+        </div>
+        {(exceptions.data?.items?.length ?? 0) > 0 && (
+          <table className="table">
+            <thead><tr><th>类型</th><th>级别</th><th>描述</th><th>状态</th><th>责任/金额</th></tr></thead>
+            <tbody>
+              {(exceptions.data?.items ?? []).map((ex) => (
+                <tr key={ex.id}>
+                  <td>{EXC_TYPE_LABEL[ex.exception_type] ?? ex.exception_type}</td>
+                  <td><span className={`tag tag-${ex.level === "high" ? "high" : ex.level === "low" ? "low" : "medium"}`}>{RISK_LABEL[ex.level] ?? ex.level}</span></td>
+                  <td className="small">{ex.description || "-"}</td>
+                  <td><Link className="link" to="/exceptions">{EXC_STATUS_LABEL[ex.status] ?? ex.status}</Link></td>
+                  <td className="small">{ex.responsibility_party || "-"}{Number(ex.amount) > 0 ? ` · ¥${ex.amount}` : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="wb-grid">
         <div className="panel">

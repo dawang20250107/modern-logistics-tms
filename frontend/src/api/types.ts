@@ -230,11 +230,11 @@ export const SLA_STATUS_LABEL: Record<string, string> = {
 
 export interface DispatchSuggestion {
   order_no: string;
-  vehicle_candidates: Array<{ plate_no: string; utilization: number }>;
+  vehicle_candidates: Array<{ plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean }>;
   carrier_quotes: Array<{ carrier: string; quote: number }>;
   external_signals: Array<{ type: string; level: string; note: string }>;
   suggested_dispatch_type: string;
-  best_vehicle: { plate_no: string } | null;
+  best_vehicle: { plate_no: string; compliance?: string[]; compliance_ok?: boolean } | null;
   best_carrier: { carrier: string; quote: number } | null;
 }
 

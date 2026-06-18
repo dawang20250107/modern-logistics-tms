@@ -111,10 +111,29 @@ export function DispatchBoardPage() {
                 </div>
               )}
               <div className="kv" style={{ padding: 0 }}>
-                <div><span>推荐车辆</span><b>{suggestion.best_vehicle?.plate_no ?? "无可用自有车"}</b></div>
+                <div>
+                  <span>推荐车辆</span>
+                  <b>
+                    {suggestion.best_vehicle?.plate_no ?? "无可用自有车"}
+                    {suggestion.best_vehicle && suggestion.best_vehicle.compliance_ok === false && (
+                      <span className="tag tag-high" style={{ marginLeft: 6 }}>⚠ {suggestion.best_vehicle.compliance?.join("/")}证件过期</span>
+                    )}
+                  </b>
+                </div>
                 <div><span>最优承运商</span><b>{suggestion.best_carrier ? `${suggestion.best_carrier.carrier} ¥${suggestion.best_carrier.quote}` : "—"}</b></div>
                 <div><span>建议派单类型</span><b>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</b></div>
               </div>
+
+              {suggestion.vehicle_candidates.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {suggestion.vehicle_candidates.map((v) => (
+                    <span key={v.plate_no} className={`tag tag-${v.compliance_ok === false ? "high" : "low"}`}>
+                      {v.plate_no} · 装载{Math.round(v.utilization * 100)}%
+                      {v.compliance_ok === false && ` ⚠${v.compliance?.join("/")}过期`}
+                    </span>
+                  ))}
+                </div>
+              )}
 
               <div className="form-row" style={{ padding: 0 }}>
                 <select value={dispatchType} onChange={(e) => setDispatchType(e.target.value)}>

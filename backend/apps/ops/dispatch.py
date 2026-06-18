@@ -5,6 +5,7 @@
 """
 
 from django.db.models import Q
+from django.utils import timezone
 
 from .models import Waybill
 
@@ -37,6 +38,17 @@ def available_drivers():
     return Driver.objects.filter(is_active=True).exclude(id__in=_busy_ids("driver_id"))
 
 
+def vehicle_compliance_issues(vehicle) -> list[str]:
+    """返回车辆已过期的证件（年检/保险/维保）标签；空表示合规。"""
+    today = timezone.localdate()
+    issues = []
+    for field, label in [("inspection_expiry", "年检"), ("insurance_expiry", "保险"), ("maintenance_due_date", "维保")]:
+        expiry = getattr(vehicle, field, None)
+        if expiry and expiry < today:
+            issues.append(label)
+    return issues
+
+
 def vehicle_fit(vehicle, waybill) -> dict | None:
     """车辆对运单的装载适配；不满足核载/容积返回 None，否则返回评分（slack 越小越优）。"""
     cap_t = float(vehicle.load_capacity_ton or 0)
@@ -50,7 +62,14 @@ def vehicle_fit(vehicle, waybill) -> dict | None:
     # 余量（运力未知按 0 处理，排在后面）
     slack = (cap_t - need_t if cap_t else 1e9) + (cap_v - need_v if cap_v else 1e9)
     util = (need_t / cap_t) if cap_t else 0.0
-    return {"plate_no": vehicle.plate_no, "slack": round(slack, 2), "utilization": round(util, 3)}
+    compliance = vehicle_compliance_issues(vehicle)
+    return {
+        "plate_no": vehicle.plate_no,
+        "slack": round(slack, 2),
+        "utilization": round(util, 3),
+        "compliance": compliance,
+        "compliance_ok": not compliance,
+    }
 
 
 def rank_vehicles(waybill, vehicles=None) -> list[dict]:
@@ -61,7 +80,8 @@ def rank_vehicles(waybill, vehicles=None) -> list[dict]:
         if fit is not None:
             fit["vehicle_id"] = str(v.id)
             scored.append((v, fit))
-    scored.sort(key=lambda x: x[1]["slack"])  # 紧凑装载优先
+    # 合规车辆优先，其次紧凑装载优先；证件过期车下沉、不做硬阻断（仍可人工选择）
+    scored.sort(key=lambda x: (not x[1]["compliance_ok"], x[1]["slack"]))
     return [fit for _v, fit in scored]
 
 

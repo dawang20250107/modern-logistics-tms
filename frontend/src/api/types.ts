@@ -113,8 +113,20 @@ export interface ExpenseLine {
   id: string;
   direction: string;
   expense_item_code: string;
+  item_label: string;
   amount: number;
   risk_status: string;
+  payee_type: string;
+  payee_label: string;
+  payee_ref: string;
+  source_system: string;
+  remark: string;
+}
+
+export interface PayeeGroup {
+  payee_type: string;
+  payee_label: string;
+  amount: number;
 }
 
 export interface CostSummary {
@@ -122,8 +134,17 @@ export interface CostSummary {
   receivables: ExpenseLine[];
   payables: ExpenseLine[];
   external_expenses: ExpenseLine[];
+  payables_by_payee: PayeeGroup[];
+  receivable_total: number;
+  payable_total: number;
   gross_profit: number;
   gross_margin: number;
+}
+
+export interface CostCatalog {
+  cost_items: Record<string, string>;
+  income_items: Record<string, string>;
+  payees: Record<string, string>;
 }
 
 export interface ExceptionRecord {

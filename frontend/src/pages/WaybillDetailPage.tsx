@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { toast } from "../api/toast";
-import { STATUS_LABEL, type CostSummary, type ExceptionRecord, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
+import { STATUS_LABEL, type CostCatalog, type CostSummary, type ExceptionRecord, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
@@ -107,9 +107,28 @@ export function WaybillDetailPage() {
     onSuccess: (_d, v) => { toast.success(v.event === "arrived" ? "已记录到达" : "已记录离开"); invalidate(); },
   });
 
+  const catalog = useQuery({ queryKey: ["cost-catalog"], queryFn: () => apiGet<CostCatalog>("/waybills/cost-catalog") });
+  const [exDir, setExDir] = useState<"payable" | "receivable">("payable");
+  const [exItem, setExItem] = useState("TRANSPORT_COST");
+  const [exAmount, setExAmount] = useState("");
+  const [exPayeeType, setExPayeeType] = useState("carrier");
+  const [exPayeeRef, setExPayeeRef] = useState("");
+  const addExpense = useMutation({
+    mutationFn: () => apiPost(`/waybills/${no}/add-expense`, {
+      direction: exDir, expense_item_code: exItem, amount: exAmount,
+      payee_type: exPayeeType, payee_ref: exPayeeRef,
+    }),
+    onSuccess: () => {
+      setExAmount(""); setExPayeeRef("");
+      toast.success("已新增费用明细");
+      queryClient.invalidateQueries({ queryKey: ["waybill", no, "costs"] });
+    },
+  });
+
   if (detail.isLoading) return <div className="muted">加载中…</div>;
   if (detail.isError || !detail.data) return <div className="muted">运单不存在或无权访问。</div>;
   const w = detail.data;
+  const editable = !["settled", "cancelled", "voided"].includes(w.status);
 
   return (
     <div className="stack">
@@ -291,14 +310,52 @@ export function WaybillDetailPage() {
           )}
 
           <div className="panel">
-            <div className="panel-head">费用与毛利</div>
+            <div className="panel-head">费用构成与毛利</div>
             {costs.data ? (
-              <div className="kv">
-                <div><span>应收</span>{costs.data.receivables.reduce((s, r) => s + r.amount, 0)}</div>
-                <div><span>应付</span>{costs.data.payables.reduce((s, r) => s + r.amount, 0)}</div>
-                <div><span>毛利</span>{costs.data.gross_profit}</div>
-                <div><span>毛利率</span>{(costs.data.gross_margin * 100).toFixed(1)}%</div>
-              </div>
+              <>
+                <div className="kv">
+                  <div><span>应收合计</span>¥{costs.data.receivable_total.toFixed(2)}</div>
+                  <div><span>应付合计</span>¥{costs.data.payable_total.toFixed(2)}</div>
+                  <div><span>毛利</span>¥{costs.data.gross_profit.toFixed(2)}</div>
+                  <div><span>毛利率</span>{(costs.data.gross_margin * 100).toFixed(1)}%</div>
+                </div>
+                {(costs.data.payables.length > 0 || costs.data.receivables.length > 0) && (
+                  <table className="table">
+                    <thead><tr><th>方向</th><th>科目</th><th>金额</th><th>收/付款方</th></tr></thead>
+                    <tbody>
+                      {[...costs.data.receivables, ...costs.data.payables].map((e) => (
+                        <tr key={e.id}>
+                          <td><span className={`tag${e.direction === "receivable" ? " tag-low" : " tag-high"}`}>{e.direction === "receivable" ? "应收" : "应付"}</span></td>
+                          <td className="small">{e.item_label}</td>
+                          <td className="small">¥{e.amount.toFixed(2)}</td>
+                          <td className="small">{e.payee_label}{e.payee_ref ? ` · ${e.payee_ref}` : ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {costs.data.payables_by_payee.length > 0 && (
+                  <div className="muted small" style={{ padding: "0 16px 10px" }}>
+                    应付归集：{costs.data.payables_by_payee.map((p) => `${p.payee_label} ¥${p.amount.toFixed(2)}`).join(" · ")}
+                  </div>
+                )}
+                {editable && (
+                  <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+                    <select value={exDir} onChange={(e) => { const d = e.target.value as "payable" | "receivable"; setExDir(d); setExItem(d === "payable" ? "TRANSPORT_COST" : "TRANSPORT_INCOME"); setExPayeeType(d === "payable" ? "carrier" : "customer"); }}>
+                      <option value="payable">应付</option><option value="receivable">应收</option>
+                    </select>
+                    <select value={exItem} onChange={(e) => setExItem(e.target.value)}>
+                      {Object.entries(exDir === "payable" ? (catalog.data?.cost_items ?? {}) : (catalog.data?.income_items ?? {})).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    </select>
+                    <input className="search" style={{ width: 90 }} placeholder="金额" value={exAmount} onChange={(e) => setExAmount(e.target.value)} />
+                    <select value={exPayeeType} onChange={(e) => setExPayeeType(e.target.value)}>
+                      {Object.entries(catalog.data?.payees ?? {}).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    </select>
+                    <input className="search" style={{ width: 110 }} placeholder="收/付款方" value={exPayeeRef} onChange={(e) => setExPayeeRef(e.target.value)} />
+                    <button className="btn-primary" disabled={addExpense.isPending || !exAmount} onClick={() => addExpense.mutate()}>加明细</button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="muted small">加载中…</div>
             )}

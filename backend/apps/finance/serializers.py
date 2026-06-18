@@ -28,7 +28,8 @@ class ExpenseRecordSerializer(serializers.ModelSerializer):
         model = ExpenseRecord
         fields = [
             "id", "waybill", "waybill_no", "direction", "expense_item_code", "amount", "currency",
-            "occurred_at", "risk_status", "source_system", "external_id", "created_at",
+            "occurred_at", "risk_status", "source_system", "external_id",
+            "payee_type", "payee_ref", "remark", "created_at",
         ]
         extra_kwargs = {"waybill": {"required": False}}
 

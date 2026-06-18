@@ -54,6 +54,10 @@ class ExpenseRecord(BaseModel):
     risk_status = models.CharField(max_length=32, default="normal")
     source_system = models.CharField(max_length=64, blank=True)
     external_id = models.CharField(max_length=64, blank=True)
+    # 上下游收/付款方：应付付给承运商/司机/油卡商，应收来自客户
+    payee_type = models.CharField(max_length=16, blank=True, db_index=True, help_text="carrier/driver/fuel_card/customer/other")
+    payee_ref = models.CharField(max_length=120, blank=True, help_text="收/付款方名称或标识")
+    remark = models.CharField(max_length=255, blank=True)
 
     class Meta:
         db_table = "fin_expense_record"

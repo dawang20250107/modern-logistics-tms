@@ -75,6 +75,8 @@ def generate_costs(waybill) -> dict:
             direction=ExpenseRecord.DIRECTION_RECEIVABLE,
             expense_item_code=rule.expense_item_code,
             amount=rule.quote(weight),
+            payee_type="customer",
+            payee_ref=waybill.customer.name if waybill.customer_id else "",
             source_system="pricing",
         )
         result["receivable"] = 1
@@ -82,11 +84,20 @@ def generate_costs(waybill) -> dict:
     cost = _match_rules(waybill, PricingRule.PRICE_TYPE_COST)
     if cost:
         rule = cost[0]
+        # 应付收款方（上下游）：优先承运商，其次司机
+        if waybill.carrier_id:
+            payee_type, payee_ref = "carrier", waybill.carrier.name
+        elif waybill.driver_id:
+            payee_type, payee_ref = "driver", waybill.driver.name
+        else:
+            payee_type, payee_ref = "", ""
         ExpenseRecord.objects.create(
             waybill=waybill,
             direction=ExpenseRecord.DIRECTION_PAYABLE,
             expense_item_code=rule.expense_item_code,
             amount=rule.quote(weight),
+            payee_type=payee_type,
+            payee_ref=payee_ref,
             source_system="pricing",
         )
         result["payable"] = 1

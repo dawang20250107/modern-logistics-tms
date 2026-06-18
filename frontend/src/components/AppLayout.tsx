@@ -3,7 +3,9 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
 
-const NAV = [
+type NavItem = { to: string; label: string; icon: string; end: boolean; adminOnly?: boolean };
+
+const NAV: NavItem[] = [
   { to: "/", label: "控制塔", icon: "🗼", end: true },
   { to: "/intake", label: "建单", icon: "📝", end: false },
   { to: "/dispatch-board", label: "调度台", icon: "🎯", end: false },
@@ -16,6 +18,7 @@ const NAV = [
   { to: "/dashboard", label: "看板", icon: "📊", end: false },
   { to: "/catalog", label: "资产", icon: "🗂️", end: false },
   { to: "/ai", label: "AI", icon: "🤖", end: false },
+  { to: "/audit", label: "审计", icon: "🛡️", end: false, adminOnly: true },
 ];
 
 export function AppLayout() {
@@ -25,7 +28,7 @@ export function AppLayout() {
       <aside className="side">
         <div className="mark">智运</div>
         <nav className="nav">
-          {NAV.map((item) => (
+          {NAV.filter((item) => !item.adminOnly || user?.is_staff || user?.is_superuser).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

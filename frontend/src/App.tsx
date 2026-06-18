@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./auth/auth";
 import { AiWorkbenchPage } from "./pages/AiWorkbenchPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { AuditPage } from "./pages/AuditPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -42,6 +43,7 @@ export function App() {
               <Route path="reconciliation" element={<ReconciliationPage />} />
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="catalog" element={<DataCatalogPage />} />
+              <Route path="audit" element={<AuditPage />} />
               <Route path="ai" element={<AiWorkbenchPage />} />
             </Route>
           </Route>

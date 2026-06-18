@@ -24,6 +24,7 @@ urlpatterns = [
     path("api/v1/telematics/", include("apps.telematics.urls")),
     path("api/v1/analytics/", include("apps.analytics.urls")),
     path("api/v1/", include("apps.notifications.urls")),
+    path("api/v1/", include("apps.audit.urls")),
     # 实时事件流（SSE）
     path("api/v1/stream/events", event_stream, name="event-stream"),
 ]

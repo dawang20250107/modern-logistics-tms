@@ -359,3 +359,19 @@ export interface DataAsset {
   row_count?: number | null;
   fields: Array<{ name: string; type: string; help: string }>;
 }
+
+// ── 审计日志 ────────────────────────────────────────────
+export interface AuditLog {
+  id: string;
+  actor_name: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  request_id: string;
+  method: string;
+  path: string;
+  status_code: number | null;
+  ip: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}

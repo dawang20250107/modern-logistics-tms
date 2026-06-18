@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
-import type { Paginated, QueryWaybillResult, Waybill } from "../api/types";
+import type { ExpiringCredentials, Paginated, QueryWaybillResult, Waybill } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
@@ -46,6 +46,12 @@ export function ControlTowerPage() {
     refetchInterval: 30000,
   });
 
+  const compliance = useQuery({
+    queryKey: ["compliance-mini"],
+    queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30"),
+    refetchInterval: 60000,
+  });
+
   const items = waybills.data?.items ?? [];
   const risky = items.filter((w) => w.risk_level === "high" || w.risk_level === "medium");
   const pendingReceipt = items.filter((w) => w.receipt_status === "pending");
@@ -57,6 +63,7 @@ export function ControlTowerPage() {
     { label: "我认领的", value: w.dispatch.my_claimed, to: "/dispatch-board", tone: "" },
     { label: "待对账", value: w.finance.draft_statements, to: "/reconciliation", tone: "" },
     { label: "我的异常", value: w.common.my_open_exceptions, to: "/exceptions", tone: "red" },
+    { label: "证件预警", value: (compliance.data?.summary.expired ?? 0) + (compliance.data?.summary.critical ?? 0), to: "/fleet", tone: "red" },
   ].filter((t) => t.value > 0) : [];
 
   return (
@@ -64,7 +71,7 @@ export function ControlTowerPage() {
       {todos.length > 0 && (
         <div className="panel">
           <div className="panel-head">我的待办</div>
-          <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: `repeat(${Math.min(todos.length, 5)}, 1fr)` }}>
+          <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: `repeat(${Math.min(todos.length, 6)}, 1fr)` }}>
             {todos.map((t) => (
               <Link key={t.label} to={t.to} className={`kpi${t.tone ? ` kpi-${t.tone}` : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
                 <div className="kpi-value">{t.value}</div>

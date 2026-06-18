@@ -40,6 +40,14 @@ const EMPTY_FORM: FormState = {
   expected_pickup_at: "", expected_delivery_at: "", remark: "",
 };
 
+const CHANNEL_META: Record<string, { icon: string; hint: string; sourcePlaceholder: string }> = {
+  cs: { icon: "🎧", hint: "客服代客户录入完整订单，信息最全。", sourcePlaceholder: "坐席/工号" },
+  self: { icon: "🧑‍💼", hint: "客户自助提交的订单，建议核对后确认。", sourcePlaceholder: "客户账号" },
+  miniprogram: { icon: "📱", hint: "小程序下单，核对联系人与地址后确认。", sourcePlaceholder: "小程序用户" },
+  wechat_group: { icon: "💬", hint: "粘贴微信群消息到上方「AI 速录」一键解析填充。", sourcePlaceholder: "群名称" },
+  api: { icon: "🔌", hint: "开放 API/EDI 对接，系统自动接单，可在此补录。", sourcePlaceholder: "对接系统" },
+};
+
 const emptyCargo = (): OrderCargoItem => ({ name: "", quantity: "", weight_ton: "", volume_cbm: "", package_type: "", temperature_range: "", remark: "" });
 const emptyStop = (t: "pickup" | "delivery"): OrderStop => ({ stop_type: t, city: "", address: "", contact_name: "", contact_phone: "", expected_start: "", expected_end: "", cargo_note: "" });
 
@@ -177,6 +185,20 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
         <span className="ai-pill">企业级 · 多货多站</span>
       </div>
 
+      {/* 订单来源（多渠道）：选择来源驱动录单流程 */}
+      <div className="form-section">
+        <div className="section-label">订单来源</div>
+        <div className="source-tabs">
+          {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => (
+            <button key={k} type="button" className={`source-tab${form.channel === k ? " on" : ""}`} onClick={() => set("channel", k)}>
+              <span className="st-icon">{CHANNEL_META[k]?.icon ?? "📋"}</span>
+              <span>{v}</span>
+            </button>
+          ))}
+        </div>
+        <div className="muted small" style={{ marginTop: 6 }}>{CHANNEL_META[form.channel]?.hint}</div>
+      </div>
+
       {/* AI 速录 */}
       <div className="ai-box">
         <input placeholder="AI 速录：粘贴客户消息，自动填充线路/货量/电话…" value={paste} onChange={(e) => setPaste(e.target.value)} />
@@ -202,11 +224,6 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
               {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>
-          <label>渠道
-            <select value={form.channel} onChange={(e) => set("channel", e.target.value)}>
-              {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </label>
           <label>客户类型
             <select value={form.source_type} onChange={(e) => set("source_type", e.target.value)}>
               {Object.entries(SOURCE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -227,8 +244,8 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
               {Object.entries(SETTLEMENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </label>
-          <label>来源备注
-            <input value={form.source} onChange={(e) => set("source", e.target.value)} placeholder="群名/坐席" />
+          <label>来源标识
+            <input value={form.source} onChange={(e) => set("source", e.target.value)} placeholder={CHANNEL_META[form.channel]?.sourcePlaceholder ?? "来源"} />
           </label>
         </div>
       </div>

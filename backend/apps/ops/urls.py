@@ -5,6 +5,7 @@ from .views import (
     ExceptionViewSet,
     OrderTemplateViewSet,
     OrderViewSet,
+    PublicOrderIntakeView,
     PublicTrackingView,
     ReceiptViewSet,
     TrackingIngestView,
@@ -23,5 +24,6 @@ urlpatterns = [
     *router.urls,
     path("tracking/points", TrackingIngestView.as_view(), name="tracking-ingest"),
     path("track", PublicTrackingView.as_view(), name="public-track"),
+    path("public/orders", PublicOrderIntakeView.as_view(), name="public-order-intake"),
     path("workbench", WorkbenchView.as_view(), name="workbench"),
 ]

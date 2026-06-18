@@ -347,6 +347,22 @@ class OrderViewSet(viewsets.ModelViewSet):
         order = clone_order(self.get_object(), operator=request.user)
         return Response(OrderSerializer(order).data, status=201)
 
+    @action(detail=True, methods=["post"], url_path="split")
+    def split(self, request, pk=None):
+        """订单拆单：{groups:[{cargo_item_ids:[...]}, ...]} 按货物明细拆成多张子订单。"""
+        from .intake import split_order
+
+        children = split_order(self.get_object(), request.data.get("groups") or [], operator=request.user)
+        return Response(OrderSerializer(children, many=True).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="merge")
+    def merge(self, request, pk=None):
+        """订单合单：{ids:[...]} 把多张订单合并为一张。"""
+        from .intake import merge_orders
+
+        merged = merge_orders(request.data.get("ids") or [], operator=request.user)
+        return Response(OrderSerializer(merged).data, status=201)
+
     @action(detail=False, methods=["post"], url_path="quote")
     def quote(self, request):
         """录单自动报价：按客户/线路/货量估价。"""
@@ -424,8 +440,15 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="pool")
     def pool_list(self, request):
-        """订单池：在池待派订单，按优先级与进池时间排序。"""
-        qs = self.get_queryset().filter(status=Order.STATUS_POOLED).order_by("-priority", "pooled_at")
+        """订单池：在池待派(POOLED) + 调度中(DISPATCHING，已认领)订单，按优先级与进池时间排序。
+
+        包含已认领订单，避免认领后从看板消失；?mine=1 仅看自己认领的。
+        """
+        qs = self.get_queryset().filter(
+            status__in=[Order.STATUS_POOLED, Order.STATUS_DISPATCHING]
+        ).order_by("-priority", "pooled_at")
+        if request.query_params.get("mine") in ("1", "true"):
+            qs = qs.filter(claimed_by=_current_user_or_none(request))
         page = self.paginate_queryset(qs)
         ser = OrderSerializer(page if page is not None else qs, many=True)
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
@@ -450,6 +473,19 @@ class OrderViewSet(viewsets.ModelViewSet):
         from .order_dispatch import recommend_dispatch_for_order
 
         return Response(recommend_dispatch_for_order(self.get_object()))
+
+    @action(detail=False, methods=["post"], url_path="dispatch-plan")
+    def dispatch_plan(self, request):
+        """订单池批量智能排线：传 {ids:[...]}，返回每单的自有车分配建议（不落库）。"""
+        from .order_dispatch import plan_dispatch_orders
+
+        ids = request.data.get("ids") or []
+        if not ids:
+            raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
+        orders = list(
+            self.get_queryset().filter(id__in=ids, status__in=[Order.STATUS_POOLED, Order.STATUS_DISPATCHING])
+        )
+        return Response(plan_dispatch_orders(orders))
 
     @action(detail=True, methods=["post"], url_path="dispatch")
     def dispatch_order_action(self, request, pk=None):
@@ -544,7 +580,7 @@ class OrderTemplateViewSet(viewsets.ModelViewSet):
 class ExceptionViewSet(viewsets.ModelViewSet):
     queryset = ExceptionRecord.objects.select_related("waybill", "assignee").all()
     serializer_class = ExceptionSerializer
-    filterset_fields = ["exception_type", "status", "level", "source"]
+    filterset_fields = ["exception_type", "status", "level", "source", "waybill"]
     search_fields = ["exception_type", "description"]
 
     @action(detail=True, methods=["post"], url_path="assign")
@@ -727,3 +763,44 @@ class WorkbenchView(APIView):
                 "draft_statements": Statement.objects.filter(status=Statement.STATUS_DRAFT).count(),
             },
         })
+
+
+class PublicOrderIntakeView(APIView):
+    """客户自助下单（免登录）：客户填写联系/线路/货物，落待确认订单，进入客服确认队列。"""
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from .intake import create_order_from_intake
+
+        data = request.data
+        contact_phone = (data.get("contact_phone") or "").strip()
+        origin = (data.get("origin") or "").strip()
+        destination = (data.get("destination") or "").strip()
+        if not (contact_phone and origin and destination):
+            raise AppError("PUBLIC_INTAKE_REQUIRED", "联系电话、始发、目的地必填。", status=400)
+        channel = data.get("channel")
+        if channel not in (Order.CHANNEL_SELF, Order.CHANNEL_MINIPROGRAM):
+            channel = Order.CHANNEL_SELF
+        fields = {
+            "contact_name": data.get("contact_name", ""),
+            "contact_phone": contact_phone,
+            "origin": origin,
+            "destination": destination,
+            "cargo_desc": data.get("cargo_desc", ""),
+            "cargo_weight_ton": data.get("cargo_weight_ton") or 0,
+            "cargo_quantity": data.get("cargo_quantity") or 0,
+            "expected_pickup_at": data.get("expected_pickup_at") or None,
+            "remark": data.get("remark", ""),
+            "source_type": Order.SOURCE_INDIVIDUAL,
+        }
+        order = create_order_from_intake(
+            fields=fields, channel=channel, source=data.get("source", "客户自助"),
+            status=Order.STATUS_PENDING_CONFIRM,
+        )
+        return Response(
+            {"order_no": order.order_no, "status": order.status,
+             "message": "下单成功，客服将尽快与您确认。可凭订单号与手机号查询进度。"},
+            status=201,
+        )

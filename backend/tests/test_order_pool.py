@@ -106,6 +106,32 @@ def test_pool_and_claim_endpoints(admin_client):
     assert resp.status_code == 200, resp.content
     assert resp.json()["data"]["status"] == Order.STATUS_DISPATCHING
 
+    # 认领后仍在池中可见（DISPATCHING），且 mine 过滤命中
+    pool = admin_client.get("/api/v1/orders/pool")
+    assert len(pool.json()["data"]["items"]) == 1
+    mine = admin_client.get("/api/v1/orders/pool?mine=1")
+    assert len(mine.json()["data"]["items"]) == 1
+
+    # 退回订单池
+    rel = admin_client.post(f"/api/v1/orders/{oid}/release")
+    assert rel.status_code == 200, rel.content
+    assert rel.json()["data"]["status"] == Order.STATUS_POOLED
+
+
+@pytest.mark.django_db
+def test_dispatch_plan_assigns_vehicles(admin_client):
+    Vehicle.objects.create(plate_no="排线A", load_capacity_ton=20)
+    Vehicle.objects.create(plate_no="排线B", load_capacity_ton=20)
+    o1 = _pooled_order(cargo_weight_ton=15)
+    o2 = _pooled_order(cargo_weight_ton=8)
+    o3 = _pooled_order(cargo_weight_ton=5)
+    resp = admin_client.post("/api/v1/orders/dispatch-plan", {"ids": [str(o1.id), str(o2.id), str(o3.id)]}, format="json")
+    assert resp.status_code == 200, resp.content
+    data = resp.json()["data"]
+    assert data["assigned_count"] == 2  # 仅 2 辆车
+    assert data["unassigned_count"] == 1
+    assert all("vehicle" in a for a in data["assignments"])
+
 
 @pytest.mark.django_db
 def test_signing_completes_order():

@@ -13,10 +13,11 @@ import { StructuredOrderForm } from "../components/StructuredOrderForm";
 export function OrderIntakePage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState("");
+  const [channelFilter, setChannelFilter] = useState("");
   const [search, setSearch] = useState("");
-  const filterQs = `${statusFilter ? `&status=${statusFilter}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
+  const filterQs = `${statusFilter ? `&status=${statusFilter}` : ""}${channelFilter ? `&channel=${channelFilter}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
   const orders = useQuery({
-    queryKey: ["orders", statusFilter, search],
+    queryKey: ["orders", statusFilter, channelFilter, search],
     queryFn: () => apiGet<Paginated<Order>>(`/orders?page_size=50&ordering=-created_at${filterQs}`),
   });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orders"] });
@@ -29,6 +30,10 @@ export function OrderIntakePage() {
   const clone = useMutation({
     mutationFn: (id: string) => apiPost<Order>(`/orders/${id}/clone`, {}),
     onSuccess: (o) => { toast.success(`已复制为草稿：${o.order_no}`); invalidate(); },
+  });
+  const merge = useMutation({
+    mutationFn: (ids: string[]) => apiPost<Order>("/orders/merge", { ids }),
+    onSuccess: (o) => { toast.success(`已合单：${o.order_no}`); setSelected(new Set()); invalidate(); },
   });
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -133,11 +138,21 @@ export function OrderIntakePage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0 }}>
+          <span className="muted small">来源</span>
+          <button className={`chip${channelFilter === "" ? " chip-on" : ""}`} onClick={() => setChannelFilter("")}>全部</button>
+          {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => (
+            <button key={k} className={`chip${channelFilter === k ? " chip-on" : ""}`} onClick={() => setChannelFilter(k)}>{v}</button>
+          ))}
+        </div>
         {selected.size > 0 && (
           <div className="batch-bar">
             <span>已选 {selected.size} 单</span>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>批量确认</button>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>批量进池</button>
+            <button className="btn-ghost" disabled={merge.isPending || selected.size < 2} onClick={async () => {
+              if (await confirmAction({ message: `将选中的 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]);
+            }}>合单</button>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>批量取消</button>
             <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("delete")}>批量删除</button>
             <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除选择</button>

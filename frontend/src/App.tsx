@@ -7,6 +7,7 @@ import { AiWorkbenchPage } from "./pages/AiWorkbenchPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AuditPage } from "./pages/AuditPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
+import { CustomerOrderPage } from "./pages/CustomerOrderPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DataCatalogPage } from "./pages/DataCatalogPage";
@@ -30,6 +31,7 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/track" element={<TrackingPage />} />
+          <Route path="/submit" element={<CustomerOrderPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />

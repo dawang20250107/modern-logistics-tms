@@ -218,6 +218,7 @@ export interface Order {
   claimed_by_name: string;
   created_by_name: string;
   sla_status: string;
+  pooled_at: string | null;
   delivered_at: string | null;
   raw_text: string;
   parse_meta: Record<string, unknown>;
@@ -432,6 +433,7 @@ export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   finance: "财务 / 对账",
 };
 export interface Vehicle { id: string; plate_no: string; vehicle_type: string; }
+export interface Driver { id: string; name: string; phone: string; }
 
 // ── 通知 / 订单事件 ─────────────────────────────────────
 export interface Notification {
@@ -459,6 +461,7 @@ export const ORDER_EVENT_LABEL: Record<string, string> = {
   created: "建单", confirmed: "确认", pooled: "进池", claimed: "调度认领",
   dispatched: "派单", completed: "完成", cancelled: "取消", updated: "编辑",
   approval_required: "提交审批", approved: "审批通过", rejected: "审批驳回",
+  split: "拆单", merged: "合单",
 };
 export const APPROVAL_STATUS_LABEL: Record<string, string> = {
   none: "无需审批", pending: "待审批", approved: "已通过", rejected: "已驳回",

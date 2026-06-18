@@ -44,3 +44,24 @@ def test_medium_alert_no_exception():
         vehicle=vehicle, waybill=wb, triggered_at=timezone.now(),
     )
     assert ExceptionRecord.objects.filter(waybill=wb).count() == 0
+
+
+@pytest.mark.django_db
+def test_report_and_filter_exception_by_waybill():
+    from django.contrib.auth import get_user_model
+    from rest_framework.test import APIClient
+
+    get_user_model().objects.create_superuser(username="exu", password="pw-strong-123")
+    client = APIClient()
+    tok = client.post("/api/v1/auth/token", {"username": "exu", "password": "pw-strong-123"}, format="json")
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tok.json()['data']['access']}")
+    wb = Waybill.objects.create(waybill_no="EXREPORT1", route_name="r")
+
+    resp = client.post("/api/v1/exceptions", {
+        "waybill": str(wb.id), "exception_type": "transit_delay", "level": "high", "description": "高速拥堵",
+    }, format="json")
+    assert resp.status_code == 201, resp.content
+
+    lst = client.get(f"/api/v1/exceptions?waybill={wb.id}")
+    assert lst.json()["data"]["total"] == 1
+    assert lst.json()["data"]["items"][0]["exception_type"] == "transit_delay"

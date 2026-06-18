@@ -132,3 +132,39 @@ def recommend_dispatch_for_order(order) -> dict:
         "best_vehicle": vehicles[0] if vehicles else None,
         "best_carrier": quotes[0] if quotes else None,
     }
+
+
+def plan_dispatch_orders(orders) -> dict:
+    """批量智能排线：按货量从大到小，为每个订单贪心分配最紧凑适配且未占用的合规自有车。
+
+    同一车不会重复分配；无合适自有车的订单列入 unassigned（建议三方）。仅建议，不落库。
+    """
+    import uuid as _uuid
+
+    from .dispatch import available_vehicles, rank_vehicles
+
+    vehicles = list(available_vehicles())
+    used: set = set()
+    assignments, unassigned = [], []
+    ordered = sorted(orders, key=lambda o: float(o.cargo_weight_ton or 0), reverse=True)
+    for order in ordered:
+        candidates = [v for v in vehicles if v.id not in used]
+        ranked = rank_vehicles(order, candidates)
+        if ranked:
+            pick = ranked[0]
+            used.add(_uuid.UUID(pick["vehicle_id"]) if isinstance(pick["vehicle_id"], str) else pick["vehicle_id"])
+            assignments.append({
+                "order_id": str(order.id), "order_no": order.order_no,
+                "route": f"{order.origin}→{order.destination}",
+                "weight_ton": float(order.cargo_weight_ton or 0),
+                "vehicle": pick,
+            })
+        else:
+            unassigned.append({"order_id": str(order.id), "order_no": order.order_no})
+    return {
+        "assigned_count": len(assignments),
+        "unassigned_count": len(unassigned),
+        "assignments": assignments,
+        "unassigned": unassigned,
+    }
+

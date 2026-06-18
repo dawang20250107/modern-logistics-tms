@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
+import { fmtRelative } from "../api/format";
 import type { Notification, Paginated } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 
@@ -10,6 +11,17 @@ export function NotificationBell() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // 点击面板外部自动关闭
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
 
   const count = useQuery({
     queryKey: ["ntf", "count"],
@@ -37,7 +49,7 @@ export function NotificationBell() {
   const items = list.data?.items ?? [];
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative" }} ref={ref}>
       <button className="btn-ghost" onClick={() => setOpen((v) => !v)} style={{ position: "relative" }}>
         🔔
         {unread > 0 && (
@@ -74,6 +86,7 @@ export function NotificationBell() {
                       {n.level === "critical" ? "重要" : n.level === "warning" ? "提醒" : "信息"}
                     </span>
                     <b style={{ fontSize: 13 }}>{n.title}</b>
+                    <span className="small muted" style={{ marginLeft: "auto" }}>{fmtRelative(n.created_at)}</span>
                   </div>
                   {n.body && <div className="small muted" style={{ marginTop: 4 }}>{n.body}</div>}
                 </div>

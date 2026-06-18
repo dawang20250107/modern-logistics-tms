@@ -218,6 +218,7 @@ export interface Order {
   claimed_by_name: string;
   created_by_name: string;
   sla_status: string;
+  pooled_at: string | null;
   delivered_at: string | null;
   raw_text: string;
   parse_meta: Record<string, unknown>;

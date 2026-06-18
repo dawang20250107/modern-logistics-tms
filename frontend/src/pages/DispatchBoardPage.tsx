@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { EmptyState } from "../components/EmptyState";
 import type { Carrier, DispatchSuggestion, Driver, Order, Paginated, Vehicle } from "../api/types";
-import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, PRIORITY_LABEL } from "../api/types";
+import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, PRIORITY_LABEL, SLA_STATUS_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 
 export function DispatchBoardPage() {
@@ -100,19 +101,26 @@ export function DispatchBoardPage() {
           ) : (
             <table className="table">
               <thead>
-                <tr><th>订单号</th><th>来源</th><th>线路</th><th>类型</th><th>优先级</th><th>货量</th><th>认领</th><th>操作</th></tr>
+                <tr><th>订单号</th><th>来源</th><th>线路</th><th>类型</th><th>优先级</th><th>货量</th><th>等待/时效</th><th>认领</th><th>操作</th></tr>
               </thead>
               <tbody>
                 {orders.map((o) => {
                   const claimed = o.status === "dispatching";
+                  const urgent = o.sla_status === "breached" || o.sla_status === "at_risk" || o.priority === "vip";
                   return (
-                  <tr key={o.id} style={active?.id === o.id ? { background: "#f1f5fb" } : {}}>
+                  <tr key={o.id} style={active?.id === o.id ? { background: "#f1f5fb" } : urgent ? { background: "#fff7f7" } : {}}>
                     <td className="mono small">{o.order_no}</td>
                     <td className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</td>
                     <td>{o.origin} → {o.destination}</td>
                     <td>{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.is_hazardous ? " ⚠危" : ""}</td>
                     <td><span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span></td>
                     <td>{o.cargo_weight_ton}吨</td>
+                    <td className="small">
+                      {o.pooled_at && <span title="进池等待时长">⏱ {fmtRelative(o.pooled_at)}</span>}
+                      {o.sla_status && o.sla_status !== "pending" && o.sla_status !== "on_time" && (
+                        <span className={`tag tag-sla_${o.sla_status}`} style={{ marginLeft: 4 }}>{SLA_STATUS_LABEL[o.sla_status]}</span>
+                      )}
+                    </td>
                     <td className="small">{claimed ? <span className="tag tag-info">{o.claimed_by_name || "已认领"}</span> : "-"}</td>
                     <td className="row-actions">
                       {!claimed && <button className="btn-ghost" disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>认领</button>}

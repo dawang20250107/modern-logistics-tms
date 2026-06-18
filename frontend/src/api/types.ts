@@ -250,6 +250,7 @@ export const DISPATCH_TYPE_LABEL: Record<string, string> = {
 export interface ParsedOrder {
   fields: Record<string, string | number>;
   meta: { source?: string };
+  missing?: Array<{ field: string; label: string }>;
 }
 export const ORDER_CHANNEL_LABEL: Record<OrderChannel, string> = {
   cs: "客服代下",

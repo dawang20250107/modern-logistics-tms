@@ -339,7 +339,10 @@ class OrderViewSet(viewsets.ModelViewSet):
             raise AppError("INTAKE_EMPTY", "text 必填。", status=400)
         parsed = parse_order_text(text)
         meta = parsed.pop("_meta", {})
-        return Response({"fields": parsed, "meta": meta})
+        # AI 赋能客服：指出关键信息缺口，建议补全
+        important = {"origin": "始发地", "destination": "目的地", "contact_phone": "联系电话", "cargo_weight_ton": "货量"}
+        missing = [{"field": f, "label": label} for f, label in important.items() if not parsed.get(f)]
+        return Response({"fields": parsed, "meta": meta, "missing": missing})
 
     @action(detail=True, methods=["get"], url_path="timeline")
     def timeline(self, request, pk=None):

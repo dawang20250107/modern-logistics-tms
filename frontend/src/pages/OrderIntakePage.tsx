@@ -25,6 +25,7 @@ export function OrderIntakePage() {
   const [text, setText] = useState("");
   const [fields, setFields] = useState<Fields>({});
   const [parseSource, setParseSource] = useState("");
+  const [missing, setMissing] = useState<Array<{ field: string; label: string }>>([]);
 
   const orders = useQuery({
     queryKey: ["orders"],
@@ -37,6 +38,7 @@ export function OrderIntakePage() {
     onSuccess: (data) => {
       setFields(data.fields ?? {});
       setParseSource(data.meta?.source ?? "");
+      setMissing(data.missing ?? []);
     },
   });
 
@@ -119,6 +121,15 @@ export function OrderIntakePage() {
                   onChange={(e) => setFields({ ...fields, [key]: e.target.value })}
                 />
               </div>
+            ))}
+          </div>
+        )}
+
+        {missing.length > 0 && (
+          <div style={{ padding: "0 18px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className="muted small">🤖 AI 建议补充：</span>
+            {missing.map((m) => (
+              <span key={m.field} className="tag tag-medium">{m.label}</span>
             ))}
           </div>
         )}

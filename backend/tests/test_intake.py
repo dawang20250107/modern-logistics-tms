@@ -84,3 +84,11 @@ def test_parse_preview_endpoint(admin_client):
     body = resp.json()["data"]
     assert body["fields"]["origin"] == "成都"
     assert body["meta"]["source"] == "rule"
+
+
+@pytest.mark.django_db
+def test_parse_preview_flags_missing_fields(admin_client):
+    # 只给始发+货量，缺目的地与电话 → AI 提示补充
+    resp = admin_client.post("/api/v1/orders/parse-preview", {"text": "上海 10吨"}, format="json")
+    labels = {m["label"] for m in resp.json()["data"]["missing"]}
+    assert "联系电话" in labels

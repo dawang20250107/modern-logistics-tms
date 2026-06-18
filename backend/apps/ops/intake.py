@@ -16,6 +16,9 @@ from .models import Order, OrderEvent, Waybill
 from .numbering import order_no as gen_order_no
 from .numbering import waybill_no as gen_waybill_no
 
+# 单次批量操作上限，避免误传超大列表拖垮请求（交付级输入边界防护）
+MAX_BATCH_SIZE = 500
+
 
 def record_order_event(order, event_type, *, actor=None, from_status="", to_status="", source="system", **payload):
     """记录订单事件（溯源）。actor 仅在已认证时落库。"""
@@ -174,6 +177,8 @@ def import_orders(rows: list, *, channel: str = Order.CHANNEL_CS, source: str = 
     """批量建单：每行一个结构化 fields，逐行建单，失败隔离并返回逐行结果。"""
     if not isinstance(rows, list) or not rows:
         raise AppError("IMPORT_EMPTY", "rows 必须是非空数组。", status=400)
+    if len(rows) > MAX_BATCH_SIZE:
+        raise AppError("BATCH_TOO_LARGE", f"单次最多导入 {MAX_BATCH_SIZE} 行，请分批。", status=400)
     ok, failed = [], []
     for idx, row in enumerate(rows):
         if not isinstance(row, dict):
@@ -248,6 +253,8 @@ def batch_orders(action: str, ids: list, *, operator=None) -> dict:
     handler = handlers.get(action)
     if handler is None:
         raise AppError("INVALID_BATCH_ACTION", f"不支持的操作：{action}", status=400)
+    if len(ids) > MAX_BATCH_SIZE:
+        raise AppError("BATCH_TOO_LARGE", f"单次最多操作 {MAX_BATCH_SIZE} 单，请分批。", status=400)
     ok, failed = [], []
     for order in Order.objects.filter(id__in=ids):
         try:

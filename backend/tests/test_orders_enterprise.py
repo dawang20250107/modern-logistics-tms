@@ -92,3 +92,18 @@ def test_batch_endpoint(admin_client):
     resp = admin_client.post("/api/v1/orders/batch", {"action": "confirm", "ids": ids}, format="json")
     assert resp.status_code == 200, resp.content
     assert resp.json()["data"]["ok_count"] == 2
+
+
+@pytest.mark.django_db
+def test_batch_rejects_oversized_input():
+    from apps.core.exceptions import AppError
+    from apps.ops.intake import MAX_BATCH_SIZE, batch_orders, import_orders
+
+    too_many = [str(i) for i in range(MAX_BATCH_SIZE + 1)]
+    with pytest.raises(AppError) as exc:
+        batch_orders("confirm", too_many)
+    assert exc.value.code == "BATCH_TOO_LARGE"
+
+    with pytest.raises(AppError) as exc2:
+        import_orders([{"origin": "A", "destination": "B"}] * (MAX_BATCH_SIZE + 1))
+    assert exc2.value.code == "BATCH_TOO_LARGE"

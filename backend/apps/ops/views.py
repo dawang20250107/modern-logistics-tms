@@ -2,12 +2,12 @@ import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -29,7 +29,7 @@ from .serializers import (
     WaybillSerializer,
     WaybillWriteSerializer,
 )
-from .services import transition_waybill
+from .services import merge_waybills, sign_waybill, split_waybill, transition_waybill
 from .tasks import TRACKING_QUEUE, flush_tracking_points, process_receipt_ocr
 
 
@@ -65,6 +65,11 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         "tracking": "waybill.view",
         "gen_costs": "waybill.manage",
         "events": "waybill.manage",
+        "split": "waybill.manage",
+        "merge": "waybill.manage",
+        "dispatch_recommendation": "waybill.view",
+        "dispatch_plan": "waybill.view",
+        "sign": "waybill.manage",
     }
     lookup_field = "waybill_no"
     lookup_value_regex = "[^/]+"
@@ -151,6 +156,22 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         transition_waybill(waybill, to_status, operator=request.user, remark=request.data.get("remark", ""))
         return Response(WaybillDetailSerializer(waybill).data)
 
+    @action(detail=True, methods=["post"], url_path="sign")
+    def sign(self, request, waybill_no=None):
+        """司机/客户签收回传（e-POD）：电子签名 + 回单，推进到已签收并触发订单完成。"""
+        waybill = self.get_object()
+        receipt = sign_waybill(
+            waybill,
+            signatory=request.data.get("signatory", ""),
+            signature=request.data.get("signature", ""),
+            file_url=request.data.get("file_url", ""),
+            sign_source=request.data.get("sign_source", "driver"),
+            operator=request.user,
+        )
+        from .serializers import ReceiptSerializer
+
+        return Response({"waybill_no": waybill.waybill_no, "status": waybill.status, "receipt": ReceiptSerializer(receipt).data}, status=201)
+
     @action(detail=True, methods=["get"], url_path="tracking")
     def tracking(self, request, waybill_no=None):
         waybill = self.get_object()
@@ -163,13 +184,204 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         result = generate_costs(waybill)
         return Response({"waybill_no": waybill.waybill_no, "generated": result})
 
+    @action(detail=True, methods=["post"], url_path="split")
+    def split(self, request, waybill_no=None):
+        waybill = self.get_object()
+        splits = request.data.get("splits") or []
+        children = split_waybill(waybill, splits, operator=request.user)
+        return Response({"parent": waybill.waybill_no, "children": WaybillSerializer(children, many=True).data}, status=201)
+
+    @action(detail=True, methods=["get"], url_path="dispatch-recommendation")
+    def dispatch_recommendation(self, request, waybill_no=None):
+        from .dispatch import recommend_dispatch
+
+        waybill = self.get_object()
+        return Response(recommend_dispatch(waybill))
+
+    @action(detail=False, methods=["post"], url_path="dispatch-plan")
+    def dispatch_plan(self, request):
+        from .dispatch import plan_dispatch
+
+        nos = request.data.get("waybill_nos") or []
+        if nos:
+            waybills = list(self.get_queryset().filter(waybill_no__in=nos))
+        else:
+            waybills = list(self.get_queryset().filter(status=Waybill.STATUS_PENDING_DISPATCH)[:200])
+        return Response(plan_dispatch(waybills))
+
+    @action(detail=False, methods=["post"], url_path="merge")
+    def merge(self, request):
+        nos = request.data.get("waybill_nos") or []
+        if len(nos) < 2:
+            raise AppError("INVALID_MERGE", "waybill_nos 至少 2 个。", status=400)
+        waybills = list(self.get_queryset().filter(waybill_no__in=nos))
+        if len(waybills) != len(set(nos)):
+            raise AppError("WAYBILL_NOT_FOUND", "部分运单不存在或无权限。", status=404)
+        merged = merge_waybills(waybills, operator=request.user, route_name=request.data.get("route_name", ""))
+        return Response(WaybillSerializer(merged).data, status=201)
+
 
 class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.select_related("customer").all()
+    queryset = (
+        Order.objects.select_related("customer", "created_by", "claimed_by")
+        .prefetch_related("waybills")
+        .all()
+    )
     serializer_class = OrderSerializer
-    filterset_fields = ["status"]
-    search_fields = ["order_no", "remark"]
-    ordering_fields = ["created_at", "order_no"]
+    filterset_fields = ["status", "channel", "source_type", "business_type", "priority"]
+    search_fields = ["order_no", "remark", "contact_phone", "origin", "destination"]
+    ordering_fields = ["created_at", "order_no", "priority"]
+
+    @action(detail=False, methods=["post"], url_path="intake")
+    def intake(self, request):
+        """多渠道建单入口：传 text(自然语言/微信群) 或 fields(结构化)。"""
+        from .intake import create_order_from_intake
+
+        text = (request.data.get("text") or "").strip()
+        fields = request.data.get("fields")
+        if not text and not fields:
+            raise AppError("INTAKE_EMPTY", "text 或 fields 至少其一。", status=400)
+        order = create_order_from_intake(
+            text=text,
+            fields=fields,
+            channel=request.data.get("channel", Order.CHANNEL_CS),
+            source=request.data.get("source", ""),
+            operator=request.user,
+        )
+        return Response(OrderSerializer(order).data, status=201)
+
+    @action(detail=True, methods=["post"], url_path="pool")
+    def pool(self, request, pk=None):
+        from .intake import pool_order
+
+        return Response(OrderSerializer(pool_order(self.get_object(), operator=request.user)).data)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        from .intake import cancel_order
+
+        return Response(OrderSerializer(cancel_order(self.get_object(), operator=request.user)).data)
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_rows(self, request):
+        """批量建单：{rows: [{origin, destination, ...}], channel}。"""
+        from .intake import import_orders
+
+        result = import_orders(
+            request.data.get("rows") or [],
+            channel=request.data.get("channel", Order.CHANNEL_CS),
+            source=request.data.get("source", ""),
+            operator=request.user,
+        )
+        return Response(result, status=201)
+
+    @action(detail=False, methods=["post"], url_path="batch")
+    def batch(self, request):
+        """批量操作：{action: confirm|pool|cancel|delete, ids: [...]}。"""
+        from .intake import batch_orders
+
+        action_name = request.data.get("action")
+        ids = request.data.get("ids") or []
+        if not ids:
+            raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
+        return Response(batch_orders(action_name, ids, operator=request.user))
+
+    @action(detail=False, methods=["get"], url_path="pool")
+    def pool_list(self, request):
+        """订单池：在池待派订单，按优先级与进池时间排序。"""
+        qs = self.get_queryset().filter(status=Order.STATUS_POOLED).order_by("-priority", "pooled_at")
+        page = self.paginate_queryset(qs)
+        ser = OrderSerializer(page if page is not None else qs, many=True)
+        return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
+
+    @action(detail=True, methods=["post"], url_path="claim")
+    def claim(self, request, pk=None):
+        """调度认领（并发安全，行锁防抢单）。"""
+        from .order_dispatch import claim_order
+
+        order = claim_order(pk, request.user)
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="release")
+    def release(self, request, pk=None):
+        from .order_dispatch import release_order
+
+        return Response(OrderSerializer(release_order(self.get_object(), request.user)).data)
+
+    @action(detail=True, methods=["get"], url_path="dispatch-suggestion")
+    def dispatch_suggestion(self, request, pk=None):
+        """AI 派单建议：运力候选 + 承运商比价 + 外部信号 + 派单类型建议。"""
+        from .order_dispatch import recommend_dispatch_for_order
+
+        return Response(recommend_dispatch_for_order(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="dispatch")
+    def dispatch_order_action(self, request, pk=None):
+        """派单：指派承运商/车辆/司机 + 派单类型，生成运单。"""
+        from apps.masterdata.models import Carrier, Driver, Vehicle
+
+        from .order_dispatch import dispatch_order
+
+        order = self.get_object()
+        data = request.data
+        carrier = Carrier.objects.filter(id=data["carrier"]).first() if data.get("carrier") else None
+        vehicle = Vehicle.objects.filter(id=data["vehicle"]).first() if data.get("vehicle") else None
+        driver = Driver.objects.filter(id=data["driver"]).first() if data.get("driver") else None
+        waybill = dispatch_order(
+            order, dispatch_type=data.get("dispatch_type", ""), carrier=carrier,
+            vehicle=vehicle, driver=driver, operator=request.user,
+        )
+        return Response(WaybillSerializer(waybill).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="parse-preview")
+    def parse_preview(self, request):
+        """仅解析预览，不落库（供前端 AI 建单先看结果再确认）。"""
+        from .intake import find_duplicate_orders, parse_order_text
+
+        text = (request.data.get("text") or "").strip()
+        if not text:
+            raise AppError("INTAKE_EMPTY", "text 必填。", status=400)
+        parsed = parse_order_text(text)
+        meta = parsed.pop("_meta", {})
+        # AI 赋能客服：指出关键信息缺口，建议补全
+        important = {"origin": "始发地", "destination": "目的地", "contact_phone": "联系电话", "cargo_weight_ton": "货量"}
+        missing = [{"field": f, "label": label} for f, label in important.items() if not parsed.get(f)]
+        # AI 赋能客服：近 24h 同电话/同线路查重，防重复下单
+        dups = find_duplicate_orders(
+            contact_phone=parsed.get("contact_phone", ""),
+            origin=parsed.get("origin", ""),
+            destination=parsed.get("destination", ""),
+        )
+        duplicates = [
+            {
+                "id": str(o.id), "order_no": o.order_no, "status": o.status,
+                "origin": o.origin, "destination": o.destination,
+                "contact_phone": o.contact_phone, "created_at": o.created_at.isoformat(),
+            }
+            for o in dups
+        ]
+        return Response({"fields": parsed, "meta": meta, "missing": missing, "duplicates": duplicates})
+
+    @action(detail=True, methods=["get"], url_path="timeline")
+    def timeline(self, request, pk=None):
+        """订单全生命周期事件时间线。"""
+        from .serializers import OrderEventSerializer
+
+        order = self.get_object()
+        return Response(OrderEventSerializer(order.events.select_related("actor").all(), many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="confirm")
+    def confirm(self, request, pk=None):
+        from .intake import confirm_order
+
+        return Response(OrderSerializer(confirm_order(self.get_object(), operator=request.user)).data)
+
+    @action(detail=True, methods=["post"], url_path="convert")
+    def convert(self, request, pk=None):
+        from .intake import convert_order_to_waybill
+
+        waybill = convert_order_to_waybill(self.get_object(), operator=request.user)
+        return Response(WaybillSerializer(waybill).data, status=201)
 
 
 class ExceptionViewSet(viewsets.ModelViewSet):
@@ -259,3 +471,102 @@ class TrackingIngestView(APIView):
         if queued:
             flush_tracking_points.delay()
         return Response({"queued": queued, "status": "queued_for_async_persist"}, status=202)
+
+
+class PublicTrackingView(APIView):
+    """客户自助订单跟踪（免登录）：订单号 + 手机号验证，返回脱敏进度。"""
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    @staticmethod
+    def _phone_ok(order, phone):
+        if not phone:
+            return False
+        for cand in (order.contact_phone, order.pickup_contact_phone, order.delivery_contact_phone):
+            if cand and (cand == phone or (len(phone) >= 4 and cand.endswith(phone))):
+                return True
+        return False
+
+    def get(self, request):
+        order_no = (request.query_params.get("order_no") or "").strip()
+        phone = (request.query_params.get("phone") or "").strip()
+        if not order_no or not phone:
+            raise AppError("TRACK_PARAMS", "order_no 与 phone 必填。", status=400)
+        order = Order.objects.filter(order_no=order_no).first()
+        if order is None or not self._phone_ok(order, phone):
+            raise AppError("TRACK_NOT_FOUND", "未找到匹配的订单，请核对订单号与手机号。", status=404)
+
+        milestones = [
+            {"event": e.event_type, "time": e.event_time.isoformat()}
+            for e in order.events.all()
+            if e.event_type in {"created", "confirmed", "pooled", "dispatched", "completed"}
+        ]
+        shipment = None
+        waybill = order.waybills.order_by("-created_at").first()
+        if waybill is not None:
+            position = None
+            if waybill.vehicle_id:
+                from apps.telematics.models import VehicleState
+
+                state = VehicleState.objects.filter(vehicle_id=waybill.vehicle_id).first()
+                if state and state.reported_at:
+                    position = {"lat": float(state.lat), "lng": float(state.lng), "at": state.reported_at.isoformat()}
+            shipment = {
+                "waybill_no": waybill.waybill_no,
+                "status": waybill.get_status_display(),
+                "estimated_arrival": waybill.estimated_arrival.isoformat() if waybill.estimated_arrival else None,
+                "receipt_status": waybill.receipt_status,
+                "position": position,
+            }
+        return Response({
+            "order_no": order.order_no,
+            "status": dict(Order.STATUS_CHOICES).get(order.status, order.status),
+            "business_type": order.get_business_type_display(),
+            "origin": order.origin,
+            "destination": order.destination,
+            "created_at": order.created_at.isoformat(),
+            "milestones": milestones,
+            "shipment": shipment,
+        })
+
+
+class WorkbenchView(APIView):
+    """个人工作台「我的待办」：按角色聚合当前用户最该处理的事项。"""
+
+    def get(self, request):
+        from django.utils import timezone
+
+        from apps.finance.models import Statement
+        from apps.notifications.models import Notification
+
+        user = request.user
+        today = timezone.localdate()
+        open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
+
+        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills").filter(
+            created_by=user, status=Order.STATUS_PENDING_CONFIRM
+        )
+        pool = Order.objects.filter(status=Order.STATUS_POOLED)
+        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills").filter(
+            status=Order.STATUS_POOLED
+        ).order_by("-priority", "pooled_at")[:5]
+        return Response({
+            "common": {
+                "unread_notifications": Notification.objects.filter(recipient=user, is_read=False).count(),
+                "my_open_exceptions": ExceptionRecord.objects.filter(open_exc, assignee=user).count(),
+            },
+            "cs": {
+                "my_orders_pending_confirm": my_pending.count(),
+                "my_orders_today": Order.objects.filter(created_by=user, created_at__date=today).count(),
+                "recent_pending": OrderSerializer(my_pending.order_by("-created_at")[:5], many=True).data,
+            },
+            "dispatch": {
+                "pool_count": pool.count(),
+                "my_claimed": Order.objects.filter(claimed_by=user, status=Order.STATUS_DISPATCHING).count(),
+                "pool_top": OrderSerializer(pool_serialized, many=True).data,
+            },
+            "finance": {
+                "draft_statements": Statement.objects.filter(status=Statement.STATUS_DRAFT).count(),
+            },
+        })

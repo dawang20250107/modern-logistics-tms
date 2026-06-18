@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action, api_view
@@ -70,6 +71,38 @@ class AgentToolExecuteView(APIView):
             status_code=200,
             payload={"arguments": arguments, "risk_detected": result.get("risk_detected")},
         )
+
+
+class AgentChatView(APIView):
+    """LangGraph ReAct Agent 同步问答：自动编排工具，返回答复 + 工具轨迹 + 待确认建议。"""
+
+    def post(self, request):
+        from .services.agent_runner import run_agent
+
+        message = (request.data.get("message") or "").strip()
+        if not message:
+            raise AppError("MESSAGE_REQUIRED", "message 必填。", status=400)
+        thread_id = request.data.get("thread_id") or None
+        result = run_agent(message, thread_id)
+        return Response(result)
+
+
+class AgentStreamView(APIView):
+    """LangGraph Agent 流式问答（SSE）：逐段 token + 工具执行事件，对接实时信息流。"""
+
+    def post(self, request):
+        from .services.agent_runner import stream_agent
+
+        message = (request.data.get("message") or "").strip()
+        if not message:
+            raise AppError("MESSAGE_REQUIRED", "message 必填。", status=400)
+        thread_id = request.data.get("thread_id") or None
+        response = StreamingHttpResponse(
+            stream_agent(message, thread_id), content_type="text/event-stream"
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
 
 
 @api_view(["POST"])

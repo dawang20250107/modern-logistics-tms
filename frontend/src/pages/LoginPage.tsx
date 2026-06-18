@@ -33,8 +33,8 @@ export function LoginPage() {
   return (
     <div className="center-screen">
       <form className="login-card" onSubmit={onSubmit}>
-        <div className="login-brand">现代化物流 TMS</div>
-        <div className="login-sub">控制塔 · 执行引擎 · AI 工作台</div>
+        <div className="login-brand">智运 <span className="accent">AI 物流中台</span></div>
+        <div className="login-sub">TMS · CRM · ERP · 调度指挥中心 · 全程 AI</div>
         <label className="field">
           <span>用户名</span>
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />

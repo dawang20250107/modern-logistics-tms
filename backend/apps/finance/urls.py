@@ -2,11 +2,13 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AgingView,
     ExpenseItemViewSet,
     ExpenseRecordViewSet,
     PaymentRequestViewSet,
     PaymentResultView,
     PricingRuleViewSet,
+    StatementViewSet,
     WebhookDeliveryViewSet,
     WebhookViewSet,
 )
@@ -18,8 +20,10 @@ router.register("payment-requests", PaymentRequestViewSet, basename="payment-req
 router.register("pricing-rules", PricingRuleViewSet, basename="pricing-rule")
 router.register("webhooks", WebhookViewSet, basename="webhook")
 router.register("webhook-deliveries", WebhookDeliveryViewSet, basename="webhook-delivery")
+router.register("statements", StatementViewSet, basename="statement")
 
 urlpatterns = [
     *router.urls,
     path("payment-results", PaymentResultView.as_view(), name="payment-results"),
+    path("aging", AgingView.as_view(), name="aging"),
 ]

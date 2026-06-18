@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Carrier, Customer, Driver, Vehicle
+from .models import Carrier, Customer, Driver, Route, Vehicle
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -20,7 +20,12 @@ class VehicleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Vehicle
-        fields = ["id", "plate_no", "vehicle_type", "ownership_type", "carrier", "carrier_name", "is_active"]
+        fields = [
+            "id", "plate_no", "vehicle_type", "ownership_type", "carrier", "carrier_name",
+            "load_capacity_ton", "volume_capacity_cbm",
+            "road_transport_cert_no", "inspection_expiry", "insurance_expiry", "maintenance_due_date",
+            "is_active",
+        ]
 
 
 class DriverSerializer(serializers.ModelSerializer):
@@ -28,4 +33,16 @@ class DriverSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Driver
-        fields = ["id", "name", "phone", "id_no", "license_no", "carrier", "carrier_name", "is_active"]
+        fields = [
+            "id", "name", "phone", "id_no", "license_no", "license_type", "license_expiry",
+            "qualification_cert_no", "qualification_expiry", "carrier", "carrier_name", "is_active",
+        ]
+
+
+class RouteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Route
+        fields = [
+            "id", "code", "name", "origin", "destination", "waypoints",
+            "corridor_m", "distance_km", "is_active",
+        ]

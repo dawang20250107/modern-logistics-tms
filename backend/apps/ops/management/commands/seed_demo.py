@@ -48,10 +48,12 @@ class Command(BaseCommand):
         self._seed_rbac()
 
         vehicle_1, _ = Vehicle.objects.update_or_create(
-            plate_no="川A****1", defaults={"vehicle_type": "17.5m", "carrier": carrier}
+            plate_no="川A****1",
+            defaults={"vehicle_type": "17.5m", "carrier": carrier, "load_capacity_ton": 32, "volume_capacity_cbm": 120},
         )
         vehicle_2, _ = Vehicle.objects.update_or_create(
-            plate_no="沪B****2", defaults={"vehicle_type": "冷链", "carrier": carrier}
+            plate_no="沪B****2",
+            defaults={"vehicle_type": "冷链", "carrier": carrier, "load_capacity_ton": 10, "volume_capacity_cbm": 40},
         )
         driver_1, _ = Driver.objects.update_or_create(
             phone="13800000001", defaults={"name": "示例司机A", "carrier": carrier}
@@ -111,8 +113,36 @@ class Command(BaseCommand):
             seeded.append(waybill)
             self._refresh_related(waybill)
 
+        self._seed_metric_history()
+
         self.stdout.write(self.style.SUCCESS(f"Seeded {len(seeded)} waybills."))
-        self.stdout.write("Demo 用户：dispatcher/Dispatch123!（上海网点，可管运单）、viewer/Viewer123!（只读）。")
+        self.stdout.write(
+            "Demo 用户：admin/Admin12345!（超管）、dispatcher/Dispatch123!（上海网点，可管运单）、viewer/Viewer123!（只读）。"
+        )
+
+    def _seed_metric_history(self):
+        """播种近 14 天指标历史，让经营看板趋势 sparkline 有曲线（演示用）。"""
+        import math
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.analytics.models import MetricSnapshot
+
+        samples = {
+            "ops.waybill_count": (40, 12),
+            "order.count": (55, 16),
+            "fleet.alert_count": (8, 5),
+            "finance.receivable_total": (120000, 30000),
+        }
+        today = timezone.localdate()
+        for code, (base, amp) in samples.items():
+            for i in range(14):
+                day = today - timedelta(days=13 - i)
+                value = round(base + amp * math.sin(i / 2.0) + (i * base * 0.02), 2)
+                MetricSnapshot.objects.update_or_create(
+                    metric_code=code, stat_date=day, dimension_key="", defaults={"value": value}
+                )
 
     def _seed_rbac(self):
         user_model = get_user_model()
@@ -148,6 +178,9 @@ class Command(BaseCommand):
         )
         viewer_role.permissions.set([perms["waybill.view"]])
 
+        # 超管账号（与 README 文档一致）
+        self._ensure_user(user_model, "admin", "Admin12345!", group, "系统管理员", is_superuser=True)
+
         # 演示用户（非超管，用于演示权限点与数据域）
         dispatcher = self._ensure_user(user_model, "dispatcher", "Dispatch123!", self.org_sh, "上海调度")
         viewer = self._ensure_user(user_model, "viewer", "Viewer123!", self.org_sh, "只读用户")
@@ -155,7 +188,7 @@ class Command(BaseCommand):
         RoleAssignment.objects.update_or_create(user=viewer, role=viewer_role, organization=self.org_sh)
 
     @staticmethod
-    def _ensure_user(user_model, username, password, org, nickname=""):
+    def _ensure_user(user_model, username, password, org, nickname="", is_superuser=False):
         user, created = user_model.objects.get_or_create(
             username=username, defaults={"nickname": nickname, "organization": org}
         )
@@ -165,6 +198,10 @@ class Command(BaseCommand):
             changed = True
         if created:
             user.set_password(password)
+            changed = True
+        if is_superuser and not (user.is_superuser and user.is_staff):
+            user.is_superuser = True
+            user.is_staff = True
             changed = True
         if changed:
             user.save()

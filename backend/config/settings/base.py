@@ -48,6 +48,9 @@ LOCAL_APPS = [
     "apps.ops",
     "apps.finance",
     "apps.ai",
+    "apps.telematics",
+    "apps.analytics",
+    "apps.notifications",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -185,6 +188,10 @@ CELERY_BEAT_SCHEDULE = {
     "flush-tracking-points": {"task": "ops.flush_tracking_points", "schedule": 5.0},
     "scan-eta-risks": {"task": "ops.scan_eta_risks", "schedule": 60.0},
     "scan-receipt-reminders": {"task": "ops.scan_receipt_reminders", "schedule": 120.0},
+    "scan-sla-breaches": {"task": "ops.scan_sla_breaches", "schedule": 300.0},
+    "flush-telemetry": {"task": "telematics.flush_telemetry", "schedule": 5.0},
+    "scan-offline-devices": {"task": "telematics.scan_offline_devices", "schedule": 60.0},
+    "materialize-metrics": {"task": "analytics.materialize_metrics", "schedule": 3600.0},
 }
 
 # ── CORS ────────────────────────────────────────────────
@@ -244,3 +251,31 @@ DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY", default="")
 DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", default="https://api.deepseek.com")
 DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", default="deepseek-v4-pro")
 DEEPSEEK_TIMEOUT_SECONDS = env.int("DEEPSEEK_TIMEOUT_SECONDS", default=60)
+
+# ── LangGraph Agent ─────────────────────────────────────
+# ReAct 编排：DeepSeek（OpenAI 兼容）作为 LLM，状态持久化到 Postgres（checkpointer）。
+AGENT_LLM_TEMPERATURE = env.float("AGENT_LLM_TEMPERATURE", default=0.2)
+AGENT_MAX_TOOL_LOOPS = env.int("AGENT_MAX_TOOL_LOOPS", default=8)
+# checkpointer 连接池（复用主库 DATABASE_URL；空则回退内存 saver，仅供无 PG 的本地/测试）
+AGENT_CHECKPOINT_ENABLED = env.bool("AGENT_CHECKPOINT_ENABLED", default=True)
+AGENT_CHECKPOINT_POOL_MAX = env.int("AGENT_CHECKPOINT_POOL_MAX", default=10)
+# 外部 MCP server 连接表（JSON），用于后期接入大量 API/MCP 工具；空则不加载。
+# 例：{"weather": {"url": "http://mcp:8000/mcp", "transport": "streamable_http"}}
+AGENT_MCP_SERVERS = env.json("AGENT_MCP_SERVERS", default={})
+
+# ── 车联网 / 报警阈值 ───────────────────────────────────
+ALERT_SPEED_LIMIT_KMH = env.float("ALERT_SPEED_LIMIT_KMH", default=90.0)
+ALERT_SPEED_HIGH_MARGIN = env.float("ALERT_SPEED_HIGH_MARGIN", default=20.0)  # 超限速 +N 判高危
+ALERT_TEMP_MIN_C = env.float("ALERT_TEMP_MIN_C", default=-18.0)  # 冷链允许温区下限
+ALERT_TEMP_MAX_C = env.float("ALERT_TEMP_MAX_C", default=8.0)  # 上限
+ALERT_FUEL_LOW_PCT = env.float("ALERT_FUEL_LOW_PCT", default=15.0)  # 低油量阈值
+ALERT_DEDUP_MINUTES = env.int("ALERT_DEDUP_MINUTES", default=15)  # 同车同类型报警去重窗口
+DEVICE_OFFLINE_MINUTES = env.int("DEVICE_OFFLINE_MINUTES", default=10)  # 超时未上报判离线
+AMAP_KEY = env("AMAP_KEY", default="")  # 高德地图 Web/JS API Key（前端实时地图用）
+
+# ── IoT 终端网关（MQTT）─────────────────────────────────
+MQTT_HOST = env("MQTT_HOST", default="mqtt")
+MQTT_PORT = env.int("MQTT_PORT", default=1883)
+MQTT_TOPIC = env("MQTT_TOPIC", default="tms/telemetry/#")
+MQTT_USERNAME = env("MQTT_USERNAME", default="")
+MQTT_PASSWORD = env("MQTT_PASSWORD", default="")

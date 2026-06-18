@@ -6,27 +6,193 @@
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
-from apps.core.models import BaseModel, OrgScopedModel
+from apps.core.models import BaseModel, OrgScopedModel, SoftDeleteModel
 
 
-class Order(BaseModel):
+class NumberCounter(models.Model):
+    """单据号原子计数器（按 scope 维度，配合 select_for_update 保证并发唯一）。"""
+
+    scope = models.CharField(max_length=64, unique=True)
+    value = models.BigIntegerField(default=0)
+
+    class Meta:
+        db_table = "ops_number_counter"
+
+    def __str__(self) -> str:
+        return f"{self.scope}={self.value}"
+
+
+class Order(BaseModel, SoftDeleteModel):
+    # 建单渠道（多渠道统一入口）
+    CHANNEL_CS = "cs"
+    CHANNEL_SELF = "self"
+    CHANNEL_MINIPROGRAM = "miniprogram"
+    CHANNEL_WECHAT_GROUP = "wechat_group"
+    CHANNEL_API = "api"
+    CHANNEL_CHOICES = [
+        (CHANNEL_CS, "客服代下"),
+        (CHANNEL_SELF, "客户自助"),
+        (CHANNEL_MINIPROGRAM, "小程序"),
+        (CHANNEL_WECHAT_GROUP, "微信群"),
+        (CHANNEL_API, "开放API"),
+    ]
+
+    # 客户来源类型
+    SOURCE_INDIVIDUAL = "individual"
+    SOURCE_ENTERPRISE = "enterprise"
+    SOURCE_GOVERNMENT = "government"
+    SOURCE_TYPE_CHOICES = [
+        (SOURCE_INDIVIDUAL, "个人"),
+        (SOURCE_ENTERPRISE, "企业"),
+        (SOURCE_GOVERNMENT, "政府"),
+    ]
+
+    # 业务类型
+    BIZ_FTL = "ftl"
+    BIZ_LTL = "ltl"
+    BIZ_EXPRESS = "express"
+    BIZ_COLDCHAIN = "coldchain"
+    BUSINESS_TYPE_CHOICES = [
+        (BIZ_FTL, "整车"),
+        (BIZ_LTL, "零担"),
+        (BIZ_EXPRESS, "快递"),
+        (BIZ_COLDCHAIN, "冷链"),
+    ]
+
+    PRIORITY_CHOICES = [("normal", "普通"), ("urgent", "加急"), ("vip", "VIP")]
+    SETTLEMENT_CHOICES = [("monthly", "月结"), ("cash", "现结"), ("prepaid", "预付")]
+
+    # 订单生命周期：建单→确认→进池→（调度认领）→派单转运单→完成→对账
+    STATUS_DRAFT = "draft"
+    STATUS_PENDING_CONFIRM = "pending_confirm"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_POOLED = "pooled"
+    STATUS_DISPATCHING = "dispatching"
+    STATUS_CONVERTED = "converted"  # 已派单（已转运单）
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "草稿"),
+        (STATUS_PENDING_CONFIRM, "待确认"),
+        (STATUS_CONFIRMED, "已确认"),
+        (STATUS_POOLED, "订单池"),
+        (STATUS_DISPATCHING, "调度中"),
+        (STATUS_CONVERTED, "已派单"),
+        (STATUS_COMPLETED, "已完成"),
+        (STATUS_CANCELLED, "已取消"),
+    ]
+
     order_no = models.CharField(max_length=40, unique=True)
     customer = models.ForeignKey(
         "masterdata.Customer", null=True, blank=True, on_delete=models.SET_NULL, related_name="orders"
     )
-    source = models.CharField(max_length=32, blank=True)
-    status = models.CharField(max_length=32, default="open")
+    channel = models.CharField(max_length=24, choices=CHANNEL_CHOICES, default=CHANNEL_CS, db_index=True)
+    source = models.CharField(max_length=32, blank=True, help_text="渠道内来源标识，如群名/坐席")
+    source_type = models.CharField(max_length=16, choices=SOURCE_TYPE_CHOICES, default=SOURCE_ENTERPRISE)
+    business_type = models.CharField(max_length=16, choices=BUSINESS_TYPE_CHOICES, default=BIZ_FTL)
+    priority = models.CharField(max_length=16, choices=PRIORITY_CHOICES, default="normal")
+    settlement_type = models.CharField(max_length=16, choices=SETTLEMENT_CHOICES, default="monthly")
+    status = models.CharField(max_length=32, default=STATUS_PENDING_CONFIRM, db_index=True)
+
+    # 联系人（兼容旧字段：通用联系人 = 发货联系人）
+    contact_name = models.CharField(max_length=64, blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+
+    # 收发货（城市级 origin/destination 兼容既有；新增详细地址与两端联系人）
+    origin = models.CharField(max_length=120, blank=True)
+    destination = models.CharField(max_length=120, blank=True)
+    pickup_address = models.CharField(max_length=255, blank=True)
+    pickup_contact_name = models.CharField(max_length=64, blank=True)
+    pickup_contact_phone = models.CharField(max_length=32, blank=True)
+    delivery_address = models.CharField(max_length=255, blank=True)
+    delivery_contact_name = models.CharField(max_length=64, blank=True)
+    delivery_contact_phone = models.CharField(max_length=32, blank=True)
+
+    # 货物
+    cargo_desc = models.CharField(max_length=255, blank=True)
+    cargo_quantity = models.IntegerField(default=0)
+    cargo_weight_ton = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cargo_volume_cbm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cargo_value = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="货值（保险/风控）")
+    package_type = models.CharField(max_length=32, blank=True)
+    is_hazardous = models.BooleanField(default=False)
+    temperature_range = models.CharField(max_length=32, blank=True, help_text="冷链温区，如 -18~0")
+
+    # 报价（运营，不做利润看板）
+    quoted_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    expected_pickup_at = models.DateTimeField(null=True, blank=True)
+    expected_delivery_at = models.DateTimeField(null=True, blank=True)
+
+    # SLA 时效
+    SLA_PENDING = "pending"
+    SLA_AT_RISK = "at_risk"
+    SLA_ON_TIME = "on_time"
+    SLA_BREACHED = "breached"
+    SLA_CHOICES = [
+        (SLA_PENDING, "进行中"),
+        (SLA_AT_RISK, "临期"),
+        (SLA_ON_TIME, "准时"),
+        (SLA_BREACHED, "超时"),
+    ]
+    sla_status = models.CharField(max_length=16, choices=SLA_CHOICES, default=SLA_PENDING, db_index=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+
+    # 调度池认领（多调度并发，乐观+悲观锁保护）
+    claimed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="claimed_orders"
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    pooled_at = models.DateTimeField(null=True, blank=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_orders"
+    )
+    raw_text = models.TextField(blank=True, help_text="原始消息（微信群/自然语言建单）")
+    parse_meta = models.JSONField(default=dict, blank=True, help_text="AI 解析来源与置信信息")
     remark = models.CharField(max_length=255, blank=True)
 
     class Meta:
         db_table = "ops_order"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["channel", "status"]),
+            models.Index(fields=["status", "priority"]),
+            models.Index(fields=["created_by", "status"]),
+            models.Index(fields=["claimed_by", "status"]),
+        ]
         verbose_name = "订单"
         verbose_name_plural = "订单"
 
     def __str__(self) -> str:
         return self.order_no
+
+
+class OrderEvent(BaseModel):
+    """订单全生命周期事件溯源：建单/确认/进池/认领/派单/完成/取消等留痕。"""
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="events")
+    event_type = models.CharField(max_length=48)
+    from_status = models.CharField(max_length=32, blank=True)
+    to_status = models.CharField(max_length=32, blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="order_events"
+    )
+    source = models.CharField(max_length=24, blank=True, help_text="cs/dispatch/system/ai")
+    payload = models.JSONField(default=dict, blank=True)
+    event_time = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = "ops_order_event"
+        ordering = ["event_time"]
+        indexes = [models.Index(fields=["order", "event_time"])]
+        verbose_name = "订单事件"
+        verbose_name_plural = "订单事件"
+
+    def __str__(self) -> str:
+        return f"{self.order_id}:{self.event_type}"
 
 
 class Waybill(BaseModel, OrgScopedModel):
@@ -64,7 +230,18 @@ class Waybill(BaseModel, OrgScopedModel):
     RISK_NONE = "none"
     RISK_CHOICES = [(RISK_HIGH, "高"), (RISK_MEDIUM, "中"), (RISK_LOW, "低"), (RISK_NONE, "无")]
 
+    # 派单类型：自有单车 / 自有车队 / 三方承运商
+    DISPATCH_OWN = "own_vehicle"
+    DISPATCH_FLEET = "fleet"
+    DISPATCH_THIRD_PARTY = "third_party"
+    DISPATCH_TYPE_CHOICES = [
+        (DISPATCH_OWN, "自有单车"),
+        (DISPATCH_FLEET, "自有车队"),
+        (DISPATCH_THIRD_PARTY, "三方承运商"),
+    ]
+
     waybill_no = models.CharField(max_length=40, unique=True)
+    dispatch_type = models.CharField(max_length=16, choices=DISPATCH_TYPE_CHOICES, blank=True)
     order = models.ForeignKey(
         Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )
@@ -82,6 +259,13 @@ class Waybill(BaseModel, OrgScopedModel):
     )
 
     route_name = models.CharField(max_length=160)
+    planned_route = models.ForeignKey(
+        "masterdata.Route", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
+    )
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children",
+        help_text="拆单/合单血缘：拆出的子单指向原单；合并的源单指向合并单",
+    )
     origin = models.CharField(max_length=80, blank=True)
     destination = models.CharField(max_length=80, blank=True)
     status = models.CharField(max_length=32, default=STATUS_PENDING_DISPATCH, choices=STATUS_CHOICES)
@@ -197,6 +381,8 @@ class Receipt(BaseModel):
     ocr_result = models.JSONField(default=dict, blank=True)
     signatory = models.CharField(max_length=80, blank=True)
     signed_at = models.DateTimeField(null=True, blank=True)
+    signature = models.TextField(blank=True, help_text="电子签名（dataURL/base64）")
+    sign_source = models.CharField(max_length=16, blank=True, help_text="driver/customer")
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="uploaded_receipts"
     )

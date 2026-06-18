@@ -134,3 +134,277 @@ export const STATUS_LABEL: Record<string, string> = {
   cancelled: "已取消",
   voided: "已作废",
 };
+
+// ── 车联网监控 ──────────────────────────────────────────
+export interface VehicleState {
+  id: string;
+  vehicle: string;
+  vehicle_plate: string;
+  vehicle_type: string;
+  waybill: string | null;
+  waybill_no: string;
+  lng: string;
+  lat: string;
+  speed_kmh: string;
+  heading: number;
+  mileage_km: string;
+  temperature_c: string | null;
+  fuel_pct: string | null;
+  online: boolean;
+  reported_at: string | null;
+}
+
+export type AlertType =
+  | "overspeed" | "fatigue" | "deviation" | "abnormal_stop"
+  | "geofence" | "temperature" | "fuel" | "offline";
+export type AlertLevel = "info" | "medium" | "high";
+export type AlertStatus = "open" | "acknowledged" | "closed";
+
+export interface Alert {
+  id: string;
+  alert_type: AlertType;
+  level: AlertLevel;
+  status: AlertStatus;
+  vehicle: string | null;
+  vehicle_plate: string;
+  device_no: string;
+  waybill: string | null;
+  waybill_no: string;
+  message: string;
+  value: string | null;
+  threshold: string | null;
+  detail: Record<string, unknown>;
+  triggered_at: string;
+  handled_at: string | null;
+  created_at: string;
+}
+
+export const ALERT_TYPE_LABEL: Record<AlertType, string> = {
+  overspeed: "超速",
+  fatigue: "疲劳驾驶",
+  deviation: "偏航",
+  abnormal_stop: "异常停车",
+  geofence: "围栏进出",
+  temperature: "温度异常",
+  fuel: "油量异常",
+  offline: "设备离线",
+};
+
+// ── 多渠道订单 ──────────────────────────────────────────
+export type OrderChannel = "cs" | "self" | "miniprogram" | "wechat_group" | "api";
+export interface Order {
+  id: string;
+  order_no: string;
+  customer: string | null;
+  customer_name: string;
+  channel: OrderChannel;
+  source: string;
+  source_type: string;
+  business_type: string;
+  priority: string;
+  settlement_type: string;
+  status: string;
+  contact_name: string;
+  contact_phone: string;
+  origin: string;
+  destination: string;
+  cargo_desc: string;
+  cargo_quantity: number;
+  cargo_weight_ton: string;
+  cargo_volume_cbm: string;
+  cargo_value: string;
+  is_hazardous: boolean;
+  temperature_range: string;
+  claimed_by_name: string;
+  created_by_name: string;
+  sla_status: string;
+  delivered_at: string | null;
+  raw_text: string;
+  parse_meta: Record<string, unknown>;
+  waybill_nos: string[];
+  created_at: string;
+}
+
+export const SLA_STATUS_LABEL: Record<string, string> = {
+  pending: "进行中", at_risk: "临期", on_time: "准时", breached: "超时",
+};
+
+export interface DispatchSuggestion {
+  order_no: string;
+  vehicle_candidates: Array<{ plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean }>;
+  carrier_quotes: Array<{ carrier: string; quote: number }>;
+  external_signals: Array<{ type: string; level: string; note: string }>;
+  suggested_dispatch_type: string;
+  best_vehicle: { plate_no: string; compliance?: string[]; compliance_ok?: boolean } | null;
+  best_carrier: { carrier: string; quote: number } | null;
+}
+
+export const BUSINESS_TYPE_LABEL: Record<string, string> = {
+  ftl: "整车", ltl: "零担", express: "快递", coldchain: "冷链",
+};
+export const PRIORITY_LABEL: Record<string, string> = {
+  normal: "普通", urgent: "加急", vip: "VIP",
+};
+export const DISPATCH_TYPE_LABEL: Record<string, string> = {
+  own_vehicle: "自有单车", fleet: "自有车队", third_party: "三方承运商",
+};
+export interface DuplicateOrder {
+  id: string;
+  order_no: string;
+  status: string;
+  origin: string;
+  destination: string;
+  contact_phone: string;
+  created_at: string;
+}
+export interface ParsedOrder {
+  fields: Record<string, string | number>;
+  meta: { source?: string };
+  missing?: Array<{ field: string; label: string }>;
+  duplicates?: DuplicateOrder[];
+}
+export const ORDER_CHANNEL_LABEL: Record<OrderChannel, string> = {
+  cs: "客服代下",
+  self: "客户自助",
+  miniprogram: "小程序",
+  wechat_group: "微信群",
+  api: "开放API",
+};
+export const ORDER_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
+  pending_confirm: "待确认",
+  confirmed: "已确认",
+  pooled: "订单池",
+  dispatching: "调度中",
+  converted: "已派单",
+  completed: "已完成",
+  cancelled: "已取消",
+};
+
+// ── 对账单 ──────────────────────────────────────────────
+export interface StatementLine {
+  id: string;
+  waybill_no: string;
+  expense_item_code: string;
+  amount: string;
+  occurred_at: string | null;
+}
+export interface Statement {
+  id: string;
+  statement_no: string;
+  direction: "receivable" | "payable";
+  counterparty_type: "customer" | "carrier";
+  counterparty_id: string;
+  counterparty_name: string;
+  period_start: string;
+  period_end: string;
+  total_amount: string;
+  item_count: number;
+  external_total: string;
+  diff: string;
+  status: string;
+  created_at: string;
+  lines?: StatementLine[];
+}
+export const STATEMENT_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿",
+  confirmed: "已确认",
+  settled: "已结算",
+};
+
+// ── 车队合规预警 ────────────────────────────────────────
+export type CredSeverity = "expired" | "critical" | "warning";
+export interface CredentialRow {
+  subject: string;
+  plate_no?: string;
+  name?: string;
+  credential: string;
+  expiry: string;
+  days_left: number;
+  severity: CredSeverity;
+}
+export interface ExpiringCredentials {
+  days: number;
+  summary: { total: number; expired: number; critical: number; warning: number };
+  vehicles: CredentialRow[];
+  drivers: CredentialRow[];
+}
+export const CRED_SEVERITY_LABEL: Record<CredSeverity, string> = {
+  expired: "已过期", critical: "紧急", warning: "临期",
+};
+
+// ── 主数据(精简) ───────────────────────────────────────
+export interface Customer { id: string; code: string; name: string; }
+export interface Carrier { id: string; code: string; name: string; }
+
+// ── 指标中台 ────────────────────────────────────────────
+export interface MetricCard {
+  code: string;
+  name: string;
+  unit: string;
+  domain: string;
+  value: number;
+  breakdown?: Array<{ key: string; value: number }>;
+}
+export const METRIC_DOMAIN_LABEL: Record<string, string> = {
+  ops: "运单 / 履约",
+  fleet: "运力 / 车辆",
+  order: "订单 / 渠道",
+  finance: "财务 / 对账",
+};
+export interface Vehicle { id: string; plate_no: string; vehicle_type: string; }
+
+// ── 通知 / 订单事件 ─────────────────────────────────────
+export interface Notification {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  level: "info" | "warning" | "critical";
+  link_type: string;
+  link_id: string;
+  is_read: boolean;
+  created_at: string;
+}
+export interface OrderEvent {
+  id: string;
+  event_type: string;
+  from_status: string;
+  to_status: string;
+  actor_name: string;
+  source: string;
+  payload: Record<string, unknown>;
+  event_time: string;
+}
+export const ORDER_EVENT_LABEL: Record<string, string> = {
+  created: "建单", confirmed: "确认", pooled: "进池", claimed: "调度认领",
+  dispatched: "派单", completed: "完成", cancelled: "取消",
+};
+
+// ── 数据资产目录 ───────────────────────────────────────
+export interface DataAsset {
+  app: string;
+  domain: string;
+  model: string;
+  table: string;
+  verbose_name: string;
+  field_count: number;
+  row_count?: number | null;
+  fields: Array<{ name: string; type: string; help: string }>;
+}
+
+// ── 审计日志 ────────────────────────────────────────────
+export interface AuditLog {
+  id: string;
+  actor_name: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  request_id: string;
+  method: string;
+  path: string;
+  status_code: number | null;
+  ip: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}

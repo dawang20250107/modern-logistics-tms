@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import Carrier, Customer, Driver, Vehicle
+from .models import Carrier, Customer, Driver, Route, Vehicle
+
+
+@admin.register(Route)
+class RouteAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "origin", "destination", "corridor_m", "is_active")
+    search_fields = ("code", "name")
 
 
 @admin.register(Customer)

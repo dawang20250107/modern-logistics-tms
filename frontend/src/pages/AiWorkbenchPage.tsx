@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { apiGet, apiPost } from "../api/client";
+import { ApiError, apiGet, apiPost } from "../api/client";
 import type { AgentSuggestion, Paginated } from "../api/types";
 
 interface ToolDef {
@@ -9,11 +9,51 @@ interface ToolDef {
   description: string;
 }
 
+interface AgentReply {
+  thread_id: string;
+  answer: string;
+  tool_calls: Array<{ tool_name: string; summary: string }>;
+  suggestions: unknown[];
+}
+
+interface ChatMsg {
+  role: "user" | "assistant";
+  text: string;
+  tools?: string[];
+}
+
 export function AiWorkbenchPage() {
   const queryClient = useQueryClient();
   const [tool, setTool] = useState("");
   const [wbno, setWbno] = useState("");
   const [result, setResult] = useState("");
+
+  const [thread, setThread] = useState("");
+  const [input, setInput] = useState("");
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+
+  const ask = useMutation({
+    mutationFn: (msg: string) => apiPost<AgentReply>("/agent/chat", { message: msg, thread_id: thread || undefined }),
+    onSuccess: (d) => {
+      setThread(d.thread_id);
+      setChat((c) => [...c, { role: "assistant", text: d.answer, tools: d.tool_calls.map((t) => t.tool_name) }]);
+      queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+    },
+    onError: (e) => {
+      const msg = e instanceof ApiError && e.code === "DEEPSEEK_NOT_CONFIGURED"
+        ? "未配置 DEEPSEEK_API_KEY，AI 对话暂不可用（下方工具仍可直接执行）。"
+        : `出错了：${String(e)}`;
+      setChat((c) => [...c, { role: "assistant", text: msg }]);
+    },
+  });
+
+  const send = () => {
+    const m = input.trim();
+    if (!m) return;
+    setChat((c) => [...c, { role: "user", text: m }]);
+    setInput("");
+    ask.mutate(m);
+  };
 
   const tools = useQuery({ queryKey: ["tools"], queryFn: () => apiGet<{ tools: ToolDef[] }>("/agent/tools") });
   const suggestions = useQuery({
@@ -43,6 +83,47 @@ export function AiWorkbenchPage() {
 
   return (
     <div className="stack">
+      <div className="panel">
+        <div className="panel-head">
+          AI 智能助手
+          <span className="ai-pill">LangGraph Agent</span>
+        </div>
+        <div style={{ padding: 16, maxHeight: 380, overflow: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+          {chat.length === 0 ? (
+            <div className="muted small">
+              试着问：「运单 YD2606040010 有没有 ETA 风险？」「近30天准时率是多少？」「帮 WB001 生成调度建议」
+            </div>
+          ) : (
+            chat.map((m, i) => (
+              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "80%" }}>
+                <div style={{
+                  padding: "9px 13px", borderRadius: 12,
+                  background: m.role === "user" ? "var(--grad)" : "var(--panel-2)",
+                  color: m.role === "user" ? "#fff" : "var(--ink)",
+                  border: m.role === "user" ? "none" : "1px solid var(--line)",
+                  whiteSpace: "pre-wrap", lineHeight: 1.6,
+                }}>{m.text}</div>
+                {m.tools && m.tools.length > 0 && (
+                  <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {m.tools.map((t, j) => <span key={j} className="tag tag-info">🔧 {t}</span>)}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+          {ask.isPending && <div className="muted small">思考中…</div>}
+        </div>
+        <div className="ai-box" style={{ borderTop: "1px solid var(--line)" }}>
+          <input
+            placeholder="问点什么…（多轮对话，自动调用系统工具）"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+          />
+          <button className="btn-primary" disabled={ask.isPending || !input.trim()} onClick={send}>发送</button>
+        </div>
+      </div>
+
       <div className="panel">
         <div className="panel-head">Agent 工具执行</div>
         <div className="form-row">

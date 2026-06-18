@@ -12,13 +12,21 @@ from apps.core.exceptions import AppError
 
 _REGISTRY: dict = {}
 
+# 风险分级（分级闸门）：
+# - "low"：只读/分析/落建议等不直接变更核心业务状态的动作，agent 可自动执行；
+# - "high"：会真正写入/执行高风险动作（改运单状态、发起付款、对外承诺等），
+#   必须经人工确认闭环（落 AgentSuggestion 等待 confirm），agent 不得自动落地。
+RISK_LOW = "low"
+RISK_HIGH = "high"
 
-def tool(name: str, description: str, input_schema: dict):
+
+def tool(name: str, description: str, input_schema: dict, risk: str = RISK_LOW):
     def decorator(fn):
         _REGISTRY[name] = {
             "name": name,
             "description": description,
             "input_schema": input_schema,
+            "risk": risk,
             "fn": fn,
         }
         return fn
@@ -337,4 +345,87 @@ def customer_reply_draft(arguments):
         "draft": draft,
         "source": source,
         "suggestion": suggestion,
+    }
+
+
+@tool(
+    "telematics.vehicle_alert_summary",
+    "汇总运单关联车辆的未处理车联网报警（超速/温度/油量/离线/疲劳等），用于风险归因。",
+    _WAYBILL_SCHEMA,
+)
+def vehicle_alert_summary(arguments):
+    from apps.telematics.models import Alert
+
+    waybill = _get_waybill(arguments)
+    alerts = list(
+        Alert.objects.filter(waybill=waybill, status=Alert.STATUS_OPEN).order_by("-triggered_at")[:20]
+    )
+    by_type: dict = {}
+    for a in alerts:
+        by_type[a.alert_type] = by_type.get(a.alert_type, 0) + 1
+    high = [a for a in alerts if a.level == Alert.LEVEL_HIGH]
+    evidence = {
+        "waybill_no": waybill.waybill_no,
+        "open_alert_count": len(alerts),
+        "high_count": len(high),
+        "by_type": by_type,
+        "recent": [
+            {"type": a.alert_type, "level": a.level, "message": a.message, "at": a.triggered_at.isoformat()}
+            for a in alerts[:5]
+        ],
+    }
+    risk_detected = bool(high)
+    if alerts:
+        body = f"{waybill.waybill_no} 关联车辆有 {len(alerts)} 条未处理报警（高危 {len(high)}）：{by_type}。"
+    else:
+        body = f"{waybill.waybill_no} 关联车辆当前无未处理报警。"
+    suggestion = (
+        _create_suggestion(
+            waybill, "vehicle_alert", "车辆报警待核实", body, evidence, "telematics.vehicle_alert_summary"
+        )
+        if risk_detected
+        else None
+    )
+    return {
+        "tool_name": "telematics.vehicle_alert_summary",
+        "waybill_no": waybill.waybill_no,
+        "risk_detected": risk_detected,
+        "summary": body,
+        "evidence": evidence,
+        "suggestion": suggestion,
+    }
+
+
+@tool(
+    "analytics.query_metric",
+    "查询经营/运营指标（运单量/在途/准时率/风险率/运力在线率/利用率/报警数/订单量/转化率/应收/应付/对账差异等）。",
+    {
+        "type": "object",
+        "required": ["metric_code"],
+        "properties": {
+            "metric_code": {"type": "string", "description": "指标 code，如 ops.on_time_rate"},
+            "days": {"type": "integer", "description": "统计区间天数，默认 30"},
+        },
+    },
+)
+def query_metric(arguments):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.analytics.registry import compute_metric
+
+    code = arguments["metric_code"]
+    days = arguments.get("days") or 30
+    end = timezone.now().date()
+    start = end - timedelta(days=days)
+    result = compute_metric(code, start=start, end=end)
+    return {
+        "tool_name": "analytics.query_metric",
+        "metric_code": code,
+        "value": result["value"],
+        "unit": result.get("unit", ""),
+        "summary": f"{result['name']}（近{days}天）= {result['value']}{result.get('unit', '')}",
+        "evidence": result,
+        "suggestion": None,
     }

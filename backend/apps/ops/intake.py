@@ -522,7 +522,7 @@ def batch_orders(action: str, ids: list, *, operator=None) -> dict:
 def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver=None,
                              trailer=None, co_drivers=None, dispatch_type="", operator=None) -> Waybill:
     """订单转运单（人工确认/派单后）。可带承运商/牵引车/挂车/主副驾与派单类型，回写订单为已派单。"""
-    from .models import WaybillDriver
+    from .models import WaybillDriver, WaybillStop
 
     if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED):
         raise AppError("ORDER_ALREADY_CONVERTED", "订单已派单/完成。", status=409)
@@ -547,6 +547,17 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         cargo_volume_cbm=order.cargo_volume_cbm,
         status=Waybill.STATUS_PENDING_DISPATCH,
     )
+    # 点位拷贝进执行层（计划时间 → 实际到达由围栏/手动盖戳）
+    stops = [
+        WaybillStop(
+            waybill=waybill, seq=st.seq, stop_type=st.stop_type, city=st.city, address=st.address,
+            contact_name=st.contact_name, contact_phone=st.contact_phone,
+            planned_eta=st.expected_end or st.expected_start, note=st.cargo_note,
+        )
+        for st in order.stops.all().order_by("seq")
+    ]
+    if stops:
+        WaybillStop.objects.bulk_create(stops)
     # 司机分配：主驾 + 多名同行司机（副驾/接力）
     if driver:
         WaybillDriver.objects.create(waybill=waybill, driver=driver, role=WaybillDriver.ROLE_MAIN)

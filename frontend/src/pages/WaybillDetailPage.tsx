@@ -8,6 +8,7 @@ import { STATUS_LABEL, type CostSummary, type ExceptionRecord, type Paginated, t
 import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
+const fmt = (s: string | null) => (s ? new Date(s).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
 const EXC_TYPE_LABEL: Record<string, string> = {
   transit_delay: "在途超时", route_deviation: "偏航", cargo_damage: "货损货差",
@@ -100,6 +101,12 @@ export function WaybillDetailPage() {
     },
   });
 
+  const stopEvent = useMutation({
+    mutationFn: (v: { seq: number; event: "arrived" | "departed" }) =>
+      apiPost(`/waybills/${no}/stop-event`, v),
+    onSuccess: (_d, v) => { toast.success(v.event === "arrived" ? "已记录到达" : "已记录离开"); invalidate(); },
+  });
+
   if (detail.isLoading) return <div className="muted">加载中…</div>;
   if (detail.isError || !detail.data) return <div className="muted">运单不存在或无权访问。</div>;
   const w = detail.data;
@@ -141,6 +148,37 @@ export function WaybillDetailPage() {
           </button>
         </div>
       </div>
+
+      {w.stops && w.stops.length > 0 && (
+        <div className="panel">
+          <div className="panel-head">点位时效 · 计划 vs 实际（GPS 围栏自动盖戳）</div>
+          <table className="table">
+            <thead><tr><th>序</th><th>类型</th><th>地址</th><th>计划ETA</th><th>实际到达</th><th>实际离开</th><th>来源</th><th>状态</th><th></th></tr></thead>
+            <tbody>
+              {w.stops.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.seq}</td>
+                  <td>{s.stop_type_label}</td>
+                  <td className="small">{s.address || s.city || "-"}</td>
+                  <td className="small">{fmt(s.planned_eta)}</td>
+                  <td className="small">{s.actual_arrival_at ? <b>{fmt(s.actual_arrival_at)}</b> : "—"}</td>
+                  <td className="small">{fmt(s.actual_depart_at)}</td>
+                  <td className="small">{s.arrival_source === "gps" ? "GPS围栏" : s.arrival_source === "manual" ? "手动" : "-"}</td>
+                  <td><span className={`tag${s.status === "arrived" ? " tag-high" : s.status === "departed" ? " tag-low" : ""}`}>{s.status_label}</span></td>
+                  <td>
+                    {!s.actual_arrival_at && (
+                      <button className="btn-ghost" disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "arrived" })}>到达</button>
+                    )}
+                    {s.actual_arrival_at && !s.actual_depart_at && (
+                      <button className="btn-ghost" disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "departed" })}>离开</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="panel">
         <div className="panel-head">轨迹回放</div>

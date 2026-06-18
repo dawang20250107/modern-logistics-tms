@@ -404,6 +404,11 @@ class Waybill(BaseModel, OrgScopedModel):
     cargo_volume_cbm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     planned_arrival = models.DateTimeField(null=True, blank=True)
     estimated_arrival = models.DateTimeField(null=True, blank=True)
+    # 关键里程碑实际时间（从状态流转/围栏物化，便于 SLA 与查询）
+    loaded_at = models.DateTimeField(null=True, blank=True)
+    departed_at = models.DateTimeField(null=True, blank=True)
+    arrived_at = models.DateTimeField(null=True, blank=True)
+    signed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "ops_waybill"
@@ -453,6 +458,55 @@ class WaybillDriver(BaseModel):
     @property
     def waybill_no(self) -> str:
         return self.waybill.waybill_no if self.waybill_id else ""
+
+
+class WaybillStop(BaseModel):
+    """运单执行点位：从订单点位拷贝进执行层，记录计划/实际到达离开时间（GPS 围栏自动盖戳）。"""
+
+    STOP_PICKUP = "pickup"
+    STOP_DELIVERY = "delivery"
+    STOP_TYPE_CHOICES = [(STOP_PICKUP, "提货"), (STOP_DELIVERY, "送货")]
+
+    STATUS_PENDING = "pending"
+    STATUS_ARRIVED = "arrived"
+    STATUS_DEPARTED = "departed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "待到达"),
+        (STATUS_ARRIVED, "已到达"),
+        (STATUS_DEPARTED, "已离开"),
+    ]
+
+    SRC_GPS = "gps"
+    SRC_MANUAL = "manual"
+    SRC_SMS = "sms"
+
+    waybill = models.ForeignKey(Waybill, on_delete=models.CASCADE, related_name="stops")
+    seq = models.PositiveIntegerField(default=1)
+    stop_type = models.CharField(max_length=12, choices=STOP_TYPE_CHOICES, default=STOP_PICKUP)
+    city = models.CharField(max_length=80, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    contact_name = models.CharField(max_length=64, blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+    # 围栏中心与半径（设了坐标才能自动盖戳）
+    lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    lng = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    radius_m = models.PositiveIntegerField(default=800, help_text="到达围栏半径(米)")
+    planned_eta = models.DateTimeField(null=True, blank=True)
+    actual_arrival_at = models.DateTimeField(null=True, blank=True)
+    actual_depart_at = models.DateTimeField(null=True, blank=True)
+    arrival_source = models.CharField(max_length=12, blank=True, help_text="gps/manual/sms")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    note = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "ops_waybill_stop"
+        ordering = ["waybill", "seq"]
+        indexes = [models.Index(fields=["waybill", "seq"])]
+        verbose_name = "运单点位"
+        verbose_name_plural = "运单点位"
+
+    def __str__(self) -> str:
+        return f"{self.waybill_id}:{self.seq}:{self.stop_type}"
 
 
 class WaybillEvent(BaseModel):

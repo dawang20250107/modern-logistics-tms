@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
 import type { Order, OrderChannel, Paginated, ParsedOrder } from "../api/types";
-import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL } from "../api/types";
+import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
 
 type Fields = Record<string, string | number>;
 
@@ -116,7 +116,7 @@ export function OrderIntakePage() {
         ) : (
           <table className="table">
             <thead>
-              <tr><th>订单号</th><th>渠道</th><th>线路</th><th>货量</th><th>电话</th><th>状态</th><th>操作</th></tr>
+              <tr><th>订单号</th><th>渠道</th><th>线路</th><th>货量</th><th>状态</th><th>SLA</th><th>操作</th></tr>
             </thead>
             <tbody>
               {items.map((o) => (
@@ -125,8 +125,8 @@ export function OrderIntakePage() {
                   <td>{ORDER_CHANNEL_LABEL[o.channel]}</td>
                   <td>{o.origin} → {o.destination}</td>
                   <td>{o.cargo_weight_ton}吨 / {o.cargo_quantity}件</td>
-                  <td className="mono small">{o.contact_phone || "-"}</td>
-                  <td><span className={`tag tag-${o.status === "converted" ? "low" : o.status === "cancelled" ? "none" : "medium"}`}>{ORDER_STATUS_LABEL[o.status] ?? o.status}</span></td>
+                  <td><span className={`tag tag-${o.status === "converted" || o.status === "completed" ? "low" : o.status === "cancelled" ? "none" : "medium"}`}>{ORDER_STATUS_LABEL[o.status] ?? o.status}</span></td>
+                  <td><span className={`tag tag-sla_${o.sla_status}`}>{SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status}</span></td>
                   <td>
                     {o.status === "pending_confirm" && (
                       <button className="btn-ghost" disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "confirm" })}>确认</button>

@@ -4,17 +4,17 @@ import { useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
 
 const NAV = [
-  { to: "/", label: "控制塔", end: true },
-  { to: "/intake", label: "建单", end: false },
-  { to: "/dispatch-board", label: "调度台", end: false },
-  { to: "/waybills", label: "运单", end: false },
-  { to: "/command", label: "指挥中心", end: false },
-  { to: "/monitor", label: "监控", end: false },
-  { to: "/alerts", label: "报警", end: false },
-  { to: "/exceptions", label: "异常", end: false },
-  { to: "/reconciliation", label: "对账", end: false },
-  { to: "/dashboard", label: "看板", end: false },
-  { to: "/ai", label: "AI", end: false },
+  { to: "/", label: "控制塔", icon: "🗼", end: true },
+  { to: "/intake", label: "建单", icon: "📝", end: false },
+  { to: "/dispatch-board", label: "调度台", icon: "🎯", end: false },
+  { to: "/waybills", label: "运单", icon: "🚚", end: false },
+  { to: "/command", label: "指挥中心", icon: "🛰️", end: false },
+  { to: "/monitor", label: "监控", icon: "📍", end: false },
+  { to: "/alerts", label: "报警", icon: "🚨", end: false },
+  { to: "/exceptions", label: "异常", icon: "⚠️", end: false },
+  { to: "/reconciliation", label: "对账", icon: "🧾", end: false },
+  { to: "/dashboard", label: "看板", icon: "📊", end: false },
+  { to: "/ai", label: "AI", icon: "🤖", end: false },
 ];
 
 export function AppLayout() {
@@ -22,7 +22,7 @@ export function AppLayout() {
   return (
     <div className="app">
       <aside className="side">
-        <div className="mark">TMS</div>
+        <div className="mark">智运</div>
         <nav className="nav">
           {NAV.map((item) => (
             <NavLink
@@ -31,10 +31,12 @@ export function AppLayout() {
               end={item.end}
               className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
             >
-              {item.label}
+              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
             </NavLink>
           ))}
         </nav>
+        <div className="side-foot">v1.0</div>
       </aside>
       <main className="main">
         <header className="topbar">

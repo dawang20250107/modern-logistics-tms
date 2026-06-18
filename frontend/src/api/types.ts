@@ -217,10 +217,16 @@ export interface Order {
   temperature_range: string;
   claimed_by_name: string;
   created_by_name: string;
+  sla_status: string;
+  delivered_at: string | null;
   raw_text: string;
   parse_meta: Record<string, unknown>;
   created_at: string;
 }
+
+export const SLA_STATUS_LABEL: Record<string, string> = {
+  pending: "进行中", at_risk: "临期", on_time: "准时", breached: "超时",
+};
 
 export interface DispatchSuggestion {
   order_no: string;

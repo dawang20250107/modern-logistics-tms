@@ -10,6 +10,7 @@ import {
   ORDER_EVENT_LABEL,
   ORDER_STATUS_LABEL,
   PRIORITY_LABEL,
+  SLA_STATUS_LABEL,
 } from "../api/types";
 
 const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个人", enterprise: "企业", government: "政府" };
@@ -47,6 +48,9 @@ export function OrderDetailPage() {
           </div>
           <div className="wb-status">
             <span className="status-pill">{ORDER_STATUS_LABEL[o.status] ?? o.status}</span>
+            {o.sla_status && o.sla_status !== "pending" && (
+              <span className={`tag tag-sla_${o.sla_status}`}>{SLA_STATUS_LABEL[o.sla_status]}</span>
+            )}
           </div>
         </div>
         <div className="wb-actions">

@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { ApiError } from "./api/client";
 import { toast } from "./api/toast";
 import { App } from "./App";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Toaster } from "./components/Toaster";
 import "./styles.css";
 
@@ -29,6 +30,7 @@ createRoot(container).render(
     <QueryClientProvider client={queryClient}>
       <App />
       <Toaster />
+      <ConfirmDialog />
     </QueryClientProvider>
   </StrictMode>,
 );

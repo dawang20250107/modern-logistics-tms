@@ -260,3 +260,22 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .toast-icon { flex: none; }
 .toast-msg { flex: 1; color: var(--ink); word-break: break-word; }
 .toast-x { flex: none; color: var(--muted); font-size: 16px; line-height: 1; }
+
+/* ── 确认对话框 ────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center;
+  background: rgba(12, 19, 32, 0.42); backdrop-filter: blur(2px); animation: toast-in 0.15s ease-out;
+}
+.modal {
+  background: var(--panel); border-radius: 16px; box-shadow: var(--shadow-lg); width: min(420px, calc(100vw - 40px));
+  padding: 22px 24px; border: 1px solid var(--line);
+}
+.modal-title { font-weight: 700; font-size: 16px; margin-bottom: 10px; }
+.modal-body { color: var(--ink-2); line-height: 1.6; margin-bottom: 20px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.btn-danger {
+  padding: 9px 18px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-weight: 600;
+  color: #fff; background: var(--red); transition: transform var(--speed), filter var(--speed);
+}
+.btn-danger:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
+.btn-danger:disabled { opacity: 0.55; cursor: default; }

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
+import { confirmAction } from "../api/confirm";
 import type { Order, OrderEvent } from "../api/types";
 import {
   BUSINESS_TYPE_LABEL,
@@ -60,7 +61,18 @@ export function OrderDetailPage() {
           {(o.waybill_nos ?? []).map((no) => (
             <Link key={no} className="btn-ghost mono" to={`/waybills/${no}`} style={{ textDecoration: "none" }}>运单 {no} →</Link>
           ))}
-          {!["converted", "completed", "cancelled"].includes(o.status) && <button className="btn-ghost" onClick={() => act.mutate("cancel")}>取消</button>}
+          {!["converted", "completed", "cancelled"].includes(o.status) && (
+            <button
+              className="btn-ghost"
+              onClick={async () => {
+                if (await confirmAction({ message: `确定取消订单 ${o.order_no}？取消后不可恢复。`, tone: "danger", confirmText: "取消订单" })) {
+                  act.mutate("cancel");
+                }
+              }}
+            >
+              取消订单
+            </button>
+          )}
         </div>
       </div>
 

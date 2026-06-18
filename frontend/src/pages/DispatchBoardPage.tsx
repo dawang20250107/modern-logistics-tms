@@ -152,10 +152,19 @@ export function DispatchBoardPage() {
                     {(vehicles.data?.items ?? []).map((v) => <option key={v.id} value={v.id}>{v.plate_no}</option>)}
                   </select>
                 )}
-                <button className="btn-primary" disabled={dispatch.isPending} onClick={() => dispatch.mutate(active.id)}>
+                <button
+                  className="btn-primary"
+                  disabled={dispatch.isPending || (dispatchType === "third_party" ? !carrierId : !vehicleId)}
+                  onClick={() => dispatch.mutate(active.id)}
+                >
                   {dispatch.isPending ? "派单中…" : "确认派单"}
                 </button>
               </div>
+              {(dispatchType === "third_party" ? !carrierId : !vehicleId) && (
+                <div className="muted small" style={{ padding: 0 }}>
+                  请先选择{dispatchType === "third_party" ? "承运商" : "车辆"}再派单
+                </div>
+              )}
             </div>
           ) : null}
         </div>

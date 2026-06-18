@@ -221,6 +221,7 @@ export interface Order {
   delivered_at: string | null;
   raw_text: string;
   parse_meta: Record<string, unknown>;
+  waybill_nos: string[];
   created_at: string;
 }
 

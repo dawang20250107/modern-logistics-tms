@@ -57,6 +57,9 @@ export function OrderDetailPage() {
           {o.status === "pending_confirm" && <button className="btn-ghost" onClick={() => act.mutate("confirm")}>确认</button>}
           {(o.status === "confirmed" || o.status === "pending_confirm") && <button className="btn-ghost" onClick={() => act.mutate("pool")}>进池</button>}
           {o.status === "pooled" && <Link className="btn-primary" to="/dispatch-board" style={{ textDecoration: "none" }}>去调度台派单</Link>}
+          {(o.waybill_nos ?? []).map((no) => (
+            <Link key={no} className="btn-ghost mono" to={`/waybills/${no}`} style={{ textDecoration: "none" }}>运单 {no} →</Link>
+          ))}
           {!["converted", "completed", "cancelled"].includes(o.status) && <button className="btn-ghost" onClick={() => act.mutate("cancel")}>取消</button>}
         </div>
       </div>

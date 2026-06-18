@@ -183,6 +183,9 @@ export function OrderIntakePage() {
                     {(o.status === "pending_confirm" || o.status === "confirmed") && (
                       <button className="btn-ghost" disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "convert" })}>转运单</button>
                     )}
+                    {(o.waybill_nos ?? []).map((no) => (
+                      <Link key={no} className="link mono small" to={`/waybills/${no}`} style={{ marginLeft: 6 }}>{no}</Link>
+                    ))}
                   </td>
                 </tr>
               ))}

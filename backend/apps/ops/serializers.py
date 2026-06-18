@@ -122,6 +122,11 @@ class OrderSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
     created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
     claimed_by_name = serializers.CharField(source="claimed_by.username", read_only=True, default="")
+    waybill_nos = serializers.SerializerMethodField()
+
+    def get_waybill_nos(self, obj) -> list[str]:
+        # 依赖视图层 prefetch_related("waybills") 避免 N+1；拆单后可能多张
+        return [w.waybill_no for w in obj.waybills.all()]
 
     class Meta:
         model = Order
@@ -136,5 +141,6 @@ class OrderSerializer(serializers.ModelSerializer):
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
             "created_by", "created_by_name", "raw_text", "parse_meta", "remark", "created_at",
+            "waybill_nos",
         ]
         read_only_fields = ["claimed_by", "claimed_at", "pooled_at", "created_by"]

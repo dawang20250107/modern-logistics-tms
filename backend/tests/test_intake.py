@@ -76,6 +76,15 @@ def test_intake_and_convert_endpoints(admin_client):
 
 
 @pytest.mark.django_db
+def test_order_exposes_waybill_nos_after_convert(admin_client):
+    order = create_order_from_intake(text="上海到成都 10吨", channel=Order.CHANNEL_CS)
+    waybill = convert_order_to_waybill(order)
+    resp = admin_client.get(f"/api/v1/orders/{order.id}")
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["data"]["waybill_nos"] == [waybill.waybill_no]
+
+
+@pytest.mark.django_db
 def test_parse_preview_endpoint(admin_client):
     resp = admin_client.post(
         "/api/v1/orders/parse-preview", {"text": "成都到重庆 12吨"}, format="json"

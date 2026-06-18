@@ -763,3 +763,44 @@ class WorkbenchView(APIView):
                 "draft_statements": Statement.objects.filter(status=Statement.STATUS_DRAFT).count(),
             },
         })
+
+
+class PublicOrderIntakeView(APIView):
+    """客户自助下单（免登录）：客户填写联系/线路/货物，落待确认订单，进入客服确认队列。"""
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from .intake import create_order_from_intake
+
+        data = request.data
+        contact_phone = (data.get("contact_phone") or "").strip()
+        origin = (data.get("origin") or "").strip()
+        destination = (data.get("destination") or "").strip()
+        if not (contact_phone and origin and destination):
+            raise AppError("PUBLIC_INTAKE_REQUIRED", "联系电话、始发、目的地必填。", status=400)
+        channel = data.get("channel")
+        if channel not in (Order.CHANNEL_SELF, Order.CHANNEL_MINIPROGRAM):
+            channel = Order.CHANNEL_SELF
+        fields = {
+            "contact_name": data.get("contact_name", ""),
+            "contact_phone": contact_phone,
+            "origin": origin,
+            "destination": destination,
+            "cargo_desc": data.get("cargo_desc", ""),
+            "cargo_weight_ton": data.get("cargo_weight_ton") or 0,
+            "cargo_quantity": data.get("cargo_quantity") or 0,
+            "expected_pickup_at": data.get("expected_pickup_at") or None,
+            "remark": data.get("remark", ""),
+            "source_type": Order.SOURCE_INDIVIDUAL,
+        }
+        order = create_order_from_intake(
+            fields=fields, channel=channel, source=data.get("source", "客户自助"),
+            status=Order.STATUS_PENDING_CONFIRM,
+        )
+        return Response(
+            {"order_no": order.order_no, "status": order.status,
+             "message": "下单成功，客服将尽快与您确认。可凭订单号与手机号查询进度。"},
+            status=201,
+        )

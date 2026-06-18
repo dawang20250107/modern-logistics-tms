@@ -327,3 +327,8 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .source-tab:hover { border-color: var(--brand); color: var(--brand); transform: translateY(-1px); }
 .source-tab.on { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 6px 16px rgba(47, 107, 255, 0.3); }
 .source-tab .st-icon { font-size: 22px; }
+
+/* ── 公开下单页 ────────────────────────────────────────── */
+.public-page { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; background: var(--bg); padding: 40px 16px; }
+.public-card { width: min(560px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 28px; }
+.public-brand { font-weight: 800; font-size: 20px; margin-bottom: 6px; background: var(--grad-ai); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }

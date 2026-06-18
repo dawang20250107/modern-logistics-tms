@@ -69,6 +69,8 @@ export function DispatchBoardPage() {
   });
 
   const orders = pool.data?.items ?? [];
+  // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
+  const activeGone = Boolean(active) && !pool.isLoading && !orders.some((o) => o.id === active?.id);
 
   return (
     <div className="stack">
@@ -109,7 +111,12 @@ export function DispatchBoardPage() {
             AI 派单建议
             {active && <span className="ai-pill">{active.order_no}</span>}
           </div>
-          {!active ? (
+          {active && activeGone ? (
+            <div style={{ padding: 16 }} className="stack">
+              <div className="tag tag-medium" style={{ alignSelf: "flex-start" }}>⚠ 订单 {active.order_no} 已被他人处理或离开订单池</div>
+              <button className="btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => { setActive(null); setSuggestion(null); }}>关闭</button>
+            </div>
+          ) : !active ? (
             <div className="muted small" style={{ padding: 16 }}>从订单池选「派单」查看 AI 建议</div>
           ) : suggest.isPending ? (
             <div className="muted" style={{ padding: 16 }}>分析中…</div>

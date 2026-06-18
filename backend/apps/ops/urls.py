@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     ExceptionViewSet,
+    OrderTemplateViewSet,
     OrderViewSet,
     PublicTrackingView,
     ReceiptViewSet,
@@ -14,6 +15,7 @@ from .views import (
 router = DefaultRouter(trailing_slash=False)
 router.register("waybills", WaybillViewSet, basename="waybill")
 router.register("orders", OrderViewSet, basename="order")
+router.register("order-templates", OrderTemplateViewSet, basename="order-template")
 router.register("exceptions", ExceptionViewSet, basename="exception")
 router.register("receipts", ReceiptViewSet, basename="receipt")
 

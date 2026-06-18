@@ -234,21 +234,91 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="intake")
     def intake(self, request):
-        """多渠道建单入口：传 text(自然语言/微信群) 或 fields(结构化)。"""
+        """多渠道建单入口：传 text(自然语言/微信群) 或 fields(结构化)，可带货物明细/站点/草稿。"""
         from .intake import create_order_from_intake
 
         text = (request.data.get("text") or "").strip()
         fields = request.data.get("fields")
-        if not text and not fields:
-            raise AppError("INTAKE_EMPTY", "text 或 fields 至少其一。", status=400)
+        cargo_items = request.data.get("cargo_items")
+        stops = request.data.get("stops")
+        if not text and not fields and not cargo_items:
+            raise AppError("INTAKE_EMPTY", "text、fields 或 cargo_items 至少其一。", status=400)
+        customer = None
+        if fields and fields.get("customer"):
+            from apps.masterdata.models import Customer
+
+            customer = Customer.objects.filter(id=fields.get("customer")).first()
         order = create_order_from_intake(
             text=text,
             fields=fields,
             channel=request.data.get("channel", Order.CHANNEL_CS),
             source=request.data.get("source", ""),
+            customer=customer,
             operator=request.user,
+            cargo_items=cargo_items,
+            stops=stops,
+            status=request.data.get("status"),
         )
         return Response(OrderSerializer(order).data, status=201)
+
+    @action(detail=True, methods=["post"], url_path="edit")
+    def edit(self, request, pk=None):
+        """编辑订单（含货物明细/站点替换），草稿/待确认/已确认可改。"""
+        from .intake import update_order
+
+        order = update_order(
+            self.get_object(),
+            fields=request.data.get("fields") or {},
+            cargo_items=request.data.get("cargo_items"),
+            stops=request.data.get("stops"),
+            operator=request.user,
+        )
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="clone")
+    def clone(self, request, pk=None):
+        """复制建单：以现有订单为蓝本生成新草稿。"""
+        from .intake import clone_order
+
+        order = clone_order(self.get_object(), operator=request.user)
+        return Response(OrderSerializer(order).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="quote")
+    def quote(self, request):
+        """录单自动报价：按客户/线路/货量估价。"""
+        from apps.finance.services import estimate_order_quote
+
+        data = request.data
+        weight = data.get("cargo_weight_ton") or data.get("weight_ton") or 0
+        result = estimate_order_quote(
+            customer_id=data.get("customer") or None,
+            route_name=f"{data.get('origin', '')}→{data.get('destination', '')}",
+            weight_ton=weight,
+        )
+        return Response(result)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export(self, request):
+        """导出当前筛选的订单为 CSV。"""
+        import csv
+
+        from django.http import HttpResponse
+
+        qs = self.filter_queryset(self.get_queryset())[:5000]
+        resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+        resp["Content-Disposition"] = 'attachment; filename="orders.csv"'
+        resp.write("﻿")  # BOM，Excel 正确识别中文
+        writer = csv.writer(resp)
+        writer.writerow(["订单号", "客户", "渠道", "状态", "始发", "目的", "货量(吨)", "件数", "报价", "创建时间"])
+        status_map = dict(Order.STATUS_CHOICES)
+        channel_map = dict(Order.CHANNEL_CHOICES)
+        for o in qs:
+            writer.writerow([
+                o.order_no, o.customer.name if o.customer else "", channel_map.get(o.channel, o.channel),
+                status_map.get(o.status, o.status), o.origin, o.destination,
+                o.cargo_weight_ton, o.cargo_quantity, o.quoted_amount, o.created_at.strftime("%Y-%m-%d %H:%M"),
+            ])
+        return resp
 
     @action(detail=True, methods=["post"], url_path="pool")
     def pool(self, request, pk=None):
@@ -382,6 +452,27 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         waybill = convert_order_to_waybill(self.get_object(), operator=request.user)
         return Response(WaybillSerializer(waybill).data, status=201)
+
+
+class OrderTemplateViewSet(viewsets.ModelViewSet):
+    """录单模板：保存常用订单为模板，一键套用建单。"""
+
+    serializer_class = None  # set below to avoid import cycle at class-def time
+    search_fields = ["name"]
+    ordering_fields = ["created_at", "name"]
+
+    def get_queryset(self):
+        from .models import OrderTemplate
+
+        return OrderTemplate.objects.select_related("created_by").all()
+
+    def get_serializer_class(self):
+        from .serializers import OrderTemplateSerializer
+
+        return OrderTemplateSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=_current_user_or_none(self.request))
 
 
 class ExceptionViewSet(viewsets.ModelViewSet):

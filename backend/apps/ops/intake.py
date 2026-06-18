@@ -134,9 +134,53 @@ _ORDER_FIELDS = (
 )
 
 
+_CARGO_ITEM_FIELDS = ("name", "quantity", "weight_ton", "volume_cbm", "package_type", "temperature_range", "remark")
+_STOP_FIELDS = ("stop_type", "city", "address", "contact_name", "contact_phone",
+                "expected_start", "expected_end", "cargo_note")
+
+
+def _sync_cargo_items(order, items: list) -> None:
+    from .models import OrderCargoItem
+
+    order.cargo_items.all().delete()
+    rows = []
+    for i, raw in enumerate(items or []):
+        if not isinstance(raw, dict) or not (raw.get("name") or "").strip():
+            continue
+        clean = {k: raw[k] for k in _CARGO_ITEM_FIELDS if k in raw and raw[k] not in (None, "")}
+        rows.append(OrderCargoItem(order=order, seq=i + 1, **clean))
+    if rows:
+        OrderCargoItem.objects.bulk_create(rows)
+
+
+def _sync_stops(order, stops: list) -> None:
+    from django.utils.dateparse import parse_datetime
+
+    from .models import OrderStop
+
+    order.stops.all().delete()
+    rows = []
+    for i, raw in enumerate(stops or []):
+        if not isinstance(raw, dict) or not (raw.get("address") or raw.get("city")):
+            continue
+        clean = {k: raw[k] for k in _STOP_FIELDS if k in raw and raw[k] not in (None, "")}
+        for tf in ("expected_start", "expected_end"):
+            if isinstance(clean.get(tf), str):
+                dt = parse_datetime(clean[tf])
+                clean[tf] = (timezone.make_aware(dt) if dt and timezone.is_naive(dt) else dt) if dt else None
+        rows.append(OrderStop(order=order, seq=i + 1, **clean))
+    if rows:
+        OrderStop.objects.bulk_create(rows)
+
+
 def create_order_from_intake(*, text: str = "", fields: dict | None = None, channel: str = Order.CHANNEL_CS,
-                             source: str = "", customer=None, operator=None) -> Order:
-    """统一建单入口：先 AI/规则解析 text，再用显式 fields 覆盖（人工改优先），落待确认订单。"""
+                             source: str = "", customer=None, operator=None,
+                             cargo_items: list | None = None, stops: list | None = None,
+                             status: str | None = None) -> Order:
+    """统一建单入口：AI/规则解析 text → 显式 fields 覆盖 → 可带货物明细/站点，落单。
+
+    status 可指定 draft（草稿箱），默认待确认。有货物明细时按明细汇总回写货量。
+    """
     data: dict = {}
     parse_meta = {}
     if text:
@@ -151,22 +195,59 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
     clean = {k: data[k] for k in _ORDER_FIELDS if k in data and data[k] not in (None, "")}
     _coerce_datetimes(clean)
     operator_user = operator if operator and getattr(operator, "is_authenticated", False) else None
+    valid_status = status if status in dict(Order.STATUS_CHOICES) else Order.STATUS_PENDING_CONFIRM
     order = Order.objects.create(
         order_no=gen_order_no(timezone.now()),
         channel=channel,
         source=source,
-        status=Order.STATUS_PENDING_CONFIRM,
+        status=valid_status,
         customer=customer,
         created_by=operator_user,
         raw_text=text,
         parse_meta=parse_meta,
         **clean,
     )
+    if cargo_items:
+        _sync_cargo_items(order, cargo_items)
+        recompute_cargo_totals(order)
+    if stops:
+        _sync_stops(order, stops)
     record_order_event(
         order, "created", actor=operator, to_status=order.status,
         source="ai" if parse_meta.get("source") == "deepseek" else "cs", channel=channel,
     )
     return order
+
+
+def update_order(order, *, fields: dict, cargo_items=None, stops=None, operator=None) -> Order:
+    """编辑订单（草稿/待确认/已确认可改），支持替换货物明细与站点并重算货量。"""
+    if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED, Order.STATUS_CANCELLED):
+        raise AppError("ORDER_NOT_EDITABLE", "已派单/完成/取消的订单不可编辑。", status=409)
+    if order.customer_id is None and fields.get("customer"):
+        order.customer_id = fields.get("customer")
+    clean = {k: fields[k] for k in _ORDER_FIELDS if k in fields}
+    _coerce_datetimes(clean)
+    for k, v in clean.items():
+        setattr(order, k, v if v not in (None, "") else getattr(order, k))
+    order.save()
+    if cargo_items is not None:
+        _sync_cargo_items(order, cargo_items)
+        recompute_cargo_totals(order)
+    if stops is not None:
+        _sync_stops(order, stops)
+    record_order_event(order, "updated", actor=operator, to_status=order.status, source="cs")
+    return order
+
+
+def clone_order(order, *, operator=None) -> Order:
+    """复制建单：以现有订单为蓝本生成新草稿（含货物明细与站点），便于重复线路快速下单。"""
+    fields = {k: getattr(order, k) for k in _ORDER_FIELDS}
+    items = [{k: getattr(ci, k) for k in _CARGO_ITEM_FIELDS} for ci in order.cargo_items.all()]
+    stops = [{k: getattr(st, k) for k in _STOP_FIELDS} for st in order.stops.all()]
+    return create_order_from_intake(
+        fields=fields, channel=order.channel, source=order.source, customer=order.customer,
+        operator=operator, cargo_items=items, stops=stops, status=Order.STATUS_DRAFT,
+    )
 
 
 def find_duplicate_orders(*, contact_phone="", origin="", destination="", within_hours=24, limit=5) -> list[Order]:

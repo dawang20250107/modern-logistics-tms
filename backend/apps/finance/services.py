@@ -26,11 +26,12 @@ def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0) -> di
 
     匹配条件：客户/线路通配；命中多条按 priority 取最高。返回 {amount, rule_name, matched}。
     """
+    cust = str(customer_id) if customer_id else ""
     best = None
     for rule in PricingRule.objects.filter(
         is_active=True, price_type=PricingRule.PRICE_TYPE_INCOME
     ).order_by("-priority"):
-        if rule.customer_id and rule.customer_id != customer_id:
+        if rule.customer_id and str(rule.customer_id) != cust:
             continue
         if rule.route_name and rule.route_name != route_name:
             continue

@@ -347,7 +347,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         from .serializers import OrderEventSerializer
 
         order = self.get_object()
-        return Response(OrderEventSerializer(order.events.all(), many=True).data)
+        return Response(OrderEventSerializer(order.events.select_related("actor").all(), many=True).data)
 
     @action(detail=True, methods=["post"], url_path="confirm")
     def confirm(self, request, pk=None):
@@ -523,8 +523,13 @@ class WorkbenchView(APIView):
         today = timezone.localdate()
         open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
 
-        my_pending = Order.objects.filter(created_by=user, status=Order.STATUS_PENDING_CONFIRM)
+        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").filter(
+            created_by=user, status=Order.STATUS_PENDING_CONFIRM
+        )
         pool = Order.objects.filter(status=Order.STATUS_POOLED)
+        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").filter(
+            status=Order.STATUS_POOLED
+        ).order_by("-priority", "pooled_at")[:5]
         return Response({
             "common": {
                 "unread_notifications": Notification.objects.filter(recipient=user, is_read=False).count(),
@@ -538,7 +543,7 @@ class WorkbenchView(APIView):
             "dispatch": {
                 "pool_count": pool.count(),
                 "my_claimed": Order.objects.filter(claimed_by=user, status=Order.STATUS_DISPATCHING).count(),
-                "pool_top": OrderSerializer(pool.order_by("-priority", "pooled_at")[:5], many=True).data,
+                "pool_top": OrderSerializer(pool_serialized, many=True).data,
             },
             "finance": {
                 "draft_statements": Statement.objects.filter(status=Statement.STATUS_DRAFT).count(),

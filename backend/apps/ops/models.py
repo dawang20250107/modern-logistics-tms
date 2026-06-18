@@ -160,6 +160,8 @@ class Order(BaseModel, SoftDeleteModel):
         indexes = [
             models.Index(fields=["channel", "status"]),
             models.Index(fields=["status", "priority"]),
+            models.Index(fields=["created_by", "status"]),
+            models.Index(fields=["claimed_by", "status"]),
         ]
         verbose_name = "订单"
         verbose_name_plural = "订单"

@@ -424,8 +424,15 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="pool")
     def pool_list(self, request):
-        """订单池：在池待派订单，按优先级与进池时间排序。"""
-        qs = self.get_queryset().filter(status=Order.STATUS_POOLED).order_by("-priority", "pooled_at")
+        """订单池：在池待派(POOLED) + 调度中(DISPATCHING，已认领)订单，按优先级与进池时间排序。
+
+        包含已认领订单，避免认领后从看板消失；?mine=1 仅看自己认领的。
+        """
+        qs = self.get_queryset().filter(
+            status__in=[Order.STATUS_POOLED, Order.STATUS_DISPATCHING]
+        ).order_by("-priority", "pooled_at")
+        if request.query_params.get("mine") in ("1", "true"):
+            qs = qs.filter(claimed_by=_current_user_or_none(request))
         page = self.paginate_queryset(qs)
         ser = OrderSerializer(page if page is not None else qs, many=True)
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)

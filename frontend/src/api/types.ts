@@ -432,6 +432,7 @@ export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   finance: "财务 / 对账",
 };
 export interface Vehicle { id: string; plate_no: string; vehicle_type: string; }
+export interface Driver { id: string; name: string; phone: string; }
 
 // ── 通知 / 订单事件 ─────────────────────────────────────
 export interface Notification {

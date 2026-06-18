@@ -106,6 +106,17 @@ def test_pool_and_claim_endpoints(admin_client):
     assert resp.status_code == 200, resp.content
     assert resp.json()["data"]["status"] == Order.STATUS_DISPATCHING
 
+    # 认领后仍在池中可见（DISPATCHING），且 mine 过滤命中
+    pool = admin_client.get("/api/v1/orders/pool")
+    assert len(pool.json()["data"]["items"]) == 1
+    mine = admin_client.get("/api/v1/orders/pool?mine=1")
+    assert len(mine.json()["data"]["items"]) == 1
+
+    # 退回订单池
+    rel = admin_client.post(f"/api/v1/orders/{oid}/release")
+    assert rel.status_code == 200, rel.content
+    assert rel.json()["data"]["status"] == Order.STATUS_POOLED
+
 
 @pytest.mark.django_db
 def test_signing_completes_order():

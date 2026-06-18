@@ -4,8 +4,8 @@ import { useState } from "react";
 import { apiGet, apiPost } from "../api/client";
 import { toast } from "../api/toast";
 import { EmptyState } from "../components/EmptyState";
-import type { Carrier, DispatchSuggestion, Order, Paginated, Vehicle } from "../api/types";
-import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, PRIORITY_LABEL } from "../api/types";
+import type { Carrier, DispatchSuggestion, Driver, Order, Paginated, Vehicle } from "../api/types";
+import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, PRIORITY_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 
 export function DispatchBoardPage() {
@@ -15,14 +15,17 @@ export function DispatchBoardPage() {
   const [dispatchType, setDispatchType] = useState("third_party");
   const [carrierId, setCarrierId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
+  const [driverId, setDriverId] = useState("");
+  const [mineOnly, setMineOnly] = useState(false);
 
   const pool = useQuery({
-    queryKey: ["pool"],
-    queryFn: () => apiGet<Paginated<Order>>("/orders/pool"),
+    queryKey: ["pool", mineOnly],
+    queryFn: () => apiGet<Paginated<Order>>(`/orders/pool${mineOnly ? "?mine=1" : ""}`),
     refetchInterval: 15000,
   });
   const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=200") });
   const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: () => apiGet<Paginated<Vehicle>>("/vehicles?page_size=200") });
+  const drivers = useQuery({ queryKey: ["drivers"], queryFn: () => apiGet<Paginated<Driver>>("/drivers?page_size=200") });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["pool"] });
 
   // 订单池实时变化即刷新（多客服建单 / 多调度抢单）
@@ -33,6 +36,10 @@ export function DispatchBoardPage() {
   const claim = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/claim`, {}),
     onSuccess: () => { toast.success("认领成功"); invalidate(); },
+  });
+  const release = useMutation({
+    mutationFn: (id: string) => apiPost(`/orders/${id}/release`, {}),
+    onSuccess: () => { toast.success("已退回订单池"); invalidate(); },
   });
   const suggest = useMutation({
     mutationFn: (id: string) => apiGet<DispatchSuggestion>(`/orders/${id}/dispatch-suggestion`),
@@ -59,10 +66,14 @@ export function DispatchBoardPage() {
         dispatch_type: dispatchType,
         carrier: carrierId || undefined,
         vehicle: vehicleId || undefined,
+        driver: driverId || undefined,
       }),
     onSuccess: () => {
       setActive(null);
       setSuggestion(null);
+      setVehicleId("");
+      setCarrierId("");
+      setDriverId("");
       toast.success("派单成功，已生成运单");
       invalidate();
     },
@@ -76,31 +87,41 @@ export function DispatchBoardPage() {
     <div className="stack">
       <div className="ct-grid">
         <div className="panel">
-          <div className="panel-head">订单池 · 待派 {orders.length}</div>
+          <div className="panel-head">
+            订单池 · {mineOnly ? "我认领的" : "全部"} {orders.length}
+            <label className="switch-mini" style={{ fontWeight: 400 }}>
+              <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> 仅看我认领
+            </label>
+          </div>
           {pool.isLoading ? (
             <div className="muted" style={{ padding: 16 }}>加载中…</div>
           ) : orders.length === 0 ? (
-            <EmptyState icon="🅿️" title="订单池为空" hint="已确认订单进池后将在此等待派单" actionLabel="去建单" actionTo="/intake" />
+            <EmptyState icon="🅿️" title={mineOnly ? "暂无我认领的订单" : "订单池为空"} hint="已确认订单进池后将在此等待派单" actionLabel="去建单" actionTo="/intake" />
           ) : (
             <table className="table">
               <thead>
-                <tr><th>订单号</th><th>线路</th><th>类型</th><th>优先级</th><th>货量</th><th>认领</th><th>操作</th></tr>
+                <tr><th>订单号</th><th>来源</th><th>线路</th><th>类型</th><th>优先级</th><th>货量</th><th>认领</th><th>操作</th></tr>
               </thead>
               <tbody>
-                {orders.map((o) => (
+                {orders.map((o) => {
+                  const claimed = o.status === "dispatching";
+                  return (
                   <tr key={o.id} style={active?.id === o.id ? { background: "#f1f5fb" } : {}}>
                     <td className="mono small">{o.order_no}</td>
+                    <td className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</td>
                     <td>{o.origin} → {o.destination}</td>
                     <td>{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.is_hazardous ? " ⚠危" : ""}</td>
                     <td><span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span></td>
                     <td>{o.cargo_weight_ton}吨</td>
-                    <td className="small">{o.claimed_by_name || "-"}</td>
-                    <td>
-                      <button className="btn-ghost" disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>认领</button>
-                      <button className="btn-ghost" onClick={() => { setActive(o); setSuggestion(null); suggest.mutate(o.id); }}>派单</button>
+                    <td className="small">{claimed ? <span className="tag tag-info">{o.claimed_by_name || "已认领"}</span> : "-"}</td>
+                    <td className="row-actions">
+                      {!claimed && <button className="btn-ghost" disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>认领</button>}
+                      {claimed && <button className="btn-ghost" disabled={release.isPending} onClick={() => release.mutate(o.id)}>退回</button>}
+                      <button className="btn-ghost" onClick={() => { setActive(o); setSuggestion(null); setVehicleId(""); setCarrierId(""); setDriverId(""); suggest.mutate(o.id); }}>派单</button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -175,10 +196,16 @@ export function DispatchBoardPage() {
                     {(carriers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 ) : (
-                  <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
-                    <option value="">选车辆</option>
-                    {(vehicles.data?.items ?? []).map((v) => <option key={v.id} value={v.id}>{v.plate_no}</option>)}
-                  </select>
+                  <>
+                    <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
+                      <option value="">选车辆</option>
+                      {(vehicles.data?.items ?? []).map((v) => <option key={v.id} value={v.id}>{v.plate_no}</option>)}
+                    </select>
+                    <select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
+                      <option value="">选司机（可选）</option>
+                      {(drivers.data?.items ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </>
                 )}
                 <button
                   className="btn-primary"

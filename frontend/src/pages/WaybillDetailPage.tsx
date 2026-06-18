@@ -221,14 +221,36 @@ export function WaybillDetailPage() {
             <div className="kv">
               <div><span>客户</span>{w.customer_name || "-"}</div>
               <div><span>承运商</span>{w.carrier_name || "-"}</div>
-              <div><span>车牌</span>{w.vehicle_plate || "-"}</div>
-              <div><span>司机</span>{w.driver_name || "-"}</div>
+              <div><span>牵引车牌</span>{w.vehicle_plate || "-"}</div>
+              <div><span>挂车牌</span>{w.trailer_plate || "-"}</div>
+              <div><span>主驾</span>{w.driver_name ? `${w.driver_name}${w.driver_phone ? ` · ${w.driver_phone}` : ""}` : "-"}</div>
+              <div><span>司机关系</span>{w.driver_employment || "-"}</div>
               <div><span>件数</span>{w.cargo.quantity}</div>
               <div><span>重量(吨)</span>{w.cargo.weight_ton}</div>
               <div><span>体积(方)</span>{w.cargo.volume_cbm}</div>
               <div><span>ETA偏移(分)</span>{w.eta_drift_minutes}</div>
             </div>
           </div>
+
+          {w.drivers && w.drivers.length > 0 && (
+            <div className="panel">
+              <div className="panel-head">随车司机 · {w.drivers.length} 人</div>
+              <table className="table">
+                <thead><tr><th>姓名</th><th>角色</th><th>关系</th><th>电话</th><th>区间</th></tr></thead>
+                <tbody>
+                  {w.drivers.map((d) => (
+                    <tr key={d.id}>
+                      <td>{d.name}</td>
+                      <td><span className={`tag${d.role === "main" ? " tag-high" : ""}`}>{d.role_label}</span></td>
+                      <td className="small">{d.employment}</td>
+                      <td className="small">{d.phone || "-"}</td>
+                      <td className="small">{d.note || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="panel">
             <div className="panel-head">费用与毛利</div>

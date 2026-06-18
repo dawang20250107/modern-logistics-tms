@@ -83,6 +83,32 @@ def test_dispatch_order_creates_waybill_with_type():
 
 
 @pytest.mark.django_db
+def test_dispatch_with_trailer_and_multiple_drivers():
+    from apps.masterdata.models import Driver
+    from apps.ops.serializers import WaybillSerializer
+
+    tractor = Vehicle.objects.create(plate_no="牵引沪A01", vehicle_class=Vehicle.CLASS_TRACTOR, load_capacity_ton=40)
+    trailer = Vehicle.objects.create(plate_no="挂沪A02", vehicle_class=Vehicle.CLASS_TRAILER, load_capacity_ton=40)
+    main = Driver.objects.create(name="张师傅", phone="13800000001", employment_type=Driver.EMP_EMPLOYEE)
+    co = Driver.objects.create(name="李师傅", phone="13800000002", employment_type=Driver.EMP_OUTSOURCED)
+    order = _pooled_order(cargo_weight_ton=20)
+
+    waybill = dispatch_order(
+        order, dispatch_type=Waybill.DISPATCH_OWN, vehicle=tractor, driver=main,
+        trailer=trailer, co_drivers=[co],
+    )
+    assert waybill.trailer_id == trailer.id
+    roles = {a.driver.name: a.role for a in waybill.driver_assignments.all()}
+    assert roles == {"张师傅": "main", "李师傅": "co"}
+
+    data = WaybillSerializer(waybill).data
+    assert data["trailer_plate"] == "挂沪A02"
+    assert data["driver_employment"] == "自有员工"
+    assert {d["name"] for d in data["drivers"]} == {"张师傅", "李师傅"}
+    assert next(d["employment"] for d in data["drivers"] if d["name"] == "李师傅") == "外协外调"
+
+
+@pytest.mark.django_db
 def test_dispatch_rejects_overloaded_vehicle():
     order = _pooled_order(cargo_weight_ton=20)
     small = Vehicle.objects.create(plate_no="小面包", load_capacity_ton=3)

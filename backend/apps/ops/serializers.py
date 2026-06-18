@@ -89,16 +89,31 @@ class WaybillSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
     carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")
     vehicle_plate = serializers.CharField(source="vehicle.plate_no", read_only=True, default="")
+    trailer_plate = serializers.CharField(source="trailer.plate_no", read_only=True, default="")
     driver_name = serializers.CharField(source="driver.name", read_only=True, default="")
+    driver_phone = serializers.CharField(source="driver.phone", read_only=True, default="")
+    driver_employment = serializers.CharField(source="driver.get_employment_type_display", read_only=True, default="")
+    drivers = serializers.SerializerMethodField()
     cargo = serializers.SerializerMethodField()
 
     class Meta:
         model = Waybill
         fields = [
-            "id", "waybill_no", "customer_name", "carrier_name", "vehicle_plate", "driver_name",
+            "id", "waybill_no", "customer_name", "carrier_name", "vehicle_plate", "trailer_plate",
+            "driver_name", "driver_phone", "driver_employment", "drivers",
             "route_name", "origin", "destination", "status", "dispatch_status", "risk_level",
             "receipt_status", "eta_drift_minutes", "planned_arrival", "estimated_arrival",
             "cargo", "created_at",
+        ]
+
+    def get_drivers(self, obj):
+        return [
+            {
+                "id": str(a.driver_id), "name": a.driver.name, "phone": a.driver.phone,
+                "role": a.role, "role_label": a.get_role_display(),
+                "employment": a.driver.get_employment_type_display(), "note": a.note,
+            }
+            for a in obj.driver_assignments.select_related("driver").all()
         ]
 
     def get_cargo(self, obj):

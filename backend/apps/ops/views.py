@@ -499,9 +499,12 @@ class OrderViewSet(viewsets.ModelViewSet):
         carrier = Carrier.objects.filter(id=data["carrier"]).first() if data.get("carrier") else None
         vehicle = Vehicle.objects.filter(id=data["vehicle"]).first() if data.get("vehicle") else None
         driver = Driver.objects.filter(id=data["driver"]).first() if data.get("driver") else None
+        trailer = Vehicle.objects.filter(id=data["trailer"]).first() if data.get("trailer") else None
+        co_ids = data.get("co_drivers") or []
+        co_drivers = list(Driver.objects.filter(id__in=co_ids)) if co_ids else []
         waybill = dispatch_order(
             order, dispatch_type=data.get("dispatch_type", ""), carrier=carrier,
-            vehicle=vehicle, driver=driver, operator=request.user,
+            vehicle=vehicle, driver=driver, trailer=trailer, co_drivers=co_drivers, operator=request.user,
         )
         return Response(WaybillSerializer(waybill).data, status=201)
 

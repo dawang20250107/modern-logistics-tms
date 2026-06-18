@@ -69,8 +69,9 @@ def _assert_capacity_fit(vehicle, order):
         )
 
 
-def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None, operator=None):
-    """派单：生成运单并落承运信息与派单类型，回写订单为已派单。
+def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None,
+                   trailer=None, co_drivers=None, operator=None):
+    """派单：生成运单并落承运信息（牵引车/挂车/主副驾）与派单类型，回写订单为已派单。
 
     并发安全：锁定车辆/司机行后校验占用，避免两名调度把同一车/司机重复派出。
     """
@@ -89,7 +90,8 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
         _assert_resource_free(vehicle, driver)
         _assert_capacity_fit(vehicle, order)
         waybill = convert_order_to_waybill(
-            order, carrier=carrier, vehicle=vehicle, driver=driver, dispatch_type=dispatch_type, operator=operator
+            order, carrier=carrier, vehicle=vehicle, driver=driver, trailer=trailer,
+            co_drivers=co_drivers, dispatch_type=dispatch_type, operator=operator,
         )
         record_order_event(
             order, "dispatched", actor=operator, to_status=order.status, source="dispatch",

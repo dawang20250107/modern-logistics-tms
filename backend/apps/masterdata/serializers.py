@@ -17,12 +17,13 @@ class CarrierSerializer(serializers.ModelSerializer):
 
 class VehicleSerializer(serializers.ModelSerializer):
     carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")
+    vehicle_class_label = serializers.CharField(source="get_vehicle_class_display", read_only=True, default="")
 
     class Meta:
         model = Vehicle
         fields = [
-            "id", "plate_no", "vehicle_type", "ownership_type", "carrier", "carrier_name",
-            "load_capacity_ton", "volume_capacity_cbm",
+            "id", "plate_no", "vehicle_class", "vehicle_class_label", "vehicle_type", "ownership_type",
+            "carrier", "carrier_name", "load_capacity_ton", "volume_capacity_cbm",
             "road_transport_cert_no", "inspection_expiry", "insurance_expiry", "maintenance_due_date",
             "is_active",
         ]
@@ -30,12 +31,14 @@ class VehicleSerializer(serializers.ModelSerializer):
 
 class DriverSerializer(serializers.ModelSerializer):
     carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")
+    employment_label = serializers.CharField(source="get_employment_type_display", read_only=True, default="")
 
     class Meta:
         model = Driver
         fields = [
-            "id", "name", "phone", "id_no", "license_no", "license_type", "license_expiry",
-            "qualification_cert_no", "qualification_expiry", "carrier", "carrier_name", "is_active",
+            "id", "name", "phone", "employment_type", "employment_label", "id_no", "license_no",
+            "license_type", "license_expiry", "qualification_cert_no", "qualification_expiry",
+            "carrier", "carrier_name", "is_active",
         ]
 
 

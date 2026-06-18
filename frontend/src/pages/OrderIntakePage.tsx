@@ -29,9 +29,12 @@ export function OrderIntakePage() {
   const [missing, setMissing] = useState<Array<{ field: string; label: string }>>([]);
   const [duplicates, setDuplicates] = useState<DuplicateOrder[]>([]);
 
+  const [statusFilter, setStatusFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const orderQuery = `/orders?page_size=50&ordering=-created_at${statusFilter ? `&status=${statusFilter}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
   const orders = useQuery({
-    queryKey: ["orders"],
-    queryFn: () => apiGet<Paginated<Order>>("/orders?page_size=50&ordering=-created_at"),
+    queryKey: ["orders", statusFilter, search],
+    queryFn: () => apiGet<Paginated<Order>>(orderQuery),
   });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orders"] });
 
@@ -185,6 +188,21 @@ export function OrderIntakePage() {
 
       <div className="panel">
         <div className="panel-head">订单（全流程）</div>
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <button className={`chip${statusFilter === "" ? " chip-on" : ""}`} onClick={() => setStatusFilter("")}>全部</button>
+          {["pending_confirm", "confirmed", "pooled", "dispatching", "converted", "completed", "cancelled"].map((s) => (
+            <button key={s} className={`chip${statusFilter === s ? " chip-on" : ""}`} onClick={() => setStatusFilter(s)}>
+              {ORDER_STATUS_LABEL[s] ?? s}
+            </button>
+          ))}
+          <input
+            className="search"
+            style={{ minWidth: 200, flex: 1 }}
+            placeholder="搜索订单号 / 电话 / 始发 / 目的地"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         {orders.isLoading ? (
           <div className="muted" style={{ padding: 16 }}>加载中…</div>
         ) : items.length === 0 ? (

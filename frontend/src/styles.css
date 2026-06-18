@@ -279,3 +279,11 @@ button, select, input, textarea { font: inherit; color: inherit; }
 }
 .btn-danger:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
 .btn-danger:disabled { opacity: 0.55; cursor: default; }
+
+/* ── 过滤 chip ─────────────────────────────────────────── */
+.chip {
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--panel);
+  color: var(--ink-2); font-size: 13px; cursor: pointer; transition: all var(--speed); white-space: nowrap;
+}
+.chip:hover { border-color: var(--brand); color: var(--brand); }
+.chip-on { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 4px 12px rgba(47, 107, 255, 0.28); }

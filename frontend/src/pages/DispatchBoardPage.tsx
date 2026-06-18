@@ -41,6 +41,17 @@ export function DispatchBoardPage() {
       if (data.best_vehicle) setVehicleId("");
     },
   });
+  const adopt = () => {
+    if (!suggestion) return;
+    const type = suggestion.suggested_dispatch_type;
+    setDispatchType(type);
+    if (type === "third_party") {
+      setCarrierId(suggestion.best_carrier?.carrier_id ?? "");
+    } else {
+      setVehicleId(suggestion.best_vehicle?.vehicle_id ?? "");
+    }
+  };
+
   const dispatch = useMutation({
     mutationFn: (id: string) =>
       apiPost(`/orders/${id}/dispatch`, {
@@ -125,6 +136,15 @@ export function DispatchBoardPage() {
                 <div><span>最优承运商</span><b>{suggestion.best_carrier ? `${suggestion.best_carrier.carrier} ¥${suggestion.best_carrier.quote}` : "—"}</b></div>
                 <div><span>建议派单类型</span><b>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</b></div>
               </div>
+
+              <button
+                className="btn-ghost"
+                style={{ alignSelf: "flex-start" }}
+                disabled={suggestion.suggested_dispatch_type === "third_party" ? !suggestion.best_carrier : !suggestion.best_vehicle}
+                onClick={adopt}
+              >
+                ⚡ 采纳建议（自动回填运力）
+              </button>
 
               {suggestion.vehicle_candidates.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>

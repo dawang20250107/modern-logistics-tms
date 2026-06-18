@@ -258,6 +258,39 @@ class OrderTemplate(BaseModel, SoftDeleteModel):
         return self.name
 
 
+class OrderAttachment(BaseModel):
+    """订单附件：合同 / 委托书 / 货物照片 / 其他单据。"""
+
+    KIND_CONTRACT = "contract"
+    KIND_AUTHORIZATION = "authorization"
+    KIND_PHOTO = "photo"
+    KIND_OTHER = "other"
+    KIND_CHOICES = [
+        (KIND_CONTRACT, "合同"),
+        (KIND_AUTHORIZATION, "委托书"),
+        (KIND_PHOTO, "货物照片"),
+        (KIND_OTHER, "其他"),
+    ]
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="attachments")
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_OTHER)
+    name = models.CharField(max_length=160, blank=True)
+    file = models.FileField(upload_to="order_attachments/", null=True, blank=True)
+    file_url = models.URLField(blank=True, help_text="外部已上传文件 URL")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="order_attachments"
+    )
+
+    class Meta:
+        db_table = "ops_order_attachment"
+        ordering = ["-created_at"]
+        verbose_name = "订单附件"
+        verbose_name_plural = "订单附件"
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} {self.name}"
+
+
 class OrderEvent(BaseModel):
     """订单全生命周期事件溯源：建单/确认/进池/认领/派单/完成/取消等留痕。"""
 

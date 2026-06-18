@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import (
     ExceptionRecord,
     Order,
+    OrderAttachment,
     OrderCargoItem,
     OrderEvent,
     OrderStop,
@@ -13,6 +14,25 @@ from .models import (
     WaybillEvent,
 )
 from .services import allowed_next
+
+
+class OrderAttachmentSerializer(serializers.ModelSerializer):
+    file_display = serializers.SerializerMethodField()
+    uploaded_by_name = serializers.CharField(source="uploaded_by.username", read_only=True, default="")
+
+    class Meta:
+        model = OrderAttachment
+        fields = ["id", "order", "kind", "name", "file", "file_url", "file_display", "uploaded_by_name", "created_at"]
+        read_only_fields = ["uploaded_by_name"]
+        extra_kwargs = {"file": {"required": False}, "order": {"required": False}}
+
+    def get_file_display(self, obj):
+        if obj.file:
+            try:
+                return obj.file.url
+            except ValueError:
+                return ""
+        return obj.file_url
 
 
 class OrderCargoItemSerializer(serializers.ModelSerializer):
@@ -160,6 +180,7 @@ class OrderSerializer(serializers.ModelSerializer):
     waybill_nos = serializers.SerializerMethodField()
     cargo_items = OrderCargoItemSerializer(many=True, read_only=True)
     stops = OrderStopSerializer(many=True, read_only=True)
+    attachments = OrderAttachmentSerializer(many=True, read_only=True)
 
     def get_waybill_nos(self, obj) -> list[str]:
         # 依赖视图层 prefetch_related("waybills") 避免 N+1；拆单后可能多张
@@ -178,7 +199,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
             "created_by", "created_by_name", "raw_text", "parse_meta", "remark", "created_at",
-            "waybill_nos", "cargo_items", "stops",
+            "waybill_nos", "cargo_items", "stops", "attachments",
             "approval_status", "approval_remark", "approved_at",
         ]
         read_only_fields = ["claimed_by", "claimed_at", "pooled_at", "created_by"]

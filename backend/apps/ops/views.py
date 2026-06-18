@@ -224,7 +224,7 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = (
         Order.objects.select_related("customer", "created_by", "claimed_by")
-        .prefetch_related("waybills", "cargo_items", "stops")
+        .prefetch_related("waybills", "cargo_items", "stops", "attachments")
         .all()
     )
     serializer_class = OrderSerializer
@@ -297,6 +297,31 @@ class OrderViewSet(viewsets.ModelViewSet):
             operator=request.user,
         )
         return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        """订单附件：GET 列表 / POST 上传（合同/委托书/货物照片）。"""
+        from .models import OrderAttachment
+        from .serializers import OrderAttachmentSerializer
+
+        order = self.get_object()
+        if request.method == "GET":
+            return Response(OrderAttachmentSerializer(order.attachments.all(), many=True).data)
+        att = OrderAttachment.objects.create(
+            order=order,
+            kind=request.data.get("kind", OrderAttachment.KIND_OTHER),
+            name=request.data.get("name", "") or (request.FILES.get("file").name if request.FILES.get("file") else ""),
+            file=request.FILES.get("file"),
+            file_url=request.data.get("file_url", ""),
+            uploaded_by=_current_user_or_none(request),
+        )
+        return Response(OrderAttachmentSerializer(att).data, status=201)
+
+    @action(detail=True, methods=["delete"], url_path="attachments/(?P<att_id>[^/]+)")
+    def delete_attachment(self, request, pk=None, att_id=None):
+        """删除订单附件。"""
+        self.get_object().attachments.filter(id=att_id).delete()
+        return Response(status=204)
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
@@ -676,11 +701,11 @@ class WorkbenchView(APIView):
         today = timezone.localdate()
         open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
 
-        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops").filter(
+        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
             created_by=user, status=Order.STATUS_PENDING_CONFIRM
         )
         pool = Order.objects.filter(status=Order.STATUS_POOLED)
-        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops").filter(
+        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
             status=Order.STATUS_POOLED
         ).order_by("-priority", "pooled_at")[:5]
         return Response({

@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { apiGet, apiPost } from "../api/client";
+import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Order, OrderEvent } from "../api/types";
 import {
   APPROVAL_STATUS_LABEL,
+  ATTACHMENT_KIND_LABEL,
   BUSINESS_TYPE_LABEL,
   ORDER_CHANNEL_LABEL,
   ORDER_EVENT_LABEL,
@@ -47,6 +48,20 @@ export function OrderDetailPage() {
   const approval = useMutation({
     mutationFn: (v: { action: "approve" | "reject"; remark: string }) => apiPost(`/orders/${id}/${v.action}`, { remark: v.remark }),
     onSuccess: (_d, v) => { toast.success(v.action === "approve" ? "已审批通过" : "已驳回"); invalidate(); },
+  });
+  const [attKind, setAttKind] = useState("contract");
+  const upload = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("kind", attKind);
+      return apiUpload(`/orders/${id}/attachments`, fd);
+    },
+    onSuccess: () => { toast.success("附件已上传"); invalidate(); },
+  });
+  const delAtt = useMutation({
+    mutationFn: (attId: string) => apiDelete(`/orders/${id}/attachments/${attId}`),
+    onSuccess: () => { toast.success("已删除附件"); invalidate(); },
   });
 
   const o = order.data;
@@ -229,6 +244,38 @@ export function OrderDetailPage() {
                 <div className="muted small">原始消息</div>
                 <div className="result-box" style={{ margin: "6px 0 0" }}>{o.raw_text}</div>
               </div>
+            )}
+          </div>
+
+          {/* 附件 */}
+          <div className="panel">
+            <div className="panel-head">附件（合同 / 委托书 / 货物照片）</div>
+            <div className="form-actions" style={{ borderBottom: "1px solid var(--line)" }}>
+              <select value={attKind} onChange={(e) => setAttKind(e.target.value)}>
+                {Object.entries(ATTACHMENT_KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <label className="btn-ghost" style={{ cursor: "pointer" }}>
+                {upload.isPending ? "上传中…" : "选择文件上传"}
+                <input type="file" hidden disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
+              </label>
+            </div>
+            {o.attachments.length === 0 ? (
+              <div className="muted small" style={{ padding: 16 }}>暂无附件</div>
+            ) : (
+              <table className="table">
+                <thead><tr><th>类型</th><th>名称</th><th>上传人</th><th>时间</th><th>操作</th></tr></thead>
+                <tbody>
+                  {o.attachments.map((a) => (
+                    <tr key={a.id}>
+                      <td><span className="tag tag-info">{ATTACHMENT_KIND_LABEL[a.kind] ?? a.kind}</span></td>
+                      <td>{a.file_display ? <a className="link" href={a.file_display} target="_blank" rel="noreferrer">{a.name || "查看"}</a> : (a.name || "-")}</td>
+                      <td className="small">{a.uploaded_by_name || "-"}</td>
+                      <td className="small">{new Date(a.created_at).toLocaleString()}</td>
+                      <td><button className="btn-ghost" disabled={delAtt.isPending} onClick={() => delAtt.mutate(a.id)}>删除</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>

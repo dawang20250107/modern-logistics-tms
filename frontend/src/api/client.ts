@@ -85,6 +85,7 @@ async function raw(path: string, options: RequestInit, retry = true): Promise<Re
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const resp = await raw(path, options);
+  if (resp.status === 204) return null as T; // No Content（如删除）
   const env = (await resp.json().catch(() => null)) as Envelope<T> | null;
   if (!env) throw new ApiError("BAD_JSON", "响应解析失败");
   if (!resp.ok || !env.success) {
@@ -96,6 +97,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export const apiGet = <T>(path: string): Promise<T> => api<T>(path);
 export const apiPost = <T>(path: string, body: unknown): Promise<T> =>
   api<T>(path, { method: "POST", body: JSON.stringify(body) });
+export const apiDelete = <T>(path: string): Promise<T> =>
+  api<T>(path, { method: "DELETE" });
 
 // 下载（非 JSON，如 CSV 导出）：带鉴权 + 自动刷新，触发浏览器下载。
 export async function apiDownload(path: string, filename: string): Promise<void> {

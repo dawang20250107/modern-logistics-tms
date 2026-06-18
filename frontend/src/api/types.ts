@@ -224,6 +224,7 @@ export interface Order {
   waybill_nos: string[];
   cargo_items: OrderCargoItem[];
   stops: OrderStop[];
+  attachments: OrderAttachment[];
   approval_status: "none" | "pending" | "approved" | "rejected";
   approval_remark: string;
   approved_at: string | null;
@@ -267,6 +268,18 @@ export interface OrderTemplate {
   created_by_name: string;
   created_at: string;
 }
+export interface OrderAttachment {
+  id: string;
+  kind: string;
+  name: string;
+  file_display: string;
+  file_url: string;
+  uploaded_by_name: string;
+  created_at: string;
+}
+export const ATTACHMENT_KIND_LABEL: Record<string, string> = {
+  contract: "合同", authorization: "委托书", photo: "货物照片", other: "其他",
+};
 export const SETTLEMENT_LABEL: Record<string, string> = { monthly: "月结", cash: "现结", prepaid: "预付" };
 export const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个人", enterprise: "企业", government: "政府" };
 

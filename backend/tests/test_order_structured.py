@@ -189,6 +189,28 @@ def test_normal_order_no_approval():
 
 
 @pytest.mark.django_db
+def test_order_attachment_upload_list_delete(admin_client):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    order = create_order_from_intake(fields={"origin": "上海", "destination": "成都"})
+    f = SimpleUploadedFile("contract.txt", b"hello contract", content_type="text/plain")
+    resp = admin_client.post(f"/api/v1/orders/{order.id}/attachments", {"kind": "contract", "file": f}, format="multipart")
+    assert resp.status_code == 201, resp.content
+    att_id = resp.json()["data"]["id"]
+
+    lst = admin_client.get(f"/api/v1/orders/{order.id}/attachments")
+    assert len(lst.json()["data"]) == 1
+    assert lst.json()["data"][0]["kind"] == "contract"
+
+    detail = admin_client.get(f"/api/v1/orders/{order.id}")
+    assert len(detail.json()["data"]["attachments"]) == 1
+
+    d = admin_client.delete(f"/api/v1/orders/{order.id}/attachments/{att_id}")
+    assert d.status_code == 204
+    assert order.attachments.count() == 0
+
+
+@pytest.mark.django_db
 def test_customer_addresses_book(admin_client):
     cust = Customer.objects.create(code="CA1", name="海尔")
     o1 = create_order_from_intake(fields={"origin": "青岛", "destination": "上海"}, customer=cust)

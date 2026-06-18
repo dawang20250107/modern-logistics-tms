@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
+import { EmptyState } from "../components/EmptyState";
 import type { DuplicateOrder, Order, OrderChannel, Paginated, ParsedOrder } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
 
@@ -250,7 +251,10 @@ export function OrderIntakePage() {
         {orders.isLoading ? (
           <div className="muted" style={{ padding: 16 }}>加载中…</div>
         ) : items.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无订单</div>
+          <EmptyState
+            title={statusFilter || search ? "没有匹配的订单" : "暂无订单"}
+            hint={statusFilter || search ? "试试调整状态过滤或搜索条件" : "粘贴客户消息，AI 解析后即可一键建单"}
+          />
         ) : (
           <table className="table">
             <thead>

@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { toast } from "../api/toast";
+import { EmptyState } from "../components/EmptyState";
 import type { Carrier, DispatchSuggestion, Order, Paginated, Vehicle } from "../api/types";
 import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, PRIORITY_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
@@ -77,7 +78,7 @@ export function DispatchBoardPage() {
           {pool.isLoading ? (
             <div className="muted" style={{ padding: 16 }}>加载中…</div>
           ) : orders.length === 0 ? (
-            <div className="muted" style={{ padding: 16 }}>订单池为空</div>
+            <EmptyState icon="🅿️" title="订单池为空" hint="已确认订单进池后将在此等待派单" actionLabel="去建单" actionTo="/intake" />
           ) : (
             <table className="table">
               <thead>

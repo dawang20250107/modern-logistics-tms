@@ -185,20 +185,6 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
         <span className="ai-pill">企业级 · 多货多站</span>
       </div>
 
-      {/* 订单来源（多渠道）：选择来源驱动录单流程 */}
-      <div className="form-section">
-        <div className="section-label">订单来源</div>
-        <div className="source-tabs">
-          {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => (
-            <button key={k} type="button" className={`source-tab${form.channel === k ? " on" : ""}`} onClick={() => set("channel", k)}>
-              <span className="st-icon">{CHANNEL_META[k]?.icon ?? "📋"}</span>
-              <span>{v}</span>
-            </button>
-          ))}
-        </div>
-        <div className="muted small" style={{ marginTop: 6 }}>{CHANNEL_META[form.channel]?.hint}</div>
-      </div>
-
       {/* AI 速录 */}
       <div className="ai-box">
         <input placeholder="AI 速录：粘贴客户消息，自动填充线路/货量/电话…" value={paste} onChange={(e) => setPaste(e.target.value)} />
@@ -214,10 +200,15 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
         )}
       </div>
 
-      {/* 客户与商务 */}
+      {/* 客户信息 */}
       <div className="form-section">
-        <div className="section-label">客户与商务</div>
+        <div className="section-label">客户信息</div>
         <div className="grid-form">
+          <label>订单来源
+            <select value={form.channel} onChange={(e) => set("channel", e.target.value)}>
+              {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </label>
           <label>客户
             <select value={form.customer} onChange={(e) => set("customer", e.target.value)}>
               <option value="">选择客户（可选）</option>

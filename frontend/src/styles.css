@@ -57,14 +57,16 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .side {
   background: radial-gradient(120% 60% at 50% 0%, #11335c 0%, #0a1626 55%, #070f1c 100%);
   color: #c7d7ee; padding: 18px 10px; display: flex; flex-direction: column; gap: 18px; align-items: center;
-  border-right: 1px solid #0b1a30; height: 100vh; overflow-y: auto; overscroll-behavior: contain;
+  border-right: 1px solid #0b1a30; height: 100vh; overflow: hidden;
 }
 .mark {
-  width: 60px; height: 44px; border-radius: 12px; background: var(--grad-ai);
+  width: 60px; height: 44px; flex-shrink: 0; border-radius: 12px; background: var(--grad-ai);
   display: grid; place-items: center; color: #fff; font-weight: 800; letter-spacing: 1px; font-size: 15px;
   box-shadow: 0 8px 20px rgba(47, 107, 255, 0.45);
 }
-.nav { display: flex; flex-direction: column; gap: 4px; width: 100%; align-items: center; flex: 1; }
+.nav { display: flex; flex-direction: column; gap: 4px; width: 100%; align-items: center; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.nav::-webkit-scrollbar { width: 4px; }
+.nav::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
 .nav-item {
   position: relative; width: 80px; padding: 9px 0; border-radius: 10px;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
@@ -78,7 +80,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .nav-item.active::before {
   content: ""; position: absolute; left: -10px; top: 20%; height: 60%; width: 3px; border-radius: 3px; background: var(--grad);
 }
-.side-foot { color: #46597a; font-size: 11px; letter-spacing: 1px; padding-top: 6px; }
+.side-foot { color: #46597a; font-size: 11px; letter-spacing: 1px; padding-top: 6px; flex-shrink: 0; }
 
 /* SLA / 状态徽标 */
 .tag-info { background: #e8f0ff; color: var(--brand); border-color: #c7daff; }
@@ -317,16 +319,6 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .switch-mini { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .switch-mini input { cursor: pointer; }
 
-/* ── 订单来源选择 ──────────────────────────────────────── */
-.source-tabs { display: flex; flex-wrap: wrap; gap: 10px; }
-.source-tab {
-  display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 88px; padding: 12px 14px;
-  border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); cursor: pointer;
-  font-size: 13px; color: var(--ink-2); transition: all var(--speed);
-}
-.source-tab:hover { border-color: var(--brand); color: var(--brand); transform: translateY(-1px); }
-.source-tab.on { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 6px 16px rgba(47, 107, 255, 0.3); }
-.source-tab .st-icon { font-size: 22px; }
 
 /* ── 公开下单页 ────────────────────────────────────────── */
 .public-page { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; background: var(--bg); padding: 40px 16px; }

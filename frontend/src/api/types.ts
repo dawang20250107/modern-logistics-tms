@@ -420,7 +420,7 @@ export interface OrderEvent {
 }
 export const ORDER_EVENT_LABEL: Record<string, string> = {
   created: "建单", confirmed: "确认", pooled: "进池", claimed: "调度认领",
-  dispatched: "派单", completed: "完成", cancelled: "取消",
+  dispatched: "派单", completed: "完成", cancelled: "取消", updated: "编辑",
 };
 
 // ── 数据资产目录 ───────────────────────────────────────

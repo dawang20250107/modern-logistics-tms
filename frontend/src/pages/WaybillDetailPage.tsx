@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { STATUS_LABEL, type CostSummary, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
+import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
@@ -47,6 +48,13 @@ export function WaybillDetailPage() {
     mutationFn: (vars: { id: string; status: string }) =>
       apiPost(`/ai/suggestions/${vars.id}/confirm`, { status: vars.status }),
     onSuccess: invalidate,
+  });
+
+  const [signatory, setSignatory] = useState("");
+  const [signature, setSignature] = useState("");
+  const sign = useMutation({
+    mutationFn: () => apiPost(`/waybills/${no}/sign`, { signatory, signature, sign_source: "driver" }),
+    onSuccess: () => { setSignatory(""); setSignature(""); invalidate(); },
   });
 
   const fileInput = useRef<HTMLInputElement>(null);
@@ -117,6 +125,22 @@ export function WaybillDetailPage() {
           <div className="muted small" style={{ padding: 16 }}>暂无轨迹数据。</div>
         )}
       </div>
+
+      {(w.status === "in_transit" || w.status === "arrived") && (
+        <div className="panel">
+          <div className="panel-head">签收回传 · e-POD</div>
+          <div style={{ padding: 16 }} className="stack">
+            <input className="search" placeholder="签收人姓名" value={signatory} onChange={(e) => setSignatory(e.target.value)} style={{ maxWidth: 240 }} />
+            <div>
+              <div className="muted small" style={{ marginBottom: 6 }}>电子签名（手写）</div>
+              <SignaturePad onChange={setSignature} />
+            </div>
+            <button className="btn-primary" style={{ width: 160 }} disabled={!signatory || sign.isPending} onClick={() => sign.mutate()}>
+              {sign.isPending ? "提交中…" : "确认签收"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="wb-grid">
         <div className="panel">

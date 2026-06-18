@@ -53,11 +53,11 @@ button, select, input, textarea { font: inherit; color: inherit; }
 ::-webkit-scrollbar-thumb:hover { background: #aab6c8; background-clip: content-box; }
 
 /* ── 布局 ───────────────────────────────────────────── */
-.app { display: grid; grid-template-columns: 96px 1fr; min-height: 100vh; }
+.app { display: grid; grid-template-columns: 96px 1fr; height: 100vh; overflow: hidden; }
 .side {
   background: radial-gradient(120% 60% at 50% 0%, #11335c 0%, #0a1626 55%, #070f1c 100%);
   color: #c7d7ee; padding: 18px 10px; display: flex; flex-direction: column; gap: 18px; align-items: center;
-  border-right: 1px solid #0b1a30;
+  border-right: 1px solid #0b1a30; height: 100vh; overflow-y: auto; overscroll-behavior: contain;
 }
 .mark {
   width: 60px; height: 44px; border-radius: 12px; background: var(--grad-ai);
@@ -91,11 +91,11 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .content > .stack { animation: fadeUp 220ms cubic-bezier(0.4, 0, 0.2, 1); }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-.main { display: flex; flex-direction: column; min-width: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; height: 100vh; overflow: hidden; }
 .topbar {
-  height: 62px; background: rgba(255, 255, 255, 0.85); backdrop-filter: saturate(1.4) blur(8px);
+  height: 62px; flex-shrink: 0; background: rgba(255, 255, 255, 0.85); backdrop-filter: saturate(1.4) blur(8px);
   border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between;
-  padding: 0 24px; position: sticky; top: 0; z-index: 20;
+  padding: 0 24px; z-index: 20;
 }
 .topbar-title { font-weight: 700; font-size: 16px; letter-spacing: 0.2px; display: flex; align-items: center; gap: 10px; }
 .topbar-title .sub { font-weight: 500; font-size: 12px; color: var(--muted); letter-spacing: 0.6px; }
@@ -104,7 +104,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
   background: var(--grad-ai); box-shadow: 0 4px 12px rgba(108, 92, 255, 0.35);
 }
 .topbar-user { display: flex; align-items: center; gap: 14px; color: var(--muted); }
-.content { padding: 24px; max-width: 1480px; width: 100%; }
+.content { padding: 24px; max-width: 1480px; width: 100%; flex: 1; min-height: 0; overflow-y: auto; }
 
 .stack { display: flex; flex-direction: column; gap: 18px; }
 

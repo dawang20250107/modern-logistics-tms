@@ -245,3 +245,18 @@ button, select, input, textarea { font: inherit; color: inherit; }
 
 /* ── AI result ──────────────────────────────────────── */
 .result-box { margin: 0 18px 16px; padding: 14px; background: #0b1f33; color: #cfe2f5; border-radius: 10px; font-size: 12px; overflow: auto; max-height: 320px; }
+
+/* ── Toaster（全局操作反馈） ───────────────────────────── */
+.toaster { position: fixed; right: 20px; bottom: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; max-width: 380px; }
+.toast {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+  cursor: pointer; font-size: 13px; line-height: 1.5; animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.toast-error { border-left: 4px solid var(--red); }
+.toast-success { border-left: 4px solid var(--green); }
+.toast-info { border-left: 4px solid var(--brand); }
+.toast-icon { flex: none; }
+.toast-msg { flex: 1; color: var(--ink); word-break: break-word; }
+.toast-x { flex: none; color: var(--muted); font-size: 16px; line-height: 1; }

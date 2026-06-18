@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { toast } from "../api/toast";
 import type { Carrier, DispatchSuggestion, Order, Paginated, Vehicle } from "../api/types";
 import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, PRIORITY_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
@@ -30,7 +31,7 @@ export function DispatchBoardPage() {
 
   const claim = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/claim`, {}),
-    onSuccess: invalidate,
+    onSuccess: () => { toast.success("认领成功"); invalidate(); },
   });
   const suggest = useMutation({
     mutationFn: (id: string) => apiGet<DispatchSuggestion>(`/orders/${id}/dispatch-suggestion`),
@@ -50,6 +51,7 @@ export function DispatchBoardPage() {
     onSuccess: () => {
       setActive(null);
       setSuggestion(null);
+      toast.success("派单成功，已生成运单");
       invalidate();
     },
   });

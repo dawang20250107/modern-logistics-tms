@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, Statement } from "../api/types";
 import { STATEMENT_STATUS_LABEL } from "../api/types";
 
@@ -38,11 +39,11 @@ export function ReconciliationPage() {
         direction, counterparty_type: cpType, counterparty_id: counterpartyId,
         period_start: start, period_end: end, external_total: externalTotal || 0,
       }),
-    onSuccess: invalidate,
+    onSuccess: (s) => { toast.success(`对账单已生成：${s.statement_no}`); invalidate(); },
   });
   const confirm = useMutation({
     mutationFn: (id: string) => apiPost(`/finance/statements/${id}/confirm`, {}),
-    onSuccess: invalidate,
+    onSuccess: () => { toast.success("对账单已确认"); invalidate(); },
   });
   const detail = useQuery({
     queryKey: ["statement", expanded],

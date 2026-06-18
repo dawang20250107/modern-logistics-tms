@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
+import { toast } from "../api/toast";
 import type { DuplicateOrder, Order, OrderChannel, Paginated, ParsedOrder } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
 
@@ -46,19 +47,24 @@ export function OrderIntakePage() {
 
   const submit = useMutation({
     mutationFn: () => apiPost<Order>("/orders/intake", { channel, source, fields, text }),
-    onSuccess: () => {
+    onSuccess: (o) => {
       setText("");
       setFields({});
       setParseSource("");
       setMissing([]);
       setDuplicates([]);
+      toast.success(`建单成功：${o.order_no}`);
       invalidate();
     },
   });
 
+  const ACTION_LABEL: Record<string, string> = { confirm: "已确认", convert: "已转运单" };
   const act = useMutation({
     mutationFn: (v: { id: string; action: string }) => apiPost(`/orders/${v.id}/${v.action}`, {}),
-    onSuccess: invalidate,
+    onSuccess: (_d, v) => {
+      toast.success(ACTION_LABEL[v.action] ?? "操作成功");
+      invalidate();
+    },
   });
 
   const [bulk, setBulk] = useState("");
@@ -75,7 +81,11 @@ export function OrderIntakePage() {
       });
       return apiPost<{ ok_count: number; failed_count: number }>("/orders/import", { channel, source, rows });
     },
-    onSuccess: () => { setBulk(""); invalidate(); },
+    onSuccess: (r) => {
+      setBulk("");
+      toast.success(`批量建单完成：成功 ${r.ok_count}，失败 ${r.failed_count}`);
+      invalidate();
+    },
   });
 
   const items = orders.data?.items ?? [];

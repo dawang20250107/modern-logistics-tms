@@ -52,7 +52,7 @@ export function AppLayout() {
       <aside className="side">
         <div className="brand">
           <span className="brand-mark">智</span>
-          <span className="brand-text">智运 TMS<span className="brand-sub">智能运输中台</span></span>
+          <span className="brand-text">智运 TMS<span className="brand-sub">成为世界级物贸生态集团</span></span>
         </div>
         <nav className="nav">
           {NAV_GROUPS.map((group) => {

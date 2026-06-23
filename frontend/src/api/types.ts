@@ -368,10 +368,22 @@ export interface DispatchSuggestion {
   order_no: string;
   vehicle_candidates: Array<{ vehicle_id?: string; plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean }>;
   carrier_quotes: Array<{ carrier_id?: string; carrier: string; quote: number }>;
+  ymm_quote?: YmmQuote;
   external_signals: Array<{ type: string; level: string; note: string }>;
   suggested_dispatch_type: string;
   best_vehicle: { vehicle_id?: string; plate_no: string; compliance?: string[]; compliance_ok?: boolean } | null;
   best_carrier: { carrier_id?: string; carrier: string; quote: number } | null;
+}
+
+export interface YmmQuote {
+  source: string;
+  provider: string;
+  route: string;
+  low: number | null;
+  avg: number | null;
+  high: number | null;
+  currency: string;
+  note: string;
 }
 
 export const BUSINESS_TYPE_LABEL: Record<string, string> = {

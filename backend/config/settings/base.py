@@ -252,6 +252,13 @@ DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", default="https://api.deepseek.com")
 DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", default="deepseek-v4-pro")
 DEEPSEEK_TIMEOUT_SECONDS = env.int("DEEPSEEK_TIMEOUT_SECONDS", default=60)
 
+# ── 运满满/满帮 开放平台（调车运费比价）────────────────────
+YMM_BASE_URL = env("YMM_BASE_URL", default="https://qa-open.ymm56.com")
+YMM_APP_KEY = env("YMM_APP_KEY", default="")
+YMM_APP_SECRET = env("YMM_APP_SECRET", default="")
+YMM_ACCESS_TOKEN = env("YMM_ACCESS_TOKEN", default="")
+YMM_TIMEOUT_SECONDS = env.int("YMM_TIMEOUT_SECONDS", default=8)
+
 # ── LangGraph Agent ─────────────────────────────────────
 # ReAct 编排：DeepSeek（OpenAI 兼容）作为 LLM，状态持久化到 Postgres（checkpointer）。
 AGENT_LLM_TEMPERATURE = env.float("AGENT_LLM_TEMPERATURE", default=0.2)

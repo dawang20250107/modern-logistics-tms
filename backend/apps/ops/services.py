@@ -110,6 +110,11 @@ def sign_waybill(waybill, *, signatory="", signature="", file_url="", sign_sourc
     transition_waybill(waybill, Waybill.STATUS_SIGNED, operator=operator, remark=f"签收人 {signatory}")
     waybill.receipt_status = "received"
     waybill.save(update_fields=["receipt_status", "updated_at"])
+    # 刷新司机累计运单/运费（司机库统计）
+    if waybill.driver_id:
+        from .stats import refresh_driver_stats
+
+        refresh_driver_stats(waybill.driver)
     return receipt
 
 

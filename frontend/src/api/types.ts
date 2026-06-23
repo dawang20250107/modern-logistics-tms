@@ -15,6 +15,8 @@ export interface WaybillDriverRow {
   id: string;
   name: string;
   phone: string;
+  wechat: string;
+  app_registered: boolean;
   role: string;
   role_label: string;
   employment: string;
@@ -33,6 +35,7 @@ export interface Waybill {
   driver_employment: string;
   drivers: WaybillDriverRow[];
   route_name: string;
+  ai_conversation_id: string;
   origin: string;
   destination: string;
   status: string;
@@ -279,6 +282,7 @@ export interface Order {
   pooled_at: string | null;
   delivered_at: string | null;
   raw_text: string;
+  ai_conversation_id: string;
   parse_meta: Record<string, unknown>;
   waybill_nos: string[];
   cargo_items: OrderCargoItem[];

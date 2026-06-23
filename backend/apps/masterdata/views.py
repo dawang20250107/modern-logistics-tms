@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -35,16 +36,26 @@ class VehicleViewSet(viewsets.ModelViewSet):
     queryset = Vehicle.objects.select_related("carrier").all()
     serializer_class = VehicleSerializer
     search_fields = ["plate_no", "vehicle_type"]
-    filterset_fields = ["is_active", "carrier", "vehicle_class"]
+    filterset_fields = ["is_active", "carrier", "vehicle_class", "dispatch_source"]
     ordering_fields = ["plate_no", "created_at"]
 
 
 class DriverViewSet(viewsets.ModelViewSet):
     queryset = Driver.objects.select_related("carrier").all()
     serializer_class = DriverSerializer
-    search_fields = ["name", "phone"]
-    filterset_fields = ["is_active", "carrier", "employment_type"]
-    ordering_fields = ["name", "created_at"]
+    search_fields = ["name", "phone", "wechat"]
+    filterset_fields = ["is_active", "carrier", "employment_type", "app_registered"]
+    ordering_fields = ["name", "created_at", "cumulative_waybills", "cumulative_freight"]
+
+    @action(detail=True, methods=["post"], url_path="refresh-stats")
+    def refresh_stats(self, request, pk=None):
+        """刷新该司机累计运单数与运费（司机库统计）。"""
+        from apps.ops.stats import refresh_driver_stats
+
+        driver = self.get_object()
+        refresh_driver_stats(driver)
+        driver.refresh_from_db()
+        return Response(DriverSerializer(driver).data)
 
 
 class RouteViewSet(viewsets.ModelViewSet):

@@ -169,6 +169,7 @@ class Order(BaseModel, SoftDeleteModel):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_orders"
     )
     raw_text = models.TextField(blank=True, help_text="原始消息（微信群/自然语言建单）")
+    ai_conversation_id = models.CharField(max_length=64, blank=True, db_index=True, help_text="AI会话ID（关联智能客服对话）")
     parse_meta = models.JSONField(default=dict, blank=True, help_text="AI 解析来源与置信信息")
     remark = models.CharField(max_length=255, blank=True)
 
@@ -384,6 +385,7 @@ class Waybill(BaseModel, OrgScopedModel):
     )
 
     route_name = models.CharField(max_length=160)
+    ai_conversation_id = models.CharField(max_length=64, blank=True, db_index=True, help_text="AI会话ID（沿订单带入）")
     planned_route = models.ForeignKey(
         "masterdata.Route", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )

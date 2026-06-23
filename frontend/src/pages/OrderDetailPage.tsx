@@ -276,6 +276,12 @@ export function OrderDetailPage() {
                 ? <textarea className="search" style={{ width: "100%", minHeight: 56 }} value={edit.remark} onChange={(e) => setEdit({ ...edit, remark: e.target.value })} />
                 : <div>{o.remark || <span className="muted">-</span>}</div>}
             </div>
+            {o.ai_conversation_id && (
+              <div style={{ padding: "0 18px 12px" }}>
+                <div className="muted small">AI会话ID</div>
+                <div className="mono small">{o.ai_conversation_id}</div>
+              </div>
+            )}
             {o.raw_text && (
               <div style={{ padding: "0 18px 16px" }}>
                 <div className="muted small">原始消息</div>

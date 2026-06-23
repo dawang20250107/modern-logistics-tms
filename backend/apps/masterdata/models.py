@@ -10,6 +10,7 @@ class Customer(BaseModel, SoftDeleteModel):
     name = models.CharField(max_length=120)
     contact_name = models.CharField(max_length=64, blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
+    wechat_group = models.CharField(max_length=120, blank=True, help_text="所属微信群聊（需求入口）")
     settlement_type = models.CharField(max_length=32, blank=True)
     is_active = models.BooleanField(default=True)
 
@@ -51,10 +52,23 @@ class Vehicle(BaseModel, SoftDeleteModel):
         (CLASS_RIGID, "单体车"),
     ]
 
+    DISPATCH_OWN = "own"
+    DISPATCH_EXTERNAL = "external"
+    DISPATCH_PLATFORM = "platform"
+    DISPATCH_SOURCE_CHOICES = [
+        (DISPATCH_OWN, "自有"),
+        (DISPATCH_EXTERNAL, "外调"),
+        (DISPATCH_PLATFORM, "平台"),
+    ]
+
     plate_no = models.CharField(max_length=32, unique=True)
     vehicle_class = models.CharField(
         max_length=16, choices=VEHICLE_CLASS_CHOICES, default=CLASS_RIGID, db_index=True,
         help_text="牵引车/挂车/单体车",
+    )
+    dispatch_source = models.CharField(
+        max_length=16, choices=DISPATCH_SOURCE_CHOICES, default=DISPATCH_OWN, db_index=True,
+        help_text="调车来源：自有/外调/平台",
     )
     vehicle_type = models.CharField(max_length=64, blank=True)
     ownership_type = models.CharField(max_length=32, blank=True)
@@ -98,6 +112,12 @@ class Driver(BaseModel, SoftDeleteModel):
         help_text="雇佣关系：员工/外调/承运商司机/临时，决定结算路径",
     )
     phone = models.CharField(max_length=32, blank=True, db_index=True)
+    wechat = models.CharField(max_length=64, blank=True, help_text="微信号")
+    app_registered = models.BooleanField(default=False, db_index=True, help_text="司机App注册状态")
+    app_registered_at = models.DateTimeField(null=True, blank=True)
+    # 累计统计（运单签收/结算时刷新）
+    cumulative_waybills = models.IntegerField(default=0, help_text="累计运单数")
+    cumulative_freight = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="累计运费")
     id_no = models.CharField(max_length=32, blank=True)
     license_no = models.CharField(max_length=32, blank=True)
     license_type = models.CharField(max_length=16, blank=True, help_text="准驾车型，如 A2")

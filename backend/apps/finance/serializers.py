@@ -56,6 +56,24 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
         ]
 
 
+class ReimbursementSerializer(serializers.ModelSerializer):
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    category_label = serializers.CharField(source="get_category_display", read_only=True)
+    waybill_no = serializers.CharField(source="waybill.waybill_no", read_only=True, default="")
+    submitted_by_name = serializers.CharField(source="submitted_by.username", read_only=True, default="")
+
+    class Meta:
+        from .models import Reimbursement
+
+        model = Reimbursement
+        fields = [
+            "id", "reimb_no", "waybill", "waybill_no", "order_no", "category", "category_label",
+            "amount", "reason", "status", "status_label", "submitted_by_name",
+            "approved_at", "paid_at", "remark", "created_at",
+        ]
+        read_only_fields = ["reimb_no", "status", "approved_at", "paid_at"]
+
+
 class PricingRuleSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
     carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")

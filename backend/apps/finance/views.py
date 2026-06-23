@@ -83,6 +83,59 @@ class PaymentRequestViewSet(viewsets.ModelViewSet):
     search_fields = ["request_no"]
 
 
+class ReimbursementViewSet(viewsets.ModelViewSet):
+    """内部简易报销：提交 → 审批(生成应付+付款申请) → 付款。"""
+
+    filterset_fields = ["status", "category", "waybill"]
+    search_fields = ["reimb_no", "order_no", "reason"]
+    ordering_fields = ["created_at", "amount"]
+
+    def get_queryset(self):
+        from .models import Reimbursement
+
+        return Reimbursement.objects.select_related("waybill", "submitted_by").all()
+
+    def get_serializer_class(self):
+        from .serializers import ReimbursementSerializer
+
+        return ReimbursementSerializer
+
+    def create(self, request, *args, **kwargs):
+        from apps.ops.models import Waybill
+
+        from .reimbursement import submit_reimbursement
+        from .serializers import ReimbursementSerializer
+
+        data = request.data
+        wb = Waybill.objects.filter(waybill_no=data.get("waybill_no")).first() if data.get("waybill_no") else None
+        if wb is None and data.get("waybill"):
+            wb = Waybill.objects.filter(id=data["waybill"]).first()
+        reimb = submit_reimbursement(
+            waybill=wb, order_no=data.get("order_no", ""), category=data.get("category", "other"),
+            amount=data.get("amount", 0), reason=data.get("reason", ""), operator=request.user,
+        )
+        return Response(ReimbursementSerializer(reimb).data, status=201)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, pk=None):
+        from .reimbursement import approve_reimbursement
+
+        return Response(self.get_serializer(approve_reimbursement(self.get_object(), operator=request.user)).data)
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, pk=None):
+        from .reimbursement import reject_reimbursement
+
+        reimb = reject_reimbursement(self.get_object(), reason=request.data.get("reason", ""), operator=request.user)
+        return Response(self.get_serializer(reimb).data)
+
+    @action(detail=True, methods=["post"], url_path="pay")
+    def pay(self, request, pk=None):
+        from .reimbursement import pay_reimbursement
+
+        return Response(self.get_serializer(pay_reimbursement(self.get_object(), operator=request.user)).data)
+
+
 class PaymentResultView(APIView):
     """外部 OA/ERP/财务回写付款结果（配合 Idempotency-Key 幂等）。"""
 

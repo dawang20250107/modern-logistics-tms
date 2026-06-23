@@ -25,6 +25,26 @@ export interface Contract {
   created_at: string;
 }
 
+export interface Reimbursement {
+  id: string;
+  reimb_no: string;
+  waybill_no: string;
+  order_no: string;
+  category: string;
+  category_label: string;
+  amount: number;
+  reason: string;
+  status: string;
+  status_label: string;
+  submitted_by_name: string;
+  created_at: string;
+}
+
+export const REIMB_CATEGORY_LABEL: Record<string, string> = {
+  freight_advance: "运费垫付", toll: "过路费", fuel: "油费",
+  loading: "装卸费", lodging: "食宿", other: "其他",
+};
+
 export interface ReminderTemplate {
   id: string;
   name: string;

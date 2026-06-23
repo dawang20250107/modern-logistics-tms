@@ -73,6 +73,61 @@ class ExpenseRecord(BaseModel):
         return f"{self.expense_item_code}:{self.amount}"
 
 
+class Reimbursement(BaseModel):
+    """内部简易报销：勾选订单/运单提交报销 → 审批 → 下游付款（计入经营结果）。"""
+
+    STATUS_SUBMITTED = "submitted"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_PAID = "paid"
+    STATUS_CHOICES = [
+        (STATUS_SUBMITTED, "已提交"),
+        (STATUS_APPROVED, "已审批"),
+        (STATUS_REJECTED, "已驳回"),
+        (STATUS_PAID, "已付款"),
+    ]
+    CATEGORY_CHOICES = [
+        ("freight_advance", "运费垫付"),
+        ("toll", "过路费"),
+        ("fuel", "油费"),
+        ("loading", "装卸费"),
+        ("lodging", "食宿"),
+        ("other", "其他"),
+    ]
+
+    reimb_no = models.CharField(max_length=40, unique=True)
+    waybill = models.ForeignKey(
+        "ops.Waybill", null=True, blank=True, on_delete=models.SET_NULL, related_name="reimbursements"
+    )
+    order_no = models.CharField(max_length=40, blank=True, help_text="关联订单号（勾选订单提交时带入）")
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="other", db_index=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    reason = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_SUBMITTED, db_index=True)
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="submitted_reimbursements"
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="approved_reimbursements"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    payment_request = models.ForeignKey(
+        "finance.PaymentRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="reimbursements"
+    )
+    remark = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "fin_reimbursement"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status"]), models.Index(fields=["waybill", "status"])]
+        verbose_name = "报销"
+        verbose_name_plural = "报销"
+
+    def __str__(self) -> str:
+        return self.reimb_no
+
+
 class PaymentRequest(BaseModel):
     request_no = models.CharField(max_length=64, unique=True)
     waybill = models.ForeignKey(

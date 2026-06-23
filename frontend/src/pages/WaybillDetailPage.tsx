@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { toast } from "../api/toast";
-import { STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverReminder, type ExceptionRecord, type Paginated, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
+import { REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
@@ -144,6 +144,24 @@ export function WaybillDetailPage() {
     },
   });
 
+  const reimbursements = useQuery({
+    queryKey: ["waybill", no, "reimbursements"],
+    queryFn: () => apiGet<Paginated<Reimbursement>>(`/finance/reimbursements?waybill=${detail.data?.id}&page_size=50`),
+    enabled: Boolean(detail.data?.id),
+  });
+  const invalidateReimb = () => queryClient.invalidateQueries({ queryKey: ["waybill", no, "reimbursements"] });
+  const [bxCat, setBxCat] = useState("toll");
+  const [bxAmount, setBxAmount] = useState("");
+  const [bxReason, setBxReason] = useState("");
+  const submitReimb = useMutation({
+    mutationFn: () => apiPost("/finance/reimbursements", { waybill_no: no, category: bxCat, amount: bxAmount, reason: bxReason }),
+    onSuccess: () => { setBxAmount(""); setBxReason(""); toast.success("报销已提交"); invalidateReimb(); },
+  });
+  const reimbAction = useMutation({
+    mutationFn: (v: { id: string; action: string }) => apiPost(`/finance/reimbursements/${v.id}/${v.action}`, {}),
+    onSuccess: (_d, v) => { toast.success(v.action === "approve" ? "已审批，生成应付与付款申请" : v.action === "pay" ? "已付款" : "已驳回"); invalidateReimb(); },
+  });
+
   const catalog = useQuery({ queryKey: ["cost-catalog"], queryFn: () => apiGet<CostCatalog>("/waybills/cost-catalog") });
   const [exDir, setExDir] = useState<"payable" | "receivable">("payable");
   const [exItem, setExItem] = useState("TRANSPORT_COST");
@@ -262,6 +280,46 @@ export function WaybillDetailPage() {
           </div>
         </div>
       )}
+
+      <div className="panel">
+        <div className="panel-head">内部报销 · 下游付款</div>
+        <div style={{ padding: 16 }} className="stack">
+          <div className="form-row" style={{ gap: 8, flexWrap: "wrap", padding: 0 }}>
+            <select value={bxCat} onChange={(e) => setBxCat(e.target.value)}>
+              {Object.entries(REIMB_CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <input className="search" style={{ width: 90 }} placeholder="金额" value={bxAmount} onChange={(e) => setBxAmount(e.target.value)} />
+            <input className="search" style={{ flex: 1, minWidth: 140 }} placeholder="事由" value={bxReason} onChange={(e) => setBxReason(e.target.value)} />
+            <button className="btn-primary" disabled={submitReimb.isPending || !bxAmount} onClick={() => submitReimb.mutate()}>提交报销</button>
+          </div>
+          {(reimbursements.data?.items?.length ?? 0) > 0 && (
+            <table className="table">
+              <thead><tr><th>单号</th><th>类别</th><th>金额</th><th>事由</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                {(reimbursements.data?.items ?? []).map((b) => (
+                  <tr key={b.id}>
+                    <td className="mono small">{b.reimb_no}</td>
+                    <td className="small">{b.category_label}</td>
+                    <td className="small">¥{b.amount}</td>
+                    <td className="small">{b.reason || "-"}</td>
+                    <td><span className={`tag${b.status === "paid" ? " tag-low" : b.status === "rejected" ? " tag-high" : ""}`}>{b.status_label}</span></td>
+                    <td className="small">
+                      {b.status === "submitted" && (
+                        <>
+                          <button className="link" onClick={() => reimbAction.mutate({ id: b.id, action: "approve" })}>审批</button>
+                          {" · "}
+                          <button className="link" onClick={() => reimbAction.mutate({ id: b.id, action: "reject" })}>驳回</button>
+                        </>
+                      )}
+                      {b.status === "approved" && <button className="link" onClick={() => reimbAction.mutate({ id: b.id, action: "pay" })}>付款</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
 
       <div className="panel">
         <div className="panel-head">作业提醒 · 富文本回复库（司机端强制确认）</div>

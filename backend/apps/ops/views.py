@@ -692,6 +692,13 @@ class OrderViewSet(viewsets.ModelViewSet):
         ]
         return Response({"fields": parsed, "meta": meta, "missing": missing, "duplicates": duplicates})
 
+    @action(detail=True, methods=["get"], url_path="workflow")
+    def workflow(self, request, pk=None):
+        """订单全流程总览：建单→确认→派单→合同→司机注册→在途→签收→报销→付款→对账→完成。"""
+        from .workflow import order_workflow
+
+        return Response(order_workflow(self.get_object()))
+
     @action(detail=True, methods=["get"], url_path="timeline")
     def timeline(self, request, pk=None):
         """订单全生命周期事件时间线。"""

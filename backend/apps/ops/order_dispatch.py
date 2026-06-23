@@ -97,6 +97,11 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
             order, "dispatched", actor=operator, to_status=order.status, source="dispatch",
             waybill_no=waybill.waybill_no, dispatch_type=dispatch_type,
         )
+        # 工作流编排：派单即自动生成承运合同（告别文字版合同）
+        if driver is not None:
+            from .contracts import generate_contract
+
+            generate_contract(waybill, operator=operator)
     publish_event("order_dispatched", {
         "order_no": order.order_no, "waybill_no": waybill.waybill_no, "dispatch_type": dispatch_type,
     })

@@ -142,7 +142,12 @@ class DriverCheckinView(_DriverPublic):
             stamped = watermark(photo.read(), lines)
             checkin.photo.save(f"{wb.waybill_no}_{node}.jpg", ContentFile(stamped), save=False)
         checkin.save()
-        return Response({"ok": True, "node": node, "checkin_at": checkin.checkin_at}, status=201)
+        # 工作流编排：打卡节点自动推进运单状态
+        from .workflow import advance_from_checkin
+
+        new_status = advance_from_checkin(wb, node, operator=None)
+        return Response({"ok": True, "node": node, "checkin_at": checkin.checkin_at,
+                         "waybill_status": new_status}, status=201)
 
 
 class DriverCredentialUploadView(_DriverPublic):

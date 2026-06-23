@@ -379,3 +379,13 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .public-page { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; background: var(--bg); padding: 40px 16px; }
 .public-card { width: min(560px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 28px; }
 .public-brand { font-weight: 800; font-size: 20px; margin-bottom: 6px; background: var(--grad-ai); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* ── 司机端 H5 ────────────────────────────────────────── */
+.driver-card { width: min(440px, 100%); }
+.driver-wb { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 12px; background: var(--panel-2); }
+.driver-wb-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.driver-modal-mask { position: fixed; inset: 0; background: rgba(6, 13, 24, 0.7); display: grid; place-items: center; z-index: 100; padding: 20px; }
+.driver-modal { width: min(440px, 100%); background: var(--panel); border-radius: 16px; padding: 22px; box-shadow: var(--shadow-lg); }
+.driver-modal-title { font-size: 18px; font-weight: 800; color: var(--red); }
+.driver-modal-sub { color: var(--muted); font-size: 13px; margin: 4px 0 10px; }
+.driver-modal-body { white-space: pre-wrap; background: var(--panel-2); border-radius: 10px; padding: 12px; max-height: 46vh; overflow: auto; font-size: 13px; line-height: 1.7; margin: 0 0 14px; }

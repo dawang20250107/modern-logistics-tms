@@ -704,3 +704,41 @@ class DriverReminder(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.driver_id}:{self.title}:{self.status}"
+
+
+class DriverCheckin(BaseModel):
+    """司机端打卡签到：各流程节点自动定位 + 上传水印照片。"""
+
+    NODE_CHOICES = [
+        ("depart", "出发"),
+        ("arrive_pickup", "到达装货地"),
+        ("queuing", "排队"),
+        ("loading", "装货"),
+        ("depart_loaded", "发车"),
+        ("in_transit", "在途打卡"),
+        ("arrive_delivery", "到达卸货地"),
+        ("unloading", "卸货"),
+        ("receipt", "回单"),
+        ("finish", "订单结束"),
+    ]
+
+    waybill = models.ForeignKey(Waybill, on_delete=models.CASCADE, related_name="checkins")
+    driver = models.ForeignKey(
+        "masterdata.Driver", null=True, blank=True, on_delete=models.SET_NULL, related_name="checkins"
+    )
+    node = models.CharField(max_length=20, choices=NODE_CHOICES, db_index=True)
+    lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    lng = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    photo = models.FileField(upload_to="checkins/", null=True, blank=True, help_text="水印照片")
+    note = models.CharField(max_length=255, blank=True)
+    checkin_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "ops_driver_checkin"
+        ordering = ["-checkin_at"]
+        indexes = [models.Index(fields=["waybill", "node"])]
+        verbose_name = "司机打卡"
+        verbose_name_plural = "司机打卡"
+
+    def __str__(self) -> str:
+        return f"{self.waybill_id}:{self.node}"

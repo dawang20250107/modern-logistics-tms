@@ -8,6 +8,7 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { AuditPage } from "./pages/AuditPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { CustomerOrderPage } from "./pages/CustomerOrderPage";
+import { DriverPortalPage } from "./pages/DriverPortalPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DataCatalogPage } from "./pages/DataCatalogPage";
@@ -32,6 +33,7 @@ export function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/track" element={<TrackingPage />} />
           <Route path="/submit" element={<CustomerOrderPage />} />
+          <Route path="/driver" element={<DriverPortalPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />

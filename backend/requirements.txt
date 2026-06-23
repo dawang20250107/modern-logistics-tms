@@ -30,3 +30,6 @@ paho-mqtt>=2,<3
 
 # 合同 PDF 生成（含中文 CID 字体 STSong-Light，无需外部字体文件）
 reportlab>=4.0,<5
+
+# 打卡水印照片（叠加时间/定位文字）
+Pillow>=10,<13

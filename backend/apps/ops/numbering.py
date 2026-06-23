@@ -25,3 +25,8 @@ def order_no(now) -> str:
 def waybill_no(now) -> str:
     day = now.strftime("%Y%m%d")
     return f"YD{day}{next_sequence(f'waybill:{day}'):06d}"
+
+
+def contract_no(now) -> str:
+    day = now.strftime("%Y%m%d")
+    return f"HT{day}{next_sequence(f'contract:{day}'):06d}"

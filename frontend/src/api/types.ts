@@ -11,6 +11,20 @@ export interface CurrentUser {
   roles: string[];
 }
 
+export interface Contract {
+  id: string;
+  contract_no: string;
+  driver_name: string;
+  content: string;
+  sent_at: string | null;
+  driver_reply: string;
+  confirm_status: string;
+  status_label: string;
+  confirmed_at: string | null;
+  pdf_url: string;
+  created_at: string;
+}
+
 export interface WaybillDriverRow {
   id: string;
   name: string;
@@ -524,6 +538,8 @@ export const ORDER_EVENT_LABEL: Record<string, string> = {
   dispatched: "派单", completed: "完成", cancelled: "取消", updated: "编辑",
   approval_required: "提交审批", approved: "审批通过", rejected: "审批驳回",
   split: "拆单", merged: "合单",
+  contract_generated: "生成合同", contract_sent: "发送合同",
+  contract_confirmed: "合同确认", contract_rejected: "合同拒签",
 };
 export const APPROVAL_STATUS_LABEL: Record<string, string> = {
   none: "无需审批", pending: "待审批", approved: "已通过", rejected: "已驳回",

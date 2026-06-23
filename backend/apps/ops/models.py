@@ -511,6 +511,44 @@ class WaybillStop(BaseModel):
         return f"{self.waybill_id}:{self.seq}:{self.stop_type}"
 
 
+class Contract(BaseModel):
+    """合同库：司机承运合同生成/发送/确认/PDF归档（对应方案"发合同→引导注册"节点）。"""
+
+    STATUS_PENDING = "pending"      # 待发送
+    STATUS_SENT = "sent"            # 已发送待确认
+    STATUS_CONFIRMED = "confirmed"  # 司机已确认
+    STATUS_REJECTED = "rejected"    # 司机拒签
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "待发送"),
+        (STATUS_SENT, "已发送"),
+        (STATUS_CONFIRMED, "已确认"),
+        (STATUS_REJECTED, "已拒签"),
+    ]
+
+    contract_no = models.CharField(max_length=40, unique=True)
+    waybill = models.ForeignKey(Waybill, on_delete=models.CASCADE, related_name="contracts")
+    driver = models.ForeignKey(
+        "masterdata.Driver", null=True, blank=True, on_delete=models.SET_NULL, related_name="contracts"
+    )
+    template_code = models.CharField(max_length=32, default="standard")
+    content = models.TextField(blank=True, help_text="合同内容（文本，PDF 由此生成）")
+    sent_at = models.DateTimeField(null=True, blank=True, help_text="AI发送时间")
+    driver_reply = models.CharField(max_length=255, blank=True, help_text="司机回复")
+    confirm_status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    pdf = models.FileField(upload_to="contracts/", null=True, blank=True, help_text="自动生成的合同PDF")
+
+    class Meta:
+        db_table = "ops_contract"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["waybill", "confirm_status"])]
+        verbose_name = "合同"
+        verbose_name_plural = "合同"
+
+    def __str__(self) -> str:
+        return self.contract_no
+
+
 class WaybillEvent(BaseModel):
     waybill = models.ForeignKey(Waybill, on_delete=models.CASCADE, related_name="events")
     event_type = models.CharField(max_length=64)

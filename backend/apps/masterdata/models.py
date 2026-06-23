@@ -1,5 +1,6 @@
 """主数据：客户 / 承运商 / 车辆 / 司机。"""
 
+from django.conf import settings
 from django.db import models
 
 from apps.core.models import BaseModel, SoftDeleteModel
@@ -137,6 +138,54 @@ class Driver(BaseModel, SoftDeleteModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class DriverCredential(BaseModel):
+    """司机证件库：行驶证(车头/车挂主副页)、驾驶证(主副页)、运输证、身份证(正反面)。
+
+    支持司机自传或代上传；OCR 自动识别带出姓名/证号/有效期建档。
+    """
+
+    CRED_VEHICLE_LICENSE = "vehicle_license"   # 车头行驶证
+    CRED_TRAILER_LICENSE = "trailer_license"   # 车挂行驶证
+    CRED_DRIVING_LICENSE = "driving_license"   # 驾驶证
+    CRED_TRANSPORT_CERT = "transport_cert"     # 道路运输证
+    CRED_ID_CARD = "id_card"                   # 身份证
+    CRED_TYPE_CHOICES = [
+        (CRED_VEHICLE_LICENSE, "车头行驶证"),
+        (CRED_TRAILER_LICENSE, "车挂行驶证"),
+        (CRED_DRIVING_LICENSE, "驾驶证"),
+        (CRED_TRANSPORT_CERT, "道路运输证"),
+        (CRED_ID_CARD, "身份证"),
+    ]
+    SIDE_MAIN = "main"   # 主页 / 正面
+    SIDE_BACK = "back"   # 副页 / 反面
+    SIDE_CHOICES = [(SIDE_MAIN, "主页/正面"), (SIDE_BACK, "副页/反面")]
+
+    driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name="credentials")
+    cred_type = models.CharField(max_length=24, choices=CRED_TYPE_CHOICES, db_index=True)
+    side = models.CharField(max_length=8, choices=SIDE_CHOICES, default=SIDE_MAIN)
+    file = models.FileField(upload_to="credentials/", null=True, blank=True)
+    file_url = models.URLField(blank=True)
+    ocr_status = models.CharField(max_length=16, default="pending", help_text="pending/processing/done/failed")
+    ocr_result = models.JSONField(default=dict, blank=True)
+    holder_name = models.CharField(max_length=64, blank=True, help_text="识别出的姓名/车牌")
+    cert_no = models.CharField(max_length=64, blank=True, help_text="识别出的证号")
+    expiry_date = models.DateField(null=True, blank=True, help_text="有效期至")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="uploaded_credentials"
+    )
+    self_uploaded = models.BooleanField(default=False, help_text="司机自传(True)或代上传(False)")
+
+    class Meta:
+        db_table = "md_driver_credential"
+        ordering = ["driver", "cred_type", "side"]
+        indexes = [models.Index(fields=["driver", "cred_type"]), models.Index(fields=["expiry_date"])]
+        verbose_name = "司机证件"
+        verbose_name_plural = "司机证件"
+
+    def __str__(self) -> str:
+        return f"{self.driver_id}:{self.cred_type}:{self.side}"
 
 
 class Route(BaseModel, SoftDeleteModel):

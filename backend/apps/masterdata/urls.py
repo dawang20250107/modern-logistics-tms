@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CarrierViewSet,
     CustomerViewSet,
+    DriverCredentialViewSet,
     DriverViewSet,
     ExpiringCredentialsView,
     RouteViewSet,
@@ -15,6 +16,7 @@ router.register("customers", CustomerViewSet, basename="customer")
 router.register("carriers", CarrierViewSet, basename="carrier")
 router.register("vehicles", VehicleViewSet, basename="vehicle")
 router.register("drivers", DriverViewSet, basename="driver")
+router.register("driver-credentials", DriverCredentialViewSet, basename="driver-credential")
 router.register("routes", RouteViewSet, basename="route")
 
 urlpatterns = [

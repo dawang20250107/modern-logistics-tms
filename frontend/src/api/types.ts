@@ -523,6 +523,34 @@ export const METRIC_DOMAIN_LABEL: Record<string, string> = {
 export interface Vehicle { id: string; plate_no: string; vehicle_type: string; vehicle_class?: string; vehicle_class_label?: string; }
 export interface Driver { id: string; name: string; phone: string; employment_type?: string; employment_label?: string; }
 
+export interface DriverCredential {
+  id: string;
+  driver: string;
+  driver_name: string;
+  cred_type: string;
+  cred_type_label: string;
+  side: string;
+  side_label: string;
+  file_display: string;
+  ocr_status: string;
+  holder_name: string;
+  cert_no: string;
+  expiry_date: string | null;
+  self_uploaded: boolean;
+  created_at: string;
+}
+
+export interface DriverLookup {
+  matched: boolean;
+  driver: Driver | null;
+  credentials: DriverCredential[];
+}
+
+export const CRED_TYPE_LABEL: Record<string, string> = {
+  vehicle_license: "车头行驶证", trailer_license: "车挂行驶证",
+  driving_license: "驾驶证", transport_cert: "道路运输证", id_card: "身份证",
+};
+
 // ── 通知 / 订单事件 ─────────────────────────────────────
 export interface Notification {
   id: string;

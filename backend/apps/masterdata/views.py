@@ -57,6 +57,54 @@ class DriverViewSet(viewsets.ModelViewSet):
         driver.refresh_from_db()
         return Response(DriverSerializer(driver).data)
 
+    @action(detail=False, methods=["get"], url_path="lookup")
+    def lookup(self, request):
+        """按 姓名 + 身份证后6位 自动带出司机档案与证件。?name=&id_tail="""
+        from .credential_ocr import match_driver
+        from .serializers import DriverCredentialSerializer
+
+        name = (request.query_params.get("name") or "").strip()
+        id_tail = (request.query_params.get("id_tail") or "").strip()
+        driver = match_driver(name=name, id_tail=id_tail)
+        if driver is None:
+            return Response({"matched": False, "driver": None, "credentials": []})
+        creds = DriverCredentialSerializer(driver.credentials.all(), many=True).data
+        return Response({"matched": True, "driver": DriverSerializer(driver).data, "credentials": creds})
+
+
+class DriverCredentialViewSet(viewsets.ModelViewSet):
+    """司机证件库：上传(自传/代上传) → OCR 自动识别建档。"""
+
+    serializer_class = None  # set below
+    filterset_fields = ["driver", "cred_type", "ocr_status"]
+    ordering_fields = ["created_at", "expiry_date"]
+
+    def get_queryset(self):
+        from .models import DriverCredential
+
+        return DriverCredential.objects.select_related("driver").all()
+
+    def get_serializer_class(self):
+        from .serializers import DriverCredentialSerializer
+
+        return DriverCredentialSerializer
+
+    def perform_create(self, serializer):
+        from .credential_ocr import apply_ocr
+
+        user = self.request.user if getattr(self.request.user, "is_authenticated", False) else None
+        cred = serializer.save(uploaded_by=user)
+        apply_ocr(cred)  # 上传即触发 OCR 识别建档
+
+    @action(detail=True, methods=["post"], url_path="ocr")
+    def ocr(self, request, pk=None):
+        """重新触发 OCR 识别。"""
+        from .credential_ocr import apply_ocr
+
+        cred = self.get_object()
+        apply_ocr(cred)
+        return Response(self.get_serializer(cred).data)
+
 
 class RouteViewSet(viewsets.ModelViewSet):
     queryset = Route.objects.all()

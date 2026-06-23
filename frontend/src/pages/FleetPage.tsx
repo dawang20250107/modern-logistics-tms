@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { apiGet } from "../api/client";
-import type { CredentialRow, CredSeverity, ExpiringCredentials } from "../api/types";
-import { CRED_SEVERITY_LABEL } from "../api/types";
+import { apiGet, apiUpload } from "../api/client";
+import { toast } from "../api/toast";
+import type { CredentialRow, CredSeverity, DriverCredential, DriverLookup, ExpiringCredentials } from "../api/types";
+import { CRED_SEVERITY_LABEL, CRED_TYPE_LABEL } from "../api/types";
 
 const SEVERITY_TAG: Record<CredSeverity, string> = {
   expired: "high", critical: "medium", warning: "low",
@@ -38,6 +39,78 @@ function CredTable({ title, rows, subjectLabel }: { title: string; rows: Credent
             ))}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+function CredentialLibrary() {
+  const [name, setName] = useState("");
+  const [idTail, setIdTail] = useState("");
+  const [result, setResult] = useState<DriverLookup | null>(null);
+  const [credType, setCredType] = useState("id_card");
+  const [side, setSide] = useState("main");
+
+  const lookup = useMutation({
+    mutationFn: () => apiGet<DriverLookup>(`/drivers/lookup?name=${encodeURIComponent(name)}&id_tail=${encodeURIComponent(idTail)}`),
+    onSuccess: (d) => { setResult(d); if (!d.matched) toast.info("未匹配到司机，请核对姓名与身份证后6位"); },
+  });
+  const upload = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData();
+      fd.append("driver", result!.driver!.id);
+      fd.append("cred_type", credType);
+      fd.append("side", side);
+      fd.append("self_uploaded", "false");
+      fd.append("file", file);
+      return apiUpload<DriverCredential>("/driver-credentials", fd);
+    },
+    onSuccess: () => { toast.success("证件已上传，OCR 识别建档中"); lookup.mutate(); },
+  });
+
+  return (
+    <div className="panel">
+      <div className="panel-head">司机证件库 · 姓名 + 身份证后6位带出</div>
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <input className="search" style={{ width: 130 }} placeholder="司机姓名" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="search" style={{ width: 130 }} placeholder="身份证后6位" value={idTail} onChange={(e) => setIdTail(e.target.value)} />
+        <button className="btn-primary" disabled={lookup.isPending || (!name && !idTail)} onClick={() => lookup.mutate()}>带出档案</button>
+      </div>
+      {result?.matched && result.driver && (
+        <div style={{ padding: "0 16px 14px" }} className="stack">
+          <div className="muted small">
+            {result.driver.name} · {result.driver.phone} · {result.driver.employment_label ?? ""}
+          </div>
+          <table className="table">
+            <thead><tr><th>证件</th><th>面</th><th>持有人/车牌</th><th>证号</th><th>有效期</th><th>识别</th><th>文件</th></tr></thead>
+            <tbody>
+              {result.credentials.length === 0 && <tr><td colSpan={7} className="muted small">暂无证件，下方上传。</td></tr>}
+              {result.credentials.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.cred_type_label}</td>
+                  <td className="small">{c.side_label}</td>
+                  <td className="small">{c.holder_name || "-"}</td>
+                  <td className="small">{c.cert_no || "-"}</td>
+                  <td className="small">{c.expiry_date || "-"}</td>
+                  <td><span className={`tag${c.ocr_status === "done" ? " tag-low" : ""}`}>{c.ocr_status}</span></td>
+                  <td>{c.file_display ? <a className="link small" href={c.file_display} target="_blank" rel="noreferrer">查看</a> : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+            <select value={credType} onChange={(e) => setCredType(e.target.value)}>
+              {Object.entries(CRED_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <select value={side} onChange={(e) => setSide(e.target.value)}>
+              <option value="main">主页/正面</option><option value="back">副页/反面</option>
+            </select>
+            <label className="btn-ghost" style={{ cursor: "pointer" }}>
+              {upload.isPending ? "上传中…" : "上传证件"}
+              <input type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
+            </label>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -88,6 +161,8 @@ export function FleetPage() {
           <CredTable title="司机资质" rows={q.data?.drivers ?? []} subjectLabel="司机" />
         </div>
       )}
+
+      <CredentialLibrary />
     </div>
   );
 }

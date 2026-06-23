@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Carrier, Customer, Driver, Route, Vehicle
+from .models import Carrier, Customer, Driver, DriverCredential, Route, Vehicle
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -67,3 +67,27 @@ class RouteSerializer(serializers.ModelSerializer):
             "id", "code", "name", "origin", "destination", "waypoints",
             "corridor_m", "distance_km", "is_active",
         ]
+
+
+class DriverCredentialSerializer(serializers.ModelSerializer):
+    cred_type_label = serializers.CharField(source="get_cred_type_display", read_only=True)
+    side_label = serializers.CharField(source="get_side_display", read_only=True)
+    driver_name = serializers.CharField(source="driver.name", read_only=True, default="")
+    file_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DriverCredential
+        fields = [
+            "id", "driver", "driver_name", "cred_type", "cred_type_label", "side", "side_label",
+            "file", "file_url", "file_display", "ocr_status", "ocr_result",
+            "holder_name", "cert_no", "expiry_date", "self_uploaded", "created_at",
+        ]
+        extra_kwargs = {"file": {"required": False}}
+
+    def get_file_display(self, obj):
+        if obj.file:
+            try:
+                return obj.file.url
+            except ValueError:
+                return ""
+        return obj.file_url

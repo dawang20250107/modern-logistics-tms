@@ -239,6 +239,47 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         )
         return Response(WaybillDetailSerializer(waybill).data)
 
+    @action(detail=True, methods=["get", "post"], url_path="contract")
+    def contract(self, request, waybill_no=None):
+        """合同库：GET 取最新合同；POST 生成承运合同（含中文PDF）。"""
+        from .contracts import generate_contract
+        from .serializers import ContractSerializer
+
+        waybill = self.get_object()
+        if request.method == "POST":
+            c = generate_contract(waybill, operator=request.user)
+            return Response(ContractSerializer(c).data, status=201)
+        latest = waybill.contracts.first()
+        return Response(ContractSerializer(latest).data if latest else None)
+
+    @action(detail=True, methods=["post"], url_path="contract/send")
+    def contract_send(self, request, waybill_no=None):
+        """发送最新合同给司机（微信下发预留）。"""
+        from .contracts import send_contract
+        from .serializers import ContractSerializer
+
+        waybill = self.get_object()
+        latest = waybill.contracts.first()
+        if latest is None:
+            raise AppError("NO_CONTRACT", "请先生成合同。", status=404)
+        return Response(ContractSerializer(send_contract(latest, operator=request.user)).data)
+
+    @action(detail=True, methods=["post"], url_path="contract/confirm")
+    def contract_confirm(self, request, waybill_no=None):
+        """司机确认/拒签最新合同：{accepted, reply}。"""
+        from .contracts import confirm_contract
+        from .serializers import ContractSerializer
+
+        waybill = self.get_object()
+        latest = waybill.contracts.first()
+        if latest is None:
+            raise AppError("NO_CONTRACT", "无可确认的合同。", status=404)
+        c = confirm_contract(
+            latest, accepted=bool(request.data.get("accepted", True)),
+            reply=request.data.get("reply", ""), operator=request.user,
+        )
+        return Response(ContractSerializer(c).data)
+
     @action(detail=True, methods=["post"], url_path="sign")
     def sign(self, request, waybill_no=None):
         """司机/客户签收回传（e-POD）：电子签名 + 回单，推进到已签收并触发订单完成。"""

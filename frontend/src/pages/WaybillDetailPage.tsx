@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { toast } from "../api/toast";
-import { STATUS_LABEL, type CostCatalog, type CostSummary, type ExceptionRecord, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
+import { STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type ExceptionRecord, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
@@ -105,6 +105,24 @@ export function WaybillDetailPage() {
     mutationFn: (v: { seq: number; event: "arrived" | "departed" }) =>
       apiPost(`/waybills/${no}/stop-event`, v),
     onSuccess: (_d, v) => { toast.success(v.event === "arrived" ? "已记录到达" : "已记录离开"); invalidate(); },
+  });
+
+  const contract = useQuery({
+    queryKey: ["waybill", no, "contract"],
+    queryFn: () => apiGet<Contract | null>(`/waybills/${no}/contract`),
+  });
+  const invalidateContract = () => queryClient.invalidateQueries({ queryKey: ["waybill", no, "contract"] });
+  const genContract = useMutation({
+    mutationFn: () => apiPost(`/waybills/${no}/contract`, {}),
+    onSuccess: () => { toast.success("合同已生成（含PDF）"); invalidateContract(); },
+  });
+  const sendContract = useMutation({
+    mutationFn: () => apiPost(`/waybills/${no}/contract/send`, {}),
+    onSuccess: () => { toast.success("合同已发送给司机"); invalidateContract(); },
+  });
+  const confirmContract = useMutation({
+    mutationFn: (accepted: boolean) => apiPost(`/waybills/${no}/contract/confirm`, { accepted, reply: accepted ? "同意承运" : "拒签" }),
+    onSuccess: () => { toast.success("已更新合同确认状态"); invalidateContract(); },
   });
 
   const catalog = useQuery({ queryKey: ["cost-catalog"], queryFn: () => apiGet<CostCatalog>("/waybills/cost-catalog") });
@@ -225,6 +243,35 @@ export function WaybillDetailPage() {
           </div>
         </div>
       )}
+
+      <div className="panel">
+        <div className="panel-head">
+          承运合同 · 合同库
+          {!contract.data && <button className="btn-primary" disabled={genContract.isPending} onClick={() => genContract.mutate()}>生成合同</button>}
+        </div>
+        {contract.data ? (
+          <div style={{ padding: 16 }} className="stack">
+            <div className="form-row" style={{ gap: 12, alignItems: "center", padding: 0, flexWrap: "wrap" }}>
+              <span className="mono">{contract.data.contract_no}</span>
+              <span className={`tag${contract.data.confirm_status === "confirmed" ? " tag-low" : contract.data.confirm_status === "rejected" ? " tag-high" : ""}`}>{contract.data.status_label}</span>
+              {contract.data.sent_at && <span className="muted small">发送 {fmt(contract.data.sent_at)}</span>}
+              {contract.data.driver_reply && <span className="muted small">司机回复：{contract.data.driver_reply}</span>}
+              <span style={{ flex: 1 }} />
+              {contract.data.pdf_url && <a className="link small" href={contract.data.pdf_url} target="_blank" rel="noreferrer">查看PDF</a>}
+              {contract.data.confirm_status === "pending" && <button className="btn-ghost" disabled={sendContract.isPending} onClick={() => sendContract.mutate()}>发送给司机</button>}
+              {contract.data.confirm_status === "sent" && (
+                <>
+                  <button className="btn-primary" disabled={confirmContract.isPending} onClick={() => confirmContract.mutate(true)}>司机确认</button>
+                  <button className="btn-ghost" disabled={confirmContract.isPending} onClick={() => confirmContract.mutate(false)}>拒签</button>
+                </>
+              )}
+            </div>
+            <pre className="result-box" style={{ margin: 0, whiteSpace: "pre-wrap", maxHeight: 220 }}>{contract.data.content}</pre>
+          </div>
+        ) : (
+          <div className="muted small" style={{ padding: 16 }}>尚未生成承运合同。点击「生成合同」自动出具含中文 PDF 的承运合同。</div>
+        )}
+      </div>
 
       <div className="panel">
         <div className="panel-head">在途异常 · 上报与处理</div>

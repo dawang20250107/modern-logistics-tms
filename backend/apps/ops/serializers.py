@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import (
+    Contract,
     ExceptionRecord,
     Order,
     OrderAttachment,
@@ -125,6 +126,22 @@ class WaybillSerializer(serializers.ModelSerializer):
             "weight_ton": float(obj.cargo_weight_ton),
             "volume_cbm": float(obj.cargo_volume_cbm),
         }
+
+
+class ContractSerializer(serializers.ModelSerializer):
+    status_label = serializers.CharField(source="get_confirm_status_display", read_only=True)
+    driver_name = serializers.CharField(source="driver.name", read_only=True, default="")
+    pdf_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Contract
+        fields = [
+            "id", "contract_no", "waybill", "driver", "driver_name", "template_code", "content",
+            "sent_at", "driver_reply", "confirm_status", "status_label", "confirmed_at", "pdf_url", "created_at",
+        ]
+
+    def get_pdf_url(self, obj):
+        return obj.pdf.url if obj.pdf else ""
 
 
 class WaybillStopSerializer(serializers.ModelSerializer):

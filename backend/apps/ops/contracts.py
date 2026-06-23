@@ -151,5 +151,11 @@ def confirm_contract(contract, *, accepted=True, reply="", operator=None) -> Con
     if accepted and contract.driver_id:
         from .stats import refresh_driver_stats
 
-        refresh_driver_stats(contract.driver)
+        # 工作流编排：合同确认 → 引导注册完成（司机入驻）
+        driver = contract.driver
+        if not driver.app_registered:
+            driver.app_registered = True
+            driver.app_registered_at = timezone.now()
+            driver.save(update_fields=["app_registered", "app_registered_at", "updated_at"])
+        refresh_driver_stats(driver)
     return contract

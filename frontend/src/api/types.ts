@@ -25,6 +25,9 @@ export interface Contract {
   created_at: string;
 }
 
+export interface WorkflowStage { key: string; name: string; done: boolean; detail: string; at: string | null }
+export interface OrderWorkflow { order_no: string; current: string; stages: WorkflowStage[] }
+
 export interface Reimbursement {
   id: string;
   reimb_no: string;

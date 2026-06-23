@@ -6,7 +6,7 @@ import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
-import type { Order, OrderEvent } from "../api/types";
+import type { Order, OrderEvent, OrderWorkflow } from "../api/types";
 import {
   APPROVAL_STATUS_LABEL,
   ATTACHMENT_KIND_LABEL,
@@ -30,6 +30,7 @@ export function OrderDetailPage() {
   const [edit, setEdit] = useState<Record<string, string>>({});
 
   const order = useQuery({ queryKey: ["order", id], queryFn: () => apiGet<Order>(`/orders/${id}`) });
+  const workflow = useQuery({ queryKey: ["order", id, "workflow"], queryFn: () => apiGet<OrderWorkflow>(`/orders/${id}/workflow`) });
   const timeline = useQuery({ queryKey: ["order", id, "timeline"], queryFn: () => apiGet<OrderEvent[]>(`/orders/${id}/timeline`) });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["order", id] });
 
@@ -98,6 +99,20 @@ export function OrderDetailPage() {
 
   return (
     <div className="stack">
+      {workflow.data && (
+        <div className="panel">
+          <div className="panel-head">工作流全流程</div>
+          <div className="wf-track">
+            {workflow.data.stages.map((s) => (
+              <div key={s.key} className={`wf-step${s.done ? " done" : ""}${s.key === workflow.data!.current ? " current" : ""}`}>
+                <span className="wf-dot">{s.done ? "✓" : ""}</span>
+                <span className="wf-name">{s.name}</span>
+                {s.detail && <span className="wf-detail">{s.detail}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="panel">
         <div className="wb-head">
           <div>

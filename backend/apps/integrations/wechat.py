@@ -6,9 +6,21 @@
 
 import logging
 
+from django.conf import settings
+
 logger = logging.getLogger("integrations.wechat")
 
 RESERVED = {"status": "reserved", "channel": "wechat"}
+
+
+def configured() -> bool:
+    return bool(settings.WECHAT_PROVIDER and (settings.WECHAT_CORP_ID or settings.WECHAT_PROVIDER == "personal"))
+
+
+def receive_group_message(payload: dict) -> dict:
+    """接收微信群消息（预留）：接入后由此入口转 AI 解析建单。"""
+    logger.info("wechat.receive_group_message reserved")
+    return {**RESERVED, "action": "receive_group_message"}
 
 
 def send_contract_to_driver(contract) -> dict:

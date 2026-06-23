@@ -11,12 +11,34 @@ export function DataCatalogPage() {
     queryFn: () => apiGet<{ assets: DataAsset[]; total_assets: number; domains: string[] }>("/analytics/catalog?counts=true"),
   });
 
+  const integrations = useQuery({
+    queryKey: ["integration-status"],
+    queryFn: () => apiGet<{ integrations: { key: string; name: string; state: string; note: string }[] }>("/integrations/status"),
+  });
+
   const assets = cat.data?.assets ?? [];
   const domains = cat.data?.domains ?? [];
   const totalRows = assets.reduce((s, a) => s + (a.row_count ?? 0), 0);
+  const stateLabel: Record<string, string> = { live: "已接入", fallback: "离线参考", reserved: "预留" };
+  const stateTag: Record<string, string> = { live: "tag-low", fallback: "", reserved: "tag-none" };
 
   return (
     <div className="stack">
+      <div className="panel">
+        <div className="panel-head">外部接入状态</div>
+        <table className="table">
+          <thead><tr><th>接入</th><th>状态</th><th>说明</th></tr></thead>
+          <tbody>
+            {(integrations.data?.integrations ?? []).map((i) => (
+              <tr key={i.key}>
+                <td><b>{i.name}</b></td>
+                <td><span className={`tag ${stateTag[i.state] ?? ""}`}>{stateLabel[i.state] ?? i.state}</span></td>
+                <td className="muted small">{i.note}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <div className="panel">
         <div className="panel-head">
           数据资产目录 · 数据治理

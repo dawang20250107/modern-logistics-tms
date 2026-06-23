@@ -862,6 +862,15 @@ class PublicTrackingView(APIView):
         })
 
 
+class IntegrationStatusView(APIView):
+    """外部接入状态：运满满（已实现/离线）、飞书与微信（预留）。"""
+
+    def get(self, request):
+        from apps.integrations.status import integration_status
+
+        return Response(integration_status())
+
+
 class WorkbenchView(APIView):
     """个人工作台「我的待办」：按角色聚合当前用户最该处理的事项。"""
 

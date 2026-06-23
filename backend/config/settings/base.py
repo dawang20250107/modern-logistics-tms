@@ -259,6 +259,17 @@ YMM_APP_SECRET = env("YMM_APP_SECRET", default="")
 YMM_ACCESS_TOKEN = env("YMM_ACCESS_TOKEN", default="")
 YMM_TIMEOUT_SECONDS = env.int("YMM_TIMEOUT_SECONDS", default=8)
 
+# ── 飞书开放平台（Bot 卡片 + 多维表格双向同步）· 预留 ──────────
+FEISHU_APP_ID = env("FEISHU_APP_ID", default="")
+FEISHU_APP_SECRET = env("FEISHU_APP_SECRET", default="")
+FEISHU_BASE_URL = env("FEISHU_BASE_URL", default="https://open.feishu.cn")
+FEISHU_BITABLE_APP_TOKEN = env("FEISHU_BITABLE_APP_TOKEN", default="")
+
+# ── 微信接入（企业微信API / 个人微信自动化）· 预留 ────────────
+WECHAT_PROVIDER = env("WECHAT_PROVIDER", default="")  # work / personal
+WECHAT_CORP_ID = env("WECHAT_CORP_ID", default="")
+WECHAT_CORP_SECRET = env("WECHAT_CORP_SECRET", default="")
+
 # ── LangGraph Agent ─────────────────────────────────────
 # ReAct 编排：DeepSeek（OpenAI 兼容）作为 LLM，状态持久化到 Postgres（checkpointer）。
 AGENT_LLM_TEMPERATURE = env.float("AGENT_LLM_TEMPERATURE", default=0.2)

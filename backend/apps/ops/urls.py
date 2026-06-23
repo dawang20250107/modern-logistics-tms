@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     ExceptionViewSet,
+    IntegrationStatusView,
     OrderTemplateViewSet,
     OrderViewSet,
     PublicOrderIntakeView,
@@ -26,4 +27,5 @@ urlpatterns = [
     path("track", PublicTrackingView.as_view(), name="public-track"),
     path("public/orders", PublicOrderIntakeView.as_view(), name="public-order-intake"),
     path("workbench", WorkbenchView.as_view(), name="workbench"),
+    path("integrations/status", IntegrationStatusView.as_view(), name="integration-status"),
 ]

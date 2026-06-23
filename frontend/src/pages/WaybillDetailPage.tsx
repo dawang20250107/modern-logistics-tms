@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { toast } from "../api/toast";
-import { STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type ExceptionRecord, type Paginated, type Receipt, type WaybillDetail } from "../api/types";
+import { STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverReminder, type ExceptionRecord, type Paginated, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
@@ -125,6 +125,25 @@ export function WaybillDetailPage() {
     onSuccess: () => { toast.success("已更新合同确认状态"); invalidateContract(); },
   });
 
+  const reminderTpls = useQuery({ queryKey: ["reminder-templates"], queryFn: () => apiGet<Paginated<ReminderTemplate>>("/reminder-templates?is_active=true&page_size=100") });
+  const reminders = useQuery({
+    queryKey: ["waybill", no, "reminders"],
+    queryFn: () => apiGet<DriverReminder[]>(`/waybills/${no}/reminders`),
+  });
+  const [rmTpl, setRmTpl] = useState("");
+  const [rmContent, setRmContent] = useState("");
+  const [rmAck, setRmAck] = useState(true);
+  const sendReminder = useMutation({
+    mutationFn: () => apiPost(`/waybills/${no}/reminders`, {
+      template: rmTpl || undefined, content: rmContent || undefined, ack_required: rmAck,
+    }),
+    onSuccess: () => {
+      setRmContent(""); setRmTpl("");
+      toast.success("提醒已下发至司机端");
+      queryClient.invalidateQueries({ queryKey: ["waybill", no, "reminders"] });
+    },
+  });
+
   const catalog = useQuery({ queryKey: ["cost-catalog"], queryFn: () => apiGet<CostCatalog>("/waybills/cost-catalog") });
   const [exDir, setExDir] = useState<"payable" | "receivable">("payable");
   const [exItem, setExItem] = useState("TRANSPORT_COST");
@@ -243,6 +262,39 @@ export function WaybillDetailPage() {
           </div>
         </div>
       )}
+
+      <div className="panel">
+        <div className="panel-head">作业提醒 · 富文本回复库（司机端强制确认）</div>
+        <div style={{ padding: 16 }} className="stack">
+          <div className="form-row" style={{ gap: 8, flexWrap: "wrap", padding: 0 }}>
+            <select value={rmTpl} onChange={(e) => { setRmTpl(e.target.value); const t = (reminderTpls.data?.items ?? []).find((x) => x.id === e.target.value); if (t) setRmContent(t.content); }}>
+              <option value="">选择模板…</option>
+              {(reminderTpls.data?.items ?? []).map((t) => <option key={t.id} value={t.id}>{t.category ? `[${t.category}] ` : ""}{t.name}</option>)}
+            </select>
+            <label className="small" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="checkbox" checked={rmAck} onChange={(e) => setRmAck(e.target.checked)} />强制确认
+            </label>
+            <span style={{ flex: 1 }} />
+            <button className="btn-primary" disabled={sendReminder.isPending || !rmContent.trim()} onClick={() => sendReminder.mutate()}>下发提醒</button>
+          </div>
+          <textarea className="search" style={{ width: "100%", minHeight: 90 }} placeholder="提醒内容（可选模板后编辑）" value={rmContent} onChange={(e) => setRmContent(e.target.value)} />
+          {(reminders.data?.length ?? 0) > 0 && (
+            <table className="table">
+              <thead><tr><th>标题</th><th>强制</th><th>下发</th><th>状态</th></tr></thead>
+              <tbody>
+                {(reminders.data ?? []).map((r) => (
+                  <tr key={r.id}>
+                    <td className="small">{r.title}</td>
+                    <td className="small">{r.ack_required ? "是" : "否"}</td>
+                    <td className="small">{fmt(r.sent_at)}</td>
+                    <td><span className={`tag${r.status === "acknowledged" ? " tag-low" : " tag-high"}`}>{r.status === "acknowledged" ? `已确认 ${fmt(r.acknowledged_at)}` : "待确认"}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
 
       <div className="panel">
         <div className="panel-head">

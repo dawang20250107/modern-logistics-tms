@@ -280,6 +280,26 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         )
         return Response(ContractSerializer(c).data)
 
+    @action(detail=True, methods=["get", "post"], url_path="reminders")
+    def reminders(self, request, waybill_no=None):
+        """作业提醒：GET 列出本运单提醒；POST 下发提醒（template 或 title+content）。"""
+        from .models import ReminderTemplate
+        from .reminders import send_reminder
+        from .serializers import DriverReminderSerializer
+
+        waybill = self.get_object()
+        if request.method == "POST":
+            tpl_id = request.data.get("template")
+            template = ReminderTemplate.objects.filter(id=tpl_id).first() if tpl_id else None
+            reminder = send_reminder(
+                waybill, template=template, title=request.data.get("title", ""),
+                content=request.data.get("content", ""),
+                ack_required=bool(request.data.get("ack_required", True)), operator=request.user,
+            )
+            return Response(DriverReminderSerializer(reminder).data, status=201)
+        rows = waybill.reminders.select_related("driver").all()
+        return Response(DriverReminderSerializer(rows, many=True).data)
+
     @action(detail=True, methods=["post"], url_path="sign")
     def sign(self, request, waybill_no=None):
         """司机/客户签收回传（e-POD）：电子签名 + 回单，推进到已签收并触发订单完成。"""
@@ -713,6 +733,55 @@ class OrderTemplateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=_current_user_or_none(self.request))
+
+
+class ReminderTemplateViewSet(viewsets.ModelViewSet):
+    """作业提醒富文本回复库：维护常用提醒模板。"""
+
+    serializer_class = None
+    search_fields = ["name", "category"]
+    filterset_fields = ["category", "is_active"]
+    ordering_fields = ["category", "name", "created_at"]
+
+    def get_queryset(self):
+        from .models import ReminderTemplate
+
+        return ReminderTemplate.objects.all()
+
+    def get_serializer_class(self):
+        from .serializers import ReminderTemplateSerializer
+
+        return ReminderTemplateSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=_current_user_or_none(self.request))
+
+
+class DriverReminderViewSet(viewsets.ModelViewSet):
+    """下发给司机的提醒：列表 + 确认收到。"""
+
+    serializer_class = None
+    filterset_fields = ["driver", "waybill", "status"]
+    ordering_fields = ["sent_at"]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        from .models import DriverReminder
+
+        return DriverReminder.objects.select_related("driver", "waybill").all()
+
+    def get_serializer_class(self):
+        from .serializers import DriverReminderSerializer
+
+        return DriverReminderSerializer
+
+    @action(detail=True, methods=["post"], url_path="acknowledge")
+    def acknowledge(self, request, pk=None):
+        """司机确认收到提醒。"""
+        from .reminders import acknowledge_reminder
+
+        reminder = acknowledge_reminder(self.get_object())
+        return Response(self.get_serializer(reminder).data)
 
 
 class ExceptionViewSet(viewsets.ModelViewSet):

@@ -252,3 +252,25 @@ class OrderSerializer(serializers.ModelSerializer):
             "approval_status", "approval_remark", "approved_at",
         ]
         read_only_fields = ["claimed_by", "claimed_at", "pooled_at", "created_by"]
+
+
+class ReminderTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        from .models import ReminderTemplate
+
+        model = ReminderTemplate
+        fields = ["id", "name", "category", "content", "is_active", "created_at"]
+
+
+class DriverReminderSerializer(serializers.ModelSerializer):
+    driver_name = serializers.CharField(source="driver.name", read_only=True, default="")
+    waybill_no = serializers.CharField(source="waybill.waybill_no", read_only=True, default="")
+
+    class Meta:
+        from .models import DriverReminder
+
+        model = DriverReminder
+        fields = [
+            "id", "waybill", "waybill_no", "driver", "driver_name", "template", "title", "content",
+            "ack_required", "status", "sent_at", "acknowledged_at",
+        ]

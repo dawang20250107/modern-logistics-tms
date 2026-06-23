@@ -116,12 +116,19 @@ def external_signals(order) -> list[dict]:
 
 
 def recommend_dispatch_for_order(order) -> dict:
-    """AI 派单建议：系统数据池(运力/比价) + 外部信号，给调度参考（建议态，不自动派）。"""
+    """AI 派单建议：系统数据池(运力/比价) + 运满满外部比价 + 外部信号，给调度参考（建议态，不自动派）。"""
+    from apps.integrations.ymm import freight_quote
+
     from .dispatch import carrier_quotes, rank_vehicles
 
     vehicles = rank_vehicles(order)[:3]
     quotes = carrier_quotes(order)
     signals = external_signals(order)
+    # 运满满调车运费比价（外部参考价；未接入则离线参考）
+    ymm = freight_quote(
+        order.origin, order.destination,
+        weight_ton=order.cargo_weight_ton, volume_cbm=order.cargo_volume_cbm,
+    )
     # 派单类型建议：有合适自有车→自有；否则三方
     suggested_type = "own_vehicle" if vehicles else "third_party"
     return {
@@ -129,6 +136,7 @@ def recommend_dispatch_for_order(order) -> dict:
         "cargo": {"weight_ton": float(order.cargo_weight_ton), "volume_cbm": float(order.cargo_volume_cbm)},
         "vehicle_candidates": vehicles,
         "carrier_quotes": quotes,
+        "ymm_quote": ymm,
         "external_signals": signals,
         "suggested_dispatch_type": suggested_type,
         "best_vehicle": vehicles[0] if vehicles else None,

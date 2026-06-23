@@ -598,6 +598,17 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(recommend_dispatch_for_order(self.get_object()))
 
+    @action(detail=True, methods=["get"], url_path="ymm-quote")
+    def ymm_quote(self, request, pk=None):
+        """运满满调车运费比价（外部接口，未接入则离线参考价）。"""
+        from apps.integrations.ymm import freight_quote
+
+        order = self.get_object()
+        return Response(freight_quote(
+            order.origin, order.destination,
+            weight_ton=order.cargo_weight_ton, volume_cbm=order.cargo_volume_cbm,
+        ))
+
     @action(detail=False, methods=["post"], url_path="dispatch-plan")
     def dispatch_plan(self, request):
         """订单池批量智能排线：传 {ids:[...]}，返回每单的自有车分配建议（不落库）。"""

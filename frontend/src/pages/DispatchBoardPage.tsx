@@ -226,6 +226,13 @@ export function DispatchBoardPage() {
                   </b>
                 </div>
                 <div><span>最优承运商</span><b>{suggestion.best_carrier ? `${suggestion.best_carrier.carrier} ¥${suggestion.best_carrier.quote}` : "—"}</b></div>
+                {suggestion.ymm_quote && (
+                  <div>
+                    <span>运满满比价</span>
+                    <b>{suggestion.ymm_quote.avg != null ? `¥${suggestion.ymm_quote.low}~${suggestion.ymm_quote.high}（均 ¥${suggestion.ymm_quote.avg}）` : "—"}</b>
+                    {suggestion.ymm_quote.source === "offline" && <span className="tag" style={{ marginLeft: 6 }}>离线参考</span>}
+                  </div>
+                )}
                 <div><span>建议派单类型</span><b>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</b></div>
               </div>
 

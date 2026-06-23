@@ -282,6 +282,7 @@ export function WaybillDetailPage() {
               <div><span>挂车牌</span>{w.trailer_plate || "-"}</div>
               <div><span>主驾</span>{w.driver_name ? `${w.driver_name}${w.driver_phone ? ` · ${w.driver_phone}` : ""}` : "-"}</div>
               <div><span>司机关系</span>{w.driver_employment || "-"}</div>
+              {w.ai_conversation_id && <div><span>AI会话ID</span><span className="mono small">{w.ai_conversation_id}</span></div>}
               <div><span>件数</span>{w.cargo.quantity}</div>
               <div><span>重量(吨)</span>{w.cargo.weight_ton}</div>
               <div><span>体积(方)</span>{w.cargo.volume_cbm}</div>
@@ -293,7 +294,7 @@ export function WaybillDetailPage() {
             <div className="panel">
               <div className="panel-head">随车司机 · {w.drivers.length} 人</div>
               <table className="table">
-                <thead><tr><th>姓名</th><th>角色</th><th>关系</th><th>电话</th><th>区间</th></tr></thead>
+                <thead><tr><th>姓名</th><th>角色</th><th>关系</th><th>电话</th><th>微信</th><th>App</th><th>区间</th></tr></thead>
                 <tbody>
                   {w.drivers.map((d) => (
                     <tr key={d.id}>
@@ -301,6 +302,8 @@ export function WaybillDetailPage() {
                       <td><span className={`tag${d.role === "main" ? " tag-high" : ""}`}>{d.role_label}</span></td>
                       <td className="small">{d.employment}</td>
                       <td className="small">{d.phone || "-"}</td>
+                      <td className="small">{d.wechat || "-"}</td>
+                      <td><span className={`tag${d.app_registered ? " tag-low" : ""}`}>{d.app_registered ? "已注册" : "未注册"}</span></td>
                       <td className="small">{d.note || "-"}</td>
                     </tr>
                   ))}

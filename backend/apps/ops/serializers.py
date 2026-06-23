@@ -102,7 +102,7 @@ class WaybillSerializer(serializers.ModelSerializer):
         fields = [
             "id", "waybill_no", "customer_name", "carrier_name", "vehicle_plate", "trailer_plate",
             "driver_name", "driver_phone", "driver_employment", "drivers",
-            "route_name", "origin", "destination", "status", "dispatch_status", "risk_level",
+            "route_name", "ai_conversation_id", "origin", "destination", "status", "dispatch_status", "risk_level",
             "receipt_status", "eta_drift_minutes", "planned_arrival", "estimated_arrival",
             "loaded_at", "departed_at", "arrived_at", "signed_at",
             "cargo", "created_at",
@@ -112,6 +112,7 @@ class WaybillSerializer(serializers.ModelSerializer):
         return [
             {
                 "id": str(a.driver_id), "name": a.driver.name, "phone": a.driver.phone,
+                "wechat": a.driver.wechat, "app_registered": a.driver.app_registered,
                 "role": a.role, "role_label": a.get_role_display(),
                 "employment": a.driver.get_employment_type_display(), "note": a.note,
             }
@@ -229,7 +230,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "cargo_value", "package_type", "is_hazardous", "temperature_range", "quoted_amount",
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
-            "created_by", "created_by_name", "raw_text", "parse_meta", "remark", "created_at",
+            "created_by", "created_by_name", "raw_text", "ai_conversation_id", "parse_meta", "remark", "created_at",
             "waybill_nos", "cargo_items", "stops", "attachments",
             "approval_status", "approval_remark", "approved_at",
         ]

@@ -206,6 +206,7 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
         customer=customer,
         created_by=operator_user,
         raw_text=text,
+        ai_conversation_id=str(data.get("ai_conversation_id") or parse_meta.get("conversation_id") or ""),
         parse_meta=parse_meta,
         **clean,
     )
@@ -583,6 +584,7 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         driver=driver,
         trailer=trailer,
         dispatch_type=dispatch_type,
+        ai_conversation_id=order.ai_conversation_id,
         route_name=route_name,
         origin=order.origin,
         destination=order.destination,

@@ -649,3 +649,58 @@ class Receipt(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.waybill_id}:{self.receipt_type}"
+
+
+class ReminderTemplate(BaseModel, SoftDeleteModel):
+    """作业提醒富文本回复库：调度可维护常用提醒模板（装货要求/在途打卡/回单寄回/安全等）。"""
+
+    name = models.CharField(max_length=120)
+    category = models.CharField(max_length=32, blank=True, help_text="分类，如 装货/打卡/回单/安全")
+    content = models.TextField(help_text="富文本内容（HTML/纯文本）")
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="reminder_templates"
+    )
+
+    class Meta:
+        db_table = "ops_reminder_template"
+        ordering = ["category", "name"]
+        verbose_name = "提醒模板"
+        verbose_name_plural = "提醒模板"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class DriverReminder(BaseModel):
+    """下发给司机的作业提醒：司机端强制弹窗，点击「确认收到」后记录确认时间。"""
+
+    STATUS_PENDING = "pending"
+    STATUS_ACKNOWLEDGED = "acknowledged"
+
+    waybill = models.ForeignKey(Waybill, null=True, blank=True, on_delete=models.CASCADE, related_name="reminders")
+    driver = models.ForeignKey(
+        "masterdata.Driver", null=True, blank=True, on_delete=models.SET_NULL, related_name="reminders"
+    )
+    template = models.ForeignKey(
+        ReminderTemplate, null=True, blank=True, on_delete=models.SET_NULL, related_name="reminders"
+    )
+    title = models.CharField(max_length=120, default="作业提醒")
+    content = models.TextField()
+    ack_required = models.BooleanField(default=True, help_text="是否强制确认")
+    status = models.CharField(max_length=16, default=STATUS_PENDING, db_index=True)
+    sent_at = models.DateTimeField(default=timezone.now)
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="sent_reminders"
+    )
+
+    class Meta:
+        db_table = "ops_driver_reminder"
+        ordering = ["-sent_at"]
+        indexes = [models.Index(fields=["driver", "status"]), models.Index(fields=["waybill", "status"])]
+        verbose_name = "司机提醒"
+        verbose_name_plural = "司机提醒"
+
+    def __str__(self) -> str:
+        return f"{self.driver_id}:{self.title}:{self.status}"

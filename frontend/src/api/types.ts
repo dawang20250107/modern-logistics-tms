@@ -25,6 +25,26 @@ export interface Contract {
   created_at: string;
 }
 
+export interface ReminderTemplate {
+  id: string;
+  name: string;
+  category: string;
+  content: string;
+  is_active: boolean;
+}
+
+export interface DriverReminder {
+  id: string;
+  waybill_no: string;
+  driver_name: string;
+  title: string;
+  content: string;
+  ack_required: boolean;
+  status: string;
+  sent_at: string;
+  acknowledged_at: string | null;
+}
+
 export interface WaybillDriverRow {
   id: string;
   name: string;

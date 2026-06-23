@@ -146,7 +146,26 @@ class Command(BaseCommand):
             seeded.append(waybill)
             self.refresh_related_data(waybill)
 
+        self._seed_reminder_template()
         self.stdout.write(self.style.SUCCESS(f"Seeded {len(seeded)} waybills."))
+
+    def _seed_reminder_template(self):
+        from apps.ops.models import ReminderTemplate
+
+        content = (
+            "装货要求：装货要三角木、反光背心，装货时人不能上月台。高栏要带木板、薄膜、绑带。"
+            "严格防水防撞（收货严格）。需配合客服在途打卡，上传定位、水印照片，有问题反馈调度。"
+            "装货联系人：王天维 13452841413\n\n"
+            "1、严格按照厂里要求装卸货，务必友好沟通，有问题反馈调度解决。\n"
+            "2、装好货拍清单给客服，每天 9:30 和 16:30 发定位给客服跟踪。\n"
+            "3、运费在小程序平台结算，接好单再发车，否则影响结运费。\n"
+            "4、行驶中杜绝急转弯等危险驾驶，如遇交通事故立刻报备！（高栏车到卸货地如有雨水严禁解篷布！）\n"
+            "5、回单：签字后立马拍照给客服（名字、日期、件数、有公章盖公章），白联、红联请寄回。"
+            "回单地址：陈龙堂 17882209608 四川省成都市双流区公兴街道黄龙大道一段2号卡行通办公楼4楼（只收顺丰）"
+        )
+        ReminderTemplate.objects.update_or_create(
+            name="标准作业提醒", defaults={"category": "装货", "content": content, "is_active": True},
+        )
 
     def refresh_related_data(self, waybill):
         waybill.events.all().delete()

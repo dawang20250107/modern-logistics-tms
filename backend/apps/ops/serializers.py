@@ -117,7 +117,9 @@ class WaybillSerializer(serializers.ModelSerializer):
                 "role": a.role, "role_label": a.get_role_display(),
                 "employment": a.driver.get_employment_type_display(), "note": a.note,
             }
-            for a in obj.driver_assignments.select_related("driver").all()
+            # 复用视图层 prefetch_related("driver_assignments__driver") 的缓存，
+            # 不在此处加 select_related（会另起查询导致列表 N+1）
+            for a in obj.driver_assignments.all()
         ]
 
     def get_cargo(self, obj):

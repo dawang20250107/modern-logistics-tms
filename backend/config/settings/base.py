@@ -253,6 +253,9 @@ DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", default="https://api.deepseek.com")
 DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", default="deepseek-v4-pro")
 DEEPSEEK_TIMEOUT_SECONDS = env.int("DEEPSEEK_TIMEOUT_SECONDS", default=60)
 
+# ── 可观测：慢请求阈值（毫秒，超过则日志升级为 WARNING）────────
+SLOW_REQUEST_MS = env.int("SLOW_REQUEST_MS", default=800)
+
 # ── 运满满/满帮 开放平台（调车运费比价）────────────────────
 YMM_BASE_URL = env("YMM_BASE_URL", default="https://qa-open.ymm56.com")
 YMM_APP_KEY = env("YMM_APP_KEY", default="")

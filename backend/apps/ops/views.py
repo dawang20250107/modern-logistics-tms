@@ -66,7 +66,11 @@ def _expense_payload(item):
 
 
 class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
-    queryset = Waybill.objects.select_related("customer", "carrier", "vehicle", "driver").all()
+    queryset = (
+        Waybill.objects.select_related("customer", "carrier", "vehicle", "trailer", "driver")
+        .prefetch_related("driver_assignments__driver")  # 消除列表 drivers 的 N+1
+        .all()
+    )
     permission_classes = [IsAuthenticated, HasPermission]
     required_permissions = {
         "list": "waybill.view",

@@ -3,6 +3,12 @@ from rest_framework import serializers
 from .models import B2BPartner, Carrier, Customer, Driver, DriverCredential, Route, Vehicle
 
 
+def _is_list(serializer) -> bool:
+    """当前是否为列表动作（list 时跳过逐行重聚合，避免 N+1）。"""
+    view = serializer.context.get("view")
+    return getattr(view, "action", None) == "list"
+
+
 class CustomerSerializer(serializers.ModelSerializer):
     history = serializers.SerializerMethodField()
 
@@ -14,6 +20,9 @@ class CustomerSerializer(serializers.ModelSerializer):
         ]
 
     def get_history(self, obj):
+        # 聚合较重，仅在详情页计算，避免列表 N+1
+        if _is_list(self):
+            return None
         from apps.ops.stats import customer_history
 
         return customer_history(obj)
@@ -41,6 +50,9 @@ class VehicleSerializer(serializers.ModelSerializer):
         ]
 
     def get_freight_total(self, obj):
+        # 聚合较重，仅在详情页计算，避免列表 N+1
+        if _is_list(self):
+            return None
         from apps.ops.stats import vehicle_freight_total
 
         return vehicle_freight_total(obj)

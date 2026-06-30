@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 
+from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpResponse
 
@@ -41,18 +42,24 @@ class AccessLogMiddleware:
         if request.path in _SILENT_PATHS:
             return response
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.info(
-            "%s %s -> %s (%sms)",
+        # 慢请求升级为 WARNING，便于在日志中快速定位性能热点
+        slow_ms = getattr(settings, "SLOW_REQUEST_MS", 800)
+        level = logging.WARNING if duration_ms >= slow_ms else logging.INFO
+        logger.log(
+            level,
+            "%s %s -> %s (%sms)%s",
             request.method,
             request.get_full_path(),
             response.status_code,
             duration_ms,
+            " SLOW" if level == logging.WARNING else "",
             extra={
                 "extra_fields": {
                     "method": request.method,
                     "path": request.path,
                     "status": response.status_code,
                     "duration_ms": duration_ms,
+                    "slow": level == logging.WARNING,
                 }
             },
         )

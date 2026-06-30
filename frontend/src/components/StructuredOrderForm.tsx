@@ -160,7 +160,6 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   });
 
   const aiParse = useMutation({
-    queryKey: ["parse-preview"],
     mutationFn: () => apiPost<ParsedOrder>("/orders/parse-preview", { text: paste }),
     onSuccess: (d) => {
       const f = d.fields ?? {};

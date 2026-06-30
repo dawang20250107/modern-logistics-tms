@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet } from "../api/client";
+import { toast } from "../api/toast";
 import type { VehicleState } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 import { LiveMap } from "../components/LiveMap";

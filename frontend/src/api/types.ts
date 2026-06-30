@@ -642,6 +642,126 @@ export interface DataAsset {
   fields: Array<{ name: string; type: string; help: string }>;
 }
 
+// ── 组织中台 ────────────────────────────────────────────
+export interface OrgTreeNode {
+  id: string;
+  code: string;
+  name: string;
+  short_name: string;
+  type: string;
+  type_label: string;
+  org_property: string;
+  org_property_label: string;
+  manager_name: string;
+  is_active: boolean;
+  parent_id: string | null;
+  direct_headcount: number;
+  total_headcount: number;
+  children: OrgTreeNode[];
+}
+
+export interface Employee {
+  id: string;
+  employee_no: string;
+  name: string;
+  phone: string;
+  email: string;
+  organization: string | null;
+  organization_name: string;
+  department: string | null;
+  department_name: string;
+  supervisor: string | null;
+  supervisor_name: string;
+  groups: string[];
+  group_names: string[] | null;
+  position: string;
+  status: "active" | "disabled" | "left";
+  status_label: string;
+  hire_date: string | null;
+  user: string | null;
+  username: string;
+  account_active: boolean;
+}
+
+export interface ServiceArea {
+  id: string;
+  organization: string | null;
+  organization_name: string;
+  area_type: string;
+  area_type_label: string;
+  province: string;
+  city: string;
+  district: string;
+  region_code: string;
+  region_name: string;
+  priority: number;
+  note: string;
+  is_active: boolean;
+}
+
+export interface OrgOverview {
+  organizations: { total: number; by_property: Record<string, number>; by_type: Record<string, number> };
+  employees: { total: number; active: number; by_status: Record<string, number>; active_without_account: number };
+  departments: number;
+  service_areas: { total: number; by_type: Record<string, number> };
+}
+
+export interface CoverageResolved {
+  organization_id: string;
+  organization_name: string;
+  org_short: string;
+  manager_name: string;
+  area_type: string;
+  area_type_label: string;
+  region_name: string;
+  priority: number;
+  matched_on: string;
+}
+export interface CoverageResult {
+  destination: string;
+  resolved: CoverageResolved[];
+  excluded: Array<{ organization_id: string; organization_name: string; reason: string }>;
+}
+
+export interface RbacMatrix {
+  modules: Array<{ module: string; permissions: Array<{ id: string; code: string; name: string }> }>;
+  roles: Array<{ id: string; code: string; name: string; data_scope: string; is_active: boolean; permission_codes: string[] }>;
+  permission_total: number;
+}
+
+export interface OrgOption {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  type_label: string;
+}
+
+export interface AccountHandover {
+  id: string;
+  from_employee: string;
+  from_name: string;
+  to_employee: string;
+  to_name: string;
+  operator_name: string;
+  reason: string;
+  moved_reports: number;
+  moved_departments: number;
+  disabled_account: boolean;
+  created_at: string;
+}
+
+export const EMP_STATUS_LABEL: Record<string, string> = {
+  active: "在职", disabled: "停用", left: "离职",
+};
+export const AREA_TYPE_LABEL: Record<string, string> = {
+  deliver: "派送区域", transfer: "中转区域", special: "特殊区域",
+  no_deliver: "不派送区域", no_transfer: "不中转区域",
+};
+export const ORG_PROPERTY_LABEL: Record<string, string> = {
+  self: "自营", franchise: "加盟", outsource: "外包", partner: "合作", jv: "合资",
+};
+
 // ── 审计日志 ────────────────────────────────────────────
 export interface AuditLog {
   id: string;

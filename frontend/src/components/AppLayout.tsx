@@ -3,9 +3,9 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
-import { 
-  IconTower, IconFileText, IconGrid, IconDatabase, IconMapPin, 
-  IconTruck, IconAlert, IconGitBranch, IconReceipt, IconCreditCard, IconShield 
+import {
+  IconTower, IconFileText, IconGrid, IconDatabase, IconMapPin,
+  IconTruck, IconAlert, IconGitBranch, IconReceipt, IconCreditCard, IconShield, IconBox
 } from "./Icons";
 
 type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean };
@@ -35,6 +35,12 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/reconciliation", label: "业财核销对账", icon: <IconReceipt size={18} /> },
       { to: "/pricing", label: "合同运价管理", icon: <IconCreditCard size={18} /> },
+    ],
+  },
+  {
+    title: "组织中台",
+    items: [
+      { to: "/org", label: "企业组织中枢", icon: <IconBox size={18} /> },
     ],
   },
   {

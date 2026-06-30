@@ -91,7 +91,7 @@ def test_idempotency_replay(api):
     user_model.objects.create_superuser(username="a", password="pw-strong-123")
     api.credentials(HTTP_AUTHORIZATION=f"Bearer {_login(api, 'a', 'pw-strong-123')}")
 
-    payload = {"exception_type": "delay", "description": "d"}
+    payload = {"exception_type": "transit_delay", "description": "d"}
     first = api.post("/api/v1/exceptions", payload, format="json", HTTP_IDEMPOTENCY_KEY="key-1")
     assert first.status_code == 201
     second = api.post("/api/v1/exceptions", payload, format="json", HTTP_IDEMPOTENCY_KEY="key-1")

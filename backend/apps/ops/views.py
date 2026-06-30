@@ -810,25 +810,60 @@ class ExceptionViewSet(viewsets.ModelViewSet):
     filterset_fields = ["exception_type", "status", "level", "source", "waybill"]
     search_fields = ["exception_type", "description"]
 
+    def perform_create(self, serializer):
+        from .services import record_exception_event
+
+        exc = serializer.save()
+        record_exception_event(
+            exc, "create", actor=self.request.user, to_status=exc.status,
+            note=exc.description, source=exc.source,
+        )
+
+    @action(detail=True, methods=["get"], url_path="timeline")
+    def timeline(self, request, pk=None):
+        """异常处置全过程事件溯源：立案/认领/AI 诊断/闭环等留痕。"""
+        from .serializers import ExceptionEventSerializer
+
+        exc = self.get_object()
+        return Response(ExceptionEventSerializer(exc.events.select_related("actor").all(), many=True).data)
+
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
+        from .services import record_exception_event
+
         exc = self.get_object()
+        from_status = exc.status
         exc.assignee_id = request.data.get("assignee") or None
         exc.status = ExceptionRecord.STATUS_HANDLING
         exc.save(update_fields=["assignee", "status", "updated_at"])
+        record_exception_event(
+            exc, "assign", actor=request.user, from_status=from_status, to_status=exc.status,
+            note=f"指派给 {exc.assignee.username}" if exc.assignee_id else "取消指派",
+            assignee_id=str(exc.assignee_id) if exc.assignee_id else None,
+        )
         return Response(ExceptionSerializer(exc).data)
 
     @action(detail=True, methods=["post"], url_path="handle")
     def handle(self, request, pk=None):
+        from .services import record_exception_event
+
         exc = self.get_object()
+        from_status = exc.status
         exc.status = ExceptionRecord.STATUS_PENDING_AUDIT
         exc.resolution = request.data.get("resolution", exc.resolution)
         exc.save(update_fields=["status", "resolution", "updated_at"])
+        record_exception_event(
+            exc, "handle", actor=request.user, from_status=from_status, to_status=exc.status,
+            note=request.data.get("resolution", ""),
+        )
         return Response(ExceptionSerializer(exc).data)
 
     @action(detail=True, methods=["post"], url_path="close")
     def close(self, request, pk=None):
+        from .services import record_exception_event
+
         exc = self.get_object()
+        from_status = exc.status
         exc.status = ExceptionRecord.STATUS_CLOSED
         exc.responsibility_party = request.data.get("responsibility_party", exc.responsibility_party)
         exc.amount = request.data.get("amount", exc.amount) or 0
@@ -845,15 +880,22 @@ class ExceptionViewSet(viewsets.ModelViewSet):
                 source_system="exception",
                 external_id=str(exc.id),
             )
+        record_exception_event(
+            exc, "close", actor=request.user, from_status=from_status, to_status=exc.status,
+            note=exc.resolution, responsibility_party=exc.responsibility_party, amount=str(exc.amount),
+        )
         return Response(ExceptionSerializer(exc).data)
 
     @action(detail=True, methods=["post"], url_path="ai-resolve")
     def ai_resolve(self, request, pk=None):
         """AI 自动化排查与异常预案生成：根据当前异常信息调用底层 LangGraph 大脑进行核验并建议。"""
-        from apps.ai.services.agent_runner import execute_agent_sync
-        
+        from apps.ai.services.agent_runner import run_agent
+
+        from .services import record_exception_event
+
         exc = self.get_object()
-        
+        from_status = exc.status
+
         # 将异常交由 AI 处理，使用结构化系统 Prompt 引导
         prompt = (
             f"请作为资深物流安全调度主管，审查并处理以下运输异常：\n"
@@ -865,20 +907,20 @@ class ExceptionViewSet(viewsets.ModelViewSet):
             f"2. 给出具体的业务定损建议、后续人工操作要求，以及降低该类风险的根本措施。\n"
             f"3. 必须输出 '风险阻断' 的确认方案。"
         )
-        
-        # 调用核心 AI Agent 服务
-        agent_result = execute_agent_sync(
-            prompt, 
-            user=request.user if request.user.is_authenticated else None,
-            thread_id=f"exception_{exc.id}"
-        )
-        
+
+        # 调用核心 AI Agent 服务（固定 thread_id，复诊同一异常时可续接上下文）
+        agent_result = run_agent(prompt, thread_id=f"exception_{exc.id}")
+
         # 回写 AI 的判断报告至异常工单的备忘录，并且推进状态到处理中
         exc.resolution = f"🤖 [AI 智能诊断与预案]\n{agent_result['answer']}\n\n[原有处理]: {exc.resolution}"
-        if exc.status == ExceptionRecord.STATUS_PENDING_HANDLE:
+        if exc.status == ExceptionRecord.STATUS_PENDING:
             exc.status = ExceptionRecord.STATUS_HANDLING
         exc.save(update_fields=["resolution", "status", "updated_at"])
-        
+        record_exception_event(
+            exc, "ai_resolve", actor=request.user, from_status=from_status, to_status=exc.status,
+            note=agent_result["answer"], tool_calls=agent_result.get("tool_calls"),
+        )
+
         return Response({
             "status": exc.status,
             "ai_resolution": agent_result["answer"],

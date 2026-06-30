@@ -224,6 +224,20 @@ export interface ExceptionRecord {
   created_at: string;
 }
 
+export interface ExceptionEvent {
+  id: string;
+  event_type: string;
+  from_status: string;
+  to_status: string;
+  actor_name: string;
+  note: string;
+  payload: Record<string, unknown>;
+  event_time: string;
+}
+export const EXC_EVENT_LABEL: Record<string, string> = {
+  create: "立案", assign: "指派", handle: "处理", ai_resolve: "AI 诊断", close: "闭环",
+};
+
 export interface Receipt {
   id: string;
   waybill: string;

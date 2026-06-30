@@ -7,7 +7,7 @@ from django.utils import timezone
 from apps.core.exceptions import AppError
 from apps.core.redis import publish_event
 
-from .models import Waybill, WaybillEvent
+from .models import ExceptionEvent, Waybill, WaybillEvent
 
 # 合法状态流转表
 ALLOWED_TRANSITIONS: dict[str, list[str]] = {
@@ -39,6 +39,19 @@ def allowed_next(status: str) -> list[str]:
     if status in _VOIDABLE_FROM and Waybill.STATUS_VOIDED not in nexts:
         nexts.append(Waybill.STATUS_VOIDED)
     return nexts
+
+
+def record_exception_event(exc, event_type, *, actor=None, from_status="", to_status="", note="", **payload):
+    """记录异常处置事件（溯源），与 record_order_event/WaybillEvent 同构。"""
+    ExceptionEvent.objects.create(
+        exception=exc,
+        event_type=event_type,
+        from_status=from_status,
+        to_status=to_status,
+        actor=actor if actor and getattr(actor, "is_authenticated", False) else None,
+        note=note,
+        payload=payload,
+    )
 
 
 def transition_waybill(waybill: Waybill, to_status: str, *, operator=None, remark: str = "") -> Waybill:

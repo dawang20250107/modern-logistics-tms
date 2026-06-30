@@ -597,11 +597,30 @@ class ExceptionRecord(BaseModel):
     STATUS_PENDING_AUDIT = "pending_audit"
     STATUS_CLOSED = "closed"
     STATUS_REJECTED = "rejected"
+    # 人工提报类型（与前端 EXC_TYPE_LABEL 对齐）+ 车联网告警自动生成类型（与 telematics.Alert.TYPE_CHOICES 对齐）
+    EXCEPTION_TYPE_CHOICES = [
+        ("transit_delay", "在途超时"),
+        ("route_deviation", "偏航/路线异常"),
+        ("cargo_damage", "货损货差"),
+        ("vehicle_breakdown", "车辆故障"),
+        ("detained", "扣车扣货"),
+        ("customer_complaint", "客户投诉"),
+        ("temperature", "冷链温度异常"),
+        ("fuel", "油耗/漏油异常"),
+        ("overspeed", "超速驾驶"),
+        ("fatigue", "疲劳驾驶"),
+        ("deviation", "偏航（车联网）"),
+        ("abnormal_stop", "异常停车"),
+        ("geofence", "围栏进出"),
+        ("offline", "设备离线"),
+        ("receipt_pending", "回单待确认"),
+        ("other", "其他"),
+    ]
 
     waybill = models.ForeignKey(
         Waybill, null=True, blank=True, on_delete=models.SET_NULL, related_name="exceptions"
     )
-    exception_type = models.CharField(max_length=64)
+    exception_type = models.CharField(max_length=64, choices=EXCEPTION_TYPE_CHOICES)
     level = models.CharField(max_length=16, choices=LEVEL_CHOICES, default="medium")
     source = models.CharField(max_length=32, default="manual", help_text="manual/track/ocr/customer")
     description = models.TextField(blank=True)
@@ -625,6 +644,31 @@ class ExceptionRecord(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.exception_type}:{self.status}"
+
+
+class ExceptionEvent(BaseModel):
+    """异常处置事件溯源：立案/认领/AI 诊断/驳回/闭环等留痕（与 OrderEvent/WaybillEvent 同构）。"""
+
+    exception = models.ForeignKey(ExceptionRecord, on_delete=models.CASCADE, related_name="events")
+    event_type = models.CharField(max_length=48)
+    from_status = models.CharField(max_length=32, blank=True)
+    to_status = models.CharField(max_length=32, blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="exception_events"
+    )
+    note = models.CharField(max_length=255, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    event_time = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = "ops_exception_event"
+        ordering = ["event_time"]
+        indexes = [models.Index(fields=["exception", "event_time"])]
+        verbose_name = "异常处置事件"
+        verbose_name_plural = "异常处置事件"
+
+    def __str__(self) -> str:
+        return f"{self.exception_id}:{self.event_type}"
 
 
 class Receipt(BaseModel):

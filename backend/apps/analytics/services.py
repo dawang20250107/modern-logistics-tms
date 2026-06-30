@@ -34,11 +34,18 @@ MATERIALIZE_METRICS = [
 ]
 
 
+def _default_dimensions() -> dict:
+    """各指标的首选下钻维度（取注册时声明的第一个维度），供看板默认带出占比构成。"""
+    return {m["code"]: m["dimensions"][0] for m in list_metrics() if m["dimensions"]}
+
+
 def build_dashboard(start=None, end=None, *, with_trends=False, trend_days=14) -> dict:
+    dims = _default_dimensions()
     cards = []
     for code in DASHBOARD_METRICS:
         try:
-            cards.append(compute_metric(code, start=start, end=end))
+            # 支持维度的指标默认带出首选维度的构成占比（前端 KPI 卡直接渲染 breakdown）
+            cards.append(compute_metric(code, start=start, end=end, dimension=dims.get(code)))
         except Exception:  # noqa: BLE001 - 单指标异常不拖垮整盘
             continue
     result = {"metrics": cards}

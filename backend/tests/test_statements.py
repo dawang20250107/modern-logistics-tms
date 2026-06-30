@@ -138,6 +138,38 @@ def test_audit_statement_endpoint(admin_client):
 
 
 @pytest.mark.django_db
+def test_financial_dashboard_metrics_endpoint(admin_client):
+    """回归：此前该端点按 ExpenseRecord.status=STATUS_CONFIRMED 过滤，但 ExpenseRecord
+    既无 status 字段也无 STATUS_CONFIRMED 常量 → 每次调用必 500，看板主图从不渲染；
+    且成本构成用错误的 icontains 编码 + 编造的降级演示数据兜底。"""
+    cust = Customer.objects.create(code="FD1", name="看板客户")
+    wb = Waybill.objects.create(waybill_no="WFD1", route_name="r", customer=cust)
+    ExpenseRecord.objects.create(waybill=wb, direction=ExpenseRecord.DIRECTION_RECEIVABLE, expense_item_code="TRANSPORT_INCOME", amount=Decimal("1000"))
+    ExpenseRecord.objects.create(waybill=wb, direction=ExpenseRecord.DIRECTION_PAYABLE, expense_item_code="FUEL_CARD", amount=Decimal("300"))
+    ExpenseRecord.objects.create(waybill=wb, direction=ExpenseRecord.DIRECTION_PAYABLE, expense_item_code="TOLL", amount=Decimal("120"))
+
+    resp = admin_client.get("/api/v1/finance/dashboard-metrics?days=7")
+    assert resp.status_code == 200, resp.content
+    data = resp.json()["data"]
+    assert len(data["trend"]) == 7
+    assert any(row["revenue"] > 0 for row in data["trend"])
+    # 成本构成按真实费用科目中文名聚合，无编造兜底
+    comp = {c["name"]: c["value"] for c in data["cost_composition"]}
+    assert comp["油卡"] == 300.0
+    assert comp["过路费"] == 120.0
+    # 此前的假兜底数字（45000/85000 等）不应再出现
+    assert all(c["value"] in (300.0, 120.0) for c in data["cost_composition"])
+
+
+@pytest.mark.django_db
+def test_financial_dashboard_metrics_empty(admin_client):
+    """无任何应付记录时成本构成为空列表，而非编造演示数据。"""
+    resp = admin_client.get("/api/v1/finance/dashboard-metrics?days=7")
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["data"]["cost_composition"] == []
+
+
+@pytest.mark.django_db
 def test_statement_generate_and_confirm_endpoints(admin_client):
     cust = Customer.objects.create(code="C3", name="客户丙")
     wb = Waybill.objects.create(waybill_no="WST3", route_name="r", customer=cust)

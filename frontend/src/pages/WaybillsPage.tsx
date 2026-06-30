@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { apiGet } from "../api/client";
+import { apiGet, apiPatch, apiPost } from "../api/client";
+import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
-import type { Paginated, Waybill } from "../api/types";
+import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL } from "../api/types";
 
 const RISK_LABEL: Record<string, string> = { high: "高风险", medium: "中风险", low: "低风险", none: "无风险" };
@@ -18,7 +19,8 @@ interface ContextMenuState {
 
 export function WaybillsPage() {
   const navigate = useNavigate();
-  
+  const queryClient = useQueryClient();
+
   // === 多维度查询状态 ===
   const [filter, setFilter] = useState(""); // 全局全局模糊
   const [statusFilter, setStatusFilter] = useState(""); // 快速状态
@@ -101,20 +103,56 @@ export function WaybillsPage() {
     });
   };
 
-  const handleAction = (action: string, w: Waybill) => {
+  const invalidateWaybills = () => queryClient.invalidateQueries({ queryKey: ["waybills"] });
+
+  const openContract = useMutation({
+    mutationFn: (no: string) => apiGet<Contract | null>(`/waybills/${no}/contract`),
+    onSuccess: (c, no) => {
+      if (c?.pdf_url) {
+        window.open(c.pdf_url, "_blank");
+      } else {
+        toast.info(`运单 ${no} 暂无可下载的合同/回单文件，请先在运单详情页生成承运合同。`);
+      }
+    },
+  });
+
+  const markRisk = useMutation({
+    mutationFn: ({ no, level }: { no: string; level: string }) =>
+      apiPatch<Waybill>(`/waybills/${no}`, { risk_level: level }),
+    onSuccess: (_w, v) => {
+      toast.success(v.level === "high" ? `⚠️ 运单 ${v.no} 已标记为高风险。` : `运单 ${v.no} 风险标记已清除。`);
+      invalidateWaybills();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const voidWaybill = useMutation({
+    mutationFn: (no: string) => apiPost(`/waybills/${no}/transition`, { to_status: "voided", remark: "调度台手动废弃" }),
+    onSuccess: (_d, no) => {
+      toast.success(`运单 ${no} 已作废，关联运力已释放，可重新调度。`);
+      invalidateWaybills();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const handleAction = async (action: string, w: Waybill) => {
     setContextMenu(null);
     if (action === "view") {
       navigate(`/waybills/${w.waybill_no}`);
     } else if (action === "track") {
       navigate(`/monitor?waybill=${w.waybill_no}`);
     } else if (action === "print") {
-      toast.success(`🖨️ 正在为您模拟输出运单 ${w.waybill_no} 的 B2B 电子签单(e-POD)PDF文件！`);
+      openContract.mutate(w.waybill_no);
     } else if (action === "risk") {
-      toast.info(`⚠️ 已在调度看板上将运单 ${w.waybill_no} 的预警级别手动标红置顶。`);
+      markRisk.mutate({ no: w.waybill_no, level: w.risk_level === "high" ? "none" : "high" });
     } else if (action === "cancel") {
-      if (confirm(`确定要废弃该张运单 ${w.waybill_no} 吗？`)) {
-        toast.error(`❌ 运单 ${w.waybill_no} 已废弃。系统已自动释放对应自营运力 [${w.vehicle_plate || '—'}] 并扣减应收账款。`);
-      }
+      const ok = await confirmAction({
+        title: "废弃运单",
+        message: `确定要废弃运单 ${w.waybill_no} 吗？关联车辆/司机运力将被释放，此操作不可恢复。`,
+        tone: "danger",
+        confirmText: "废弃",
+      });
+      if (ok) voidWaybill.mutate(w.waybill_no);
     }
   };
 
@@ -323,14 +361,14 @@ export function WaybillsPage() {
             <span>📍</span> 车联网在途追踪
           </button>
           <div className="context-divider"></div>
-          <button onClick={() => handleAction("print", contextMenu.waybill)}>
-            <span>🖨️</span> 打印 B2B 电子签单
+          <button disabled={openContract.isPending} onClick={() => handleAction("print", contextMenu.waybill)}>
+            <span>🖨️</span> 查看合同/回单 PDF
           </button>
-          <button onClick={() => handleAction("risk", contextMenu.waybill)} style={{ color: "var(--amber)" }}>
-            <span>⚠️</span> 手动标红置顶预警
+          <button disabled={markRisk.isPending} onClick={() => handleAction("risk", contextMenu.waybill)} style={{ color: "var(--amber)" }}>
+            <span>⚠️</span> {contextMenu.waybill.risk_level === "high" ? "清除风险标记" : "手动标红置顶预警"}
           </button>
           <div className="context-divider"></div>
-          <button onClick={() => handleAction("cancel", contextMenu.waybill)} style={{ color: "var(--red)" }}>
+          <button disabled={voidWaybill.isPending} onClick={() => handleAction("cancel", contextMenu.waybill)} style={{ color: "var(--red)" }}>
             <span>❌</span> 废弃运单释放运力 <span className="hotkey">⌫</span>
           </button>
         </div>

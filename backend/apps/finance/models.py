@@ -302,6 +302,7 @@ class Statement(BaseModel):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="confirmed_statements"
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    audited_at = models.DateTimeField(null=True, blank=True, help_text="最近一次 AI 异常审计时间")
 
     class Meta:
         db_table = "fin_statement"
@@ -320,10 +321,17 @@ class Statement(BaseModel):
 
 class StatementLine(BaseModel):
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name="lines")
+    expense_record = models.ForeignKey(
+        ExpenseRecord, null=True, blank=True, on_delete=models.SET_NULL, related_name="statement_lines"
+    )
     waybill_no = models.CharField(max_length=40, blank=True)
     expense_item_code = models.CharField(max_length=64, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     occurred_at = models.DateTimeField(null=True, blank=True)
+    # AI 异常审计结果（由 services.audit_statement 按同科目历史均值计算回填，非模拟）
+    is_anomaly = models.BooleanField(default=False)
+    baseline_avg = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    deviation_pct = models.DecimalField(max_digits=8, decimal_places=1, null=True, blank=True)
 
     class Meta:
         db_table = "fin_statement_line"

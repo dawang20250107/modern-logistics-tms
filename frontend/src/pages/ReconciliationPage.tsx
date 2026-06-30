@@ -4,7 +4,7 @@ import { Fragment, useState } from "react";
 import { apiGet, apiPost } from "../api/client";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
-import type { Carrier, Customer, Paginated, Statement } from "../api/types";
+import type { Carrier, Customer, Paginated, Statement, StatementAuditResult } from "../api/types";
 import { STATEMENT_STATUS_LABEL } from "../api/types";
 
 export function ReconciliationPage() {
@@ -15,7 +15,6 @@ export function ReconciliationPage() {
   const [end, setEnd] = useState("2026-06-30");
   const [externalTotal, setExternalTotal] = useState("");
   const [expanded, setExpanded] = useState<string>("");
-  const [isAuditing, setIsAuditing] = useState(false);
 
   const cpType = direction === "receivable" ? "customer" : "carrier";
   const counterparties = useQuery({
@@ -49,21 +48,36 @@ export function ReconciliationPage() {
   });
   const detail = useQuery({
     queryKey: ["statement", expanded],
-    queryFn: () => apiGet<Statement & { lines?: any[] }>(`/finance/statements/${expanded}`),
+    queryFn: () => apiGet<Statement>(`/finance/statements/${expanded}`),
     enabled: Boolean(expanded),
   });
 
   const cps = counterparties.data?.items ?? [];
   const items = statements.data?.items ?? [];
 
-  // === 模拟 AI 智能对账与审计异常检出 ===
-  const simulateAiAudit = () => {
-    setIsAuditing(true);
-    setTimeout(() => {
-      setIsAuditing(false);
-      toast.success("🤖 AI 自动化审计完成！已自动核对 200+ 条流水，发现 2 处潜在过高扣费风险，已在明细中红标指示。");
-    }, 1500);
-  };
+  // === AI 异常审计：按同费用科目历史均值真实计算，非模拟（apps.finance.services.audit_statement）===
+  const auditOne = useMutation({
+    mutationFn: (id: string) => apiPost<StatementAuditResult>(`/finance/statements/${id}/audit`, {}),
+    onSuccess: (r) => {
+      toast.success(`审计完成：核对 ${r.total_lines} 笔流水，发现 ${r.anomaly_count} 处异常过高费用。`);
+      queryClient.invalidateQueries({ queryKey: ["statement", expanded] });
+      invalidate();
+    },
+  });
+  const auditAll = useMutation({
+    mutationFn: async () => {
+      const results = await Promise.all(items.map((s) => apiPost<StatementAuditResult>(`/finance/statements/${s.id}/audit`, {})));
+      return results.reduce(
+        (acc, r) => ({ lines: acc.lines + r.total_lines, anomalies: acc.anomalies + r.anomaly_count }),
+        { lines: 0, anomalies: 0 }
+      );
+    },
+    onSuccess: (r) => {
+      toast.success(`🤖 批量审计完成：核对 ${items.length} 张账单共 ${r.lines} 笔流水，发现 ${r.anomalies} 处过高费用风险。`);
+      queryClient.invalidateQueries({ queryKey: ["statement", expanded] });
+      invalidate();
+    },
+  });
 
   return (
     <div className="stack" style={{ position: "relative" }}>
@@ -79,13 +93,13 @@ export function ReconciliationPage() {
               管理与客户的应收（AR）、承运商的应付（AP）对账单。可启用 AI 对账机器人自动排查异常油费/路桥费与杂项。
             </div>
           </div>
-          <button 
-            className="btn-primary" 
+          <button
+            className="btn-primary"
             style={{ padding: "10px 18px", fontSize: 13, background: "var(--grad-ai)", boxShadow: "0 6px 16px rgba(139,92,246,0.3)" }}
-            onClick={simulateAiAudit}
-            disabled={isAuditing}
+            onClick={() => auditAll.mutate()}
+            disabled={auditAll.isPending || items.length === 0}
           >
-            {isAuditing ? "🧠 深度对账审计中..." : "🤖 启动一键 AI 并发表单审计"}
+            {auditAll.isPending ? "🧠 深度对账审计中..." : `🤖 启动一键 AI 并发表单审计（${items.length} 张）`}
           </button>
         </div>
       </div>
@@ -239,7 +253,22 @@ export function ReconciliationPage() {
                             <div style={{ fontWeight: "bold", fontSize: 14 }}>
                               <span style={{ fontSize: 16 }}>🧾</span> 账单微交易流水明细审计
                             </div>
-                            <span className="muted small">该账单共包含 {detail.data?.lines?.length || 0} 笔子计费项</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span className="muted small">
+                                {detail.data?.audited_at
+                                  ? `已审计 · ${new Date(detail.data.audited_at).toLocaleString()}`
+                                  : "尚未审计"}
+                                {" · "}共 {detail.data?.lines?.length || 0} 笔子计费项
+                              </span>
+                              <button
+                                className="btn-ghost"
+                                style={{ padding: "3px 10px", fontSize: 11 }}
+                                disabled={auditOne.isPending}
+                                onClick={(e) => { e.stopPropagation(); auditOne.mutate(s.id); }}
+                              >
+                                {auditOne.isPending ? "审计中…" : "🤖 审计本单"}
+                              </button>
+                            </div>
                           </div>
 
                           {detail.isLoading ? (
@@ -257,34 +286,32 @@ export function ReconciliationPage() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {(detail.data?.lines ?? []).map((l, i) => {
-                                    // 模拟 AI 检出高速路桥费或押车费异常的高发点
-                                    const isAnomaly = (l.expense_item_code === "toll" && Number(l.amount) > 1000) || (l.expense_item_code === "demurrage" && Number(l.amount) > 500);
-                                    
-                                    return (
-                                      <tr key={l.id} style={isAnomaly ? { background: "#fff5f5" } : {}}>
-                                        <td className="mono link" style={{ cursor: "pointer" }}>{l.waybill_no}</td>
-                                        <td>
-                                          <span className="tag" style={{ background: "rgba(0,0,0,0.04)" }}>{l.expense_item_code}</span>
-                                        </td>
-                                        <td style={{ fontWeight: "bold", color: isAnomaly ? "var(--red)" : "inherit" }}>
-                                          {fmtMoney(l.amount)}
-                                        </td>
-                                        <td className="muted mono">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
-                                        <td>
-                                          {isAnomaly ? (
-                                            <span style={{ color: "#e74c3c", fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}>
-                                              <span style={{ fontSize: 14 }}>🤖</span> 异常过高！偏离该路线历史均值 240%
-                                            </span>
-                                          ) : (
-                                            <span style={{ color: "#27ae60", display: "flex", alignItems: "center", gap: 4 }}>
-                                              ✓ AI 核验合规
-                                            </span>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
+                                  {(detail.data?.lines ?? []).map((l) => (
+                                    <tr key={l.id} style={l.is_anomaly ? { background: "#fff5f5" } : {}}>
+                                      <td className="mono link" style={{ cursor: "pointer" }}>{l.waybill_no}</td>
+                                      <td>
+                                        <span className="tag" style={{ background: "rgba(0,0,0,0.04)" }}>{l.expense_item_code}</span>
+                                      </td>
+                                      <td style={{ fontWeight: "bold", color: l.is_anomaly ? "var(--red)" : "inherit" }}>
+                                        {fmtMoney(l.amount)}
+                                      </td>
+                                      <td className="muted mono">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
+                                      <td>
+                                        {l.is_anomaly ? (
+                                          <span style={{ color: "#e74c3c", fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}>
+                                            <span style={{ fontSize: 14 }}>🤖</span>
+                                            异常过高！超历史均值 ¥{fmtMoney(l.baseline_avg ?? "0")} 达 {l.deviation_pct}%
+                                          </span>
+                                        ) : l.baseline_avg != null ? (
+                                          <span style={{ color: "#27ae60", display: "flex", alignItems: "center", gap: 4 }}>
+                                            ✓ AI 核验合规（基线 ¥{fmtMoney(l.baseline_avg)}）
+                                          </span>
+                                        ) : (
+                                          <span className="muted">{detail.data?.audited_at ? "样本不足，无基线" : "待审计"}</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
                                 </tbody>
                               </table>
                             </div>

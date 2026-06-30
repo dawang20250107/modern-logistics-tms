@@ -61,6 +61,15 @@ class StatementViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewset
         statement = confirm_statement(self.get_object(), operator=request.user)
         return Response(StatementSerializer(statement).data)
 
+    @action(detail=True, methods=["post"], url_path="audit")
+    def audit(self, request, pk=None):
+        """AI 异常审计：按同科目历史均值检出本单过高费用（非模拟，见 services.audit_statement）。"""
+        from .services import audit_statement
+
+        statement = self.get_object()
+        summary = audit_statement(statement)
+        return Response({**summary, "statement": StatementSerializer(statement).data})
+
 
 class ExpenseItemViewSet(viewsets.ModelViewSet):
     queryset = ExpenseItem.objects.all()

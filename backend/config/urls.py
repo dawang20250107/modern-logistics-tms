@@ -17,6 +17,7 @@ urlpatterns = [
     path("api/docs", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     # 业务 API v1
     path("api/v1/auth/", include("apps.iam.urls")),
+    path("api/v1/org/", include("apps.iam.org_urls")),
     path("api/v1/", include("apps.masterdata.urls")),
     path("api/v1/", include("apps.ops.urls")),
     path("api/v1/finance/", include("apps.finance.urls")),

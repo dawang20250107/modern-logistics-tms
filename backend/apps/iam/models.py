@@ -12,23 +12,52 @@ class Organization(BaseModel):
     TYPE_CHOICES = [
         ("group", "集团"),
         ("company", "公司"),
+        ("region", "片区"),
         ("dept", "部门"),
         ("station", "网点"),
     ]
+    PROPERTY_CHOICES = [
+        ("self", "自营"),
+        ("franchise", "加盟"),
+        ("outsource", "外包"),
+        ("partner", "合作"),
+        ("jv", "合资"),
+    ]
 
     name = models.CharField(max_length=120)
+    short_name = models.CharField(max_length=64, blank=True, help_text="组织简称")
     code = models.CharField(max_length=64, unique=True)
     type = models.CharField(max_length=16, choices=TYPE_CHOICES, default="dept")
+    org_property = models.CharField(
+        max_length=16, choices=PROPERTY_CHOICES, default="self", help_text="经营属性"
+    )
     parent = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children"
     )
     # 物化路径（"祖先id/.../自身id"），便于按组织子树做数据权限过滤
     path = models.CharField(max_length=512, blank=True, db_index=True)
+
+    # ── 落地属性（超越 G7：结构化地址 + 坐标 + 多类联系电话 + 回单地址）──
+    province = models.CharField(max_length=32, blank=True)
+    city = models.CharField(max_length=32, blank=True)
+    district = models.CharField(max_length=32, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    manager_name = models.CharField(max_length=64, blank=True, help_text="负责人")
+    manager_phone = models.CharField(max_length=32, blank=True)
+    business_phone = models.CharField(max_length=32, blank=True, help_text="业务电话")
+    service_phone = models.CharField(max_length=32, blank=True, help_text="客服电话")
+    complaint_phone = models.CharField(max_length=32, blank=True, help_text="投诉电话")
+    receipt_return_address = models.CharField(
+        max_length=255, blank=True, help_text="司机回单寄回地址"
+    )
+    sort_order = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = "iam_organization"
-        ordering = ["code"]
+        ordering = ["sort_order", "code"]
         verbose_name = "组织"
         verbose_name_plural = "组织"
 
@@ -136,3 +165,170 @@ class ApiKey(BaseModel):
     @staticmethod
     def generate_pair() -> tuple[str, str]:
         return secrets.token_hex(8), secrets.token_urlsafe(32)
+
+
+# ── 组织中台：部门 / 员工 / 用户组 / 服务区划 / 账号移交 ─────────────
+
+
+class EmployeeGroup(BaseModel):
+    """用户组：用于权限批量授予与通知分发（对标 G7「用户组」并可挂角色）。"""
+
+    code = models.CharField(max_length=64, unique=True)
+    name = models.CharField(max_length=64)
+    description = models.CharField(max_length=255, blank=True)
+    roles = models.ManyToManyField(Role, blank=True, related_name="employee_groups")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "iam_employee_group"
+        ordering = ["code"]
+        verbose_name = "用户组"
+        verbose_name_plural = "用户组"
+
+    def __str__(self) -> str:
+        return f"{self.code} {self.name}"
+
+
+class Department(BaseModel):
+    """部门：组织内的二级编制树（与组织树解耦，可独立挂接员工与负责人）。"""
+
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="departments"
+    )
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children"
+    )
+    code = models.CharField(max_length=64)
+    name = models.CharField(max_length=120)
+    manager = models.ForeignKey(
+        "Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="managed_departments"
+    )
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "iam_department"
+        ordering = ["sort_order", "code"]
+        unique_together = [("organization", "code")]
+        verbose_name = "部门"
+        verbose_name_plural = "部门"
+
+    def __str__(self) -> str:
+        return f"{self.code} {self.name}"
+
+
+class Employee(BaseModel):
+    """员工档案：超越 G7 的工号 + 汇报线（直接上级）+ 用户组 + 账号生命周期。"""
+
+    STATUS_CHOICES = [
+        ("active", "在职"),
+        ("disabled", "停用"),
+        ("left", "离职"),
+    ]
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="employee",
+    )
+    employee_no = models.CharField(max_length=32, unique=True, help_text="工号")
+    name = models.CharField(max_length=64)
+    phone = models.CharField(max_length=32, blank=True, db_index=True)
+    email = models.EmailField(blank=True)
+    id_no = models.CharField(max_length=32, blank=True)
+    organization = models.ForeignKey(
+        Organization, null=True, blank=True, on_delete=models.SET_NULL, related_name="employees"
+    )
+    department = models.ForeignKey(
+        Department, null=True, blank=True, on_delete=models.SET_NULL, related_name="employees"
+    )
+    supervisor = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="reports",
+        help_text="直接上级",
+    )
+    groups = models.ManyToManyField(EmployeeGroup, blank=True, related_name="employees")
+    position = models.CharField(max_length=64, blank=True, help_text="职位")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="active")
+    hire_date = models.DateField(null=True, blank=True)
+    leave_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = "iam_employee"
+        ordering = ["employee_no"]
+        indexes = [
+            models.Index(fields=["organization", "status"]),
+            models.Index(fields=["status"]),
+        ]
+        verbose_name = "员工"
+        verbose_name_plural = "员工"
+
+    def __str__(self) -> str:
+        return f"{self.employee_no} {self.name}"
+
+    @property
+    def account_active(self) -> bool:
+        return bool(self.user and self.user.is_active)
+
+
+class ServiceArea(BaseModel):
+    """服务区划：网点的派送/中转/特殊/不派送/不中转覆盖范围（接单与派单路由依据）。"""
+
+    AREA_TYPE_CHOICES = [
+        ("deliver", "派送区域"),
+        ("transfer", "中转区域"),
+        ("special", "特殊区域"),
+        ("no_deliver", "不派送区域"),
+        ("no_transfer", "不中转区域"),
+    ]
+
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="service_areas"
+    )
+    area_type = models.CharField(max_length=16, choices=AREA_TYPE_CHOICES, default="deliver")
+    province = models.CharField(max_length=32, blank=True)
+    city = models.CharField(max_length=32, blank=True)
+    district = models.CharField(max_length=32, blank=True)
+    region_code = models.CharField(max_length=16, blank=True, help_text="行政区划编码")
+    region_name = models.CharField(max_length=120, help_text="区划展示名")
+    priority = models.IntegerField(default=0, help_text="多网点覆盖时的优先级，越大越优先")
+    note = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "iam_service_area"
+        ordering = ["-priority", "region_name"]
+        indexes = [
+            models.Index(fields=["organization", "area_type"]),
+            models.Index(fields=["region_code"]),
+        ]
+        verbose_name = "服务区划"
+        verbose_name_plural = "服务区划"
+
+    def __str__(self) -> str:
+        return f"{self.get_area_type_display()}:{self.region_name}"
+
+
+class AccountHandover(BaseModel):
+    """账号移交：将离职/转岗员工的下属、所辖部门改挂他人，并停用原账号（留痕可审计）。"""
+
+    from_employee = models.ForeignKey(
+        Employee, on_delete=models.CASCADE, related_name="handovers_out"
+    )
+    to_employee = models.ForeignKey(
+        Employee, on_delete=models.CASCADE, related_name="handovers_in"
+    )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    reason = models.CharField(max_length=255, blank=True)
+    moved_reports = models.IntegerField(default=0)
+    moved_departments = models.IntegerField(default=0)
+    disabled_account = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "iam_account_handover"
+        ordering = ["-created_at"]
+        verbose_name = "账号移交"
+        verbose_name_plural = "账号移交"
+
+    def __str__(self) -> str:
+        return f"{self.from_employee_id}→{self.to_employee_id}"

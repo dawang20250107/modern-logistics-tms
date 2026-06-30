@@ -73,6 +73,27 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         tree = build_org_tree(orgs, headcount=counts)
         return Response({"tree": tree, "total": len(orgs)})
 
+    @action(detail=False, methods=["get"], url_path="export")
+    def export(self, request):
+        """导出组织为 CSV（迁移就绪：可作为 G7 → 本系统的中转格式）。"""
+        import csv
+
+        from django.http import HttpResponse
+
+        qs = self.filter_queryset(self.get_queryset())[:5000]
+        resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+        resp["Content-Disposition"] = 'attachment; filename="organizations.csv"'
+        resp.write("﻿")
+        writer = csv.writer(resp)
+        writer.writerow(["编码", "名称", "简称", "类型", "经营属性", "上级编码", "负责人", "负责人电话", "城市", "启用"])
+        for o in qs:
+            writer.writerow([
+                o.code, o.name, o.short_name, o.get_type_display(), o.get_org_property_display(),
+                o.parent.code if o.parent else "", o.manager_name, o.manager_phone, o.city,
+                "是" if o.is_active else "否",
+            ])
+        return resp
+
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.select_related("organization", "manager", "parent").all()
@@ -182,6 +203,75 @@ class EmployeeViewSet(viewsets.ModelViewSet):
             ])
         assignments = RoleAssignment.objects.filter(user=emp.user).select_related("role", "organization")
         return Response(RoleAssignmentSerializer(assignments, many=True).data)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export(self, request):
+        """导出员工为 CSV，列与导入格式一致，支持往返。"""
+        import csv
+
+        from django.http import HttpResponse
+
+        qs = self.filter_queryset(self.get_queryset())[:5000]
+        resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+        resp["Content-Disposition"] = 'attachment; filename="employees.csv"'
+        resp.write("﻿")
+        writer = csv.writer(resp)
+        writer.writerow(["工号", "姓名", "手机", "组织编码", "职位", "直接上级工号", "状态"])
+        for e in qs:
+            writer.writerow([
+                e.employee_no, e.name, e.phone, e.organization.code if e.organization else "",
+                e.position, e.supervisor.employee_no if e.supervisor else "", e.get_status_display(),
+            ])
+        return resp
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_csv(self, request):
+        """批量导入员工 CSV（迁移工具）：按工号 upsert，组织/上级按编码/工号解析。
+
+        列：工号,姓名,手机,组织编码,职位,直接上级工号（首行表头可有可无）。
+        两遍处理：先 upsert 全部，再回填直接上级，保证上级已存在。
+        """
+        import csv
+        import io
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "缺少文件 file"}, status=status.HTTP_400_BAD_REQUEST)
+        text = upload.read().decode("utf-8-sig", errors="replace")
+        reader = csv.reader(io.StringIO(text))
+        org_by_code = {o.code: o for o in Organization.objects.all()}
+        created, updated, errors = 0, 0, []
+        sup_links: list[tuple[str, str]] = []
+        for idx, row in enumerate(reader, start=1):
+            if not row or not any(c.strip() for c in row):
+                continue
+            cells = (row + [""] * 6)[:6]
+            employee_no, name, phone, org_code, position, sup_no = (c.strip() for c in cells)
+            if employee_no in ("工号", "employee_no") and idx == 1:
+                continue  # 跳过表头
+            if not employee_no or not name:
+                errors.append({"row": idx, "error": "工号与姓名必填"})
+                continue
+            org = org_by_code.get(org_code) if org_code else None
+            if org_code and org is None:
+                errors.append({"row": idx, "error": f"组织编码不存在：{org_code}"})
+                continue
+            _, is_new = Employee.objects.update_or_create(
+                employee_no=employee_no,
+                defaults={"name": name, "phone": phone, "organization": org, "position": position},
+            )
+            created += int(is_new)
+            updated += int(not is_new)
+            if sup_no:
+                sup_links.append((employee_no, sup_no))
+        # 回填直接上级
+        emp_by_no = {e.employee_no: e for e in Employee.objects.all()}
+        for emp_no, sup_no in sup_links:
+            emp, sup = emp_by_no.get(emp_no), emp_by_no.get(sup_no)
+            if emp and sup and emp.id != sup.id:
+                emp.supervisor = sup
+                emp.save(update_fields=["supervisor", "updated_at"])
+        return Response({"created": created, "updated": updated, "errors": errors})
 
 
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):

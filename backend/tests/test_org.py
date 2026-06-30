@@ -235,6 +235,47 @@ def test_employee_role_requires_account(admin_client, org_tree):
 
 
 @pytest.mark.django_db
+def test_employee_csv_roundtrip(admin_client, org_tree):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    _, _, sh = org_tree  # code="SH"
+    csv_text = (
+        "工号,姓名,手机,组织编码,职位,直接上级工号\n"
+        "B1,班长,13900000001,SH,班组长,\n"
+        "B2,组员,13900000002,SH,司机,B1\n"
+        "B3,坏行,,NOPE,,,\n"  # 组织编码不存在 → 计入 errors
+    )
+    upload = SimpleUploadedFile("emp.csv", csv_text.encode("utf-8"), content_type="text/csv")
+    r = admin_client.post("/api/v1/org/employees/import", {"file": upload}, format="multipart")
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["created"] == 2
+    assert len(d["errors"]) == 1
+    b2 = Employee.objects.get(employee_no="B2")
+    assert b2.supervisor.employee_no == "B1"
+
+    # 再次导入相同数据 → 更新而非重复
+    upload2 = SimpleUploadedFile("emp.csv", csv_text.encode("utf-8"), content_type="text/csv")
+    r2 = admin_client.post("/api/v1/org/employees/import", {"file": upload2}, format="multipart")
+    assert r2.json()["data"]["updated"] == 2
+
+    # 导出 CSV
+    ex = admin_client.get("/api/v1/org/employees/export")
+    assert ex.status_code == 200
+    assert ex["Content-Type"].startswith("text/csv")
+    body = ex.content.decode("utf-8-sig")
+    assert "B1" in body and "班长" in body
+
+
+@pytest.mark.django_db
+def test_org_export(admin_client, org_tree):
+    r = admin_client.get("/api/v1/org/organizations/export")
+    assert r.status_code == 200
+    assert r["Content-Type"].startswith("text/csv")
+    assert "上海网点" in r.content.decode("utf-8-sig")
+
+
+@pytest.mark.django_db
 def test_employee_list_skips_heavy_fields(admin_client, org_tree):
     _, _, sh = org_tree
     _emp("L1", "列表甲", sh)

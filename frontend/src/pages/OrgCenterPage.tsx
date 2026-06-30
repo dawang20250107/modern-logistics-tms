@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState } from "react";
 
-import { apiGet, apiPost } from "../api/client";
+import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type {
@@ -168,6 +168,7 @@ function OrgTab() {
       <div className="panel-head">
         组织架构树
         <span className="ai-pill">含子树在职人头汇总</span>
+        <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => apiDownload("/org/organizations/export", "organizations.csv")}>导出 CSV</button>
       </div>
       {q.isLoading ? (
         <div className="muted" style={{ padding: 16 }}>加载中…</div>
@@ -250,6 +251,19 @@ function EmployeesTab() {
     onSuccess: (d) => { toast.success(`移交完成：下属 ${d.moved_reports} 人、部门 ${d.moved_departments} 个已改挂`); invalidate(); },
     onError: (e: Error) => toast.error(e.message),
   });
+  const importCsv = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return apiUpload<{ created: number; updated: number; errors: Array<{ row: number; error: string }> }>("/org/employees/import", fd);
+    },
+    onSuccess: (d) => {
+      toast.success(`导入完成：新增 ${d.created}、更新 ${d.updated}${d.errors.length ? `、失败 ${d.errors.length}` : ""}`);
+      if (d.errors.length) toast.error(`首条失败：第 ${d.errors[0].row} 行 ${d.errors[0].error}`);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const doDisable = async (e: Employee) => {
     if (await confirmAction({ title: "停用员工", message: `确认停用 ${e.name}（${e.employee_no}）？其登录账号将被禁用。`, tone: "danger", confirmText: "停用" }))
@@ -272,7 +286,16 @@ function EmployeesTab() {
     <div className="stack">
       <EmployeeCreateForm orgs={orgs.data ?? []} onDone={invalidate} />
       <div className="panel">
-        <div className="panel-head">员工名录 · 汇报线 + 账号生命周期</div>
+        <div className="panel-head">
+          员工名录 · 汇报线 + 账号生命周期
+          <div className="form-row" style={{ marginLeft: "auto", gap: 6 }}>
+            <label className="btn-ghost" style={{ cursor: "pointer" }}>
+              {importCsv.isPending ? "导入中…" : "导入 CSV"}
+              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv.mutate(f); e.target.value = ""; }} />
+            </label>
+            <button className="btn-ghost" onClick={() => apiDownload("/org/employees/export", "employees.csv")}>导出 CSV</button>
+          </div>
+        </div>
         <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
           <input className="search" placeholder="搜索工号/姓名/手机/职位" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} />
           <span className="muted small">共 {q.data?.total ?? 0} 人</span>

@@ -706,6 +706,31 @@ export interface OrgOverview {
   service_areas: { total: number; by_type: Record<string, number> };
 }
 
+export interface CoverageResolved {
+  organization_id: string;
+  organization_name: string;
+  org_short: string;
+  manager_name: string;
+  area_type: string;
+  area_type_label: string;
+  region_name: string;
+  priority: number;
+  matched_on: string;
+}
+export interface CoverageResult {
+  destination: string;
+  resolved: CoverageResolved[];
+  excluded: Array<{ organization_id: string; organization_name: string; reason: string }>;
+}
+
+export interface OrgOption {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  type_label: string;
+}
+
 export interface AccountHandover {
   id: string;
   from_employee: string;

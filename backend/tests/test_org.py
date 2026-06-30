@@ -151,6 +151,29 @@ def test_overview_kpis(admin_client, org_tree):
 
 
 @pytest.mark.django_db
+def test_coverage_resolve_ranks_and_excludes(admin_client, org_tree):
+    _, east, sh = org_tree
+    wh = Organization.objects.create(code="WH", name="武汉网点", type="station", parent=east)
+    # 上海网点：浦东派送(优先级20) + 崇明不派送
+    ServiceArea.objects.create(organization=sh, area_type="deliver", region_name="上海市浦东新区", priority=20)
+    ServiceArea.objects.create(organization=sh, area_type="no_deliver", region_name="上海市崇明区")
+    # 武汉网点：浦东中转(优先级5) —— 同目的地但派送优先于中转、且优先级低
+    ServiceArea.objects.create(organization=wh, area_type="transfer", region_name="上海市浦东新区", priority=5)
+
+    r = admin_client.get("/api/v1/org/route-resolve", {"city": "上海市", "district": "浦东新区"})
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert [x["organization_name"] for x in d["resolved"]] == ["上海网点", "武汉网点"]
+    assert d["resolved"][0]["area_type"] == "deliver"
+
+    # 崇明区：上海网点被不派送排除，无派送候选
+    r2 = admin_client.get("/api/v1/org/route-resolve", {"city": "上海市", "district": "崇明区"})
+    d2 = r2.json()["data"]
+    assert d2["resolved"] == []
+    assert any("上海网点" == e["organization_name"] for e in d2["excluded"])
+
+
+@pytest.mark.django_db
 def test_employee_list_skips_heavy_fields(admin_client, org_tree):
     _, _, sh = org_tree
     _emp("L1", "列表甲", sh)

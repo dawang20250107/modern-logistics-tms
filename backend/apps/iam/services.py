@@ -151,3 +151,67 @@ def handover_account(from_employee, to_employee, *, operator=None, reason="", di
             disabled_account=disabled,
         )
     return record
+
+
+def resolve_coverage(province: str = "", city: str = "", district: str = "") -> dict:
+    """按目的地解析「哪个网点负责」——G7 只罗列区划，我们做覆盖匹配+排他+优先级仲裁。
+
+    规则：
+      - 命中 派送/中转 区划的网点进入候选；优先按 district、其次 city 匹配。
+      - 同一目的地若网点配有 不派送/不中转 区划，则该网点被排除（留排除理由）。
+      - 候选按区划优先级倒序排名，派送优先于中转。
+    """
+    from .models import ServiceArea
+
+    # 目的地全路径（省→市→区，按地理粒度由粗到细拼接）
+    dest_full = "".join(t for t in (province, city, district) if t)
+    if not dest_full:
+        return {"destination": "", "resolved": [], "excluded": []}
+
+    def _match(area) -> str:
+        # 祖先或等于：区划名是目的地全路径的子串（"上海市"⊇"上海市浦东新区"）才算覆盖。
+        # 这样「上海市崇明区·不派送」不会误伤「浦东新区」的查询。
+        name = area.region_name
+        return name if name and name in dest_full else ""
+
+    areas = (
+        ServiceArea.objects.filter(is_active=True)
+        .select_related("organization")
+    )
+    positives: dict = {}
+    excluded: dict = {}
+    _RANK = {"deliver": 2, "transfer": 1}
+    for area in areas:
+        hit = _match(area)
+        if not hit:
+            continue
+        org = area.organization
+        if area.area_type in ("no_deliver", "no_transfer"):
+            excluded.setdefault(org.id, {
+                "organization_id": str(org.id), "organization_name": org.name,
+                "reason": f"{area.get_area_type_display()}·{area.region_name}",
+            })
+            continue
+        if area.area_type not in _RANK:
+            continue
+        cur = positives.get(org.id)
+        score = (area.priority, _RANK[area.area_type])
+        if cur is None or score > cur["_score"]:
+            positives[org.id] = {
+                "organization_id": str(org.id), "organization_name": org.name,
+                "org_short": org.short_name, "manager_name": org.manager_name,
+                "area_type": area.area_type, "area_type_label": area.get_area_type_display(),
+                "region_name": area.region_name, "priority": area.priority,
+                "matched_on": hit, "_score": score,
+            }
+
+    excluded_ids = set(excluded.keys())
+    resolved = [v for k, v in positives.items() if k not in excluded_ids]
+    resolved.sort(key=lambda r: r["_score"], reverse=True)
+    for r in resolved:
+        r.pop("_score", None)
+    return {
+        "destination": dest_full,
+        "resolved": resolved,
+        "excluded": list(excluded.values()),
+    }

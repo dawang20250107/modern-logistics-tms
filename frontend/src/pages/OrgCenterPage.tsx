@@ -6,13 +6,23 @@ import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type {
   AccountHandover,
+  CoverageResult,
   Employee,
+  OrgOption,
   OrgOverview,
   OrgTreeNode,
   Paginated,
   ServiceArea,
 } from "../api/types";
-import { AREA_TYPE_LABEL, EMP_STATUS_LABEL, ORG_PROPERTY_LABEL } from "../api/types";
+import { AREA_TYPE_LABEL, ORG_PROPERTY_LABEL } from "../api/types";
+
+function useOrgOptions() {
+  return useQuery({
+    queryKey: ["org-options"],
+    queryFn: () => apiGet<Paginated<OrgOption>>("/org/organizations?page_size=200&ordering=sort_order"),
+    select: (d) => d.items,
+  });
+}
 
 type Tab = "overview" | "org" | "employees" | "areas";
 
@@ -96,12 +106,63 @@ function OrgTreeNodeRow({ node, depth }: { node: OrgTreeNode; depth: number }) {
   );
 }
 
+const ORG_TYPES: Record<string, string> = {
+  group: "集团", company: "公司", region: "片区", dept: "部门", station: "网点",
+};
+
+function OrgCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void }) {
+  const [form, setForm] = useState({
+    code: "", name: "", short_name: "", type: "station", org_property: "self", parent: "", manager_name: "",
+  });
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const create = useMutation({
+    mutationFn: () => apiPost<unknown>("/org/organizations", { ...form, parent: form.parent || null }),
+    onSuccess: () => {
+      toast.success("组织已新增");
+      setForm({ code: "", name: "", short_name: "", type: "station", org_property: "self", parent: "", manager_name: "" });
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <div className="panel">
+      <div className="panel-head">新增组织</div>
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <input className="search" style={{ width: 110 }} placeholder="编码" value={form.code} onChange={(e) => set("code", e.target.value)} />
+        <input className="search" style={{ width: 150 }} placeholder="名称" value={form.name} onChange={(e) => set("name", e.target.value)} />
+        <input className="search" style={{ width: 100 }} placeholder="简称" value={form.short_name} onChange={(e) => set("short_name", e.target.value)} />
+        <select value={form.type} onChange={(e) => set("type", e.target.value)}>
+          {Object.entries(ORG_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select value={form.org_property} onChange={(e) => set("org_property", e.target.value)}>
+          {Object.entries(ORG_PROPERTY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select value={form.parent} onChange={(e) => set("parent", e.target.value)}>
+          <option value="">无上级（根）</option>
+          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        <input className="search" style={{ width: 90 }} placeholder="负责人" value={form.manager_name} onChange={(e) => set("manager_name", e.target.value)} />
+        <button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()}>新增</button>
+      </div>
+    </div>
+  );
+}
+
 function OrgTab() {
+  const qc = useQueryClient();
+  const orgs = useOrgOptions();
   const q = useQuery({
     queryKey: ["org-tree"],
     queryFn: () => apiGet<{ tree: OrgTreeNode[]; total: number }>("/org/organizations/tree"),
   });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["org-tree"] });
+    qc.invalidateQueries({ queryKey: ["org-options"] });
+    qc.invalidateQueries({ queryKey: ["org-overview"] });
+  };
   return (
+    <div className="stack">
+    <OrgCreateForm orgs={orgs.data ?? []} onDone={refresh} />
     <div className="panel">
       <div className="panel-head">
         组织架构树
@@ -122,11 +183,39 @@ function OrgTab() {
         </table>
       )}
     </div>
+    </div>
+  );
+}
+
+function EmployeeCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void }) {
+  const [form, setForm] = useState({ employee_no: "", name: "", phone: "", organization: "", position: "" });
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const create = useMutation({
+    mutationFn: () => apiPost<Employee>("/org/employees", { ...form, organization: form.organization || null }),
+    onSuccess: () => { toast.success("员工已新增"); setForm({ employee_no: "", name: "", phone: "", organization: "", position: "" }); onDone(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <div className="panel">
+      <div className="panel-head">新增员工</div>
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <input className="search" style={{ width: 110 }} placeholder="工号" value={form.employee_no} onChange={(e) => set("employee_no", e.target.value)} />
+        <input className="search" style={{ width: 110 }} placeholder="姓名" value={form.name} onChange={(e) => set("name", e.target.value)} />
+        <input className="search" style={{ width: 130 }} placeholder="手机号" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+        <select value={form.organization} onChange={(e) => set("organization", e.target.value)}>
+          <option value="">选择所属组织</option>
+          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        <input className="search" style={{ width: 120 }} placeholder="职位" value={form.position} onChange={(e) => set("position", e.target.value)} />
+        <button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()}>新增</button>
+      </div>
+    </div>
   );
 }
 
 function EmployeesTab() {
   const qc = useQueryClient();
+  const orgs = useOrgOptions();
   const [search, setSearch] = useState("");
   const q = useQuery({
     queryKey: ["org-employees", search],
@@ -180,6 +269,7 @@ function EmployeesTab() {
 
   return (
     <div className="stack">
+      <EmployeeCreateForm orgs={orgs.data ?? []} onDone={invalidate} />
       <div className="panel">
         <div className="panel-head">员工名录 · 汇报线 + 账号生命周期</div>
         <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -241,7 +331,94 @@ function EmployeesTab() {
   );
 }
 
+function CoverageRouter() {
+  const [city, setCity] = useState("");
+  const [district, setDistrict] = useState("");
+  const m = useMutation({
+    mutationFn: () =>
+      apiGet<CoverageResult>(
+        `/org/route-resolve?city=${encodeURIComponent(city)}&district=${encodeURIComponent(district)}`
+      ),
+  });
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        智能区划路由
+        <span className="ai-pill">覆盖匹配 · 排他 · 优先级仲裁</span>
+      </div>
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <input className="search" style={{ width: 130 }} placeholder="城市，如 上海市" value={city} onChange={(e) => setCity(e.target.value)} />
+        <input className="search" style={{ width: 140 }} placeholder="区县，如 浦东新区" value={district} onChange={(e) => setDistrict(e.target.value)} />
+        <button className="btn-primary" disabled={m.isPending || (!city && !district)} onClick={() => m.mutate()}>解析负责网点</button>
+      </div>
+      {m.data && (
+        <div style={{ padding: "0 16px 14px" }} className="stack">
+          <div className="muted small">目的地：{m.data.destination || "-"}</div>
+          {m.data.resolved.length === 0 ? (
+            <div className="muted small">无可承运网点{m.data.excluded.length > 0 ? "（均被排他规则排除）" : ""}。</div>
+          ) : (
+            <table className="table">
+              <thead><tr><th>排名</th><th>网点</th><th>方式</th><th>命中区划</th><th>优先级</th><th>负责人</th></tr></thead>
+              <tbody>
+                {m.data.resolved.map((r, i) => (
+                  <tr key={r.organization_id}>
+                    <td className="mono">{i === 0 ? <span className="tag tag-low">首选</span> : i + 1}</td>
+                    <td><b>{r.organization_name}</b></td>
+                    <td><span className={`tag tag-${r.area_type === "deliver" ? "low" : "medium"}`}>{r.area_type_label}</span></td>
+                    <td className="small">{r.region_name}</td>
+                    <td className="mono">{r.priority}</td>
+                    <td className="small">{r.manager_name || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {m.data.excluded.length > 0 && (
+            <div className="muted small">
+              已排除：{m.data.excluded.map((e) => `${e.organization_name}（${e.reason}）`).join("、")}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AreaCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void }) {
+  const [org, setOrg] = useState("");
+  const [areaType, setAreaType] = useState("deliver");
+  const [regionName, setRegionName] = useState("");
+  const [priority, setPriority] = useState(10);
+  const create = useMutation({
+    mutationFn: () =>
+      apiPost<ServiceArea>("/org/service-areas", {
+        organization: org, area_type: areaType, region_name: regionName, priority,
+      }),
+    onSuccess: () => { toast.success("区划已新增"); setRegionName(""); onDone(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <div className="panel">
+      <div className="panel-head">新增服务区划</div>
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <select value={org} onChange={(e) => setOrg(e.target.value)}>
+          <option value="">选择归属网点</option>
+          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        <select value={areaType} onChange={(e) => setAreaType(e.target.value)}>
+          {Object.entries(AREA_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <input className="search" style={{ width: 200 }} placeholder="区划名，如 上海市浦东新区" value={regionName} onChange={(e) => setRegionName(e.target.value)} />
+        <input className="search" style={{ width: 90 }} type="number" placeholder="优先级" value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
+        <button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()}>新增</button>
+      </div>
+    </div>
+  );
+}
+
 function AreasTab() {
+  const qc = useQueryClient();
+  const orgs = useOrgOptions();
   const q = useQuery({
     queryKey: ["org-areas"],
     queryFn: () => apiGet<Paginated<ServiceArea>>("/org/service-areas?page_size=200"),
@@ -254,6 +431,8 @@ function AreasTab() {
   const types = ["deliver", "transfer", "special", "no_deliver", "no_transfer"];
   return (
     <div className="stack">
+      <CoverageRouter />
+      <AreaCreateForm orgs={orgs.data ?? []} onDone={() => qc.invalidateQueries({ queryKey: ["org-areas"] })} />
       <div className="muted small">网点服务区划：决定智能接单与派单的覆盖路由——派送/中转/特殊/不派送/不中转五类。</div>
       <div className="ct-grid">
         {types.filter((t) => grouped[t]?.length).map((t) => (

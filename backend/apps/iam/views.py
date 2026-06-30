@@ -23,7 +23,7 @@ from .serializers import (
     OrganizationSerializer,
     ServiceAreaSerializer,
 )
-from .services import build_org_tree, handover_account
+from .services import build_org_tree, handover_account, resolve_coverage
 
 
 class MeView(APIView):
@@ -169,6 +169,20 @@ class AccountHandoverViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AccountHandoverSerializer
     filterset_fields = ["from_employee", "to_employee"]
     ordering_fields = ["created_at"]
+
+
+class CoverageResolveView(APIView):
+    """智能区划路由：给定目的地，解析负责网点（覆盖匹配 + 排他 + 优先级仲裁）。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        result = resolve_coverage(
+            province=request.query_params.get("province", ""),
+            city=request.query_params.get("city", ""),
+            district=request.query_params.get("district", ""),
+        )
+        return Response(result)
 
 
 class OrgOverviewView(APIView):

@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtMoney } from "../api/format";
+import { fmtMoney, fmtNum } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
 import { PRICE_TYPE_LABEL } from "../api/types";
@@ -19,13 +19,17 @@ interface RuleForm {
   base_price: string;
   price_per_ton: string;
   min_price: string;
+  tier_prices: Array<{ min_ton: number; max_ton: number; price: number }>;
+  volumetric_factor: string;
+  fuel_surcharge_pct: string;
   priority: string;
   is_active: boolean;
 }
 
 const EMPTY: RuleForm = {
   name: "", price_type: "income", expense_item_code: "FREIGHT", customer: "", carrier: "",
-  route_name: "", base_price: "0", price_per_ton: "0", min_price: "0", priority: "0", is_active: true,
+  route_name: "", base_price: "0", price_per_ton: "0", min_price: "0",
+  tier_prices: [], volumetric_factor: "0.33", fuel_surcharge_pct: "0", priority: "0", is_active: true,
 };
 
 export function PricingPage() {
@@ -70,7 +74,7 @@ export function PricingPage() {
     setForm({
       name: r.name, price_type: r.price_type, expense_item_code: r.expense_item_code,
       customer: r.customer ?? "", carrier: r.carrier ?? "", route_name: r.route_name,
-      base_price: r.base_price, min_price: r.min_price, tier_prices: r.tier_prices || [], 
+      base_price: r.base_price, price_per_ton: "0", min_price: r.min_price, tier_prices: r.tier_prices || [],
       volumetric_factor: r.volumetric_factor, fuel_surcharge_pct: r.fuel_surcharge_pct,
       priority: String(r.priority), is_active: r.is_active,
     });

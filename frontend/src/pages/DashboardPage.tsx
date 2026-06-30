@@ -101,7 +101,7 @@ export function DashboardPage() {
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(val) => `¥${val/1000}k`} />
                 <Tooltip 
                   contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 10px 24px rgba(0,0,0,0.1)", fontSize: 12 }} 
-                  formatter={(value: number) => formatRmb(value)} 
+                  formatter={(value) => formatRmb(Number(value))} 
                 />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
                 <Area type="monotone" name="主营收入" dataKey="revenue" fill="url(#colorRevenue)" stroke="#2563eb" strokeWidth={3} />
@@ -119,7 +119,7 @@ export function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Tooltip 
-                  formatter={(value: number) => formatRmb(value)}
+                  formatter={(value) => formatRmb(Number(value))}
                   contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 10px 24px rgba(0,0,0,0.1)", fontSize: 12 }} 
                 />
                 <Legend iconType="circle" layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ fontSize: 12 }} />

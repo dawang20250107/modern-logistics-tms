@@ -181,6 +181,7 @@ class Order(BaseModel, SoftDeleteModel):
             models.Index(fields=["status", "priority"]),
             models.Index(fields=["created_by", "status"]),
             models.Index(fields=["claimed_by", "status"]),
+            models.Index(fields=["status", "-created_at"]),  # 列表默认排序 + 状态筛选
         ]
         verbose_name = "订单"
         verbose_name_plural = "订单"
@@ -420,6 +421,8 @@ class Waybill(BaseModel, OrgScopedModel):
             models.Index(fields=["receipt_status"]),
             models.Index(fields=["-eta_drift_minutes"]),
             models.Index(fields=["customer", "status"]),
+            models.Index(fields=["status", "-created_at"]),  # 列表默认排序 + 状态筛选
+            models.Index(fields=["driver", "status"]),  # 司机端在途任务查询
         ]
         verbose_name = "运单"
         verbose_name_plural = "运单"

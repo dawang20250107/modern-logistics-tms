@@ -155,6 +155,7 @@ REST_FRAMEWORK = {
         "sustained": env("THROTTLE_SUSTAINED", default="3000/hour"),
         "anon": env("THROTTLE_ANON", default="60/min"),
         "apikey": env("THROTTLE_APIKEY", default="600/min"),
+        "driver_login": env("THROTTLE_DRIVER_LOGIN", default="10/min"),
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",

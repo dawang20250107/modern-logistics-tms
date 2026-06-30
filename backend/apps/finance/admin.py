@@ -33,7 +33,7 @@ class PaymentRequestAdmin(admin.ModelAdmin):
 
 @admin.register(PricingRule)
 class PricingRuleAdmin(admin.ModelAdmin):
-    list_display = ("name", "price_type", "expense_item_code", "base_price", "price_per_ton", "priority", "is_active")
+    list_display = ("name", "price_type", "expense_item_code", "base_price", "fuel_surcharge_pct", "priority", "is_active")
     list_filter = ("price_type", "is_active")
     search_fields = ("name", "route_name")
 

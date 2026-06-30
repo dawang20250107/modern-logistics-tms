@@ -12,6 +12,17 @@ export function fmtNum(value: number | string | null | undefined, digits = 0): s
   return n.toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+export function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "—";
+  return d.toLocaleString("zh-CN", { 
+    timeZone: "Asia/Shanghai", 
+    year: "numeric", month: "2-digit", day: "2-digit", 
+    hour: "2-digit", minute: "2-digit" 
+  });
+}
+
 export function fmtRelative(iso: string | null | undefined): string {
   if (!iso) return "";
   const t = new Date(iso).getTime();
@@ -24,5 +35,5 @@ export function fmtRelative(iso: string | null | undefined): string {
   if (hr < 24) return `${hr}小时前`;
   const day = Math.floor(hr / 24);
   if (day < 30) return `${day}天前`;
-  return new Date(t).toLocaleDateString("zh-CN");
+  return new Date(t).toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" });
 }

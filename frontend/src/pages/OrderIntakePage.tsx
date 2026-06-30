@@ -69,54 +69,12 @@ export function OrderIntakePage() {
     batch.mutate({ action, ids });
   };
 
-  const [bulk, setBulk] = useState("");
-  const importMut = useMutation({
-    mutationFn: () => {
-      const rows = bulk.split("\n").map((l) => l.trim()).filter(Boolean).map((line) => {
-        const [origin, destination, weight, qty, phone] = line.split(/[,，\t]/).map((s) => s.trim());
-        return {
-          origin, destination,
-          cargo_weight_ton: weight ? Number(weight) : undefined,
-          cargo_quantity: qty ? Number(qty) : undefined,
-          contact_phone: phone || undefined,
-        };
-      });
-      return apiPost<{ ok_count: number; failed_count: number }>("/orders/import", { rows });
-    },
-    onSuccess: (r) => {
-      setBulk("");
-      toast.success(`批量建单完成：成功 ${r.ok_count}，失败 ${r.failed_count}`);
-      invalidate();
-    },
-  });
-
   const items = orders.data?.items ?? [];
   const total = orders.data?.total ?? 0;
 
   return (
     <div className="stack">
       <StructuredOrderForm onCreated={invalidate} />
-
-      <details className="panel">
-        <summary className="panel-head" style={{ cursor: "pointer" }}>批量导入（粘贴多行）</summary>
-        <div style={{ padding: "12px 18px 16px" }}>
-          <textarea
-            className="search"
-            style={{ width: "100%", minHeight: 84, resize: "vertical" }}
-            placeholder="每行一单：始发,目的,吨位,件数,电话（逗号/制表符分隔）&#10;例：上海,成都,10,5,13800001234"
-            value={bulk}
-            onChange={(e) => setBulk(e.target.value)}
-          />
-          <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center" }}>
-            <button className="btn-primary" disabled={!bulk.trim() || importMut.isPending} onClick={() => importMut.mutate()}>
-              {importMut.isPending ? "导入中…" : "批量建单"}
-            </button>
-            {importMut.data && (
-              <span className="muted small">成功 {importMut.data.ok_count} · 失败 {importMut.data.failed_count}</span>
-            )}
-          </div>
-        </div>
-      </details>
 
       <div className="panel">
         <div className="panel-head">

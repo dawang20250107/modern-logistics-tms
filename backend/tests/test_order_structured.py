@@ -37,7 +37,7 @@ def test_estimate_order_quote_matches_rule():
     cust = Customer.objects.create(code="CQ1", name="比亚迪")
     PricingRule.objects.create(
         name="沪蓉整车", price_type=PricingRule.PRICE_TYPE_INCOME, expense_item_code="FREIGHT",
-        customer=cust, base_price=1000, price_per_ton=100, priority=10,
+        customer=cust, base_price=1000, tier_prices=[{"min_ton": 0, "max_ton": 999, "price": 100}], priority=10,
     )
     q = estimate_order_quote(customer_id=cust.id, route_name="上海→成都", weight_ton=8)
     assert q["matched"] is True
@@ -50,7 +50,7 @@ def test_quote_uses_volumetric_weight_for_bulky_cargo():
     cust = Customer.objects.create(code="CV1", name="泡货客户")
     PricingRule.objects.create(
         name="泡货线", price_type=PricingRule.PRICE_TYPE_INCOME, expense_item_code="FREIGHT",
-        customer=cust, base_price=0, price_per_ton=100, priority=10,
+        customer=cust, base_price=0, tier_prices=[{"min_ton": 0, "max_ton": 999, "price": 100}], priority=10,
     )
     # 实际 1 吨，但 30 方泡货 → 体积重 30*0.333≈10 吨，应按抛重计费
     q = estimate_order_quote(customer_id=cust.id, route_name="x", weight_ton=1, volume_cbm=30)
@@ -95,7 +95,7 @@ def test_quote_endpoint(admin_client):
     cust = Customer.objects.create(code="CQ2", name="宁德时代")
     PricingRule.objects.create(
         name="沪蓉", price_type=PricingRule.PRICE_TYPE_INCOME, expense_item_code="FREIGHT",
-        customer=cust, base_price=500, price_per_ton=200, priority=5,
+        customer=cust, base_price=500, tier_prices=[{"min_ton": 0, "max_ton": 999, "price": 200}], priority=5,
     )
     resp = admin_client.post("/api/v1/orders/quote", {
         "customer": str(cust.id), "origin": "上海", "destination": "成都", "cargo_weight_ton": 10,

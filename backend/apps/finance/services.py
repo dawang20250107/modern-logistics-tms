@@ -58,49 +58,120 @@ def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0, volum
         break
     if best is None:
         return {"amount": 0.0, "rule_name": "", "matched": False, **base}
-    return {"amount": float(best.quote(cw)), "rule_name": best.name, "matched": True, **base}
+    quote_result = best.quote(weight_ton, volume_cbm)
+    return {"amount": float(quote_result["amount"]), "rule_name": best.name, "matched": True, **base}
 
 
 def generate_costs(waybill) -> dict:
-    """按报价规则生成运单应收/应付（替换既往规则自动生成的记录）。"""
+    """业财结算核心引擎：按报价规则生成运单应收/应付，并支持主副驾智能运费切分（Payee-Split）。"""
     waybill.expenses.filter(source_system="pricing").delete()
     result = {"receivable": 0, "payable": 0}
     weight = waybill.cargo_weight_ton
+    volume = waybill.cargo_volume_cbm
 
+    # === AR (应收账款) 逻辑 ===
     income = _match_rules(waybill, PricingRule.PRICE_TYPE_INCOME)
     if income:
         rule = income[0]
+        quote_result = rule.quote(weight, volume)
         ExpenseRecord.objects.create(
             waybill=waybill,
             direction=ExpenseRecord.DIRECTION_RECEIVABLE,
             expense_item_code=rule.expense_item_code,
-            amount=rule.quote(weight),
+            amount=quote_result["amount"],
             payee_type="customer",
             payee_ref=waybill.customer.name if waybill.customer_id else "",
             source_system="pricing",
         )
         result["receivable"] = 1
 
+    # === AP (应付账款) 逻辑与智能切分引擎 ===
     cost = _match_rules(waybill, PricingRule.PRICE_TYPE_COST)
     if cost:
         rule = cost[0]
-        # 应付收款方（上下游）：优先承运商，其次司机
+        quote_result = rule.quote(weight, volume)
+        total_ap_amount = quote_result["amount"]
+        
+        # 模式一：外部承运商 / 专线老板 (合并池化结算，不直接跟底层司机拆分运费)
         if waybill.carrier_id:
-            payee_type, payee_ref = "carrier", waybill.carrier.name
-        elif waybill.driver_id:
-            payee_type, payee_ref = "driver", waybill.driver.name
+            ExpenseRecord.objects.create(
+                waybill=waybill,
+                direction=ExpenseRecord.DIRECTION_PAYABLE,
+                expense_item_code=rule.expense_item_code,
+                amount=total_ap_amount,
+                payee_type="carrier",
+                payee_ref=waybill.carrier.name,
+                source_system="pricing",
+            )
+            result["payable"] += 1
+            
+        # 模式二：直管 / 自营多司机网络 (主副驾/多节点接力智能拆账)
         else:
-            payee_type, payee_ref = "", ""
-        ExpenseRecord.objects.create(
-            waybill=waybill,
-            direction=ExpenseRecord.DIRECTION_PAYABLE,
-            expense_item_code=rule.expense_item_code,
-            amount=rule.quote(weight),
-            payee_type=payee_type,
-            payee_ref=payee_ref,
-            source_system="pricing",
-        )
-        result["payable"] = 1
+            # 取出本次排班绑定的所有司机 (区分主副驾)
+            drivers = list(waybill.driver_assignments.select_related("driver").all())
+            
+            if len(drivers) == 0:
+                # 兜底：无司机挂靠
+                ExpenseRecord.objects.create(
+                    waybill=waybill,
+                    direction=ExpenseRecord.DIRECTION_PAYABLE,
+                    expense_item_code=rule.expense_item_code,
+                    amount=total_ap_amount,
+                    payee_type="driver",
+                    payee_ref="未分配司机池",
+                    source_system="pricing",
+                )
+                result["payable"] += 1
+                
+            elif len(drivers) == 1:
+                # 单司机直跑，全额100%划拨结算
+                ExpenseRecord.objects.create(
+                    waybill=waybill,
+                    direction=ExpenseRecord.DIRECTION_PAYABLE,
+                    expense_item_code=rule.expense_item_code,
+                    amount=total_ap_amount,
+                    payee_type="driver",
+                    payee_ref=drivers[0].driver.name,
+                    source_system="pricing",
+                )
+                result["payable"] += 1
+                
+            else:
+                # 顶级实战：双驾/多驾切分。业内默认主驾拿 60%，副驾平分剩余 40%
+                main_driver_assignment = next((d for d in drivers if d.role == "main"), drivers[0])
+                co_driver_assignments = [d for d in drivers if d.id != main_driver_assignment.id]
+                
+                # 拆分数学计算
+                main_split = round(total_ap_amount * Decimal("0.60"), 2)
+                co_split_total = total_ap_amount - main_split
+                co_split_per = round(co_split_total / len(co_driver_assignments), 2)
+                
+                # 1. 主驾账单落库
+                ExpenseRecord.objects.create(
+                    waybill=waybill,
+                    direction=ExpenseRecord.DIRECTION_PAYABLE,
+                    expense_item_code=rule.expense_item_code,
+                    amount=main_split,
+                    payee_type="driver",
+                    payee_ref=f"{main_driver_assignment.driver.name} (主驾拆账60%)",
+                    source_system="pricing",
+                )
+                result["payable"] += 1
+                
+                # 2. 副驾群账单落库
+                for i, co_assignment in enumerate(co_driver_assignments):
+                    # 最后一个副驾拿余数平账防溢出
+                    amt = co_split_per if i < len(co_driver_assignments) - 1 else (co_split_total - co_split_per * (len(co_driver_assignments) - 1))
+                    ExpenseRecord.objects.create(
+                        waybill=waybill,
+                        direction=ExpenseRecord.DIRECTION_PAYABLE,
+                        expense_item_code=rule.expense_item_code,
+                        amount=amt,
+                        payee_type="driver",
+                        payee_ref=f"{co_assignment.driver.name} (副驾拆账)",
+                        source_system="pricing",
+                    )
+                    result["payable"] += 1
 
     emit_event("cost.generated", {"waybill_no": waybill.waybill_no, "generated": result})
     return result

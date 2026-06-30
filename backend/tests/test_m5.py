@@ -16,11 +16,11 @@ def test_generate_costs_from_pricing_rules():
     wb = Waybill.objects.create(waybill_no="P1", route_name="A->B", customer=cust, cargo_weight_ton=Decimal("10"))
     PricingRule.objects.create(
         name="inc", price_type="income", expense_item_code="TRANSPORT_INCOME",
-        base_price=Decimal("1000"), price_per_ton=Decimal("100"),
+        base_price=Decimal("1000"), tier_prices=[{"min_ton": 0, "max_ton": 999, "price": 100}],
     )
     PricingRule.objects.create(
         name="cost", price_type="cost", expense_item_code="TRANSPORT_COST",
-        base_price=Decimal("500"), price_per_ton=Decimal("50"),
+        base_price=Decimal("500"), tier_prices=[{"min_ton": 0, "max_ton": 999, "price": 50}],
     )
 
     result = generate_costs(wb)

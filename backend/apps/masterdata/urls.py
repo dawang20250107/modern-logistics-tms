@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    B2BPartnerViewSet,
     CarrierViewSet,
     CustomerViewSet,
     DriverCredentialViewSet,
@@ -14,6 +15,7 @@ from .views import (
 router = DefaultRouter(trailing_slash=False)
 router.register("customers", CustomerViewSet, basename="customer")
 router.register("carriers", CarrierViewSet, basename="carrier")
+router.register("b2b-partners", B2BPartnerViewSet, basename="b2b-partner")
 router.register("vehicles", VehicleViewSet, basename="vehicle")
 router.register("drivers", DriverViewSet, basename="driver")
 router.register("driver-credentials", DriverCredentialViewSet, basename="driver-credential")

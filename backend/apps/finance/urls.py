@@ -5,6 +5,7 @@ from .views import (
     AgingView,
     ExpenseItemViewSet,
     ExpenseRecordViewSet,
+    FinancialDashboardMetricsView,
     PaymentRequestViewSet,
     PaymentResultView,
     PricingRuleViewSet,
@@ -28,4 +29,5 @@ urlpatterns = [
     *router.urls,
     path("payment-results", PaymentResultView.as_view(), name="payment-results"),
     path("aging", AgingView.as_view(), name="aging"),
+    path("dashboard-metrics", FinancialDashboardMetricsView.as_view(), name="dashboard-metrics"),
 ]

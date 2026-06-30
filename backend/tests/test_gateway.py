@@ -45,12 +45,17 @@ def test_normalize_jt808_and_json():
 
 @pytest.mark.django_db(transaction=True)
 def test_ingest_terminal_report_persists_via_queue():
+    from apps.telematics.services import persist_reports
+    
     vehicle = Vehicle.objects.create(plate_no="沪J0001")
     Device.objects.create(device_no="130000000001", vehicle=vehicle)
     frame = build_jt808_location("130000000001", lng=121.47, lat=31.23, speed_kmh=50)
 
     report = normalize_terminal_message(frame)
-    assert ingest_terminal_report(report) is True  # 入队 + flush（eager）
+    assert ingest_terminal_report(report) is True  # 入队
+    
+    # 手动触发落库逻辑（模拟队列消费）
+    persist_reports([report])
 
     state = VehicleState.objects.get(vehicle=vehicle)
     assert round(float(state.lng), 2) == 121.47

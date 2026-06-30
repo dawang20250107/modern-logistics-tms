@@ -12,6 +12,7 @@ import {
   SETTLEMENT_LABEL,
   SOURCE_TYPE_LABEL,
 } from "../api/types";
+import { IconSparkles, IconSave, IconPlus, IconX, IconCheck, IconZap } from "./Icons";
 
 interface FormState {
   customer: string;
@@ -40,6 +41,19 @@ const EMPTY_FORM: FormState = {
   expected_pickup_at: "", expected_delivery_at: "", remark: "",
 };
 
+interface B2BPartner {
+  id: string;
+  partner_type: "shipper" | "consignee" | "supplier";
+  partner_type_label: string;
+  code: string;
+  name: string;
+  contact_name: string;
+  contact_phone: string;
+  address: string;
+  city: string;
+  is_active: boolean;
+}
+
 const CHANNEL_META: Record<string, { icon: string; hint: string; sourcePlaceholder: string }> = {
   cs: { icon: "🎧", hint: "客服代客户录入完整订单，信息最全。", sourcePlaceholder: "坐席/工号" },
   self: { icon: "🧑‍💼", hint: "客户自助提交的订单，建议核对后确认。", sourcePlaceholder: "客户账号" },
@@ -52,16 +66,27 @@ const emptyCargo = (): OrderCargoItem => ({ name: "", quantity: "", weight_ton: 
 const emptyStop = (t: "pickup" | "delivery"): OrderStop => ({ stop_type: t, city: "", address: "", contact_name: "", contact_phone: "", expected_start: "", expected_end: "", cargo_note: "" });
 
 export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
+  const [activeMode, setActiveMode] = useState<"standard" | "ai" | "batch">("standard");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [cargo, setCargo] = useState<OrderCargoItem[]>([emptyCargo()]);
   const [stops, setStops] = useState<OrderStop[]>([emptyStop("pickup"), emptyStop("delivery")]);
   const [paste, setPaste] = useState("");
   const [tplName, setTplName] = useState("");
+  const [bulkText, setBulkText] = useState("");
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const customers = useQuery({ queryKey: ["customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=500") });
   const templates = useQuery({ queryKey: ["order-templates"], queryFn: () => apiGet<Paginated<OrderTemplate>>("/order-templates?page_size=100") });
+
+  // === 查询 B2B 上下游业务伙伴 ===
+  const b2bPartners = useQuery({
+    queryKey: ["b2b-partners"],
+    queryFn: () => apiGet<Paginated<B2BPartner>>("/b2b-partners?page_size=500"),
+  });
+
+  const shippers = b2bPartners.data?.items.filter((p) => p.partner_type === "shipper" && p.is_active) ?? [];
+  const consignees = b2bPartners.data?.items.filter((p) => p.partner_type === "consignee" && p.is_active) ?? [];
 
   interface AddrItem { city: string; address: string; contact_name: string; contact_phone: string }
   const addressBook = useQuery({
@@ -81,11 +106,26 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
     if (type === "delivery" && a.city) set("destination", a.city);
   };
 
+  const handlePartnerSelect = (type: "pickup" | "delivery", partnerId: string) => {
+    const list = type === "pickup" ? shippers : consignees;
+    const partner = list.find((p) => p.id === partnerId);
+    if (!partner) return;
+
+    fillStopFromBook(type, {
+      city: partner.city,
+      address: partner.address,
+      contact_name: partner.contact_name,
+      contact_phone: partner.contact_phone,
+    });
+    toast.success(`已一键填充${type === "pickup" ? "发货方" : "收货方"}：${partner.name}`);
+  };
+
   const reset = () => {
     setForm(EMPTY_FORM);
     setCargo([emptyCargo()]);
     setStops([emptyStop("pickup"), emptyStop("delivery")]);
     setPaste("");
+    setBulkText("");
   };
 
   const cleanCargo = () => cargo.filter((c) => c.name.trim());
@@ -113,13 +153,14 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   const submit = useMutation({
     mutationFn: (status: string) => apiPost("/orders/intake", payload(status)),
     onSuccess: (_d, status) => {
-      toast.success(status === "draft" ? "已存草稿" : "建单成功（待确认）");
+      toast.success(status === "draft" ? "已存草稿" : "建单成功（并已执行 B2B 智能对齐补全！）");
       reset();
       onCreated();
     },
   });
 
   const aiParse = useMutation({
+    queryKey: ["parse-preview"],
     mutationFn: () => apiPost<ParsedOrder>("/orders/parse-preview", { text: paste }),
     onSuccess: (d) => {
       const f = d.fields ?? {};
@@ -134,7 +175,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
       if (f.contact_phone) {
         setStops((prev) => prev.map((s, i) => (i === 0 ? { ...s, contact_phone: String(f.contact_phone) } : s)));
       }
-      toast.success("已根据消息填充表单，请核对补全");
+      toast.success("AI 智能提取并装填完毕，请核对微调");
     },
   });
 
@@ -171,6 +212,43 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
     toast.success(`已套用模板「${tpl.name}」`);
   };
 
+  // === 批量 CSV/TEXT 极速录单解析 ===
+  const parseBulkLines = () => {
+    return bulkText.split("\n").map((l) => l.trim()).filter(Boolean).map((line, idx) => {
+      const parts = line.split(/[,，\t]/).map((s) => s.trim());
+      const [origin, destination, weight, qty, phone] = parts;
+      return {
+        id: idx,
+        origin: origin || "—",
+        destination: destination || "—",
+        weight: weight ? Number(weight) : 0,
+        qty: qty ? Number(qty) : 0,
+        phone: phone || "—",
+        valid: Boolean(origin && destination),
+      };
+    });
+  };
+
+  const bulkRows = parseBulkLines();
+  const bulkImportMut = useMutation({
+    mutationFn: () => {
+      const rows = bulkRows.map((r) => ({
+        origin: r.origin === "—" ? undefined : r.origin,
+        destination: r.destination === "—" ? undefined : r.destination,
+        cargo_weight_ton: r.weight || undefined,
+        cargo_quantity: r.qty || undefined,
+        contact_phone: r.phone === "—" ? undefined : r.phone,
+      }));
+      return apiPost<{ ok_count: number; failed_count: number }>("/orders/import", { rows });
+    },
+    onSuccess: (r) => {
+      setBulkText("");
+      toast.success(`批量建单成功：${r.ok_count} 单入库，${r.failed_count} 单失败`);
+      onCreated();
+      setActiveMode("standard");
+    },
+  });
+
   const totalWeight = cleanCargo().reduce((s, c) => s + (Number(c.weight_ton) || 0), 0);
   const totalVolume = cleanCargo().reduce((s, c) => s + (Number(c.volume_cbm) || 0), 0);
   const totalQty = cleanCargo().reduce((s, c) => s + (Number(c.quantity) || 0), 0);
@@ -179,152 +257,381 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   const valid = form.origin.trim() && form.destination.trim();
 
   return (
-    <div className="panel">
-      <div className="panel-head">
-        标准录单
-        <span className="ai-pill">企业级 · 多货多站</span>
-      </div>
-
-      {/* AI 速录 */}
-      <div className="ai-box">
-        <input placeholder="AI 速录：粘贴客户消息，自动填充线路/货量/电话…" value={paste} onChange={(e) => setPaste(e.target.value)} />
-        <button className="btn-ghost" disabled={!paste.trim() || aiParse.isPending} onClick={() => aiParse.mutate()}>{aiParse.isPending ? "解析中…" : "AI 填充"}</button>
-      </div>
-
-      <div className="form-section">
+    <div className="panel" style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+      {/* 标题 & 药丸标签 */}
+      <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 18 }}>B2B 智能极速录单中心</span>
+          <span className="tag tag-low" style={{ background: "rgba(39,174,96,0.1)", color: "#27ae60" }}>AI + 物理对齐支持</span>
+        </div>
         {templates.data && templates.data.items.length > 0 && (
-          <select defaultValue="" onChange={(e) => { if (e.target.value) applyTpl(e.target.value); e.target.value = ""; }}>
-            <option value="">套用模板…</option>
+          <select style={{ width: 140, padding: "4px 8px" }} defaultValue="" onChange={(e) => { if (e.target.value) applyTpl(e.target.value); e.target.value = ""; }}>
+            <option value="">快速套用模板…</option>
             {templates.data.items.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
       </div>
 
-      {/* 客户信息 */}
-      <div className="form-section">
-        <div className="section-label">客户信息</div>
-        <div className="grid-form">
-          <label>订单来源
-            <select value={form.channel} onChange={(e) => set("channel", e.target.value)}>
-              {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </label>
-          <label>客户
-            <select value={form.customer} onChange={(e) => set("customer", e.target.value)}>
-              <option value="">选择客户（可选）</option>
-              {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </label>
-          <label>客户类型
-            <select value={form.source_type} onChange={(e) => set("source_type", e.target.value)}>
-              {Object.entries(SOURCE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </label>
-          <label>业务类型
-            <select value={form.business_type} onChange={(e) => set("business_type", e.target.value)}>
-              {Object.entries(BUSINESS_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </label>
-          <label>优先级
-            <select value={form.priority} onChange={(e) => set("priority", e.target.value)}>
-              {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </label>
-          <label>结算方式
-            <select value={form.settlement_type} onChange={(e) => set("settlement_type", e.target.value)}>
-              {Object.entries(SETTLEMENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </label>
-          <label>来源标识
-            <input value={form.source} onChange={(e) => set("source", e.target.value)} placeholder={CHANNEL_META[form.channel]?.sourcePlaceholder ?? "来源"} />
-          </label>
-        </div>
+      {/* 模式选择 Tab 栏 */}
+      <div className="form-row" style={{ padding: "12px 18px", background: "var(--input-bg)", borderBottom: "1px solid var(--line)", gap: 10, display: "flex", flexWrap: "wrap" }}>
+        <button className={`chip ${activeMode === "standard" ? "chip-on" : ""}`} onClick={() => setActiveMode("standard")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
+          📋 标准 B2B 细案录单
+        </button>
+        <button className={`chip ${activeMode === "ai" ? "chip-on" : ""}`} onClick={() => setActiveMode("ai")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
+          🤖 AI 协同智能速录
+        </button>
+        <button className={`chip ${activeMode === "batch" ? "chip-on" : ""}`} onClick={() => setActiveMode("batch")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
+          ⚡ 多行文本/Excel批量秒录
+        </button>
       </div>
 
-      {/* 线路与装卸站点 */}
-      <div className="form-section">
-        <div className="section-label">线路与装卸站点（多提多送）</div>
-        <div className="grid-form">
-          <label>始发城市 *<input value={form.origin} onChange={(e) => set("origin", e.target.value)} /></label>
-          <label>目的城市 *<input value={form.destination} onChange={(e) => set("destination", e.target.value)} /></label>
-        </div>
-        {form.customer && ((addressBook.data?.pickup.length ?? 0) > 0 || (addressBook.data?.delivery.length ?? 0) > 0) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "8px 0" }}>
-            <span className="muted small">📒 地址簿：</span>
-            {(addressBook.data?.pickup ?? []).map((a, i) => (
-              <button key={`p${i}`} className="chip" onClick={() => fillStopFromBook("pickup", a)}>提·{a.city}{a.address ? ` ${a.address.slice(0, 8)}` : ""}</button>
-            ))}
-            {(addressBook.data?.delivery ?? []).map((a, i) => (
-              <button key={`d${i}`} className="chip" onClick={() => fillStopFromBook("delivery", a)}>送·{a.city}{a.address ? ` ${a.address.slice(0, 8)}` : ""}</button>
-            ))}
-          </div>
-        )}
-        {stops.map((s, i) => (
-          <div key={i} className="line-row">
-            <select value={s.stop_type} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, stop_type: e.target.value as "pickup" | "delivery" } : x))}>
-              <option value="pickup">提货</option>
-              <option value="delivery">送货</option>
-            </select>
-            <input placeholder="城市" style={{ width: 90 }} value={s.city} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, city: e.target.value } : x))} />
-            <input placeholder="详细地址" style={{ flex: 2 }} value={s.address} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} />
-            <input placeholder="联系人" style={{ width: 90 }} value={s.contact_name} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_name: e.target.value } : x))} />
-            <input placeholder="电话" style={{ width: 130 }} value={s.contact_phone} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_phone: e.target.value } : x))} />
-            <button className="btn-ghost" onClick={() => setStops((p) => p.filter((_, j) => j !== i))} disabled={stops.length <= 1}>×</button>
-          </div>
-        ))}
-        <button className="btn-ghost" onClick={() => setStops((p) => [...p, emptyStop("delivery")])}>+ 增加站点</button>
-      </div>
-
-      {/* 货物明细 */}
-      <div className="form-section">
-        <div className="section-label">
-          货物明细（一单多货）· 合计 {totalQty} 件 / {totalWeight.toFixed(2)} 吨 / {totalVolume.toFixed(2)} 方
-          {volumetric > totalWeight && <span className="tag tag-medium">抛重 {chargeable.toFixed(2)} 吨 计费</span>}
-        </div>
-        {cargo.map((c, i) => (
-          <div key={i} className="line-row">
-            <input placeholder="品名" style={{ flex: 2 }} value={c.name} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
-            <input placeholder="件数" style={{ width: 70 }} value={c.quantity} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
-            <input placeholder="吨" style={{ width: 70 }} value={c.weight_ton} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, weight_ton: e.target.value } : x))} />
-            <input placeholder="方" style={{ width: 70 }} value={c.volume_cbm} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, volume_cbm: e.target.value } : x))} />
-            <input placeholder="包装" style={{ width: 80 }} value={c.package_type} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, package_type: e.target.value } : x))} />
-            <input placeholder="温区" style={{ width: 90 }} value={c.temperature_range} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, temperature_range: e.target.value } : x))} />
-            <button className="btn-ghost" onClick={() => setCargo((p) => p.filter((_, j) => j !== i))} disabled={cargo.length <= 1}>×</button>
-          </div>
-        ))}
-        <button className="btn-ghost" onClick={() => setCargo((p) => [...p, emptyCargo()])}>+ 增加货物</button>
-      </div>
-
-      {/* 时效与商务条款 */}
-      <div className="form-section">
-        <div className="section-label">时效 · 报价 · 要求</div>
-        <div className="grid-form">
-          <label>要求提货时间<input type="datetime-local" value={form.expected_pickup_at} onChange={(e) => set("expected_pickup_at", e.target.value)} /></label>
-          <label>要求送达时间<input type="datetime-local" value={form.expected_delivery_at} onChange={(e) => set("expected_delivery_at", e.target.value)} /></label>
-          <label>报价(元)
-            <div style={{ display: "flex", gap: 6 }}>
-              <input value={form.quoted_amount} onChange={(e) => set("quoted_amount", e.target.value)} />
-              <button className="btn-ghost" disabled={quote.isPending} onClick={() => quote.mutate()}>⚡自动</button>
+      {/* === 模式一：AI 协同智能速录 === */}
+      {activeMode === "ai" && (
+        <div style={{ padding: "18px 18px 24px", display: "grid", gridTemplateColumns: "1.1fr 1.3fr", gap: 18, minHeight: 300 }}>
+          {/* 左侧：输入框 */}
+          <div className="stack" style={{ gap: 10 }}>
+            <div className="section-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span>✍️ 自由粘贴微信消息 / EDI报文</span>
+              <span className="tag tag-medium" style={{ fontSize: 10 }}>DeepSeek 抽取</span>
             </div>
-          </label>
-          <label>货值(元)<input value={form.cargo_value} onChange={(e) => set("cargo_value", e.target.value)} /></label>
-          <label>包装方式<input value={form.package_type} onChange={(e) => set("package_type", e.target.value)} /></label>
-          <label>温区<input value={form.temperature_range} onChange={(e) => set("temperature_range", e.target.value)} placeholder="如 -18~0" /></label>
-          <label className="check-label"><input type="checkbox" checked={form.is_hazardous} onChange={(e) => set("is_hazardous", e.target.checked)} /> 危险品</label>
-        </div>
-        <textarea className="search" style={{ width: "100%", minHeight: 56, marginTop: 8 }} placeholder="备注 / 特殊要求" value={form.remark} onChange={(e) => set("remark", e.target.value)} />
-      </div>
+            <textarea
+              className="search"
+              style={{ width: "100%", height: 220, resize: "none", fontSize: 14, lineHeight: 1.6, padding: 16, borderRadius: 8, background: "rgba(0,0,0,0.02)", border: "1px dashed var(--line-strong)" }}
+              placeholder="请粘贴微信群、邮件中的非结构化发货指令：&#10;&#10;例如：“李总，明天下午2点去苏州工业园区星湖街提货，大概5吨的医疗器械，要求冷链2-8度，送到北京海淀医院，收货人王医生 13800138000。这单加急！”"
+              value={paste}
+              onChange={(e) => setPaste(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                  if (paste.trim()) aiParse.mutate();
+                }
+              }}
+            />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                className="btn-primary"
+                style={{ flex: 1, padding: "12px", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                disabled={!paste.trim() || aiParse.isPending}
+                onClick={() => aiParse.mutate()}
+              >
+                {aiParse.isPending ? <><IconSparkles size={16} className="icon-offset"/> 大模型思索构建图纸中 [请稍候]...</> : <><IconZap size={16} className="icon-offset"/> 提交深度解析 (Ctrl+Enter)</>}
+              </button>
+              <button className="btn-ghost" onClick={() => setPaste("")} disabled={!paste} style={{ display: "flex", alignItems: "center", gap: 6 }}><IconX size={14} className="icon-offset" /> 清空</button>
+            </div>
+          </div>
 
-      {/* 操作 */}
-      <div className="form-actions">
-        <button className="btn-primary" disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>建单（待确认）</button>
-        <button className="btn-ghost" disabled={submit.isPending} onClick={() => submit.mutate("draft")}>存草稿</button>
-        <button className="btn-ghost" onClick={reset}>清空</button>
-        <span style={{ flex: 1 }} />
-        <input placeholder="模板名" style={{ width: 140 }} value={tplName} onChange={(e) => setTplName(e.target.value)} />
-        <button className="btn-ghost" disabled={!tplName.trim() || saveTpl.isPending} onClick={() => saveTpl.mutate()}>存为模板</button>
-      </div>
-      {!valid && <div className="muted small" style={{ padding: "0 18px 14px" }}>请至少填写始发与目的城市</div>}
+          {/* 右侧：解析预览 */}
+          <div className="stack" style={{ gap: 10, background: "rgba(0,0,0,0.015)", padding: "18px 20px", borderRadius: 10, border: "1px solid var(--line)" }}>
+            <div className="section-label" style={{ color: "var(--brand)", fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><IconSparkles size={16} className="icon-offset" /> AI 动态数据映射蓝图核验</div>
+            
+            {aiParse.isPending ? (
+              <div className="stack" style={{ gap: 16, marginTop: 10 }}>
+                <div className="skeleton" style={{ height: 32, width: "60%" }}></div>
+                <div className="skeleton" style={{ height: 80, width: "100%" }}></div>
+                <div className="skeleton" style={{ height: 100, width: "100%" }}></div>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", fontSize: 13, background: "#fff", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
+                  <div><span className="muted">始发城市：</span><strong style={{ fontSize: 15, color: "var(--brand)" }}>{form.origin || "—"}</strong></div>
+                  <div><span className="muted">目的城市：</span><strong style={{ fontSize: 15, color: "var(--brand)" }}>{form.destination || "—"}</strong></div>
+                  <div style={{ gridColumn: "1 / -1", height: 1, background: "var(--line)", margin: "4px 0" }}></div>
+                  <div><span className="muted">预估货物：</span><strong>{cargo[0]?.name || "—"}</strong></div>
+                  <div><span className="muted">预估件数：</span><strong>{cargo[0]?.quantity ? `${cargo[0].quantity} 件` : "—"}</strong></div>
+                  <div><span className="muted">预估吨位：</span><strong>{cargo[0]?.weight_ton ? `${cargo[0].weight_ton} 吨` : "—"}</strong></div>
+                  <div><span className="muted">预估方数：</span><strong>{cargo[0]?.volume_cbm ? `${cargo[0].volume_cbm} 方` : "—"}</strong></div>
+                  <div style={{ gridColumn: "1 / -1", height: 1, background: "var(--line)", margin: "4px 0" }}></div>
+                  <div><span className="muted">发货联系：</span><strong>{stops[0]?.contact_phone || "—"}</strong></div>
+                  <div><span className="muted">收货联系：</span><strong>{stops[1]?.contact_phone || "—"}</strong></div>
+                </div>
+                
+                <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div className="muted small">
+                    💡 解析完成后的数据已安全挂载至「标准录单」。你可以直接在下方极速建单，或点击进入标准表单进行货物细项、多提多送站点的微调补全。
+                  </div>
+                  <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+                    <button className="btn-secondary" style={{ flex: 1, padding: 12 }} onClick={() => setActiveMode("standard")}>
+                      进入标准表单进行微调
+                    </button>
+                    <button className="btn-primary" style={{ flex: 1.5, padding: 12, background: "var(--green)", borderColor: "var(--green)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>
+                      <IconCheck size={16} className="icon-offset" /> 核验合规，极速进运力池
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* === 模式二：多行/Excel批量极速秒录 === */}
+      {activeMode === "batch" && (
+        <div style={{ padding: "18px 18px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+            <div className="stack" style={{ gap: 10 }}>
+              <div className="section-label">⚡ 粘贴多行文本 (Excel列直接复制)</div>
+              <textarea
+                className="search"
+                style={{ width: "100%", height: 160, resize: "none", fontSize: 13, fontFamily: "monospace", padding: 12 }}
+                placeholder="每行一单：始发, 目的, 重量(吨), 件数, 联系电话（可用逗号或空格、Tab分隔）&#10;例：&#10;上海, 无锡, 5.5, 200, 13811112222&#10;无锡, 杭州, 10, 15, 13922223333"
+                value={bulkText}
+                onChange={(e) => setBulkText(e.target.value)}
+              />
+              <button
+                className="btn-primary"
+                disabled={bulkRows.length === 0 || bulkImportMut.isPending || bulkRows.some(r => !r.valid)}
+                onClick={() => bulkImportMut.mutate()}
+                style={{ padding: 12 }}
+              >
+                {bulkImportMut.isPending ? "正在导入并落库中…" : `合并生成这 ${bulkRows.length} 张订单`}
+              </button>
+            </div>
+
+            <div className="stack" style={{ gap: 10, background: "rgba(0,0,0,0.01)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
+              <div className="section-label">📋 实时预解析结果 ({bulkRows.length} 行)</div>
+              <div style={{ maxHeight: 160, overflowY: "auto", fontSize: 12 }}>
+                <table className="table" style={{ width: "100%" }}>
+                  <thead>
+                    <tr>
+                      <th>行</th><th>始发</th><th>目的</th><th>重量(吨)</th><th>件数</th><th>电话</th><th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkRows.map((r) => (
+                      <tr key={r.id}>
+                        <td>{r.id + 1}</td>
+                        <td>{r.origin}</td>
+                        <td>{r.destination}</td>
+                        <td>{r.weight}t</td>
+                        <td>{r.qty}件</td>
+                        <td>{r.phone}</td>
+                        <td>
+                          {r.valid ? (
+                            <span style={{ color: "#27ae60", fontWeight: "bold" }}>✓ 正常</span>
+                          ) : (
+                            <span style={{ color: "#e74c3c", fontWeight: "bold" }}>✗ 缺失路线</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {bulkRows.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: "center", padding: 12, color: "var(--text-soft)" }}>在左侧粘贴多行即可在此看到校验预览</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* === 模式三：标准专业 B2B 细案录单 === */}
+      {activeMode === "standard" && (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {/* 1. 基础关系与契约 */}
+          <div className="form-section" style={{ padding: "18px 18px 0" }}>
+            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8 }}>基础契约与客户信息</div>
+            <div className="grid-form" style={{ marginTop: 12 }}>
+              <label>订单来源
+                <select value={form.channel} onChange={(e) => set("channel", e.target.value)}>
+                  {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
+              <label>签约客户
+                <select value={form.customer} onChange={(e) => set("customer", e.target.value)}>
+                  <option value="">选择签约客户（可选）</option>
+                  {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label>客户分类
+                <select value={form.source_type} onChange={(e) => set("source_type", e.target.value)}>
+                  {Object.entries(SOURCE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
+              <label>业务类型
+                <select value={form.business_type} onChange={(e) => set("business_type", e.target.value)}>
+                  {Object.entries(BUSINESS_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
+              <label>优先级
+                <select value={form.priority} onChange={(e) => set("priority", e.target.value)}>
+                  {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
+              <label>结算方式
+                <select value={form.settlement_type} onChange={(e) => set("settlement_type", e.target.value)}>
+                  {Object.entries(SETTLEMENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </label>
+              <label>来源标识/坐席
+                <input value={form.source} onChange={(e) => set("source", e.target.value)} placeholder={CHANNEL_META[form.channel]?.sourcePlaceholder ?? "来源"} />
+              </label>
+            </div>
+          </div>
+
+          {/* 2. 线路与上下游业务伙伴一键绑定 */}
+          <div className="form-section" style={{ padding: "18px 18px 0" }}>
+            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8 }}>线路与装卸网点（上下游对齐）</div>
+            
+            {/* 核心上下游实体快速对齐 */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, margin: "10px 0" }}>
+              <div style={{ background: "rgba(0,0,0,0.01)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
+                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>📍 一键对齐上游「发货方 / 供应商」库</span>
+                <select 
+                  style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
+                  defaultValue="" 
+                  onChange={(e) => { if (e.target.value) handlePartnerSelect("pickup", e.target.value); e.target.value = ""; }}
+                >
+                  <option value="">检索并发货方带出城市地址、联系人、电话…</option>
+                  {shippers.map((s) => <option key={s.id} value={s.id}>[{s.city}] {s.name}</option>)}
+                </select>
+              </div>
+
+              <div style={{ background: "rgba(0,0,0,0.01)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
+                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>📍 一键对齐下游「收货方 / 仓储网点」库</span>
+                <select 
+                  style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
+                  defaultValue="" 
+                  onChange={(e) => { if (e.target.value) handlePartnerSelect("delivery", e.target.value); e.target.value = ""; }}
+                >
+                  <option value="">检索并收货方带出城市地址、联系人、电话…</option>
+                  {consignees.map((c) => <option key={c.id} value={c.id}>[{c.city}] {c.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid-form">
+              <label>始发城市 *<input value={form.origin} onChange={(e) => set("origin", e.target.value)} placeholder="如 无锡" /></label>
+              <label>目的城市 *<input value={form.destination} onChange={(e) => set("destination", e.target.value)} placeholder="如 上海" /></label>
+            </div>
+
+            {form.customer && ((addressBook.data?.pickup.length ?? 0) > 0 || (addressBook.data?.delivery.length ?? 0) > 0) && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "8px 0" }}>
+                <span className="muted small">📒 历史常用提送：</span>
+                {(addressBook.data?.pickup ?? []).map((a, i) => (
+                  <button key={`p${i}`} className="chip" onClick={() => fillStopFromBook("pickup", a)}>提·{a.city}{a.address ? ` ${a.address.slice(0, 8)}` : ""}</button>
+                ))}
+                {(addressBook.data?.delivery ?? []).map((a, i) => (
+                  <button key={`d${i}`} className="chip" onClick={() => fillStopFromBook("delivery", a)}>送·{a.city}{a.address ? ` ${a.address.slice(0, 8)}` : ""}</button>
+                ))}
+              </div>
+            )}
+
+            {stops.map((s, i) => (
+              <div key={i} className="line-row" style={{ marginTop: 8 }}>
+                <select value={s.stop_type} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, stop_type: e.target.value as "pickup" | "delivery" } : x))}>
+                  <option value="pickup">提货网点</option>
+                  <option value="delivery">送货网点</option>
+                </select>
+                <input placeholder="城市" style={{ width: 90 }} value={s.city} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, city: e.target.value } : x))} />
+                <input placeholder="详细提/送货物理地址" style={{ flex: 2 }} value={s.address} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} />
+                <input placeholder="联系人" style={{ width: 90 }} value={s.contact_name} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_name: e.target.value } : x))} />
+                <input placeholder="电话" style={{ width: 130 }} value={s.contact_phone} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_phone: e.target.value } : x))} />
+                <button className="btn-ghost" onClick={() => setStops((p) => p.filter((_, j) => j !== i))} disabled={stops.length <= 1}>×</button>
+              </div>
+            ))}
+            <button className="btn-ghost" style={{ marginTop: 6 }} onClick={() => setStops((p) => [...p, emptyStop("delivery")])}>+ 增加提送货网点</button>
+          </div>
+
+          {/* 3. 货物明细列表 */}
+          <div className="form-section" style={{ padding: "18px 18px 0" }}>
+            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+              <span>货物明细明细（一单多货，系统自适应缺损补全）</span>
+              <span className="muted small">合计: {totalQty} 件 / {totalWeight.toFixed(2)} 吨 / {totalVolume.toFixed(2)} 方</span>
+              {volumetric > totalWeight && <span className="tag tag-medium">抛重 {chargeable.toFixed(2)} 吨 计费</span>}
+            </div>
+            {cargo.map((c, i) => (
+              <div key={i} className="line-row" style={{ marginTop: 8 }}>
+                <input placeholder="货品名称 *" style={{ flex: 2 }} value={c.name} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
+                <input placeholder="件数" style={{ width: 70 }} value={c.quantity} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
+                <input placeholder="重量(吨)" style={{ width: 70 }} value={c.weight_ton} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, weight_ton: e.target.value } : x))} />
+                <input placeholder="体积(方)" style={{ width: 70 }} value={c.volume_cbm} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, volume_cbm: e.target.value } : x))} />
+                <input placeholder="包装" style={{ width: 80 }} value={c.package_type} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, package_type: e.target.value } : x))} />
+                <input placeholder="冷链温区" style={{ width: 90 }} value={c.temperature_range} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, temperature_range: e.target.value } : x))} />
+                <button className="btn-ghost" onClick={() => setCargo((p) => p.filter((_, j) => j !== i))} disabled={cargo.length <= 1}>×</button>
+              </div>
+            ))}
+            <button className="btn-ghost" style={{ marginTop: 6 }} onClick={() => setCargo((p) => [...p, emptyCargo()])}>+ 增加货物细项</button>
+          </div>
+
+          {/* 4. SLA 期望时效与报价 */}
+          <div className="form-section" style={{ padding: "20px 18px 24px" }}>
+            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8, marginBottom: 16 }}>履约时效与商务核价</div>
+            
+            {/* 4.1 时效红线 (SLA) */}
+            <div style={{ background: "var(--panel-2)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>⏱️ 履约时效要求 (SLA)</div>
+              <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <label>
+                  期望提货窗口
+                  <input type="datetime-local" className="search" value={form.expected_pickup_at} onChange={(e) => set("expected_pickup_at", e.target.value)} />
+                </label>
+                <label>
+                  绝对送达红线
+                  <input type="datetime-local" className="search" style={{ borderColor: form.expected_delivery_at ? "var(--amber-border)" : "var(--line-strong)" }} value={form.expected_delivery_at} onChange={(e) => set("expected_delivery_at", e.target.value)} />
+                </label>
+              </div>
+            </div>
+
+            {/* 4.2 财务核价 (Financial) */}
+            <div style={{ background: "#fff", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>💰 财务核价与货值声明</div>
+              <div className="grid-form" style={{ gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+                <label>
+                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>合同/预估运费 (¥)</span>
+                    <button 
+                      className="btn-ghost" 
+                      style={{ padding: "2px 8px", fontSize: 11, color: "var(--brand)", background: "var(--brand-light)", border: "none" }} 
+                      disabled={quote.isPending} 
+                      onClick={() => quote.mutate()}
+                    >
+                      {quote.isPending ? "算价中…" : "⚡ AI 极速算价"}
+                    </button>
+                  </span>
+                  <input className="search" style={{ fontSize: 14, fontWeight: "bold", color: form.quoted_amount ? "var(--green)" : "inherit" }} placeholder="0.00" value={form.quoted_amount} onChange={(e) => set("quoted_amount", e.target.value)} />
+                </label>
+                <label>
+                  投保声明货值 (¥)
+                  <input className="search" placeholder="0.00" value={form.cargo_value} onChange={(e) => set("cargo_value", e.target.value)} />
+                </label>
+              </div>
+            </div>
+
+            {/* 4.3 特种保障 (Special Care) */}
+            <div style={{ background: "#fff", padding: "14px 16px", borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>🛡️ 特种运输保障要求</div>
+              <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr auto", gap: 16, alignItems: "end" }}>
+                <label>
+                  包装标准
+                  <input className="search" placeholder="例: 托盘 / 木箱 / 裸装" value={form.package_type} onChange={(e) => set("package_type", e.target.value)} />
+                </label>
+                <label>
+                  温控区间 (冷链)
+                  <input className="search" placeholder="例: -18~0℃ 或 2~8℃" value={form.temperature_range} onChange={(e) => set("temperature_range", e.target.value)} />
+                </label>
+                <label className="switch-mini" style={{ padding: "8px 12px", background: form.is_hazardous ? "var(--red-bg)" : "var(--panel-2)", borderRadius: 6, border: `1px solid ${form.is_hazardous ? "var(--red-border)" : "var(--line)"}`, color: form.is_hazardous ? "var(--red)" : "var(--ink-2)" }}>
+                  <input type="checkbox" style={{ accentColor: "var(--red)" }} checked={form.is_hazardous} onChange={(e) => set("is_hazardous", e.target.checked)} /> 
+                  <strong style={{ marginLeft: 4 }}>危化品 / 高危品</strong>
+                </label>
+              </div>
+              <textarea className="search" style={{ width: "100%", minHeight: 64, marginTop: 16, resize: "vertical" }} placeholder="其他特殊作业、运送、签收、回单等备注要求…" value={form.remark} onChange={(e) => set("remark", e.target.value)} />
+            </div>
+          </div>
+
+          {/* 5. 表单提交控制 */}
+          <div className="form-actions" style={{ padding: "0 18px 20px", display: "flex", gap: 10, alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+            <button className="btn-primary" style={{ padding: "10px 24px" }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>确认提交（待调度派单）</button>
+            <button className="btn-ghost" disabled={submit.isPending} onClick={() => submit.mutate("draft")}>暂存草稿</button>
+            <button className="btn-ghost" onClick={reset}>清空</button>
+            <span style={{ flex: 1 }} />
+            <input placeholder="另存为新订单模板名" style={{ width: 160 }} value={tplName} onChange={(e) => setTplName(e.target.value)} />
+            <button className="btn-ghost" disabled={!tplName.trim() || saveTpl.isPending} onClick={() => saveTpl.mutate()}>存为模板</button>
+          </div>
+          {!valid && <div className="muted small" style={{ padding: "0 18px 14px", color: "#e74c3c" }}>⚠️ 请至少填写始发城市与目的城市（或套用发收货方库）即可点击提交</div>}
+        </div>
+      )}
     </div>
   );
 }

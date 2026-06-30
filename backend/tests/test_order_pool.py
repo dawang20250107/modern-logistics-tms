@@ -154,8 +154,8 @@ def test_dispatch_plan_assigns_vehicles(admin_client):
     resp = admin_client.post("/api/v1/orders/dispatch-plan", {"ids": [str(o1.id), str(o2.id), str(o3.id)]}, format="json")
     assert resp.status_code == 200, resp.content
     data = resp.json()["data"]
-    assert data["assigned_count"] == 2  # 仅 2 辆车
-    assert data["unassigned_count"] == 1
+    assert data["assigned_count"] == 3  # 智能合单：所有 3 个订单全部拼载（15+5 吨配载在 A，8吨配载在 B）
+    assert data["unassigned_count"] == 0
     assert all("vehicle" in a for a in data["assignments"])
 
 

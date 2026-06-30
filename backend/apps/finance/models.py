@@ -164,10 +164,20 @@ class PricingRule(BaseModel):
     carrier = models.ForeignKey("masterdata.Carrier", null=True, blank=True, on_delete=models.CASCADE, related_name="pricing_rules")
     route_name = models.CharField(max_length=160, blank=True)
     vehicle_type = models.CharField(max_length=64, blank=True)
-    # 计价
+    
+    # 基础与阶梯计价 (Tiered Pricing)
     base_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    price_per_ton = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     min_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    tier_prices = models.JSONField(
+        default=list, 
+        blank=True, 
+        help_text="阶梯报价: [{'min_ton': 0, 'max_ton': 5, 'price': 200}, {'min_ton': 5, 'max_ton': 999, 'price': 180}]"
+    )
+    
+    # 抛重与杂费换算规则 (Volumetric & Surcharges)
+    volumetric_factor = models.DecimalField(max_digits=8, decimal_places=4, default=Decimal("0.3333"), help_text="重抛比，如 1方=333kg，填 0.3333")
+    fuel_surcharge_pct = models.DecimalField(max_digits=6, decimal_places=4, default=0, help_text="燃油附加费率，如 2.5% 填 0.025")
+    
     priority = models.IntegerField(default=0, help_text="数值大者优先")
     is_active = models.BooleanField(default=True)
 
@@ -175,15 +185,53 @@ class PricingRule(BaseModel):
         db_table = "fin_pricing_rule"
         ordering = ["-priority", "name"]
         indexes = [models.Index(fields=["price_type", "is_active"])]
-        verbose_name = "报价规则"
-        verbose_name_plural = "报价规则"
+        verbose_name = "多维报价规则"
+        verbose_name_plural = "多维报价规则"
 
     def __str__(self) -> str:
         return f"{self.name}({self.price_type})"
 
-    def quote(self, weight_ton) -> Decimal:
-        amount = self.base_price + self.price_per_ton * Decimal(str(weight_ton or 0))
-        return max(amount, self.min_price)
+    def quote(self, weight_ton, volume_cbm=0) -> dict:
+        """
+        执行多维阶梯报价计算：
+        1. 计算计费重（Chargeable Weight）= max(物理重, 体积 * 重抛比)
+        2. 匹配阶梯单价
+        3. 计算基础运费 + 燃油附加费
+        返回明细字典供外部调阅。
+        """
+        w = Decimal(str(weight_ton or 0))
+        v = Decimal(str(volume_cbm or 0))
+        
+        # 1. 抛重计算
+        vol_weight = v * self.volumetric_factor
+        chargeable_weight = max(w, vol_weight)
+        
+        # 2. 阶梯匹配
+        matched_price_per_ton = Decimal("0")
+        if self.tier_prices:
+            for tier in self.tier_prices:
+                min_t = Decimal(str(tier.get("min_ton", 0)))
+                max_t = Decimal(str(tier.get("max_ton", 999999)))
+                if min_t <= chargeable_weight <= max_t:
+                    matched_price_per_ton = Decimal(str(tier.get("price", 0)))
+                    break
+                    
+        # 3. 基础运费
+        freight_amount = self.base_price + (matched_price_per_ton * chargeable_weight)
+        freight_amount = max(freight_amount, self.min_price)
+        
+        # 4. 燃油附加费
+        fuel_surcharge = freight_amount * self.fuel_surcharge_pct
+        
+        total_amount = round(freight_amount + fuel_surcharge, 2)
+        
+        return {
+            "amount": total_amount,
+            "chargeable_weight": round(chargeable_weight, 3),
+            "by_volume": vol_weight > w,
+            "freight_amount": round(freight_amount, 2),
+            "fuel_surcharge": round(fuel_surcharge, 2)
+        }
 
 
 class Webhook(BaseModel):

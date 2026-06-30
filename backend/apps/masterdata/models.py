@@ -208,3 +208,34 @@ class Route(BaseModel, SoftDeleteModel):
 
     def __str__(self) -> str:
         return f"{self.code} {self.name}"
+
+
+class B2BPartner(BaseModel, SoftDeleteModel):
+    """B2B 上下游业务伙伴/发货方/收货方/供应商。"""
+
+    PARTNER_SHIPPER = "shipper"      # 发货方
+    PARTNER_CONSIGNEE = "consignee"  # 收货方
+    PARTNER_SUPPLIER = "supplier"    # 供应商/承运商
+    PARTNER_TYPE_CHOICES = [
+        (PARTNER_SHIPPER, "发货方"),
+        (PARTNER_CONSIGNEE, "收货方"),
+        (PARTNER_SUPPLIER, "供应商/承运商"),
+    ]
+
+    partner_type = models.CharField(max_length=16, choices=PARTNER_TYPE_CHOICES, db_index=True)
+    code = models.CharField(max_length=32, unique=True)
+    name = models.CharField(max_length=120)
+    contact_name = models.CharField(max_length=64, blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+    address = models.CharField(max_length=255, blank=True, help_text="详细物理地址")
+    city = models.CharField(max_length=64, blank=True, help_text="归属城市（标准化城市名，如无锡）")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "md_b2b_partner"
+        ordering = ["code"]
+        verbose_name = "上下游伙伴"
+        verbose_name_plural = "上下游伙伴"
+
+    def __str__(self) -> str:
+        return f"[{self.get_partner_type_display()}] {self.code} {self.name}"

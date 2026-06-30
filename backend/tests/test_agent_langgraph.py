@@ -39,7 +39,7 @@ def _reset_graph():
 
 def test_build_langchain_tools_normalizes_names():
     tools = build_langchain_tools()
-    assert len(tools) == 8
+    assert len(tools) == 10  # 增加了 logistics.intelligent_consolidation 和 exception_handler
     names = {t.name for t in tools}
     assert "logistics__eta_risk_analysis" in names
     assert "telematics__vehicle_alert_summary" in names

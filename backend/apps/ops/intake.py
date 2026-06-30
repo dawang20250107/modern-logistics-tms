@@ -175,6 +175,132 @@ def _sync_stops(order, stops: list) -> None:
         OrderStop.objects.bulk_create(rows)
 
 
+def enrich_customer_matching(data: dict, channel: str, source: str, current_customer=None):
+    """B2B 智能客户对齐：自动关联数据库 md_customer。
+
+    1. 微信群名称对齐：若为微信渠道，根据群名称匹配 wechat_group
+    2. 电话对齐：若含有联系电话，根据联系电话匹配 Customer.contact_phone
+    3. 公司模糊名称对齐：若解析出客户/发货单位模糊名称，模糊匹配
+    """
+    from apps.masterdata.models import Customer as MDCustomer
+
+    if current_customer:
+        return current_customer
+
+    # 1. 微信群名称对齐
+    if (channel == Order.CHANNEL_WECHAT_GROUP or channel == Order.CHANNEL_API) and source:
+        cust = MDCustomer.objects.filter(wechat_group=source, is_active=True).first()
+        if cust:
+            return cust
+
+    # 2. 电话对齐
+    phone = data.get("contact_phone") or data.get("pickup_contact_phone") or data.get("delivery_contact_phone")
+    if phone:
+        cust = MDCustomer.objects.filter(contact_phone=phone, is_active=True).first()
+        if cust:
+            return cust
+
+    # 3. 模糊名称对齐 (支持来自 payload 里的 customer_name 或 shipper_name 字段)
+    cust_name = data.get("customer_name") or data.get("shipper_name") or data.get("contact_name")
+    if cust_name and isinstance(cust_name, str) and len(cust_name) >= 2:
+        cust = MDCustomer.objects.filter(name__icontains=cust_name, is_active=True).first()
+        if cust:
+            return cust
+
+    return None
+
+
+def standardize_and_enrich_addresses(data: dict) -> None:
+    """B2B 地址智能缺损补全：自动推算和补全始发地/目的地城市级字段。
+
+    如果客户只有详细提货/送货地址，而缺失始发地(origin)或目的地(destination)，自动从详细地址中提取并规范化。
+    """
+    # 常用大中城市字典（用来从详细地址中模糊检索）
+    _CITIES = [
+        "北京", "上海", "广州", "深圳", "天津", "重庆", "杭州", "南京", "物理", "苏州", "无锡", "常州",
+        "宁波", "合肥", "福州", "厦门", "南昌", "济南", "青岛", "郑州", "武汉", "长沙", "成都",
+        "西安", "昆明", "贵阳", "南宁", "海口", "石家庄", "太原", "沈阳", "大连", "长春", "哈尔滨",
+        "温州", "金华", "绍兴", "台州", "嘉兴", "泉州", "东莞", "佛山", "中山", "珠海", "惠州",
+        "徐州", "扬州", "泰州", "南通", "盐城", "淮安", "镇江", "芜湖", "马鞍山"
+    ]
+
+    def _extract_city(address: str) -> str:
+        if not address or not isinstance(address, str):
+            return ""
+        for city in _CITIES:
+            if city in address:
+                return city
+        # 如果没有匹配到常用大中城市，提取前 2~4 个字
+        # 简单去除省份字样
+        clean = address.replace("江苏省", "").replace("浙江省", "").replace("广东省", "").replace("安徽省", "")
+        m = re.match(r"^([一-龥]{2,4}市?)", clean)
+        if m:
+            return m.group(1).replace("市", "")
+        return ""
+
+    # 始发地自动推算
+    if not data.get("origin") or data["origin"] in ("-", "—", "无"):
+        inferred = _extract_city(data.get("pickup_address") or "")
+        if inferred:
+            data["origin"] = inferred
+
+    # 目的地自动推算
+    if not data.get("destination") or data["destination"] in ("-", "—", "无"):
+        inferred = _extract_city(data.get("delivery_address") or "")
+        if inferred:
+            data["destination"] = inferred
+
+
+def enrich_cargo_metrics(data: dict) -> None:
+    """B2B 货物规格智能推算与均值填充（解决重量/体积数据缺失问题）。
+
+    B2B 运单常只提供“件数”或简短“货物描述”，此处依据行业均值自适应补齐重量（吨）和体积（方），
+    防止下游排线和装载算法因 0 重量/ 0 体积导致排线不准或过载。
+    """
+    qty = int(data.get("cargo_quantity") or 0)
+    desc = (data.get("cargo_desc") or "").strip()
+    pkg = (data.get("package_type") or "").strip()
+
+    # 1. 优先根据件数和货物/包装描述进行科学推算
+    if qty > 0:
+        weight_factor = 0.005  # 默认 5kg / 件
+        volume_factor = 0.01   # 默认 0.01方 / 件
+
+        # 检测包装或货描类型
+        desc_lower = (desc + " " + pkg).lower()
+        if any(k in desc_lower for k in ("箱", "box", "carton")):
+            weight_factor = 0.015  # 15kg/箱
+            volume_factor = 0.025  # 0.025方/箱
+        elif any(k in desc_lower for k in ("托", "托盘", "板", "pallet", "plt")):
+            weight_factor = 0.400  # 400kg/托
+            volume_factor = 1.5    # 1.5方/托 (标准 1.2 * 1.0 * 1.0)
+        elif any(k in desc_lower for k in ("袋", "bag", "sack")):
+            weight_factor = 0.025  # 25kg/袋
+            volume_factor = 0.03   # 0.03方/袋
+        elif any(k in desc_lower for k in ("桶", "barrel", "drum")):
+            weight_factor = 0.200  # 200kg/桶 (标准铁桶)
+            volume_factor = 0.35   # 0.35方/桶
+
+        # 计算推算值
+        calc_weight = Decimal(str(round(qty * weight_factor, 2)))
+        calc_volume = Decimal(str(round(qty * volume_factor, 2)))
+
+        # 补全缺失值
+        if not data.get("cargo_weight_ton") or float(data["cargo_weight_ton"]) == 0:
+            data["cargo_weight_ton"] = calc_weight
+        if not data.get("cargo_volume_cbm") or float(data["cargo_volume_cbm"]) == 0:
+            data["cargo_volume_cbm"] = calc_volume
+
+    # 2. 如果只有货物描述没有件数（整车情况）
+    elif desc:
+        desc_lower = desc.lower()
+        if any(k in desc_lower for k in ("整车", "一车", "ftl")):
+            if not data.get("cargo_weight_ton") or float(data["cargo_weight_ton"]) == 0:
+                data["cargo_weight_ton"] = Decimal("10.00")  # 默认整车 10吨
+            if not data.get("cargo_volume_cbm") or float(data["cargo_volume_cbm"]) == 0:
+                data["cargo_volume_cbm"] = Decimal("30.00")  # 默认整车 30方
+
+
 def create_order_from_intake(*, text: str = "", fields: dict | None = None, channel: str = Order.CHANNEL_CS,
                              source: str = "", customer=None, operator=None,
                              cargo_items: list | None = None, stops: list | None = None,
@@ -193,6 +319,11 @@ def create_order_from_intake(*, text: str = "", fields: dict | None = None, chan
         explicit = dict(fields)
         parse_meta = explicit.pop("_meta", parse_meta) or parse_meta
         data.update(explicit)  # 显式字段覆盖解析结果
+
+    # === 执行 B2B 智能数据补全与实体对齐管道 ===
+    customer = enrich_customer_matching(data, channel, source, customer)
+    standardize_and_enrich_addresses(data)
+    enrich_cargo_metrics(data)
 
     clean = {k: data[k] for k in _ORDER_FIELDS if k in data and data[k] not in (None, "")}
     _coerce_datetimes(clean)
@@ -268,6 +399,11 @@ def update_order(order, *, fields: dict, cargo_items=None, stops=None, operator=
         order.customer_id = fields.get("customer")
     clean = {k: fields[k] for k in _ORDER_FIELDS if k in fields}
     _coerce_datetimes(clean)
+
+    # === 执行 B2B 智能数据补全与标准化 ===
+    standardize_and_enrich_addresses(clean)
+    enrich_cargo_metrics(clean)
+
     changes = _diff_order_fields(order, clean)  # 落库前快照
     for k, v in clean.items():
         setattr(order, k, v if v not in (None, "") else getattr(order, k))

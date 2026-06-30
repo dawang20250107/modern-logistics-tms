@@ -70,7 +70,8 @@ export function PricingPage() {
     setForm({
       name: r.name, price_type: r.price_type, expense_item_code: r.expense_item_code,
       customer: r.customer ?? "", carrier: r.carrier ?? "", route_name: r.route_name,
-      base_price: r.base_price, price_per_ton: r.price_per_ton, min_price: r.min_price,
+      base_price: r.base_price, min_price: r.min_price, tier_prices: r.tier_prices || [], 
+      volumetric_factor: r.volumetric_factor, fuel_surcharge_pct: r.fuel_surcharge_pct,
       priority: String(r.priority), is_active: r.is_active,
     });
   };
@@ -137,20 +138,20 @@ export function PricingPage() {
         ) : (
           <table className="table">
             <thead>
-              <tr><th>名称</th><th>类型</th><th>客户</th><th>承运商</th><th>线路</th><th>基础价</th><th>每吨</th><th>最低价</th><th>优先级</th><th>启用</th><th>操作</th></tr>
+              <tr><th>合同规则名称</th><th>方向</th><th>定向客户</th><th>定向承运商</th><th>线路路由</th><th>固定价</th><th>阶梯价层数</th><th>重抛比</th><th>燃油金</th><th>启用</th><th>操作</th></tr>
             </thead>
             <tbody>
               {items.map((r) => (
-                <tr key={r.id} style={editing === r.id ? { background: "#f1f5fb" } : {}}>
-                  <td>{r.name}</td>
-                  <td><span className={`tag tag-${r.price_type === "income" ? "low" : "info"}`}>{r.price_type === "income" ? "收入" : "支出"}</span></td>
-                  <td>{r.customer_name || "通用"}</td>
-                  <td>{r.carrier_name || "通用"}</td>
-                  <td>{r.route_name || "通用"}</td>
-                  <td>{fmtMoney(r.base_price)}</td>
-                  <td>{fmtMoney(r.price_per_ton)}</td>
-                  <td>{fmtMoney(r.min_price)}</td>
-                  <td>{r.priority}</td>
+                <tr key={r.id} style={editing === r.id ? { background: "var(--brand-light)" } : {}}>
+                  <td style={{ fontWeight: "bold" }}>{r.name}</td>
+                  <td><span className={`tag tag-${r.price_type === "income" ? "low" : "medium"}`}>{r.price_type === "income" ? "应收" : "应付"}</span></td>
+                  <td>{r.customer_name || "全局通用"}</td>
+                  <td>{r.carrier_name || "全局通用"}</td>
+                  <td>{r.route_name || "全局通用"}</td>
+                  <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{fmtMoney(r.base_price)}</td>
+                  <td>{r.tier_prices && r.tier_prices.length > 0 ? <span className="tag" style={{ background: "rgba(0,0,0,0.05)" }}>{r.tier_prices.length} 级</span> : "—"}</td>
+                  <td>{r.volumetric_factor}</td>
+                  <td>{Number(r.fuel_surcharge_pct) > 0 ? <span className="tag tag-high">+{fmtNum(Number(r.fuel_surcharge_pct) * 100, 1)}%</span> : "—"}</td>
                   <td>
                     <label className="switch-mini">
                       <input type="checkbox" checked={r.is_active} onChange={() => patch.mutate({ id: r.id, is_active: !r.is_active })} />

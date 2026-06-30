@@ -70,31 +70,71 @@ def _parse_response(data: dict, origin: str, destination: str) -> dict:
 
 
 def freight_quote(origin: str, destination: str, *, weight_ton=0, volume_cbm=0, vehicle_type="") -> dict:
-    """调车运费比价：优先调用运满满开放平台，失败回退离线参考价。"""
-    if not _configured():
-        return _offline_estimate(origin, destination, weight_ton, volume_cbm)
+    """调车运费比价：优先调用运满满开放平台，结合本地历史成交价进行 AI 智能估价。"""
+    from datetime import timedelta
 
-    params = {
-        "appKey": settings.YMM_APP_KEY,
-        "accessToken": settings.YMM_ACCESS_TOKEN,
-        "timestamp": str(int(time.time() * 1000)),
-        "method": "freight.price.compare",
-        "startAddress": origin,
-        "endAddress": destination,
-        "weight": str(weight_ton or ""),
-        "volume": str(volume_cbm or ""),
-        "vehicleType": vehicle_type or "",
-    }
-    params["sign"] = _sign(params, settings.YMM_APP_SECRET)
-    url = f"{settings.YMM_BASE_URL}{_WORKBENCH_PATH}"
+    from django.db.models import Avg
+    from django.utils import timezone
+
+    from apps.ops.models import Order
+
+    # 1. 获取满帮/离线估价作为基础市场价信号
+    market_quote = None
+    if not _configured():
+        market_quote = _offline_estimate(origin, destination, weight_ton, volume_cbm)
+    else:
+        params = {
+            "appKey": settings.YMM_APP_KEY,
+            "accessToken": settings.YMM_ACCESS_TOKEN,
+            "timestamp": str(int(time.time() * 1000)),
+            "method": "freight.price.compare",
+            "startAddress": origin,
+            "endAddress": destination,
+            "weight": str(weight_ton or ""),
+            "volume": str(volume_cbm or ""),
+            "vehicleType": vehicle_type or "",
+        }
+        params["sign"] = _sign(params, settings.YMM_APP_SECRET)
+        url = f"{settings.YMM_BASE_URL}{_WORKBENCH_PATH}"
+        try:
+            resp = httpx.post(url, json=params, timeout=settings.YMM_TIMEOUT_SECONDS)
+            resp.raise_for_status()
+            payload = resp.json()
+            if str(payload.get("code", "0")) in ("0", "200", "success"):
+                market_quote = _parse_response(payload, origin, destination)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ymm freight_quote API failed, fallback to offline: %s", exc)
+
+    if not market_quote:
+        market_quote = _offline_estimate(origin, destination, weight_ton, volume_cbm)
+
+    # 2. 查询本地历史 90 天内该线路已完成订单的平均成交价（AI 数据对齐）
+    hist_avg = None
     try:
-        resp = httpx.post(url, json=params, timeout=settings.YMM_TIMEOUT_SECONDS)
-        resp.raise_for_status()
-        payload = resp.json()
-        if str(payload.get("code", "0")) not in ("0", "200", "success"):
-            logger.warning("ymm freight_quote non-ok: %s", payload.get("message"))
-            return _offline_estimate(origin, destination, weight_ton, volume_cbm)
-        return _parse_response(payload, origin, destination)
-    except Exception as exc:  # noqa: BLE001 — 外部接口失败回退离线参考价，不阻断派单
-        logger.warning("ymm freight_quote failed: %s", exc)
-        return _offline_estimate(origin, destination, weight_ton, volume_cbm)
+        past_days = timezone.now() - timedelta(days=90)
+        history = Order.objects.filter(
+            origin__icontains=origin,
+            destination__icontains=destination,
+            status="completed",
+            created_at__gte=past_days,
+            quoted_amount__gt=0
+        ).aggregate(avg_price=Avg("quoted_amount"))
+        hist_avg = history.get("avg_price")
+    except Exception as exc:  # noqa: BLE001 — 容错，不阻断主链路
+        logger.warning("Failed to query historical freight average: %s", exc)
+
+    # 3. AI 智能价格混合插值算法 (α * historical + β * market)
+    market_avg = float(market_quote.get("avg") or 0)
+    
+    if hist_avg is not None and market_avg > 0:
+        hist_avg = float(hist_avg)
+        # 混合加权：60% 历史自营合同价 + 40% 满帮公网即时行情价
+        ai_avg = round(0.6 * hist_avg + 0.4 * market_avg, 2)
+        market_quote["avg"] = ai_avg
+        market_quote["low"] = round(ai_avg * 0.9, 2)
+        market_quote["high"] = round(ai_avg * 1.12, 2)
+        market_quote["note"] = f"AI 智能混合估值（结合历史成交价 {hist_avg}元 与市场比价）"
+    else:
+        market_quote["note"] = market_quote.get("note", "") + " (无本地历史数据，纯市场估值)"
+
+    return market_quote

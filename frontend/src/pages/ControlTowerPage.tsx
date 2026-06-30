@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import type { ExpiringCredentials, Paginated, QueryWaybillResult, Waybill } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
+import { IconSparkles, IconTerminal, IconSearch } from "../components/Icons";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
 
@@ -122,51 +123,69 @@ export function ControlTowerPage() {
         </div>
       </div>
 
-      <div className="panel">
-        <div className="panel-head">AI 查单</div>
-        <div className="ai-box">
-          <input
-            placeholder="例如：宜宾 / 上海 / 车牌 / 运单号"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && ask.mutate(question)}
-          />
-          <button className="btn-primary" disabled={ask.isPending} onClick={() => ask.mutate(question)}>
-            {ask.isPending ? "查询中…" : "查询"}
-          </button>
+      {/* AI 全局指令舱入口 */}
+      <div 
+        className="panel" 
+        style={{ 
+          background: "linear-gradient(135deg, rgba(37,99,235,0.03) 0%, rgba(37,99,235,0.08) 100%)", 
+          border: "1px solid rgba(37,99,235,0.15)",
+          cursor: "pointer",
+          transition: "all 0.2s"
+        }}
+        onClick={() => {
+          const e = new KeyboardEvent("keydown", { ctrlKey: true, key: "k" });
+          window.dispatchEvent(e);
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
+        onMouseLeave={(e) => e.currentTarget.style.background = "linear-gradient(135deg, rgba(37,99,235,0.03) 0%, rgba(37,99,235,0.08) 100%)"}
+      >
+        <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontSize: 14, fontWeight: "600", color: "var(--brand)", display: "flex", alignItems: "center", gap: 8 }}>
+              <IconSparkles size={20} className="icon-offset" /> 智能协同调度引擎已就绪
+            </div>
+            <div className="muted small" style={{ color: "var(--ink-2)" }}>
+              你可以随时使用自然语言唤起调度指令。例如：“帮我分析无锡方向拼单”、“查询苏B异常”、“测算单票利润”。
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}><IconTerminal size={14} className="icon-offset" /> 快捷指令唤起</span>
+            <span style={{ background: "var(--panel)", color: "var(--ink)", padding: "4px 8px", borderRadius: 4, fontWeight: "500", fontFamily: "var(--font-mono)", fontSize: 12, border: "1px solid var(--line)" }}>
+              Ctrl K
+            </span>
+          </div>
         </div>
-        {answer && <div className="ai-answer">{answer}</div>}
       </div>
 
       <div className="panel">
-        <div className="panel-head">风险队列</div>
+        <div className="panel-head">时空预警与异常队列</div>
         {waybills.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <div className="muted" style={{ padding: 16 }}>指标数据拉取中…</div>
         ) : risky.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无风险运单</div>
+          <div className="muted" style={{ padding: 16 }}>全网车辆运转正常，暂无活跃的异常风险。</div>
         ) : (
           <table className="table">
             <thead>
               <tr>
-                <th>运单号</th>
-                <th>线路</th>
-                <th>风险</th>
-                <th>ETA 偏移(分)</th>
-                <th>回单</th>
+                <th>系统运单号</th>
+                <th>共线线路</th>
+                <th>风险等级</th>
+                <th>ETA 偏移时效(分)</th>
+                <th>回单回收状态</th>
               </tr>
             </thead>
             <tbody>
               {risky.map((w) => (
                 <tr key={w.id}>
                   <td>
-                    <Link className="link mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>
+                    <Link className="link mono interactive-text" title="点击查看数字孪生档案" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>
                   </td>
-                  <td>{w.route_name}</td>
+                  <td><span title={`起讫：${w.origin} → ${w.destination}`}>{w.route_name}</span></td>
                   <td>
                     <span className={`tag tag-${w.risk_level}`}>{RISK_LABEL[w.risk_level]}</span>
                   </td>
-                  <td>{w.eta_drift_minutes}</td>
-                  <td>{w.receipt_status}</td>
+                  <td className="mono" style={{ color: "var(--red)" }}>+{w.eta_drift_minutes} 分钟</td>
+                  <td>{w.receipt_status === "returned" ? "已回收" : w.receipt_status === "pending" ? "待回收" : w.receipt_status}</td>
                 </tr>
               ))}
             </tbody>

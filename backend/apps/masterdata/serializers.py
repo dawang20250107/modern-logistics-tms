@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Carrier, Customer, Driver, DriverCredential, Route, Vehicle
+from .models import B2BPartner, Carrier, Customer, Driver, DriverCredential, Route, Vehicle
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -91,3 +91,14 @@ class DriverCredentialSerializer(serializers.ModelSerializer):
             except ValueError:
                 return ""
         return obj.file_url
+
+
+class B2BPartnerSerializer(serializers.ModelSerializer):
+    partner_type_label = serializers.CharField(source="get_partner_type_display", read_only=True)
+
+    class Meta:
+        model = B2BPartner
+        fields = [
+            "id", "partner_type", "partner_type_label", "code", "name",
+            "contact_name", "contact_phone", "address", "city", "is_active",
+        ]

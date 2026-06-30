@@ -6,8 +6,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Carrier, Customer, Driver, Route, Vehicle
+from .models import B2BPartner, Carrier, Customer, Driver, Route, Vehicle
 from .serializers import (
+    B2BPartnerSerializer,
     CarrierSerializer,
     CustomerSerializer,
     DriverSerializer,
@@ -177,3 +178,13 @@ class ExpiringCredentialsView(APIView):
             "warning": sum(1 for r in rows if r["severity"] == "warning"),
         }
         return Response({"days": days, "summary": summary, "vehicles": vehicles, "drivers": drivers})
+
+
+class B2BPartnerViewSet(viewsets.ModelViewSet):
+    """B2B 业务伙伴/发货方/收货方/供应商视图集。"""
+
+    queryset = B2BPartner.objects.all()
+    serializer_class = B2BPartnerSerializer
+    search_fields = ["code", "name", "contact_phone", "city"]
+    filterset_fields = ["partner_type", "is_active"]
+    ordering_fields = ["code", "name", "created_at"]

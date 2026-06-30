@@ -200,69 +200,55 @@ class FinancialDashboardMetricsView(APIView):
     def get(self, request):
         from datetime import timedelta
 
-        from django.db.models import Q, Sum
+        from django.db.models import Sum
         from django.utils import timezone
 
+        from .cost_items import COST_ITEMS
         from .models import ExpenseRecord
 
         days = int(request.query_params.get("days", 7))
-        end_date = timezone.now()
-        start_date = end_date - timedelta(days=days)
+        end_date = timezone.localdate()
+        start_date = end_date - timedelta(days=days - 1)
 
-        # 1. 营业额与利润趋势 (Revenue & Profit Trend)
+        # 1. 营业额与利润趋势：按天聚合应收(收入)/应付(成本)/毛利。
+        # 注：ExpenseRecord 无状态机字段，所有已落库的应收/应付即为真实发生额。
+        def _daily(direction):
+            rows = (
+                ExpenseRecord.objects.filter(
+                    direction=direction, created_at__date__gte=start_date, created_at__date__lte=end_date
+                )
+                .values("created_at__date")
+                .annotate(t=Sum("amount"))
+            )
+            return {r["created_at__date"]: float(r["t"] or 0) for r in rows}
+
+        rev_by_day = _daily(ExpenseRecord.DIRECTION_RECEIVABLE)
+        cost_by_day = _daily(ExpenseRecord.DIRECTION_PAYABLE)
         trend = []
         for i in range(days):
-            d = (start_date + timedelta(days=i)).date()
-            d_next = d + timedelta(days=1)
-            
-            day_rev = ExpenseRecord.objects.filter(
-                direction=ExpenseRecord.DIRECTION_RECEIVABLE,
-                status=ExpenseRecord.STATUS_CONFIRMED,
-                created_at__gte=d,
-                created_at__lt=d_next
-            ).aggregate(t=Sum("amount"))["t"] or 0
-            
-            day_cost = ExpenseRecord.objects.filter(
-                direction=ExpenseRecord.DIRECTION_PAYABLE,
-                status=ExpenseRecord.STATUS_CONFIRMED,
-                created_at__gte=d,
-                created_at__lt=d_next
-            ).aggregate(t=Sum("amount"))["t"] or 0
-            
+            d = start_date + timedelta(days=i)
+            rev, cost = rev_by_day.get(d, 0.0), cost_by_day.get(d, 0.0)
             trend.append({
-                "date": d.strftime("%m-%d"),
-                "revenue": float(day_rev),
-                "cost": float(day_cost),
-                "profit": float(day_rev - day_cost)
+                "date": d.strftime("%m-%d"), "revenue": rev, "cost": cost, "profit": round(rev - cost, 2),
             })
 
-        # 2. 车队成本构成 (Fleet Cost Composition)
-        costs = ExpenseRecord.objects.filter(
-            direction=ExpenseRecord.DIRECTION_PAYABLE,
-            status=ExpenseRecord.STATUS_CONFIRMED,
-            created_at__gte=start_date
+        # 2. 成本构成：按真实费用科目（cost_items.COST_ITEMS）聚合应付，零额科目不展示。
+        composition_rows = (
+            ExpenseRecord.objects.filter(
+                direction=ExpenseRecord.DIRECTION_PAYABLE, created_at__date__gte=start_date
+            )
+            .values("expense_item_code")
+            .annotate(t=Sum("amount"))
+            .order_by("-t")
         )
-        
-        fleet_costs = {
-            "fuel": float(costs.filter(expense_item_code__icontains="fuel").aggregate(t=Sum("amount"))["t"] or 0),
-            "toll": float(costs.filter(expense_item_code__icontains="toll").aggregate(t=Sum("amount"))["t"] or 0),
-            "maintenance": float(costs.filter(Q(expense_item_code__icontains="repair") | Q(expense_item_code__icontains="maintain")).aggregate(t=Sum("amount"))["t"] or 0),
-            "carrier_fee": float(costs.filter(expense_item_code__icontains="freight").aggregate(t=Sum("amount"))["t"] or 0),
-            "other": float(costs.filter(expense_item_code__icontains="other").aggregate(t=Sum("amount"))["t"] or 0),
-        }
-
-        # 为了保证演示数据丰满，若全部为0，提供高质量降级演示数据
-        if sum(fleet_costs.values()) == 0:
-            fleet_costs = {
-                "fuel": 45000.0,
-                "toll": 18500.0,
-                "maintenance": 6200.0,
-                "carrier_fee": 85000.0,
-                "other": 3100.0
-            }
+        cost_composition = [
+            {"name": COST_ITEMS.get(r["expense_item_code"], r["expense_item_code"] or "未分类"),
+             "value": float(r["t"] or 0)}
+            for r in composition_rows if (r["t"] or 0) > 0
+        ]
 
         return Response({
             "trend": trend,
-            "fleet_costs": fleet_costs,
-            "period": f"近 {days} 天"
+            "cost_composition": cost_composition,
+            "period": f"近 {days} 天",
         })

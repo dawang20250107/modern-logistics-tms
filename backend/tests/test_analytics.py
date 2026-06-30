@@ -58,6 +58,28 @@ def test_dashboard_returns_metric_cards():
 
 
 @pytest.mark.django_db
+def test_dashboard_populates_breakdown_for_dimensional_metrics():
+    """看板默认带出支持维度的指标的首选维度构成（此前 build_dashboard 不传
+    dimension，前端 KPI 卡的 breakdown 渲染分支永远是空，属未点亮的能力）。"""
+    Waybill.objects.create(waybill_no="DB1", route_name="r", status=Waybill.STATUS_IN_TRANSIT)
+    Waybill.objects.create(waybill_no="DB2", route_name="r", status=Waybill.STATUS_IN_TRANSIT)
+    Waybill.objects.create(waybill_no="DB3", route_name="r", status=Waybill.STATUS_PENDING_DISPATCH)
+
+    dash = build_dashboard()
+    wb = next(m for m in dash["metrics"] if m["code"] == "ops.waybill_count")
+    assert wb["value"] == 3
+    # 首选维度为 status（注册声明的第一个维度），构成应被带出
+    assert "breakdown" in wb
+    by_status = {b["key"]: b["value"] for b in wb["breakdown"]}
+    assert by_status["in_transit"] == 2
+    assert by_status["pending_dispatch"] == 1
+
+    # 不支持维度的指标不应有 breakdown，且不报错
+    in_transit = next(m for m in dash["metrics"] if m["code"] == "ops.in_transit")
+    assert "breakdown" not in in_transit
+
+
+@pytest.mark.django_db
 def test_materialize_and_trend():
     Waybill.objects.create(waybill_no="T1", route_name="r")
     count = materialize_daily()

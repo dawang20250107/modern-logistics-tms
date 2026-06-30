@@ -54,15 +54,8 @@ export function DashboardPage() {
 
   const formatRmb = (val: number) => `¥${val.toLocaleString()}`;
 
-  const pieData = financeMetrics.data?.fleet_costs
-    ? [
-        { name: "燃油费", value: financeMetrics.data.fleet_costs.fuel },
-        { name: "路桥费", value: financeMetrics.data.fleet_costs.toll },
-        { name: "维保费", value: financeMetrics.data.fleet_costs.maintenance },
-        { name: "三方承运", value: financeMetrics.data.fleet_costs.carrier_fee },
-        { name: "其他杂费", value: financeMetrics.data.fleet_costs.other },
-      ].filter((d) => d.value > 0)
-    : [];
+  // 成本构成由后端按真实费用科目聚合返回（cost_composition: [{name, value}]）
+  const pieData: Array<{ name: string; value: number }> = financeMetrics.data?.cost_composition ?? [];
 
   return (
     <div className="stack">
@@ -116,29 +109,35 @@ export function DashboardPage() {
             <div className="section-label">
               🍩 车队运营成本构成占比
             </div>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Tooltip 
-                  formatter={(value) => formatRmb(Number(value))}
-                  contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 10px 24px rgba(0,0,0,0.1)", fontSize: 12 }} 
-                />
-                <Legend iconType="circle" layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ fontSize: 12 }} />
-                <Pie
-                  data={pieData}
-                  cx="40%"
-                  cy="50%"
-                  innerRadius={65}
-                  outerRadius={100}
-                  paddingAngle={4}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
+            {pieData.length === 0 ? (
+              <div className="muted" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+                近 {financeMetrics.data?.period ?? ""} 内暂无应付成本记录
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Tooltip
+                    formatter={(value) => formatRmb(Number(value))}
+                    contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 10px 24px rgba(0,0,0,0.1)", fontSize: 12 }}
+                  />
+                  <Legend iconType="circle" layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ fontSize: 12 }} />
+                  <Pie
+                    data={pieData}
+                    cx="40%"
+                    cy="50%"
+                    innerRadius={65}
+                    outerRadius={100}
+                    paddingAngle={4}
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       )}

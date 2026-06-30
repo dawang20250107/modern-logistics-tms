@@ -14,6 +14,8 @@ from apps.iam.models import (
     Employee,
     EmployeeGroup,
     Organization,
+    Permission,
+    Role,
     ServiceArea,
 )
 
@@ -49,6 +51,30 @@ _EMPLOYEES = [
     ("2474452", "孙娟", "18908082619", "PRJ2", "OPS", "运营专员", "2553728"),
     ("2463584", "钟靖杰", "14785561693", "PRJ6", "OPS", "运营专员", "2553728"),
     ("2443517", "杨晓丽", "17713583185", "PRJ4", "FIN", "财务主管", "2553728"),
+]
+
+# (module, code, name) —— 权限点
+_PERMISSIONS = [
+    ("运单", "waybill.view", "查看运单"),
+    ("运单", "waybill.edit", "编辑运单"),
+    ("运单", "waybill.dispatch", "运单派车"),
+    ("订单", "order.view", "查看订单"),
+    ("订单", "order.create", "创建订单"),
+    ("订单", "order.approve", "订单审批"),
+    ("财务", "finance.view", "查看财务"),
+    ("财务", "finance.settle", "财务结算"),
+    ("组织", "org.manage", "组织管理"),
+    ("组织", "org.employee", "员工管理"),
+    ("风控", "risk.view", "风控查看"),
+]
+
+# (code, name, data_scope, [permission_code...]) —— 角色
+_ROLES = [
+    ("admin", "系统管理员", "all", ["*"]),
+    ("dispatcher", "调度主管", "org_sub",
+     ["waybill.view", "waybill.edit", "waybill.dispatch", "order.view", "order.create"]),
+    ("finance", "财务专员", "org", ["finance.view", "finance.settle"]),
+    ("operator", "运营专员", "org", ["order.view", "order.create", "waybill.view"]),
 ]
 
 # (org_code, area_type, region_name) —— 服务区划覆盖
@@ -120,5 +146,21 @@ class Command(BaseCommand):
                 city=region_name[:3], priority=10,
             )
         self.stdout.write(f"服务区划 {len(_AREAS)} 条")
+
+        perms: dict[str, Permission] = {}
+        for module, code, name in _PERMISSIONS:
+            perm, _ = Permission.objects.update_or_create(
+                code=code, defaults={"name": name, "module": module}
+            )
+            perms[code] = perm
+        for code, name, scope, perm_codes in _ROLES:
+            role, _ = Role.objects.update_or_create(
+                code=code, defaults={"name": name, "data_scope": scope, "is_active": True}
+            )
+            wanted = list(perms.values()) if perm_codes == ["*"] else [
+                perms[c] for c in perm_codes if c in perms
+            ]
+            role.permissions.set(wanted)
+        self.stdout.write(f"权限点 {len(perms)} 个、角色 {len(_ROLES)} 个")
 
         self.stdout.write(self.style.SUCCESS("组织中台演示数据已就绪：/api/v1/org/organizations/tree"))

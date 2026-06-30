@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
@@ -12,6 +12,7 @@ import type {
   OrgOverview,
   OrgTreeNode,
   Paginated,
+  RbacMatrix,
   ServiceArea,
 } from "../api/types";
 import { AREA_TYPE_LABEL, ORG_PROPERTY_LABEL } from "../api/types";
@@ -24,7 +25,7 @@ function useOrgOptions() {
   });
 }
 
-type Tab = "overview" | "org" | "employees" | "areas";
+type Tab = "overview" | "org" | "employees" | "areas" | "rbac";
 
 const STATUS_TAG: Record<string, string> = { active: "low", disabled: "medium", left: "high" };
 const PROPERTY_TAG: Record<string, string> = {
@@ -460,11 +461,113 @@ function AreasTab() {
   );
 }
 
+const SCOPE_LABEL: Record<string, string> = {
+  self: "仅本人", org: "本组织", org_sub: "本组织及下级", all: "全部",
+};
+
+function RbacTab() {
+  const q = useQuery({ queryKey: ["rbac-matrix"], queryFn: () => apiGet<RbacMatrix>("/org/rbac/matrix") });
+  // 本地草稿：roleId -> Set(permission code)
+  const [draft, setDraft] = useState<Record<string, Set<string>> | null>(null);
+  const matrix = q.data;
+  const codeToId = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const g of matrix?.modules ?? []) for (const p of g.permissions) m[p.code] = p.id;
+    return m;
+  }, [matrix]);
+  const state = useMemo(() => {
+    if (draft) return draft;
+    const m: Record<string, Set<string>> = {};
+    for (const r of matrix?.roles ?? []) m[r.id] = new Set(r.permission_codes);
+    return m;
+  }, [draft, matrix]);
+
+  const toggle = (roleId: string, code: string) => {
+    setDraft(() => {
+      const next: Record<string, Set<string>> = {};
+      for (const [k, v] of Object.entries(state)) next[k] = new Set(v);
+      next[roleId] ??= new Set();
+      if (next[roleId].has(code)) next[roleId].delete(code);
+      else next[roleId].add(code);
+      return next;
+    });
+  };
+
+  const save = useMutation({
+    mutationFn: async () => {
+      for (const role of matrix?.roles ?? []) {
+        const codes = [...(state[role.id] ?? new Set())];
+        const ids = codes.map((c) => codeToId[c]).filter(Boolean);
+        await apiPost(`/org/roles/${role.id}/set-permissions`, { permissions: ids });
+      }
+    },
+    onSuccess: () => { toast.success("权限矩阵已保存"); setDraft(null); q.refetch(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!matrix) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
+  if (matrix.roles.length === 0)
+    return <div className="muted" style={{ padding: 16 }}>暂无角色，执行 <code>python manage.py seed_org</code> 生成演示数据。</div>;
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        角色 × 权限矩阵
+        <span className="ai-pill">{matrix.roles.length} 角色 · {matrix.permission_total} 权限点</span>
+        <button className="btn-primary" style={{ marginLeft: "auto" }} disabled={save.isPending || !draft} onClick={() => save.mutate()}>
+          {save.isPending ? "保存中…" : "保存矩阵"}
+        </button>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ minWidth: 180 }}>权限点</th>
+              {matrix.roles.map((r) => (
+                <th key={r.id} style={{ textAlign: "center" }}>
+                  {r.name}
+                  <div className="muted small">{SCOPE_LABEL[r.data_scope] ?? r.data_scope}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.modules.map((g) => (
+              <Fragment key={g.module}>
+                <tr>
+                  <td colSpan={matrix.roles.length + 1} className="muted small" style={{ background: "var(--panel-2, rgba(255,255,255,0.03))", fontWeight: 600 }}>
+                    {g.module}
+                  </td>
+                </tr>
+                {g.permissions.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.name} <span className="muted small mono">{p.code}</span></td>
+                    {matrix.roles.map((r) => (
+                      <td key={r.id} style={{ textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={state[r.id]?.has(p.code) ?? false}
+                          onChange={() => toggle(r.id, p.code)}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "经营总览" },
   { key: "org", label: "组织架构" },
   { key: "employees", label: "员工名录" },
   { key: "areas", label: "服务区划" },
+  { key: "rbac", label: "权限授权" },
 ];
 
 export function OrgCenterPage() {
@@ -492,6 +595,7 @@ export function OrgCenterPage() {
       {tab === "org" && <OrgTab />}
       {tab === "employees" && <EmployeesTab />}
       {tab === "areas" && <AreasTab />}
+      {tab === "rbac" && <RbacTab />}
     </div>
   );
 }

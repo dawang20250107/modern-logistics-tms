@@ -3,7 +3,15 @@
 import pytest
 from rest_framework.test import APIClient
 
-from apps.iam.models import Department, Employee, Organization, ServiceArea
+from apps.iam.models import (
+    Department,
+    Employee,
+    Organization,
+    Permission,
+    Role,
+    RoleAssignment,
+    ServiceArea,
+)
 
 
 @pytest.fixture
@@ -171,6 +179,59 @@ def test_coverage_resolve_ranks_and_excludes(admin_client, org_tree):
     d2 = r2.json()["data"]
     assert d2["resolved"] == []
     assert any("上海网点" == e["organization_name"] for e in d2["excluded"])
+
+
+@pytest.mark.django_db
+def test_rbac_matrix_and_role_permissions(admin_client):
+    p1 = Permission.objects.create(code="waybill.view", name="查看运单", module="运单")
+    p2 = Permission.objects.create(code="waybill.edit", name="编辑运单", module="运单")
+    role = Role.objects.create(code="dispatcher", name="调度", data_scope="org_sub")
+
+    # 覆盖式设置角色权限点
+    r = admin_client.post(
+        f"/api/v1/org/roles/{role.id}/set-permissions",
+        {"permissions": [str(p1.id), str(p2.id)]}, format="json",
+    )
+    assert r.status_code == 200
+    assert set(r.json()["data"]["permission_codes"]) == {"waybill.view", "waybill.edit"}
+
+    # 矩阵：按模块分组 + 角色权限码
+    m = admin_client.get("/api/v1/org/rbac/matrix")
+    assert m.status_code == 200
+    data = m.json()["data"]
+    assert data["permission_total"] == 2
+    yun = next(g for g in data["modules"] if g["module"] == "运单")
+    assert len(yun["permissions"]) == 2
+    drole = next(x for x in data["roles"] if x["code"] == "dispatcher")
+    assert set(drole["permission_codes"]) == {"waybill.view", "waybill.edit"}
+
+
+@pytest.mark.django_db
+def test_employee_role_assignment(admin_client, org_tree):
+    from django.contrib.auth import get_user_model
+
+    _, _, sh = org_tree
+    role = Role.objects.create(code="op", name="运营", data_scope="org")
+    user = get_user_model().objects.create_user(username="emp_user", password="x")
+    emp = Employee.objects.create(employee_no="R1", name="授权员工", organization=sh, user=user)
+
+    r = admin_client.post(
+        f"/api/v1/org/employees/{emp.id}/roles", {"roles": [str(role.id)]}, format="json"
+    )
+    assert r.status_code == 200
+    assert RoleAssignment.objects.filter(user=user, role=role, organization=sh).exists()
+    # 覆盖式：再设为空清除
+    r2 = admin_client.post(f"/api/v1/org/employees/{emp.id}/roles", {"roles": []}, format="json")
+    assert r2.json()["data"] == []
+    assert not RoleAssignment.objects.filter(user=user).exists()
+
+
+@pytest.mark.django_db
+def test_employee_role_requires_account(admin_client, org_tree):
+    _, _, sh = org_tree
+    emp = Employee.objects.create(employee_no="R2", name="无账号", organization=sh)
+    r = admin_client.post(f"/api/v1/org/employees/{emp.id}/roles", {"roles": []}, format="json")
+    assert r.status_code == 400
 
 
 @pytest.mark.django_db

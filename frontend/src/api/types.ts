@@ -723,6 +723,12 @@ export interface CoverageResult {
   excluded: Array<{ organization_id: string; organization_name: string; reason: string }>;
 }
 
+export interface RbacMatrix {
+  modules: Array<{ module: string; permissions: Array<{ id: string; code: string; name: string }> }>;
+  roles: Array<{ id: string; code: string; name: string; data_scope: string; is_active: boolean; permission_codes: string[] }>;
+  permission_total: number;
+}
+
 export interface OrgOption {
   id: string;
   name: string;

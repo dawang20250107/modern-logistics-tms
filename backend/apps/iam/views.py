@@ -13,6 +13,9 @@ from .models import (
     Employee,
     EmployeeGroup,
     Organization,
+    Permission,
+    Role,
+    RoleAssignment,
     ServiceArea,
 )
 from .serializers import (
@@ -21,6 +24,9 @@ from .serializers import (
     EmployeeGroupSerializer,
     EmployeeSerializer,
     OrganizationSerializer,
+    PermissionSerializer,
+    RoleAssignmentSerializer,
+    RoleSerializer,
     ServiceAreaSerializer,
 )
 from .services import build_org_tree, handover_account, resolve_coverage
@@ -160,6 +166,72 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(AccountHandoverSerializer(record).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get", "post"])
+    def roles(self, request, pk=None):
+        """查看/设置员工角色（落到其登录账号的 RoleAssignment，按所属组织授予）。"""
+        emp = self.get_object()
+        if not emp.user_id:
+            return Response({"detail": "该员工尚未绑定登录账号"}, status=status.HTTP_400_BAD_REQUEST)
+        if request.method == "POST":
+            role_ids = request.data.get("roles", [])
+            roles = list(Role.objects.filter(id__in=role_ids))
+            RoleAssignment.objects.filter(user=emp.user).delete()
+            RoleAssignment.objects.bulk_create([
+                RoleAssignment(user=emp.user, role=r, organization=emp.organization) for r in roles
+            ])
+        assignments = RoleAssignment.objects.filter(user=emp.user).select_related("role", "organization")
+        return Response(RoleAssignmentSerializer(assignments, many=True).data)
+
+
+class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Permission.objects.all()
+    serializer_class = PermissionSerializer
+    search_fields = ["code", "name", "module"]
+    filterset_fields = ["module"]
+    ordering_fields = ["module", "code"]
+
+
+class RoleViewSet(viewsets.ModelViewSet):
+    queryset = Role.objects.prefetch_related("permissions").all()
+    serializer_class = RoleSerializer
+    search_fields = ["code", "name"]
+    filterset_fields = ["is_active", "data_scope"]
+    ordering_fields = ["code"]
+
+    @action(detail=True, methods=["post"], url_path="set-permissions")
+    def set_permissions(self, request, pk=None):
+        """覆盖式设置角色的权限点（接收 permission id 列表）。"""
+        role = self.get_object()
+        perm_ids = request.data.get("permissions", [])
+        role.permissions.set(Permission.objects.filter(id__in=perm_ids))
+        return Response(self.get_serializer(role).data)
+
+
+class RbacMatrixView(APIView):
+    """角色 × 权限点矩阵：一屏看清谁能做什么——G7 的扁平用户组所无。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        perms = list(Permission.objects.all())
+        modules: dict = {}
+        for p in perms:
+            modules.setdefault(p.module or "通用", []).append(
+                {"id": str(p.id), "code": p.code, "name": p.name}
+            )
+        roles = []
+        for role in Role.objects.prefetch_related("permissions").all():
+            roles.append({
+                "id": str(role.id), "code": role.code, "name": role.name,
+                "data_scope": role.data_scope, "is_active": role.is_active,
+                "permission_codes": list(role.permissions.values_list("code", flat=True)),
+            })
+        return Response({
+            "modules": [{"module": m, "permissions": ps} for m, ps in sorted(modules.items())],
+            "roles": roles,
+            "permission_total": len(perms),
+        })
 
 
 class AccountHandoverViewSet(viewsets.ReadOnlyModelViewSet):

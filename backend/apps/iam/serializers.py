@@ -8,8 +8,48 @@ from .models import (
     Employee,
     EmployeeGroup,
     Organization,
+    Permission,
+    Role,
+    RoleAssignment,
     ServiceArea,
 )
+
+
+class PermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Permission
+        fields = ["id", "code", "name", "module"]
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    data_scope_label = serializers.CharField(source="get_data_scope_display", read_only=True)
+    permission_codes = serializers.SerializerMethodField()
+    permission_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Role
+        fields = [
+            "id", "code", "name", "data_scope", "data_scope_label",
+            "permissions", "permission_codes", "permission_count", "is_active",
+        ]
+        extra_kwargs = {"permissions": {"required": False}}
+
+    def get_permission_codes(self, obj):
+        return list(obj.permissions.values_list("code", flat=True))
+
+    def get_permission_count(self, obj):
+        return obj.permissions.count()
+
+
+class RoleAssignmentSerializer(serializers.ModelSerializer):
+    role_code = serializers.CharField(source="role.code", read_only=True)
+    role_name = serializers.CharField(source="role.name", read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True, default="")
+    organization_name = serializers.CharField(source="organization.name", read_only=True, default="")
+
+    class Meta:
+        model = RoleAssignment
+        fields = ["id", "user", "username", "role", "role_code", "role_name", "organization", "organization_name"]
 
 
 class OrganizationSerializer(serializers.ModelSerializer):

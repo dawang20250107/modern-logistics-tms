@@ -96,7 +96,7 @@ export function DriverPortalPage() {
           <button 
             className="btn-primary" 
             style={{ width: "100%", marginTop: 30, padding: 16, fontSize: 16, borderRadius: 12, fontWeight: "bold" }} 
-            disabled={!phone && !idTail} 
+            disabled={!phone || idTail.length !== 6}
             onClick={login}
           >
             安 全 登 录

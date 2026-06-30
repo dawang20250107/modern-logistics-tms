@@ -11,11 +11,21 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
+from apps.core.throttling import DriverLoginRateThrottle
 
 from .models import DriverCheckin, DriverReminder, Waybill
 
 _SIGNER = TimestampSigner(salt="driver-portal")
 _TOKEN_MAX_AGE = 7 * 24 * 3600
+
+
+def _coord(value):
+    """坐标容错：非法/越界返回 None，避免脏数据导致 500。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if -180.0 <= v <= 180.0 else None
 _ACTIVE_WB = [
     Waybill.STATUS_DISPATCHED, Waybill.STATUS_LOADED, Waybill.STATUS_DEPARTED,
     Waybill.STATUS_IN_TRANSIT, Waybill.STATUS_ARRIVED, Waybill.STATUS_PENDING_DISPATCH,
@@ -50,20 +60,24 @@ class _DriverPublic(APIView):
 
 
 class DriverLoginView(_DriverPublic):
-    """手机号 + 身份证后6位 登录。"""
+    """手机号 + 身份证后6位 登录（双因子：两者必填且必须同时匹配）。"""
+
+    throttle_classes = [DriverLoginRateThrottle]
 
     def post(self, request):
-        from apps.masterdata.credential_ocr import match_driver
+        from apps.masterdata.models import Driver
 
         phone = (request.data.get("phone") or "").strip()
         id_tail = (request.data.get("id_tail") or "").strip()
-        from apps.masterdata.models import Driver
-
-        driver = Driver.objects.filter(phone=phone).first() if phone else None
-        if driver is None and id_tail:
-            driver = match_driver(id_tail=id_tail)
-        if driver is None or (id_tail and driver.id_no and not driver.id_no.endswith(id_tail)):
-            raise AppError("DRIVER_LOGIN_FAILED", "手机号或身份证后6位不匹配。", status=401)
+        # 必须同时提供手机号与身份证后6位（防止仅凭手机号登录）
+        if not phone or not id_tail:
+            raise AppError("DRIVER_LOGIN_REQUIRED", "请输入手机号与身份证后 6 位。", status=400)
+        if not id_tail.isdigit() or len(id_tail) != 6:
+            raise AppError("DRIVER_LOGIN_REQUIRED", "身份证后 6 位格式不正确。", status=400)
+        driver = Driver.objects.filter(phone=phone).first()
+        # 始终校验身份证后6位；档案缺身份证号则无法验证身份，拒绝登录
+        if driver is None or not driver.id_no or not driver.id_no.endswith(id_tail):
+            raise AppError("DRIVER_LOGIN_FAILED", "手机号或身份证后 6 位不匹配。", status=401)
         return Response({
             "token": _issue_token(driver),
             "driver": {"id": str(driver.id), "name": driver.name, "phone": driver.phone,
@@ -125,11 +139,11 @@ class DriverCheckinView(_DriverPublic):
         node = request.data.get("node")
         if node not in dict(DriverCheckin.NODE_CHOICES):
             raise AppError("INVALID_NODE", "打卡节点非法。", status=400)
-        lat = request.data.get("lat") or None
-        lng = request.data.get("lng") or None
+        lat = _coord(request.data.get("lat"))
+        lng = _coord(request.data.get("lng"))
         checkin = DriverCheckin(
             waybill=wb, driver=driver, node=node, lat=lat, lng=lng,
-            note=request.data.get("note", ""),
+            note=(request.data.get("note", "") or "")[:255],
         )
         photo = request.FILES.get("photo")
         if photo:

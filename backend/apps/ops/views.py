@@ -38,6 +38,15 @@ def _current_user_or_none(request):
     return user if isinstance(user, get_user_model()) else None
 
 
+def _valid_coord(value) -> bool:
+    """轨迹坐标校验：可转 float 且在合理经纬度范围内。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return -180.0 <= v <= 180.0
+
+
 def _expense_payload(item):
     from apps.finance.cost_items import item_label, payee_label
 
@@ -902,20 +911,28 @@ class TrackingIngestView(APIView):
     由 Celery 任务 ops.flush_tracking_points 批量 bulk_create（beat 每 5s 兜底）。
     """
 
+    MAX_POINTS = 1000
+
     def post(self, request):
         points = request.data.get("points", []) or []
+        if not isinstance(points, list):
+            raise AppError("TRACK_POINTS_INVALID", "points 必须为数组。", status=400)
+        if len(points) > self.MAX_POINTS:
+            raise AppError("TRACK_POINTS_TOO_MANY", f"单次最多上报 {self.MAX_POINTS} 个轨迹点。", status=413)
         redis = get_redis()
         pipe = redis.pipeline()
         queued = 0
         for point in points:
-            if not point.get("waybill_no"):
+            if not isinstance(point, dict) or not point.get("waybill_no"):
                 continue
+            if not _valid_coord(point.get("lat")) or not _valid_coord(point.get("lng")):
+                continue  # 丢弃非法坐标，避免脏数据落库
             pipe.rpush(TRACKING_QUEUE, json.dumps(point, default=str))
             queued += 1
         pipe.execute()
         if queued:
             flush_tracking_points.delay()
-        return Response({"queued": queued, "status": "queued_for_async_persist"}, status=202)
+        return Response({"queued": queued, "received": len(points), "status": "queued_for_async_persist"}, status=202)
 
 
 class PublicTrackingView(APIView):

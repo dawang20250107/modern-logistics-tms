@@ -235,6 +235,7 @@ def generate_statement(*, direction, counterparty_type, counterparty_id, start, 
     StatementLine.objects.bulk_create([
         StatementLine(
             statement=statement,
+            expense_record=r,
             waybill_no=r.waybill.waybill_no if r.waybill else "",
             expense_item_code=r.expense_item_code,
             amount=r.amount,
@@ -243,6 +244,60 @@ def generate_statement(*, direction, counterparty_type, counterparty_id, start, 
         for r in records
     ])
     return statement
+
+
+# 异常审计阈值：超出同科目历史均值 50% 且绝对超出 ≥ 50 元才标红，避免小额噪声误报
+ANOMALY_RATIO = Decimal("1.5")
+ANOMALY_FLOOR = Decimal("50")
+ANOMALY_MIN_SAMPLES = 3
+
+
+def audit_statement(statement) -> dict:
+    """AI 异常审计：按「同费用科目 + 同账单方向」的历史均值，检出本单子流水中的过高费用。
+
+    非模拟——对每行查询该科目（不含自身）的历史 ExpenseRecord 均值作为基线，
+    超出基线 50% 且绝对差额不低于 50 元才标红；样本不足 3 笔不下结论。
+    审计结果回写 StatementLine（供前端展示）与关联 ExpenseRecord.risk_status
+    （供 AI 工作台 expense_risk_check 等下游复用同一份风险信号）。
+    """
+    from django.db.models import Avg, Count
+    from django.utils import timezone
+
+    from .models import ExpenseRecord, StatementLine
+
+    lines = list(statement.lines.select_related("expense_record"))
+    anomaly_count = 0
+    for line in lines:
+        stats = (
+            ExpenseRecord.objects.filter(
+                direction=statement.direction, expense_item_code=line.expense_item_code
+            )
+            .exclude(id=line.expense_record_id)
+            .aggregate(avg=Avg("amount"), n=Count("id"))
+        )
+        baseline, n = stats["avg"], stats["n"]
+        if baseline is None or n < ANOMALY_MIN_SAMPLES:
+            line.baseline_avg = None
+            line.deviation_pct = None
+            line.is_anomaly = False
+            continue
+        line.baseline_avg = baseline
+        line.deviation_pct = round((line.amount - baseline) / baseline * 100, 1) if baseline else None
+        line.is_anomaly = bool(
+            line.amount > baseline * ANOMALY_RATIO and (line.amount - baseline) >= ANOMALY_FLOOR
+        )
+        if line.is_anomaly:
+            anomaly_count += 1
+        if line.expense_record_id:
+            new_status = "high_deviation" if line.is_anomaly else "normal"
+            if line.expense_record.risk_status != new_status:
+                ExpenseRecord.objects.filter(id=line.expense_record_id).update(risk_status=new_status)
+
+    if lines:
+        StatementLine.objects.bulk_update(lines, ["is_anomaly", "baseline_avg", "deviation_pct"])
+    statement.audited_at = timezone.now()
+    statement.save(update_fields=["audited_at", "updated_at"])
+    return {"total_lines": len(lines), "anomaly_count": anomaly_count, "audited_at": statement.audited_at}
 
 
 def _counterparty_name(counterparty_type, counterparty_id) -> str:

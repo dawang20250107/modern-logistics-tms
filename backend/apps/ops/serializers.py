@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     Contract,
+    ExceptionEvent,
     ExceptionRecord,
     Order,
     OrderAttachment,
@@ -201,6 +202,14 @@ class ExceptionSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["status"]
+
+
+class ExceptionEventSerializer(serializers.ModelSerializer):
+    actor_name = serializers.CharField(source="actor.username", read_only=True, default="")
+
+    class Meta:
+        model = ExceptionEvent
+        fields = ["id", "event_type", "from_status", "to_status", "actor_name", "note", "payload", "event_time"]
 
 
 class ReceiptSerializer(serializers.ModelSerializer):

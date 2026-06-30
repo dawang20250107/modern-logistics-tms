@@ -104,7 +104,10 @@ class WebhookDeliverySerializer(serializers.ModelSerializer):
 class StatementLineSerializer(serializers.ModelSerializer):
     class Meta:
         model = StatementLine
-        fields = ["id", "waybill_no", "expense_item_code", "amount", "occurred_at"]
+        fields = [
+            "id", "waybill_no", "expense_item_code", "amount", "occurred_at",
+            "is_anomaly", "baseline_avg", "deviation_pct",
+        ]
 
 
 class StatementSerializer(serializers.ModelSerializer):
@@ -116,9 +119,9 @@ class StatementSerializer(serializers.ModelSerializer):
         fields = [
             "id", "statement_no", "direction", "counterparty_type", "counterparty_id", "counterparty_name",
             "period_start", "period_end", "total_amount", "item_count", "external_total", "diff",
-            "status", "confirmed_at", "created_at", "lines",
+            "status", "confirmed_at", "audited_at", "created_at", "lines",
         ]
-        read_only_fields = ["status", "total_amount", "item_count", "confirmed_at"]
+        read_only_fields = ["status", "total_amount", "item_count", "confirmed_at", "audited_at"]
 
 
 class StatementListSerializer(StatementSerializer):

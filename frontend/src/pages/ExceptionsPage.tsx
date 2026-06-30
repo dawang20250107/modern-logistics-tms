@@ -3,7 +3,8 @@ import { useState, Fragment } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { toast } from "../api/toast";
-import type { ExceptionRecord, Paginated } from "../api/types";
+import type { ExceptionEvent, ExceptionRecord, Paginated } from "../api/types";
+import { EXC_EVENT_LABEL } from "../api/types";
 import { useAuth } from "../auth/auth";
 import { IconSparkles, IconAlert } from "../components/Icons";
 
@@ -35,7 +36,10 @@ export function ExceptionsPage() {
     queryKey: ["exceptions"],
     queryFn: () => apiGet<Paginated<ExceptionRecord>>("/exceptions?page_size=100"),
   });
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["exceptions"] });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["exceptions"] });
+    queryClient.invalidateQueries({ queryKey: ["exception-timeline"] });
+  };
 
   const create = useMutation({
     mutationFn: () => apiPost("/exceptions", { exception_type: type, description: desc, level }),
@@ -71,6 +75,12 @@ export function ExceptionsPage() {
       toast.error("AI 服务调用失败");
       setResolvingId("");
     }
+  });
+
+  const timeline = useQuery({
+    queryKey: ["exception-timeline", expandedId],
+    queryFn: () => apiGet<ExceptionEvent[]>(`/exceptions/${expandedId}/timeline`),
+    enabled: Boolean(expandedId),
   });
 
   const items = list.data?.items ?? [];
@@ -240,6 +250,29 @@ export function ExceptionsPage() {
                               )}
                             </div>
 
+                          </div>
+
+                          {/* 处置全过程事件溯源：立案/指派/处理/AI诊断/闭环，真实留痕 */}
+                          <div style={{ marginTop: 16, padding: "16px 20px", background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 12 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--ink-2)", fontWeight: "bold" }}>
+                              <span>🕒</span> 处置全过程留痕
+                            </div>
+                            {timeline.isLoading ? (
+                              <span className="muted small">加载处置流水…</span>
+                            ) : (timeline.data?.length ?? 0) === 0 ? (
+                              <span className="muted small">暂无留痕</span>
+                            ) : (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                {(timeline.data ?? []).map((ev) => (
+                                  <div key={ev.id} style={{ display: "flex", gap: 10, fontSize: 12, alignItems: "baseline" }}>
+                                    <span className="tag" style={{ background: "rgba(0,0,0,0.04)", flexShrink: 0 }}>{EXC_EVENT_LABEL[ev.event_type] ?? ev.event_type}</span>
+                                    <span className="muted mono small" style={{ flexShrink: 0 }}>{new Date(ev.event_time).toLocaleString()}</span>
+                                    <span className="muted small">{ev.actor_name || "系统"}</span>
+                                    {ev.note && <span className="small" style={{ color: "var(--ink-2)", flex: 1 }}>{ev.note.length > 60 ? `${ev.note.slice(0, 60)}…` : ev.note}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>

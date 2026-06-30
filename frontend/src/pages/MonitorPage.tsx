@@ -79,7 +79,9 @@ export function MonitorPage() {
   const offline = vehicles.filter((v) => !v.online);
 
   const handleActionClick = (label: string) => {
-    toast.success(`已触发指令「${label}」：系统已模拟外呼拨号或成功发送群消息！`);
+    // 微信/电话外呼为预留集成（参见 apps.integrations.wechat，需配置企业微信凭证后接入），
+    // 此前的版本会谎称"已外呼/已发送"，现改为如实告知通道未启用，避免调度误以为已联系到司机。
+    toast.info(`「${label}」对应的外呼/微信通道尚未配置（预留集成），请改用电话或企业微信直接联系。`);
   };
 
   return (

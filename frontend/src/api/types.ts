@@ -224,6 +224,20 @@ export interface ExceptionRecord {
   created_at: string;
 }
 
+export interface ExceptionEvent {
+  id: string;
+  event_type: string;
+  from_status: string;
+  to_status: string;
+  actor_name: string;
+  note: string;
+  payload: Record<string, unknown>;
+  event_time: string;
+}
+export const EXC_EVENT_LABEL: Record<string, string> = {
+  create: "立案", assign: "指派", handle: "处理", ai_resolve: "AI 诊断", close: "闭环",
+};
+
 export interface Receipt {
   id: string;
   waybill: string;
@@ -478,6 +492,9 @@ export interface StatementLine {
   expense_item_code: string;
   amount: string;
   occurred_at: string | null;
+  is_anomaly: boolean;
+  baseline_avg: string | null;
+  deviation_pct: string | null;
 }
 export interface Statement {
   id: string;
@@ -493,8 +510,15 @@ export interface Statement {
   external_total: string;
   diff: string;
   status: string;
+  audited_at: string | null;
   created_at: string;
   lines?: StatementLine[];
+}
+export interface StatementAuditResult {
+  total_lines: number;
+  anomaly_count: number;
+  audited_at: string;
+  statement: Statement;
 }
 export const STATEMENT_STATUS_LABEL: Record<string, string> = {
   draft: "草稿",

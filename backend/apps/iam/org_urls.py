@@ -3,6 +3,7 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
+from .auth_views import LoginAuditViewSet
 from .views import (
     AccountHandoverViewSet,
     CoverageResolveView,
@@ -26,6 +27,7 @@ router.register("service-areas", ServiceAreaViewSet, basename="service-area")
 router.register("handovers", AccountHandoverViewSet, basename="account-handover")
 router.register("roles", RoleViewSet, basename="role")
 router.register("permissions", PermissionViewSet, basename="permission")
+router.register("login-audit", LoginAuditViewSet, basename="login-audit")
 
 urlpatterns = [
     path("overview", OrgOverviewView.as_view(), name="org-overview"),

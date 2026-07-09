@@ -259,6 +259,11 @@ SLOW_REQUEST_MS = env.int("SLOW_REQUEST_MS", default=800)
 # ── 调度合规：证件过期车辆是否硬阻断派车（默认阻断，不上违规车）──
 DISPATCH_BLOCK_ON_EXPIRED = env.bool("DISPATCH_BLOCK_ON_EXPIRED", default=True)
 
+# ── 登录失败锁定：窗口内连续失败达阈值即锁定一段时间（防暴力破解）──
+LOGIN_MAX_FAILURES = env.int("LOGIN_MAX_FAILURES", default=5)
+LOGIN_LOCKOUT_MINUTES = env.int("LOGIN_LOCKOUT_MINUTES", default=15)
+LOGIN_FAILURE_WINDOW_MINUTES = env.int("LOGIN_FAILURE_WINDOW_MINUTES", default=15)
+
 # ── 运满满/满帮 开放平台（调车运费比价）────────────────────
 YMM_BASE_URL = env("YMM_BASE_URL", default="https://qa-open.ymm56.com")
 YMM_APP_KEY = env("YMM_APP_KEY", default="")

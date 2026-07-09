@@ -7,6 +7,7 @@ from .models import (
     Department,
     Employee,
     EmployeeGroup,
+    LoginAttempt,
     Organization,
     Permission,
     Role,
@@ -134,6 +135,19 @@ class ServiceAreaSerializer(serializers.ModelSerializer):
             "province", "city", "district", "region_code", "region_name",
             "priority", "note", "is_active",
         ]
+
+
+class LoginAttemptSerializer(serializers.ModelSerializer):
+    result_label = serializers.CharField(source="get_result_display", read_only=True)
+    username_display = serializers.CharField(source="username", read_only=True)
+
+    class Meta:
+        model = LoginAttempt
+        fields = [
+            "id", "username", "username_display", "user", "success",
+            "result", "result_label", "ip", "user_agent", "created_at",
+        ]
+        read_only_fields = fields
 
 
 class AccountHandoverSerializer(serializers.ModelSerializer):

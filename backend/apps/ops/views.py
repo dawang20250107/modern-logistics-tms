@@ -411,7 +411,9 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         return Response(WaybillSerializer(merged).data, status=201)
 
 
-class OrderViewSet(viewsets.ModelViewSet):
+class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+    # 订单本身无组织外键，按建单人所属组织归属其数据范围（组织子树可见）
+    org_field = "created_by__organization"
     queryset = (
         Order.objects.select_related("customer", "created_by", "claimed_by")
         .prefetch_related("waybills", "cargo_items", "stops", "attachments")
@@ -839,7 +841,9 @@ class DriverReminderViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(reminder).data)
 
 
-class ExceptionViewSet(viewsets.ModelViewSet):
+class ExceptionViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+    # 异常挂在运单上，按运单组织归属其数据范围
+    org_field = "waybill__organization"
     queryset = ExceptionRecord.objects.select_related("waybill", "assignee").all()
     serializer_class = ExceptionSerializer
     filterset_fields = ["exception_type", "status", "level", "source", "waybill"]
@@ -963,7 +967,9 @@ class ExceptionViewSet(viewsets.ModelViewSet):
         })
 
 
-class ReceiptViewSet(viewsets.ModelViewSet):
+class ReceiptViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+    # 回单挂在运单上，按运单组织归属其数据范围
+    org_field = "waybill__organization"
     queryset = Receipt.objects.select_related("waybill").all()
     serializer_class = ReceiptSerializer
     filterset_fields = ["waybill", "status", "ocr_status"]

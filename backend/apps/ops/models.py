@@ -369,6 +369,8 @@ class Waybill(BaseModel, OrgScopedModel):
     STATUS_DEPARTED = "departed"
     STATUS_IN_TRANSIT = "in_transit"
     STATUS_ARRIVED = "arrived"
+    STATUS_PARTIALLY_SIGNED = "partially_signed"
+    STATUS_REJECTED = "rejected"
     STATUS_SIGNED = "signed"
     STATUS_DELIVERED = "delivered"
     STATUS_SETTLED = "settled"
@@ -382,6 +384,8 @@ class Waybill(BaseModel, OrgScopedModel):
         (STATUS_DEPARTED, "已发车"),
         (STATUS_IN_TRANSIT, "运输中"),
         (STATUS_ARRIVED, "已到达"),
+        (STATUS_PARTIALLY_SIGNED, "部分签收"),
+        (STATUS_REJECTED, "已拒收"),
         (STATUS_SIGNED, "已签收"),
         (STATUS_DELIVERED, "已送达"),
         (STATUS_SETTLED, "已结算"),
@@ -738,6 +742,17 @@ class Receipt(BaseModel):
     signed_at = models.DateTimeField(null=True, blank=True)
     signature = models.TextField(blank=True, help_text="电子签名（dataURL/base64）")
     sign_source = models.CharField(max_length=16, blank=True, help_text="driver/customer")
+    # 签收结果：整签 / 部分签收 / 拒收（货损货差记数量差，供理赔与对账用）
+    OUTCOME_FULL = "full"
+    OUTCOME_PARTIAL = "partial"
+    OUTCOME_REJECTED = "rejected"
+    OUTCOME_CHOICES = [(OUTCOME_FULL, "整签"), (OUTCOME_PARTIAL, "部分签收"), (OUTCOME_REJECTED, "拒收")]
+    outcome = models.CharField(max_length=16, choices=OUTCOME_CHOICES, default=OUTCOME_FULL)
+    total_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="应收件数/数量")
+    signed_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="实收件数/数量")
+    damaged_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="货损数量")
+    shortage_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="货差（短少）数量")
+    rejection_reason = models.CharField(max_length=255, blank=True, help_text="拒收/异常原因")
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="uploaded_receipts"
     )

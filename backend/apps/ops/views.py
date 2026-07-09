@@ -91,6 +91,8 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         "dispatch_recommendation": "waybill.view",
         "dispatch_plan": "waybill.view",
         "sign": "waybill.manage",
+        "partial_sign": "waybill.manage",
+        "reject": "waybill.manage",
         "collection": "waybill.view",
         "collect_cod_action": "waybill.manage",
         "remit_cod_action": "waybill.manage",
@@ -338,6 +340,50 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         from .serializers import ReceiptSerializer
 
         return Response({"waybill_no": waybill.waybill_no, "status": waybill.status, "receipt": ReceiptSerializer(receipt).data}, status=201)
+
+    @action(detail=True, methods=["post"], url_path="partial-sign")
+    def partial_sign(self, request, waybill_no=None):
+        """部分签收（货损货差）：记应收/实收/货损/短少数量，落回单 + 自动立货损异常。"""
+        from .serializers import ReceiptSerializer
+        from .services import partial_sign_waybill
+
+        waybill = self.get_object()
+        receipt = partial_sign_waybill(
+            waybill,
+            total_quantity=request.data.get("total_quantity", 0),
+            signed_quantity=request.data.get("signed_quantity", 0),
+            damaged_quantity=request.data.get("damaged_quantity", 0),
+            shortage_quantity=request.data.get("shortage_quantity", 0),
+            signatory=request.data.get("signatory", ""),
+            signature=request.data.get("signature", ""),
+            file_url=request.data.get("file_url", ""),
+            sign_source=request.data.get("sign_source", "driver"),
+            note=request.data.get("note", ""),
+            operator=request.user,
+        )
+        return Response(
+            {"waybill_no": waybill.waybill_no, "status": waybill.status, "receipt": ReceiptSerializer(receipt).data},
+            status=201,
+        )
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, waybill_no=None):
+        """整车拒收：记拒收原因，落拒收回单 + 自动立客诉异常，运单进入已拒收态。"""
+        from .serializers import ReceiptSerializer
+        from .services import reject_waybill
+
+        waybill = self.get_object()
+        receipt = reject_waybill(
+            waybill,
+            reason=request.data.get("reason", ""),
+            signatory=request.data.get("signatory", ""),
+            sign_source=request.data.get("sign_source", "driver"),
+            operator=request.user,
+        )
+        return Response(
+            {"waybill_no": waybill.waybill_no, "status": waybill.status, "receipt": ReceiptSerializer(receipt).data},
+            status=201,
+        )
 
     @action(detail=True, methods=["get"], url_path="collection")
     def collection(self, request, waybill_no=None):

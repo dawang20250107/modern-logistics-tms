@@ -6,6 +6,7 @@ from .models import (
     Department,
     Employee,
     EmployeeGroup,
+    LoginAttempt,
     Organization,
     Permission,
     Role,
@@ -82,3 +83,11 @@ class ApiKeyAdmin(admin.ModelAdmin):
     search_fields = ("name", "key_id")
     list_filter = ("is_active",)
     readonly_fields = ("last_used_at",)
+
+
+@admin.register(LoginAttempt)
+class LoginAttemptAdmin(admin.ModelAdmin):
+    list_display = ("username", "success", "result", "ip", "created_at")
+    search_fields = ("username", "ip")
+    list_filter = ("success", "result")
+    readonly_fields = ("username", "user", "success", "result", "ip", "user_agent", "created_at")

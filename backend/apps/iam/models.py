@@ -307,6 +307,47 @@ class ServiceArea(BaseModel):
         return f"{self.get_area_type_display()}:{self.region_name}"
 
 
+class LoginAttempt(BaseModel):
+    """登录审计：每次登录尝试（成功/失败）留痕，供安全审计与失败锁定判定。
+
+    失败锁定的计数用 Redis 短缓存做（高频、可自动过期），此表是可追溯的持久流水。
+    """
+
+    RESULT_SUCCESS = "success"
+    RESULT_BAD_CREDENTIALS = "bad_credentials"
+    RESULT_INACTIVE = "inactive"
+    RESULT_LOCKED = "locked"
+    RESULT_CHOICES = [
+        (RESULT_SUCCESS, "成功"),
+        (RESULT_BAD_CREDENTIALS, "凭据错误"),
+        (RESULT_INACTIVE, "账号停用"),
+        (RESULT_LOCKED, "已锁定"),
+    ]
+
+    username = models.CharField(max_length=150, db_index=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="login_attempts",
+    )
+    success = models.BooleanField(default=False)
+    result = models.CharField(max_length=32, choices=RESULT_CHOICES, default=RESULT_BAD_CREDENTIALS)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "iam_login_attempt"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["username", "created_at"]),
+            models.Index(fields=["success", "created_at"]),
+        ]
+        verbose_name = "登录审计"
+        verbose_name_plural = "登录审计"
+
+    def __str__(self) -> str:
+        return f"{self.username} {self.result} @{self.created_at:%Y-%m-%d %H:%M}"
+
+
 class AccountHandover(BaseModel):
     """账号移交：将离职/转岗员工的下属、所辖部门改挂他人，并停用原账号（留痕可审计）。"""
 

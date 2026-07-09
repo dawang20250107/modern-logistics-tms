@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
+from apps.iam.scoping import OrgScopedQuerysetMixin
 
 from .models import (
     ExpenseItem,
@@ -78,23 +79,30 @@ class ExpenseItemViewSet(viewsets.ModelViewSet):
     search_fields = ["code", "name"]
 
 
-class ExpenseRecordViewSet(viewsets.ModelViewSet):
+class ExpenseRecordViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+    # 费用按其运单组织归属数据范围；无运单的费用（org 为空）不误伤，对全体可见
+    org_field = "waybill__organization"
+    org_scope_include_null = True
     queryset = ExpenseRecord.objects.select_related("waybill").all()
     serializer_class = ExpenseRecordSerializer
     filterset_fields = ["direction", "risk_status", "waybill"]
     search_fields = ["expense_item_code", "external_id"]
 
 
-class PaymentRequestViewSet(viewsets.ModelViewSet):
+class PaymentRequestViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+    org_field = "waybill__organization"
+    org_scope_include_null = True
     queryset = PaymentRequest.objects.select_related("waybill").all()
     serializer_class = PaymentRequestSerializer
     filterset_fields = ["status"]
     search_fields = ["request_no"]
 
 
-class ReimbursementViewSet(viewsets.ModelViewSet):
+class ReimbursementViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     """内部简易报销：提交 → 审批(生成应付+付款申请) → 付款。"""
 
+    org_field = "waybill__organization"
+    org_scope_include_null = True
     filterset_fields = ["status", "category", "waybill"]
     search_fields = ["reimb_no", "order_no", "reason"]
     ordering_fields = ["created_at", "amount"]

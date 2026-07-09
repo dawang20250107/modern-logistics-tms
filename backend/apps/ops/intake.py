@@ -132,6 +132,7 @@ _ORDER_FIELDS = (
     "cargo_desc", "cargo_quantity", "cargo_weight_ton", "cargo_volume_cbm",
     "cargo_value", "package_type", "is_hazardous", "temperature_range",
     "source_type", "business_type", "priority", "settlement_type", "quoted_amount",
+    "freight_term", "freight_payer", "cod_amount",
     "expected_pickup_at", "expected_delivery_at", "remark",
 )
 
@@ -727,6 +728,11 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         cargo_quantity=order.cargo_quantity,
         cargo_weight_ton=order.cargo_weight_ton,
         cargo_volume_cbm=order.cargo_volume_cbm,
+        # 运费付款方式与代收货款随订单带入执行层
+        freight_term=order.freight_term,
+        freight_payer=order.freight_payer,
+        cod_amount=order.cod_amount,
+        cod_status=Order.COD_PENDING if Decimal(str(order.cod_amount or 0)) > 0 else Order.COD_NONE,
         status=Waybill.STATUS_PENDING_DISPATCH,
     )
     # 点位拷贝进执行层（计划时间 → 实际到达由围栏/手动盖戳）

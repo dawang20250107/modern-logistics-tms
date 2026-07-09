@@ -98,6 +98,9 @@ class WaybillSerializer(serializers.ModelSerializer):
     driver_employment = serializers.CharField(source="driver.get_employment_type_display", read_only=True, default="")
     drivers = serializers.SerializerMethodField()
     cargo = serializers.SerializerMethodField()
+    freight_term_label = serializers.CharField(source="get_freight_term_display", read_only=True)
+    freight_payer_label = serializers.CharField(source="get_freight_payer_display", read_only=True)
+    cod_status_label = serializers.CharField(source="get_cod_status_display", read_only=True)
 
     class Meta:
         model = Waybill
@@ -107,6 +110,8 @@ class WaybillSerializer(serializers.ModelSerializer):
             "route_name", "ai_conversation_id", "origin", "destination", "status", "dispatch_status", "risk_level",
             "receipt_status", "eta_drift_minutes", "planned_arrival", "estimated_arrival",
             "loaded_at", "departed_at", "arrived_at", "signed_at",
+            "freight_term", "freight_term_label", "freight_payer", "freight_payer_label",
+            "cod_amount", "cod_status", "cod_status_label", "cod_collected_at", "cod_remitted_at",
             "cargo", "created_at",
         ]
 
@@ -181,6 +186,7 @@ class WaybillWriteSerializer(serializers.ModelSerializer):
             "route_name", "origin", "destination", "status", "dispatch_status", "risk_level",
             "receipt_status", "eta_drift_minutes", "cargo_quantity", "cargo_weight_ton",
             "cargo_volume_cbm", "planned_arrival", "estimated_arrival",
+            "freight_term", "freight_payer", "cod_amount", "cod_status",
         ]
 
 
@@ -241,6 +247,8 @@ class OrderSerializer(serializers.ModelSerializer):
     cargo_items = OrderCargoItemSerializer(many=True, read_only=True)
     stops = OrderStopSerializer(many=True, read_only=True)
     attachments = OrderAttachmentSerializer(many=True, read_only=True)
+    freight_term_label = serializers.CharField(source="get_freight_term_display", read_only=True)
+    freight_payer_label = serializers.CharField(source="get_freight_payer_display", read_only=True)
 
     def get_waybill_nos(self, obj) -> list[str]:
         # 依赖视图层 prefetch_related("waybills") 避免 N+1；拆单后可能多张
@@ -251,6 +259,8 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = [
             "id", "order_no", "customer", "customer_name", "channel", "source",
             "source_type", "business_type", "priority", "settlement_type", "status",
+            "freight_term", "freight_term_label", "freight_payer", "freight_payer_label",
+            "cod_amount", "cod_status",
             "contact_name", "contact_phone", "origin", "destination",
             "pickup_address", "pickup_contact_name", "pickup_contact_phone",
             "delivery_address", "delivery_contact_name", "delivery_contact_phone",

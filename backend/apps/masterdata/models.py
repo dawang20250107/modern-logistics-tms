@@ -13,6 +13,12 @@ class Customer(BaseModel, SoftDeleteModel):
     contact_phone = models.CharField(max_length=32, blank=True)
     wechat_group = models.CharField(max_length=120, blank=True, help_text="所属微信群聊（需求入口）")
     settlement_type = models.CharField(max_length=32, blank=True)
+    # 月结账期与信用管理
+    credit_limit = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, help_text="授信额度（0 表示不限）"
+    )
+    credit_days = models.IntegerField(default=30, help_text="账期天数（账单日后 N 天到期）")
+    billing_day = models.IntegerField(default=1, help_text="账单日（每月几号出账，1-28）")
     is_active = models.BooleanField(default=True)
 
     class Meta:

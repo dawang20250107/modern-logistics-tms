@@ -64,6 +64,38 @@ class Order(BaseModel, SoftDeleteModel):
     PRIORITY_CHOICES = [("normal", "普通"), ("urgent", "加急"), ("vip", "VIP")]
     SETTLEMENT_CHOICES = [("monthly", "月结"), ("cash", "现结"), ("prepaid", "预付")]
 
+    # 运费付款方式（中国货运核心：运费何时付）——与账期 settlement_type 正交
+    FREIGHT_PREPAID = "prepaid"   # 现付/寄付：发货方提货时付
+    FREIGHT_COLLECT = "collect"   # 到付：收货方送达时付
+    FREIGHT_RECEIPT = "receipt"   # 回单付：回单收回后付
+    FREIGHT_MONTHLY = "monthly"   # 月结：按账期结算
+    FREIGHT_TERM_CHOICES = [
+        (FREIGHT_PREPAID, "现付"),
+        (FREIGHT_COLLECT, "到付"),
+        (FREIGHT_RECEIPT, "回单付"),
+        (FREIGHT_MONTHLY, "月结"),
+    ]
+    # 运费承担方（谁出这笔运费）
+    PAYER_SHIPPER = "shipper"       # 发货方/寄付方
+    PAYER_CONSIGNEE = "consignee"   # 收货方/到付方
+    PAYER_THIRD = "third_party"     # 第三方
+    FREIGHT_PAYER_CHOICES = [
+        (PAYER_SHIPPER, "发货方"),
+        (PAYER_CONSIGNEE, "收货方"),
+        (PAYER_THIRD, "第三方"),
+    ]
+    # 代收货款 COD：司机代货主向收货人收取的货款（非运费），送达后回款给货主
+    COD_NONE = "none"
+    COD_PENDING = "pending"       # 待收
+    COD_COLLECTED = "collected"   # 已收（司机已向收货人收妥）
+    COD_REMITTED = "remitted"     # 已回款给货主
+    COD_STATUS_CHOICES = [
+        (COD_NONE, "无代收"),
+        (COD_PENDING, "待代收"),
+        (COD_COLLECTED, "已代收"),
+        (COD_REMITTED, "已回款"),
+    ]
+
     # 订单生命周期：建单→确认→进池→（调度认领）→派单转运单→完成→对账
     STATUS_DRAFT = "draft"
     STATUS_PENDING_CONFIRM = "pending_confirm"
@@ -94,6 +126,16 @@ class Order(BaseModel, SoftDeleteModel):
     business_type = models.CharField(max_length=16, choices=BUSINESS_TYPE_CHOICES, default=BIZ_FTL)
     priority = models.CharField(max_length=16, choices=PRIORITY_CHOICES, default="normal")
     settlement_type = models.CharField(max_length=16, choices=SETTLEMENT_CHOICES, default="monthly")
+    freight_term = models.CharField(
+        max_length=16, choices=FREIGHT_TERM_CHOICES, default=FREIGHT_PREPAID, help_text="运费付款方式"
+    )
+    freight_payer = models.CharField(
+        max_length=16, choices=FREIGHT_PAYER_CHOICES, default=PAYER_SHIPPER, help_text="运费承担方"
+    )
+    cod_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, help_text="代收货款金额（司机代货主向收货人收取）"
+    )
+    cod_status = models.CharField(max_length=16, choices=COD_STATUS_CHOICES, default=COD_NONE)
     status = models.CharField(max_length=32, default=STATUS_PENDING_CONFIRM, db_index=True)
 
     # 联系人（兼容旧字段：通用联系人 = 发货联系人）
@@ -405,6 +447,19 @@ class Waybill(BaseModel, OrgScopedModel):
     cargo_quantity = models.IntegerField(default=0)
     cargo_weight_ton = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     cargo_volume_cbm = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    # 运费付款方式与代收货款（自订单带入；司机端到付/代收依据）
+    freight_term = models.CharField(
+        max_length=16, choices=Order.FREIGHT_TERM_CHOICES, default=Order.FREIGHT_PREPAID
+    )
+    freight_payer = models.CharField(
+        max_length=16, choices=Order.FREIGHT_PAYER_CHOICES, default=Order.PAYER_SHIPPER
+    )
+    cod_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    cod_status = models.CharField(max_length=16, choices=Order.COD_STATUS_CHOICES, default=Order.COD_NONE)
+    cod_collected_at = models.DateTimeField(null=True, blank=True)
+    cod_remitted_at = models.DateTimeField(null=True, blank=True)
+
     planned_arrival = models.DateTimeField(null=True, blank=True)
     estimated_arrival = models.DateTimeField(null=True, blank=True)
     # 关键里程碑实际时间（从状态流转/围栏物化，便于 SLA 与查询）

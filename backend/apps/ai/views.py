@@ -2,12 +2,16 @@ from django.db.models import Q
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import mixins, viewsets
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.context import request_id_var
 from apps.core.exceptions import AppError
+from apps.core.throttling import OptionalScopedRateThrottle
+from apps.iam.permissions import HasPermission
+from apps.iam.scoping import scope_queryset
 from apps.ops.models import Waybill
 from apps.ops.serializers import WaybillSerializer
 
@@ -16,13 +20,25 @@ from .serializers import AgentSuggestionSerializer
 from .services.deepseek import DeepSeekClient, DeepSeekError
 from .services.tools import execute_tool, list_tools
 
+# AI/Agent 端点统一权限点：使用 AI 能力（含 LLM、Agent 编排、查单）
+PERM_AI_USE = "ai.use"
 
-class DeepSeekStatusView(APIView):
+
+class _AIAuthedView(APIView):
+    """AI 端点基类：需登录 + ai.use 权限，且按 ai scope 限流（防 token 成本 DoS）。"""
+
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = PERM_AI_USE
+    throttle_classes = [OptionalScopedRateThrottle]
+    throttle_scope = "ai"
+
+
+class DeepSeekStatusView(_AIAuthedView):
     def get(self, request):
         return Response(DeepSeekClient().status())
 
 
-class DeepSeekChatView(APIView):
+class DeepSeekChatView(_AIAuthedView):
     def post(self, request):
         messages = request.data.get("messages")
         if not isinstance(messages, list) or not messages:
@@ -39,12 +55,12 @@ class DeepSeekChatView(APIView):
         return Response({"provider": "deepseek", "model": resp.get("model"), "content": content, "raw": resp})
 
 
-class AgentToolsView(APIView):
+class AgentToolsView(_AIAuthedView):
     def get(self, request):
         return Response({"tools": list_tools()})
 
 
-class AgentToolExecuteView(APIView):
+class AgentToolExecuteView(_AIAuthedView):
     def post(self, request):
         name = request.data.get("tool_name")
         arguments = request.data.get("arguments") or {}
@@ -73,7 +89,7 @@ class AgentToolExecuteView(APIView):
         )
 
 
-class AgentChatView(APIView):
+class AgentChatView(_AIAuthedView):
     """LangGraph ReAct Agent 同步问答：自动编排工具，返回答复 + 工具轨迹 + 待确认建议。"""
 
     def post(self, request):
@@ -87,7 +103,7 @@ class AgentChatView(APIView):
         return Response(result)
 
 
-class AgentStreamView(APIView):
+class AgentStreamView(_AIAuthedView):
     """LangGraph Agent 流式问答（SSE）：逐段 token + 工具执行事件，对接实时信息流。"""
 
     def post(self, request):
@@ -105,38 +121,54 @@ class AgentStreamView(APIView):
         return response
 
 
-@api_view(["POST"])
-def query_waybill(request):
-    """自然语言查单（规则版）：按关键字检索运单；为空时返回风险/待回单运单。"""
-    query = (request.data.get("query") or "").strip()
-    queryset = Waybill.objects.select_related("customer", "carrier", "vehicle", "driver")
-    if query:
-        queryset = queryset.filter(
-            Q(waybill_no__icontains=query)
-            | Q(route_name__icontains=query)
-            | Q(customer__name__icontains=query)
-            | Q(vehicle__plate_no__icontains=query)
+class QueryWaybillView(_AIAuthedView):
+    """自然语言查单（规则版）：按关键字检索运单；为空时返回风险/待回单运单。
+
+    仅返回调用者数据范围内的运单（超管全见，否则按组织子树），杜绝跨租户查单。
+    """
+
+    def post(self, request):
+        query = (request.data.get("query") or "").strip()
+        # 按数据范围收口（组织子树），再叠加关键字过滤
+        queryset = scope_queryset(
+            Waybill.objects.select_related("customer", "carrier", "vehicle", "driver"),
+            request.user,
         )
-    else:
-        queryset = queryset.filter(
-            Q(risk_level__in=[Waybill.RISK_HIGH, Waybill.RISK_MEDIUM]) | Q(receipt_status="pending")
+        if query:
+            queryset = queryset.filter(
+                Q(waybill_no__icontains=query)
+                | Q(route_name__icontains=query)
+                | Q(customer__name__icontains=query)
+                | Q(vehicle__plate_no__icontains=query)
+            )
+        else:
+            queryset = queryset.filter(
+                Q(risk_level__in=[Waybill.RISK_HIGH, Waybill.RISK_MEDIUM]) | Q(receipt_status="pending")
+            )
+        items = list(queryset[:10])
+        risk_count = sum(1 for w in items if w.risk_level in {Waybill.RISK_HIGH, Waybill.RISK_MEDIUM})
+        return Response(
+            {
+                "answer": f"找到 {len(items)} 条相关运单，其中 {risk_count} 条存在 ETA/路线风险。",
+                "query": query,
+                "waybills": WaybillSerializer(items, many=True).data,
+            }
         )
-    items = list(queryset[:10])
-    risk_count = sum(1 for w in items if w.risk_level in {Waybill.RISK_HIGH, Waybill.RISK_MEDIUM})
-    return Response(
-        {
-            "answer": f"找到 {len(items)} 条相关运单，其中 {risk_count} 条存在 ETA/路线风险。",
-            "query": query,
-            "waybills": WaybillSerializer(items, many=True).data,
-        }
-    )
 
 
 class AgentSuggestionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    queryset = AgentSuggestion.objects.select_related("waybill").all()
     serializer_class = AgentSuggestionSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_AI_USE, "confirm": PERM_AI_USE}
     filterset_fields = ["suggestion_type", "status", "waybill"]
     search_fields = ["title", "body"]
+
+    def get_queryset(self):
+        # 建议按其运单组织归属数据范围，避免跨租户读 AI 建议
+        return scope_queryset(
+            AgentSuggestion.objects.select_related("waybill").all(),
+            self.request.user, org_field="waybill__organization", include_null=True,
+        )
 
     @action(detail=True, methods=["post"], url_path="confirm")
     def confirm(self, request, pk=None):

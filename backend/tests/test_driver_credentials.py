@@ -33,7 +33,7 @@ def test_upload_credential_triggers_ocr(client):
     assert resp.status_code == 201, resp.content
     data = resp.json()["data"]
     assert data["cred_type_label"] == "身份证"
-    assert data["ocr_status"] == "done"  # 上传即触发 OCR（离线桩）
+    assert data["ocr_status"] == "manual"  # 上传触发 OCR；无引擎→待人工录入，不造数
 
 
 @pytest.mark.django_db

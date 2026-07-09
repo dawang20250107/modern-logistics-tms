@@ -1,95 +1,74 @@
-"""司机证件 OCR（可插拔）与按 姓名+身份证后6位 检索建档。
+"""司机/车辆证件 OCR（可插拔）与按 姓名+身份证后6位 检索建档。
 
-默认离线桩实现；接入真实 OCR（百度/腾讯/阿里云 或 PaddleOCR）后替换 recognize() 即可，
-返回相同结构。证件类型 → 关注字段：
-  身份证→姓名/身份证号；驾驶证→姓名/证号/有效期；行驶证→车牌/有效期；运输证→证号/有效期。
+默认不接引擎——此时**绝不伪造**证件号/有效期。伪造未来到期日会污染合规数据、
+把过期证件"洗"成永久有效，直接架空派车时的证件到期硬阻断（安全/合规事故）。
+接入真实 OCR（百度/腾讯/阿里云 或 PaddleOCR）：设 settings.OCR_PROVIDER 并实现
+_provider_recognize，返回同结构。OCR 结果仅作**建议**，有效期须人工核验后方可生效。
 """
 
 from django.conf import settings
 
+_EMPTY_FIELDS = {"name": "", "cert_no": "", "plate_no": "", "id_no": "", "expiry_date": None}
+
 
 def recognize(credential) -> dict:
-    """智能视觉 OCR 引擎 (AI Vision OCR Simulator)。
-
-    利用高级启发式逻辑，根据上传的证件类型自动生成、提炼并返回高度逼真的结构化数据。
-    支持自动计算未来到期时间，提取车牌号、身份证号、驾驶证号等关键信息。
-    """
-    import random
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    provider = getattr(settings, "OCR_PROVIDER", "") or "ai_vision_sim"
+    """识别证件。未配置引擎时返回空字段 + status=manual（待人工录入/核验），不造数。"""
     source = credential.file.name if credential.file else credential.file_url
-    cred_type = credential.cred_type
-    
-    fields = {"name": "", "cert_no": "", "plate_no": "", "id_no": "", "expiry_date": None}
-    
-    # 模拟真实世界中 OCR 引擎对图片分析的微小延迟和随机生成高逼真度数据
-    # 1. 身份证提取 (ID Card)
-    if cred_type == "id_card":
-        fields["name"] = credential.driver.name if credential.driver else "张强"
-        # 生成逼真的 18 位身份证号 (前缀+生日+随机码)
-        fields["id_no"] = credential.driver.id_no if credential.driver and credential.driver.id_no else f"510104198{random.randint(0,9)}{random.randint(10,12)}{random.randint(10,28)}{random.randint(1000,9999)}"
-        fields["cert_no"] = fields["id_no"]
-        fields["expiry_date"] = (timezone.now() + timedelta(days=365 * 10)).date().isoformat() # 10年有效期
+    provider = getattr(settings, "OCR_PROVIDER", "") or ""
+    if not provider:
+        return {
+            "provider": "none",
+            "status": "manual",
+            "source": source,
+            "cred_type": credential.cred_type,
+            "fields": dict(_EMPTY_FIELDS),
+            "note": "未配置证件 OCR 引擎，证件信息待人工录入/核验。",
+        }
+    return _provider_recognize(provider, credential, source)
 
-    # 2. 驾驶证提取 (Driving License)
-    elif cred_type == "driving_license":
-        fields["name"] = credential.driver.name if credential.driver else "张强"
-        fields["cert_no"] = f"510104198{random.randint(0,9)}{random.randint(10,12)}{random.randint(10,28)}{random.randint(1000,9999)}"
-        fields["expiry_date"] = (timezone.now() + timedelta(days=365 * 6)).date().isoformat() # 6年有效期
-        
-    # 3. 车头/车挂行驶证提取 (Vehicle / Trailer License)
-    elif cred_type in ("vehicle_license", "trailer_license"):
-        prefixes = ["苏B", "沪A", "浙A", "粤B", "川A"]
-        fields["plate_no"] = f"{random.choice(prefixes)}{random.randint(10000, 99999)}"
-        if cred_type == "trailer_license":
-             fields["plate_no"] += "挂"
-        fields["cert_no"] = fields["plate_no"]
-        fields["name"] = "无锡智运物流科技有限公司" # 车辆所有人
-        fields["expiry_date"] = (timezone.now() + timedelta(days=365 * 1)).date().isoformat() # 1年年检有效期
 
-    # 4. 道路运输证 (Transport Cert)
-    elif cred_type == "transport_cert":
-        fields["name"] = "无锡智运物流科技有限公司"
-        fields["cert_no"] = f"交交建字{random.randint(10000000, 99999999)}号"
-        fields["expiry_date"] = (timezone.now() + timedelta(days=365 * 2)).date().isoformat()
-
+def _provider_recognize(provider: str, credential, source) -> dict:
+    """真实 OCR 引擎接入点。未实现具体 provider 时按待人工处理，绝不返回臆造字段。"""
     return {
         "provider": provider,
-        "confidence": round(random.uniform(0.92, 0.99), 4),
+        "status": "manual",
         "source": source,
-        "cred_type": cred_type,
-        "fields": fields,
-        "note": f"AI Vision 视觉分析完成 (耗时 {random.randint(120, 350)}ms)：成功框选并提取 {cred_type} 核心防伪与实体数据。",
+        "cred_type": credential.cred_type,
+        "fields": dict(_EMPTY_FIELDS),
+        "note": f"OCR 引擎 {provider} 尚未接入实现，证件信息待人工录入。",
     }
 
 
 def apply_ocr(credential) -> None:
-    """对证件执行 OCR 并回填识别字段（姓名/证号/有效期）。"""
+    """对证件执行 OCR 并（谨慎）回填。绝不覆盖人工已录入字段；有效期不自动写入
+    合规字段（仅作建议存于 ocr_result），须人工核验后手动确认，杜绝伪造到期架空阻断。"""
     result = recognize(credential)
     fields = result.get("fields", {})
     credential.ocr_result = result
-    credential.ocr_status = "done"
-    credential.holder_name = fields.get("name") or fields.get("plate_no") or credential.holder_name
-    credential.cert_no = fields.get("cert_no") or credential.cert_no
-    if fields.get("expiry_date"):
-        credential.expiry_date = fields["expiry_date"]
+    credential.ocr_status = result.get("status", "done")
+    # 仅在原字段为空时用 OCR 建议值填充（不覆盖人工录入）
+    if not credential.holder_name:
+        credential.holder_name = fields.get("name") or fields.get("plate_no") or ""
+    if not credential.cert_no:
+        credential.cert_no = fields.get("cert_no") or ""
+    # 有效期：合规关键字段，不由 OCR 自动写入（避免伪造未来到期洗白过期证件）。
+    # 真实引擎识别到的到期日留在 ocr_result 供人工核验后手动确认。
     credential.save(update_fields=[
-        "ocr_result", "ocr_status", "holder_name", "cert_no", "expiry_date", "updated_at",
+        "ocr_result", "ocr_status", "holder_name", "cert_no", "updated_at",
     ])
 
 
 def match_driver(name: str = "", id_tail: str = ""):
-    """按 姓名 + 身份证后6位 检索司机（自动带出档案的关联键）。"""
+    """按 姓名 + 身份证后6位 检索司机。要求姓名与 6 位数字尾号同时具备且唯一命中，
+    否则返回 None——避免仅凭姓名或短尾号把证件/运单错绑到他人。"""
     from .models import Driver
 
-    qs = Driver.objects.all()
-    if name:
-        qs = qs.filter(name=name)
-    if id_tail:
-        qs = qs.filter(id_no__endswith=id_tail)
-    if not name and not id_tail:
+    name = (name or "").strip()
+    id_tail = (id_tail or "").strip()
+    # 必须同时提供姓名与恰好 6 位数字的身份证尾号
+    if not name or not (id_tail.isdigit() and len(id_tail) == 6):
+        return None
+    qs = Driver.objects.filter(name=name, id_no__endswith=id_tail)
+    if qs.count() != 1:  # 无匹配或多义 → 不猜
         return None
     return qs.first()

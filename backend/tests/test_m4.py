@@ -41,4 +41,4 @@ def test_receipt_upload_runs_ocr(admin_client):
     )
     assert resp.status_code == 201, resp.content
     receipt = Receipt.objects.get(id=resp.json()["data"]["id"])
-    assert receipt.ocr_status == "done"
+    assert receipt.ocr_status == "manual"  # 无 OCR 引擎→待人工，不伪造签收人

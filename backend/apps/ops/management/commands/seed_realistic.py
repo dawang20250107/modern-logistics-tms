@@ -39,6 +39,9 @@ class Command(BaseCommand):
         self._pricing(cust, carriers)
         self._templates()
 
+        # 重置随机序列，让订单/运单/报销/对账阶段的演示分布不受上游主数据/证件阶段
+        # 随机消耗量变化影响（保证该阶段可复现，解耦证件 OCR 等改动）
+        random.seed(20260102)
         n = opts["orders"]
         completed = max(2, n // 3)
         transit = max(2, n // 3)
@@ -282,14 +285,19 @@ class Command(BaseCommand):
         stats["early"] += 1
 
     def _statements(self, carriers, stats):
+        from django.db import transaction
+
         from apps.finance.services import generate_statement
 
         end = self.now.date()
         start = end - timedelta(days=30)
         for direction, cp_type, cp in [("receivable", "customer", ""), ("payable", "carrier", str(carriers[0].id))]:
             try:
-                st = generate_statement(direction=direction, counterparty_type=cp_type,
-                                        counterparty_id=cp, start=start, end=end)
+                # savepoint 隔离：单据号偶发撞号（含快速幂等重跑同秒同号）只回滚本次，
+                # 不污染外层事务
+                with transaction.atomic():
+                    st = generate_statement(direction=direction, counterparty_type=cp_type,
+                                            counterparty_id=cp, start=start, end=end)
                 if st:
                     stats["statements"] += 1
             except Exception:  # noqa: BLE001

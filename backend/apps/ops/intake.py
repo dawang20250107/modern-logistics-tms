@@ -733,6 +733,8 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         freight_payer=order.freight_payer,
         cod_amount=order.cod_amount,
         cod_status=Order.COD_PENDING if Decimal(str(order.cod_amount or 0)) > 0 else Order.COD_NONE,
+        # 计划到达随订单承诺时效带入，激活 ETA 偏移与准班率（此前恒空导致二者在真实数据上失效）
+        planned_arrival=order.expected_delivery_at,
         status=Waybill.STATUS_PENDING_DISPATCH,
     )
     # 点位拷贝进执行层（计划时间 → 实际到达由围栏/手动盖戳）

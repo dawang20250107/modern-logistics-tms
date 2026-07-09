@@ -260,6 +260,14 @@ def _complete_order_on_delivery(waybill, to_status):
     order = waybill.order
     if order is None or order.status == Order.STATUS_COMPLETED:
         return
+    # 多运单订单（拆单/多段）：仅当全部非作废/取消子运单均已签收+，才完单，
+    # 否则货还在途却被首个签收误判完成
+    _DONE = (Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_SETTLED)
+    siblings = order.waybills.exclude(
+        status__in=(Waybill.STATUS_CANCELLED, Waybill.STATUS_VOIDED)
+    )
+    if any(sib.status not in _DONE for sib in siblings):
+        return
     from .intake import record_order_event
 
     prev = order.status

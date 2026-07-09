@@ -113,10 +113,22 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="dispatch")
     def assign(self, request, waybill_no=None):
+        """派车受理：更新受理状态，并（可选）按状态机推进——不再直写 status 绕过流转校验。"""
+        from .services import allowed_next
+
         waybill = self.get_object()
         waybill.dispatch_status = request.data.get("dispatch_status", "accepted")
-        waybill.status = request.data.get("status", Waybill.STATUS_IN_TRANSIT)
-        waybill.save(update_fields=["dispatch_status", "status", "updated_at"])
+        waybill.save(update_fields=["dispatch_status", "updated_at"])
+        target = request.data.get("status")
+        if target and target != waybill.status:
+            if target not in allowed_next(waybill.status):
+                raise AppError(
+                    "INVALID_TRANSITION",
+                    f"不允许从 {waybill.status} 流转到 {target}。合法：{allowed_next(waybill.status)}",
+                    status=409,
+                )
+            # 走状态机（盖里程碑戳 + 事件 + 订单完成/Webhook），杜绝绕过
+            transition_waybill(waybill, target, operator=request.user, remark="派车受理")
         return Response(WaybillSerializer(waybill).data)
 
     @action(detail=True, methods=["get", "post"], url_path="events")

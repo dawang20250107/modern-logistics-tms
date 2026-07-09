@@ -3,6 +3,7 @@ import { Fragment, useMemo, useState } from "react";
 
 import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
+import { hasPerm, useAuth } from "../auth/auth";
 import { toast } from "../api/toast";
 import type {
   AccountHandover,
@@ -585,16 +586,19 @@ function RbacTab() {
   );
 }
 
-const TABS: { key: Tab; label: string }[] = [
+const TABS: { key: Tab; label: string; perm?: string }[] = [
   { key: "overview", label: "经营总览" },
   { key: "org", label: "组织架构" },
   { key: "employees", label: "员工名录" },
   { key: "areas", label: "服务区划" },
-  { key: "rbac", label: "权限授权" },
+  { key: "rbac", label: "权限授权", perm: "org.rbac" },
 ];
 
 export function OrgCenterPage() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
+  // 无角色权限管理权的用户看不到「权限授权」页签（后端亦 403 兜底）
+  const tabs = TABS.filter((t) => !t.perm || hasPerm(user, t.perm));
   return (
     <div className="stack">
       <div className="panel">
@@ -603,7 +607,7 @@ export function OrgCenterPage() {
           <span className="ai-pill">超越 G7 · 汇报线 · 账号移交 · 区划路由</span>
         </div>
         <div className="form-row" style={{ gap: 6, padding: "10px 16px" }}>
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.key}
               className={tab === t.key ? "btn-primary" : "btn-ghost"}

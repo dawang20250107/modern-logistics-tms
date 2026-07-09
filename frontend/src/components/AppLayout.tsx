@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 
-import { useAuth } from "../auth/auth";
+import { hasPerm, useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
@@ -8,7 +8,7 @@ import {
   IconTruck, IconAlert, IconGitBranch, IconReceipt, IconCreditCard, IconShield, IconBox
 } from "./Icons";
 
-type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean };
+type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; perm?: string };
 type NavGroup = { title: string; items: NavItem[] };
 
 const NAV_GROUPS: NavGroup[] = [
@@ -40,7 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: "组织中台",
     items: [
-      { to: "/org", label: "企业组织中枢", icon: <IconBox size={18} /> },
+      { to: "/org", label: "企业组织中枢", icon: <IconBox size={18} />, perm: "org.view" },
     ],
   },
   {
@@ -53,7 +53,11 @@ const NAV_GROUPS: NavGroup[] = [
 
 export function AppLayout() {
   const { user, logout } = useAuth();
-  const canSee = (item: NavItem) => !item.adminOnly || user?.is_staff || user?.is_superuser;
+  const canSee = (item: NavItem) => {
+    if (item.adminOnly && !(user?.is_staff || user?.is_superuser)) return false;
+    if (item.perm && !hasPerm(user, item.perm)) return false;
+    return true;
+  };
   return (
     <div className="app">
       <aside className="side">

@@ -9,6 +9,7 @@ export interface CurrentUser {
   is_superuser: boolean;
   organization_id: string | null;
   roles: string[];
+  permissions: string[];
 }
 
 export interface Contract {

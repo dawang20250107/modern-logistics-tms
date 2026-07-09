@@ -62,3 +62,11 @@ export function useAuth(): AuthState {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
+
+/** 前端权限判定：超管（["*"]）或持有该权限点即可。与后端 effective_permissions 一致。 */
+export function hasPerm(user: CurrentUser | null, code: string): boolean {
+  if (!user) return false;
+  if (user.is_superuser) return true;
+  const perms = user.permissions ?? [];
+  return perms.includes("*") || perms.includes(code);
+}

@@ -63,8 +63,10 @@ _PERMISSIONS = [
     ("订单", "order.approve", "订单审批"),
     ("财务", "finance.view", "查看财务"),
     ("财务", "finance.settle", "财务结算"),
+    ("组织", "org.view", "组织查看"),
     ("组织", "org.manage", "组织管理"),
     ("组织", "org.employee", "员工管理"),
+    ("组织", "org.rbac", "角色权限管理"),
     ("风控", "risk.view", "风控查看"),
 ]
 
@@ -72,9 +74,9 @@ _PERMISSIONS = [
 _ROLES = [
     ("admin", "系统管理员", "all", ["*"]),
     ("dispatcher", "调度主管", "org_sub",
-     ["waybill.view", "waybill.edit", "waybill.dispatch", "order.view", "order.create"]),
-    ("finance", "财务专员", "org", ["finance.view", "finance.settle"]),
-    ("operator", "运营专员", "org", ["order.view", "order.create", "waybill.view"]),
+     ["waybill.view", "waybill.edit", "waybill.dispatch", "order.view", "order.create", "org.view"]),
+    ("finance", "财务专员", "org", ["finance.view", "finance.settle", "org.view"]),
+    ("operator", "运营专员", "org", ["order.view", "order.create", "waybill.view", "org.view"]),
 ]
 
 # (org_code, area_type, region_name) —— 服务区划覆盖

@@ -4,21 +4,34 @@ from django.conf import settings
 from django.utils import timezone
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
 from apps.core.redis import get_redis
+from apps.iam.permissions import HasPermission
 
 from .geo import analyze_trajectory
 from .models import Alert, Device, Geofence, VehicleState
 from .serializers import AlertSerializer, DeviceSerializer, GeofenceSerializer, VehicleStateSerializer
 from .tasks import TELEMETRY_QUEUE, flush_telemetry
 
+# 车联网数据（GPS 轨迹/实时定位/报警/设备）敏感：读需查看权，写需管理权
+PERM_VIEW = "telematics.view"
+PERM_MANAGE = "telematics.manage"
+
+
+class _TelematicsReadView(APIView):
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = PERM_VIEW
+
 
 class DeviceViewSet(viewsets.ModelViewSet):
     queryset = Device.objects.select_related("vehicle").all()
     serializer_class = DeviceSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW, "write": PERM_MANAGE}
     filterset_fields = ["device_type", "status", "vehicle"]
     search_fields = ["device_no", "sim_no"]
 
@@ -26,11 +39,13 @@ class DeviceViewSet(viewsets.ModelViewSet):
 class GeofenceViewSet(viewsets.ModelViewSet):
     queryset = Geofence.objects.all()
     serializer_class = GeofenceSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW, "write": PERM_MANAGE}
     filterset_fields = ["shape", "purpose", "is_active"]
     search_fields = ["name"]
 
 
-class WaybillTrajectoryView(APIView):
+class WaybillTrajectoryView(_TelematicsReadView):
     """轨迹回放：返回运单历史轨迹点 + 停留点 + 超速段。"""
 
     def get(self, request, waybill_no):
@@ -61,7 +76,7 @@ class WaybillTrajectoryView(APIView):
         })
 
 
-class CommandCenterSummaryView(APIView):
+class CommandCenterSummaryView(_TelematicsReadView):
     """调度指挥中心摘要：在线运力 / 待调度 / 在途 / 报警 一屏 KPI。"""
 
     def get(self, request):
@@ -77,7 +92,7 @@ class CommandCenterSummaryView(APIView):
         })
 
 
-class LiveVehicleView(APIView):
+class LiveVehicleView(_TelematicsReadView):
     """实时车辆位置列表（实时定位视图数据源）。?online=true 仅看在线。"""
 
     def get(self, request):
@@ -91,6 +106,8 @@ class LiveVehicleView(APIView):
 class AlertViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     queryset = Alert.objects.select_related("vehicle", "device", "waybill").all()
     serializer_class = AlertSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW, "acknowledge": PERM_MANAGE, "close": PERM_MANAGE}
     filterset_fields = ["alert_type", "level", "status", "vehicle", "waybill"]
     search_fields = ["message"]
 

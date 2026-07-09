@@ -1,20 +1,30 @@
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
+from apps.iam.permissions import HasPermission
 
 from .registry import compute_metric, list_metrics
 from .services import build_dashboard, metric_trend
 
+# 经营看板/指标/数据目录含全公司财务经营口径，须经营分析查看权
+PERM_ANALYTICS = "analytics.view"
 
-class MetricCatalogView(APIView):
+
+class _AnalyticsView(APIView):
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = PERM_ANALYTICS
+
+
+class MetricCatalogView(_AnalyticsView):
     """指标目录：列出所有可查询指标定义（口径/主题域/维度）。"""
 
     def get(self, request):
         return Response({"metrics": list_metrics(request.query_params.get("domain"))})
 
 
-class MetricQueryView(APIView):
+class MetricQueryView(_AnalyticsView):
     """指标查询：按 codes + 时间范围 + 维度计算（多指标一次取）。"""
 
     def post(self, request):
@@ -28,7 +38,7 @@ class MetricQueryView(APIView):
         return Response({"results": results})
 
 
-class DashboardView(APIView):
+class DashboardView(_AnalyticsView):
     """经营看板：一次返回核心经营/运营指标。"""
 
     def get(self, request):
@@ -38,7 +48,7 @@ class DashboardView(APIView):
         ))
 
 
-class MetricTrendView(APIView):
+class MetricTrendView(_AnalyticsView):
     """指标趋势：从物化快照取近 N 天序列。"""
 
     def get(self, request, code):
@@ -46,7 +56,7 @@ class MetricTrendView(APIView):
         return Response(metric_trend(code, days))
 
 
-class DataCatalogView(APIView):
+class DataCatalogView(_AnalyticsView):
     """数据资产目录：业务域 / 表 / 字段 / 记录数（数据治理 lite）。?counts=true"""
 
     def get(self, request):

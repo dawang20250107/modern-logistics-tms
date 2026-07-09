@@ -2,12 +2,19 @@
 
 from decimal import Decimal
 
+from django.db import transaction
 from django.utils import timezone
 
 from apps.core.exceptions import AppError
 from apps.core.redis import publish_event
 
 from .models import ExceptionEvent, Waybill, WaybillEvent
+
+
+def _lock_waybill(waybill):
+    """行级锁 + 刷新，避免并发双签/双拒等竞态（须在 transaction.atomic 内调用）。"""
+    Waybill.objects.select_for_update().get(pk=waybill.pk)
+    waybill.refresh_from_db()
 
 # 合法状态流转表
 ALLOWED_TRANSITIONS: dict[str, list[str]] = {
@@ -17,7 +24,16 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     Waybill.STATUS_LOADED: [Waybill.STATUS_DEPARTED],
     Waybill.STATUS_DEPARTED: [Waybill.STATUS_IN_TRANSIT],
     Waybill.STATUS_IN_TRANSIT: [Waybill.STATUS_ARRIVED],
-    Waybill.STATUS_ARRIVED: [Waybill.STATUS_SIGNED],
+    # 到达后可整签 / 部分签收 / 拒收（补齐签收环的三种真实结果）
+    Waybill.STATUS_ARRIVED: [
+        Waybill.STATUS_SIGNED, Waybill.STATUS_PARTIALLY_SIGNED, Waybill.STATUS_REJECTED
+    ],
+    # 部分签收后：补齐整签 / 送达 / 剩余拒收
+    Waybill.STATUS_PARTIALLY_SIGNED: [
+        Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_REJECTED
+    ],
+    # 拒收后：退回结算或取消（拒收单仍可能计付到场运费）
+    Waybill.STATUS_REJECTED: [Waybill.STATUS_SETTLED, Waybill.STATUS_CANCELLED],
     Waybill.STATUS_SIGNED: [Waybill.STATUS_DELIVERED],
     Waybill.STATUS_DELIVERED: [Waybill.STATUS_SETTLED],
     Waybill.STATUS_SETTLED: [],
@@ -97,13 +113,18 @@ def transition_waybill(waybill: Waybill, to_status: str, *, operator=None, remar
     return waybill
 
 
+@transaction.atomic
 def sign_waybill(waybill, *, signatory="", signature="", file_url="", sign_source="driver", operator=None):
     """司机/客户签收回传（e-POD）：落回单 + 一步推进到已签收（触发订单完成）。"""
     from .models import Receipt
 
+    _lock_waybill(waybill)
     if waybill.status in (Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_SETTLED):
         raise AppError("ALREADY_SIGNED", "运单已签收。", status=409)
-    if waybill.status not in (Waybill.STATUS_IN_TRANSIT, Waybill.STATUS_ARRIVED):
+    # 在途/已到达可整签；部分签收后补签剩余亦允许（状态机 PARTIALLY_SIGNED→SIGNED）
+    if waybill.status not in (
+        Waybill.STATUS_IN_TRANSIT, Waybill.STATUS_ARRIVED, Waybill.STATUS_PARTIALLY_SIGNED
+    ):
         raise AppError("NOT_SIGNABLE", "仅在途/已到达运单可签收。", status=409)
 
     receipt = Receipt.objects.create(
@@ -128,6 +149,105 @@ def sign_waybill(waybill, *, signatory="", signature="", file_url="", sign_sourc
         from .stats import refresh_driver_stats
 
         refresh_driver_stats(waybill.driver)
+    return receipt
+
+
+def _ensure_arrived(waybill, operator):
+    """签收/拒收前置：把在途运单先推进到已到达（幂等）。"""
+    if waybill.status == Waybill.STATUS_IN_TRANSIT:
+        transition_waybill(waybill, Waybill.STATUS_ARRIVED, operator=operator, remark="签收回传自动到达")
+
+
+def _open_delivery_exception(waybill, *, exception_type, level, description, amount=0, operator=None):
+    """签收异常（货损货差/拒收）自动立案，打通到异常处置与理赔。"""
+    from .models import ExceptionRecord
+
+    exc = ExceptionRecord.objects.create(
+        waybill=waybill, exception_type=exception_type, level=level,
+        source="ops", description=description, amount=amount,
+    )
+    record_exception_event(
+        exc, "create", actor=operator, to_status=exc.status, note=description, source="ops"
+    )
+    return exc
+
+
+@transaction.atomic
+def partial_sign_waybill(
+    waybill, *, total_quantity, signed_quantity, damaged_quantity=0, shortage_quantity=0,
+    signatory="", signature="", file_url="", sign_source="driver", note="", operator=None,
+):
+    """部分签收（货损货差）：实收 < 应收或有货损货差，落回单 + 自动立货损异常，
+    运单进入「部分签收」态（不直接完成订单，待后续整签/退回处置）。"""
+    from .models import Receipt
+
+    _lock_waybill(waybill)
+    if waybill.status in (Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_SETTLED):
+        raise AppError("ALREADY_SIGNED", "运单已签收。", status=409)
+    if waybill.status not in (Waybill.STATUS_IN_TRANSIT, Waybill.STATUS_ARRIVED, Waybill.STATUS_PARTIALLY_SIGNED):
+        raise AppError("NOT_SIGNABLE", "仅在途/已到达运单可签收。", status=409)
+
+    total = Decimal(str(total_quantity or 0))
+    signed = Decimal(str(signed_quantity or 0))
+    damaged = Decimal(str(damaged_quantity or 0))
+    shortage = Decimal(str(shortage_quantity or 0))
+    if signed > total:
+        raise AppError("QTY_INVALID", "实收数量不能大于应收数量。", status=400)
+    if signed >= total and damaged == 0 and shortage == 0:
+        raise AppError("NOT_PARTIAL", "无短少/货损，应走整签。", status=400)
+
+    receipt = Receipt.objects.create(
+        waybill=waybill, receipt_type="signed_pod", status="confirmed",
+        outcome=Receipt.OUTCOME_PARTIAL, total_quantity=total, signed_quantity=signed,
+        damaged_quantity=damaged, shortage_quantity=shortage, rejection_reason=note,
+        file_url=file_url, signatory=signatory, signature=signature, sign_source=sign_source,
+        signed_at=timezone.now(),
+        uploaded_by=operator if operator and getattr(operator, "is_authenticated", False) else None,
+    )
+    _ensure_arrived(waybill, operator)
+    transition_waybill(
+        waybill, Waybill.STATUS_PARTIALLY_SIGNED, operator=operator,
+        remark=f"部分签收 实收{signed}/{total} 货损{damaged} 短少{shortage}",
+    )
+    waybill.receipt_status = "received"
+    waybill.save(update_fields=["receipt_status", "updated_at"])
+    level = "high" if (damaged + shortage) > (total / 2 if total else 0) else "medium"
+    _open_delivery_exception(
+        waybill, exception_type="cargo_damage", level=level,
+        description=f"部分签收：应收{total} 实收{signed} 货损{damaged} 短少{shortage}。{note}".strip(),
+        operator=operator,
+    )
+    return receipt
+
+
+@transaction.atomic
+def reject_waybill(waybill, *, reason, signatory="", sign_source="driver", operator=None):
+    """整车拒收：收货方拒收，落拒收回单 + 自动立客诉异常，运单进入「已拒收」态
+    （不完成订单，进入退回/结算处置）。"""
+    from .models import Receipt
+
+    _lock_waybill(waybill)
+    if waybill.status in (Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_SETTLED):
+        raise AppError("ALREADY_SIGNED", "运单已签收，无法拒收。", status=409)
+    if waybill.status not in (Waybill.STATUS_IN_TRANSIT, Waybill.STATUS_ARRIVED, Waybill.STATUS_PARTIALLY_SIGNED):
+        raise AppError("NOT_REJECTABLE", "仅在途/已到达运单可拒收。", status=409)
+    if not (reason or "").strip():
+        raise AppError("REASON_REQUIRED", "拒收必须填写原因。", status=400)
+
+    receipt = Receipt.objects.create(
+        waybill=waybill, receipt_type="rejection", status="rejected",
+        outcome=Receipt.OUTCOME_REJECTED, rejection_reason=reason,
+        signatory=signatory, sign_source=sign_source, signed_at=timezone.now(),
+        uploaded_by=operator if operator and getattr(operator, "is_authenticated", False) else None,
+    )
+    _ensure_arrived(waybill, operator)
+    transition_waybill(waybill, Waybill.STATUS_REJECTED, operator=operator, remark=f"拒收：{reason}")
+    waybill.receipt_status = "received"
+    waybill.save(update_fields=["receipt_status", "updated_at"])
+    _open_delivery_exception(
+        waybill, exception_type="customer_complaint", level="high",
+        description=f"整车拒收：{reason}", operator=operator,
+    )
     return receipt
 
 

@@ -227,6 +227,8 @@ class ReceiptSerializer(serializers.ModelSerializer):
         fields = [
             "id", "waybill", "waybill_no", "receipt_type", "status", "file", "file_display",
             "file_url", "ocr_status", "ocr_result", "signatory", "signed_at", "created_at",
+            "outcome", "total_quantity", "signed_quantity", "damaged_quantity",
+            "shortage_quantity", "rejection_reason",
         ]
         read_only_fields = ["ocr_status", "ocr_result", "status"]
 

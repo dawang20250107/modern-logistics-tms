@@ -48,3 +48,5 @@ tools/
 .vscode/
 .DS_Store
 Thumbs.db
+dump.rdb
+backend/dump.rdb

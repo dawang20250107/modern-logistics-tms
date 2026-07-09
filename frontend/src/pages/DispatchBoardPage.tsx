@@ -7,7 +7,7 @@ import { toast } from "../api/toast";
 import { EmptyState } from "../components/EmptyState";
 import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconRobot, IconWarning, IconMoney, IconBox, IconDragHandle, IconCheckCircle } from "../components/Icons";
 import type { Carrier, DispatchSuggestion, Driver, Order, Paginated, Vehicle } from "../api/types";
-import { BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, PRIORITY_LABEL, SLA_STATUS_LABEL } from "../api/types";
+import { BODY_TYPE_LABEL, BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, PRIORITY_LABEL, SLA_STATUS_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 
 interface ConsolidatedTrip {
@@ -357,7 +357,10 @@ export function DispatchBoardPage() {
                   <span className="muted small" style={{ width: "100%", fontWeight: "bold" }}>其他备选闲置运力：</span>
                   {suggestion.vehicle_candidates.map((v) => (
                     <span key={v.plate_no} className={`tag tag-${v.compliance_ok === false ? "high" : "low"}`} style={{ cursor: "pointer" }} onClick={() => { setDispatchType("own_vehicle"); setVehicleId(v.vehicle_id || ""); }}>
-                      {v.plate_no} (装载率 {Math.round(v.utilization * 100)}%)
+                      {v.plate_no}
+                      {v.vehicle_length_m ? ` ${v.vehicle_length_m}m` : ""}
+                      {v.body_type ? ` ${BODY_TYPE_LABEL[v.body_type] ?? v.body_type}` : ""}
+                      {` (装载率 ${Math.round(v.utilization * 100)}%)`}
                       {v.compliance_ok === false && ` ⚠${v.compliance?.join("/")}过期`}
                     </span>
                   ))}

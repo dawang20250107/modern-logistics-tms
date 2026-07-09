@@ -256,6 +256,9 @@ DEEPSEEK_TIMEOUT_SECONDS = env.int("DEEPSEEK_TIMEOUT_SECONDS", default=60)
 # ── 可观测：慢请求阈值（毫秒，超过则日志升级为 WARNING）────────
 SLOW_REQUEST_MS = env.int("SLOW_REQUEST_MS", default=800)
 
+# ── 调度合规：证件过期车辆是否硬阻断派车（默认阻断，不上违规车）──
+DISPATCH_BLOCK_ON_EXPIRED = env.bool("DISPATCH_BLOCK_ON_EXPIRED", default=True)
+
 # ── 运满满/满帮 开放平台（调车运费比价）────────────────────
 YMM_BASE_URL = env("YMM_BASE_URL", default="https://qa-open.ymm56.com")
 YMM_APP_KEY = env("YMM_APP_KEY", default="")

@@ -40,10 +40,13 @@ class VehicleSerializer(serializers.ModelSerializer):
     dispatch_source_label = serializers.CharField(source="get_dispatch_source_display", read_only=True, default="")
     freight_total = serializers.SerializerMethodField()
 
+    body_type_label = serializers.CharField(source="get_body_type_display", read_only=True, default="")
+
     class Meta:
         model = Vehicle
         fields = [
-            "id", "plate_no", "vehicle_class", "vehicle_class_label", "dispatch_source", "dispatch_source_label",
+            "id", "plate_no", "vehicle_class", "vehicle_class_label", "body_type", "body_type_label",
+            "vehicle_length_m", "dispatch_source", "dispatch_source_label",
             "vehicle_type", "ownership_type", "carrier", "carrier_name", "load_capacity_ton", "volume_capacity_cbm",
             "road_transport_cert_no", "inspection_expiry", "insurance_expiry", "maintenance_due_date",
             "freight_total", "is_active",

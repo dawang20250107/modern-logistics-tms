@@ -86,14 +86,16 @@ def test_rank_vehicles_deprioritizes_expired_credentials():
     from django.utils import timezone
 
     today = timezone.localdate()
-    # 证件过期但装载更紧凑的车，应被合规车挤到后面
+    # 证件过期车 P0-3 后被硬阻断，默认不进推荐；合规车正常入选
     expired = Vehicle.objects.create(plate_no="过期车", load_capacity_ton=12, insurance_expiry=today - timedelta(days=2))
     Vehicle.objects.create(plate_no="合规车", load_capacity_ton=20)
     wb = Waybill.objects.create(waybill_no="CMP1", route_name="r", cargo_weight_ton=10)
     ranked = rank_vehicles(wb)
-    assert ranked[0]["plate_no"] == "合规车"
+    assert [r["plate_no"] for r in ranked] == ["合规车"]  # 过期车被硬阻断
     assert ranked[0]["compliance_ok"] is True
-    expired_row = next(r for r in ranked if r["plate_no"] == "过期车")
+    # include_blocked=True 时仍可见并带屏蔽标记
+    with_blocked = rank_vehicles(wb, include_blocked=True)
+    expired_row = next(r for r in with_blocked if r["plate_no"] == "过期车")
     assert "保险" in expired_row["compliance"]
-    assert expired_row["compliance_ok"] is False
+    assert expired_row["blocked"] is True
     assert vehicle_fit(expired, wb)["compliance"] == ["保险"]

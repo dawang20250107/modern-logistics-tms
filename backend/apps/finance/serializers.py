@@ -77,13 +77,15 @@ class ReimbursementSerializer(serializers.ModelSerializer):
 class PricingRuleSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
     carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")
+    charge_method_label = serializers.CharField(source="get_charge_method_display", read_only=True)
 
     class Meta:
         model = PricingRule
         fields = [
-            "id", "name", "price_type", "expense_item_code", "customer", "customer_name",
+            "id", "name", "price_type", "charge_method", "charge_method_label",
+            "expense_item_code", "customer", "customer_name",
             "carrier", "carrier_name", "route_name", "vehicle_type", "base_price", "min_price",
-            "tier_prices", "volumetric_factor", "fuel_surcharge_pct",
+            "unit_price", "min_charge_qty", "tier_prices", "volumetric_factor", "fuel_surcharge_pct",
             "priority", "is_active", "created_at",
         ]
 

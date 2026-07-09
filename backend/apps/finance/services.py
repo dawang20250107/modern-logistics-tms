@@ -32,10 +32,12 @@ def chargeable_weight(weight_ton, volume_cbm, factor=VOLUMETRIC_FACTOR_TON_PER_C
     return max(actual, volumetric)
 
 
-def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0, volume_cbm=0) -> dict:
-    """录单自动报价：按收入计价规则对订单计费重量估价，返回最优（最高优先级）匹配。
+def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0, volume_cbm=0,
+                         quantity=0, distance_km=0) -> dict:
+    """录单自动报价：按收入计价规则对订单估价，返回最优（最高优先级）匹配。
 
-    计费重量取实际重量与抛重的较大值（泡货按体积重）。匹配条件：客户/线路通配，按 priority 取最高。
+    支持整车/阶梯重/按方/按件/按公里/吨公里六种计费方式（见 PricingRule.quote）。
+    匹配条件：客户/线路通配，按 priority 取最高。
     """
     cust = str(customer_id) if customer_id else ""
     cw = chargeable_weight(weight_ton, volume_cbm)
@@ -57,9 +59,13 @@ def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0, volum
         best = rule
         break
     if best is None:
-        return {"amount": 0.0, "rule_name": "", "matched": False, **base}
-    quote_result = best.quote(weight_ton, volume_cbm)
-    return {"amount": float(quote_result["amount"]), "rule_name": best.name, "matched": True, **base}
+        return {"amount": 0.0, "rule_name": "", "matched": False, "charge_method": "", **base}
+    quote_result = best.quote(weight_ton, volume_cbm, quantity=quantity, distance_km=distance_km)
+    return {
+        "amount": float(quote_result["amount"]), "rule_name": best.name, "matched": True,
+        "charge_method": best.charge_method, "charge_method_label": best.get_charge_method_display(),
+        **base,
+    }
 
 
 def generate_costs(waybill) -> dict:
@@ -68,12 +74,14 @@ def generate_costs(waybill) -> dict:
     result = {"receivable": 0, "payable": 0}
     weight = waybill.cargo_weight_ton
     volume = waybill.cargo_volume_cbm
+    qty = waybill.cargo_quantity
+    distance = waybill.planned_route.distance_km if waybill.planned_route_id else 0
 
     # === AR (应收账款) 逻辑 ===
     income = _match_rules(waybill, PricingRule.PRICE_TYPE_INCOME)
     if income:
         rule = income[0]
-        quote_result = rule.quote(weight, volume)
+        quote_result = rule.quote(weight, volume, quantity=qty, distance_km=distance)
         ExpenseRecord.objects.create(
             waybill=waybill,
             direction=ExpenseRecord.DIRECTION_RECEIVABLE,
@@ -89,7 +97,7 @@ def generate_costs(waybill) -> dict:
     cost = _match_rules(waybill, PricingRule.PRICE_TYPE_COST)
     if cost:
         rule = cost[0]
-        quote_result = rule.quote(weight, volume)
+        quote_result = rule.quote(weight, volume, quantity=qty, distance_km=distance)
         total_ap_amount = quote_result["amount"]
         
         # 模式一：外部承运商 / 专线老板 (合并池化结算，不直接跟底层司机拆分运费)
@@ -180,10 +188,13 @@ def generate_costs(waybill) -> dict:
 def estimate_costs(waybill) -> dict:
     """按报价规则预估收入/成本/毛利（不落库），供调度建议使用。"""
     weight = waybill.cargo_weight_ton
+    volume = waybill.cargo_volume_cbm
+    qty = waybill.cargo_quantity
+    distance = waybill.planned_route.distance_km if waybill.planned_route_id else 0
     income = _match_rules(waybill, PricingRule.PRICE_TYPE_INCOME)
     cost = _match_rules(waybill, PricingRule.PRICE_TYPE_COST)
-    income_amt = float(income[0].quote(weight)) if income else 0.0
-    cost_amt = float(cost[0].quote(weight)) if cost else 0.0
+    income_amt = float(income[0].quote(weight, volume, quantity=qty, distance_km=distance)["amount"]) if income else 0.0
+    cost_amt = float(cost[0].quote(weight, volume, quantity=qty, distance_km=distance)["amount"]) if cost else 0.0
     return {"income": income_amt, "cost": cost_amt, "gross": round(income_amt - cost_amt, 2)}
 
 

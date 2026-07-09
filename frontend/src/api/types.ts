@@ -552,6 +552,8 @@ export interface PricingRule {
   id: string;
   name: string;
   price_type: "income" | "cost";
+  charge_method: string;
+  charge_method_label: string;
   expense_item_code: string;
   customer?: string;
   customer_name?: string;
@@ -561,6 +563,8 @@ export interface PricingRule {
   vehicle_type: string;
   base_price: string;
   min_price: string;
+  unit_price: string;
+  min_charge_qty: string;
   tier_prices: Array<{ min_ton: number; max_ton: number; price: number }>;
   volumetric_factor: string;
   fuel_surcharge_pct: string;

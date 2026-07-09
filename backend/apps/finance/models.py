@@ -156,8 +156,27 @@ class PricingRule(BaseModel):
     PRICE_TYPE_COST = "cost"
     PRICE_TYPE_CHOICES = [(PRICE_TYPE_INCOME, "收入价"), (PRICE_TYPE_COST, "支出价")]
 
+    # 计费方式（覆盖公路货运主流口径）
+    METHOD_TIERED_WEIGHT = "tiered_weight"  # 按重量阶梯（零担/泡重取大）
+    METHOD_FLAT = "flat"                    # 整车一口价（一趟固定价，含包车）
+    METHOD_PER_VOLUME = "per_volume"        # 按方（单价 × 计费方数）
+    METHOD_PER_PIECE = "per_piece"          # 按件（单价 × 件数）
+    METHOD_PER_KM = "per_km"                # 按公里（单价 × 里程）
+    METHOD_PER_TON_KM = "per_ton_km"        # 吨公里（单价 × 计费吨 × 里程）
+    CHARGE_METHOD_CHOICES = [
+        (METHOD_TIERED_WEIGHT, "按重量阶梯"),
+        (METHOD_FLAT, "整车一口价"),
+        (METHOD_PER_VOLUME, "按方计费"),
+        (METHOD_PER_PIECE, "按件计费"),
+        (METHOD_PER_KM, "按公里计费"),
+        (METHOD_PER_TON_KM, "吨公里计费"),
+    ]
+
     name = models.CharField(max_length=120)
     price_type = models.CharField(max_length=16, choices=PRICE_TYPE_CHOICES)
+    charge_method = models.CharField(
+        max_length=16, choices=CHARGE_METHOD_CHOICES, default=METHOD_TIERED_WEIGHT
+    )
     expense_item_code = models.CharField(max_length=64)
     # 匹配条件（留空表示通配）
     customer = models.ForeignKey("masterdata.Customer", null=True, blank=True, on_delete=models.CASCADE, related_name="pricing_rules")
@@ -166,11 +185,17 @@ class PricingRule(BaseModel):
     vehicle_type = models.CharField(max_length=64, blank=True)
     
     # 基础与阶梯计价 (Tiered Pricing)
-    base_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    min_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    base_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="起步价/固定价")
+    min_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="最低计费额（金额下限）")
+    unit_price = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0, help_text="按方/件/公里/吨公里的单价"
+    )
+    min_charge_qty = models.DecimalField(
+        max_digits=12, decimal_places=3, default=0, help_text="最低计费量（方/件/吨，不足按此计）"
+    )
     tier_prices = models.JSONField(
-        default=list, 
-        blank=True, 
+        default=list,
+        blank=True,
         help_text="阶梯报价: [{'min_ton': 0, 'max_ton': 5, 'price': 200}, {'min_ton': 5, 'max_ton': 999, 'price': 180}]"
     )
     
@@ -191,46 +216,66 @@ class PricingRule(BaseModel):
     def __str__(self) -> str:
         return f"{self.name}({self.price_type})"
 
-    def quote(self, weight_ton, volume_cbm=0) -> dict:
-        """
-        执行多维阶梯报价计算：
-        1. 计算计费重（Chargeable Weight）= max(物理重, 体积 * 重抛比)
-        2. 匹配阶梯单价
-        3. 计算基础运费 + 燃油附加费
+    def quote(self, weight_ton, volume_cbm=0, quantity=0, distance_km=0) -> dict:
+        """按计费方式（整车/阶梯重/方/件/公里/吨公里）计算运费。
+
+        统一先算计费重（max(物理重, 体积×重抛比)），再按 charge_method 分支计价：
+        基础运费 = 起步价 base_price + 计量部分；最后取 min_price 下限并叠加燃油附加费。
+        min_charge_qty 为计量维度（方/件/吨）的最低计费量，不足按最低量计。
         返回明细字典供外部调阅。
         """
         w = Decimal(str(weight_ton or 0))
         v = Decimal(str(volume_cbm or 0))
-        
-        # 1. 抛重计算
+        qty = Decimal(str(quantity or 0))
+        dist = Decimal(str(distance_km or 0))
+        floor_qty = Decimal(str(self.min_charge_qty or 0))
+
         vol_weight = v * self.volumetric_factor
         chargeable_weight = max(w, vol_weight)
-        
-        # 2. 阶梯匹配
-        matched_price_per_ton = Decimal("0")
-        if self.tier_prices:
-            for tier in self.tier_prices:
+        detail: dict = {}
+
+        if self.charge_method == self.METHOD_FLAT:
+            # 整车一口价：固定价，忽略计量
+            freight_amount = self.base_price
+        elif self.charge_method == self.METHOD_PER_VOLUME:
+            billable = max(v, floor_qty)
+            detail["billable_volume"] = float(round(billable, 3))
+            freight_amount = self.base_price + self.unit_price * billable
+        elif self.charge_method == self.METHOD_PER_PIECE:
+            billable = max(qty, floor_qty)
+            detail["billable_pieces"] = float(round(billable, 3))
+            freight_amount = self.base_price + self.unit_price * billable
+        elif self.charge_method == self.METHOD_PER_KM:
+            detail["distance_km"] = float(round(dist, 2))
+            freight_amount = self.base_price + self.unit_price * dist
+        elif self.charge_method == self.METHOD_PER_TON_KM:
+            billable_w = max(chargeable_weight, floor_qty)
+            detail["ton_km"] = float(round(billable_w * dist, 2))
+            freight_amount = self.base_price + self.unit_price * billable_w * dist
+        else:
+            # 按重量阶梯（默认）：匹配阶梯单价 × 计费重
+            billable_w = max(chargeable_weight, floor_qty)
+            matched_price_per_ton = Decimal("0")
+            for tier in self.tier_prices or []:
                 min_t = Decimal(str(tier.get("min_ton", 0)))
                 max_t = Decimal(str(tier.get("max_ton", 999999)))
-                if min_t <= chargeable_weight <= max_t:
+                if min_t <= billable_w <= max_t:
                     matched_price_per_ton = Decimal(str(tier.get("price", 0)))
                     break
-                    
-        # 3. 基础运费
-        freight_amount = self.base_price + (matched_price_per_ton * chargeable_weight)
+            freight_amount = self.base_price + matched_price_per_ton * billable_w
+
         freight_amount = max(freight_amount, self.min_price)
-        
-        # 4. 燃油附加费
         fuel_surcharge = freight_amount * self.fuel_surcharge_pct
-        
         total_amount = round(freight_amount + fuel_surcharge, 2)
-        
+
         return {
             "amount": total_amount,
+            "charge_method": self.charge_method,
             "chargeable_weight": round(chargeable_weight, 3),
             "by_volume": vol_weight > w,
             "freight_amount": round(freight_amount, 2),
-            "fuel_surcharge": round(fuel_surcharge, 2)
+            "fuel_surcharge": round(fuel_surcharge, 2),
+            **detail,
         }
 
 

@@ -533,6 +533,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             route_name=f"{data.get('origin', '')}→{data.get('destination', '')}",
             weight_ton=weight,
             volume_cbm=volume,
+            quantity=data.get("cargo_quantity") or data.get("quantity") or 0,
+            distance_km=data.get("distance_km") or 0,
         )
         return Response(result)
 

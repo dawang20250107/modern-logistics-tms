@@ -68,10 +68,36 @@ class Vehicle(BaseModel, SoftDeleteModel):
         (DISPATCH_PLATFORM, "平台"),
     ]
 
+    # 车厢结构（决定能装什么货：冷链货必须冷藏车、危险品必须危运/罐式车）
+    BODY_STAKE = "stake"        # 高栏
+    BODY_FLATBED = "flatbed"    # 平板
+    BODY_VAN = "van"            # 厢式
+    BODY_REEFER = "reefer"      # 冷藏
+    BODY_HAZMAT = "hazmat"      # 危运
+    BODY_FENCE = "fence"        # 仓栅
+    BODY_WING = "wing"          # 飞翼
+    BODY_TANK = "tank"          # 罐式
+    BODY_CHOICES = [
+        (BODY_STAKE, "高栏"),
+        (BODY_FLATBED, "平板"),
+        (BODY_VAN, "厢式"),
+        (BODY_REEFER, "冷藏"),
+        (BODY_HAZMAT, "危运"),
+        (BODY_FENCE, "仓栅"),
+        (BODY_WING, "飞翼"),
+        (BODY_TANK, "罐式"),
+    ]
+
     plate_no = models.CharField(max_length=32, unique=True)
     vehicle_class = models.CharField(
         max_length=16, choices=VEHICLE_CLASS_CHOICES, default=CLASS_RIGID, db_index=True,
         help_text="牵引车/挂车/单体车",
+    )
+    body_type = models.CharField(
+        max_length=16, choices=BODY_CHOICES, blank=True, help_text="车厢结构：高栏/平板/厢式/冷藏/危运…",
+    )
+    vehicle_length_m = models.DecimalField(
+        max_digits=4, decimal_places=1, default=0, help_text="车长(米)，如 4.2/6.8/9.6/13/17.5",
     )
     dispatch_source = models.CharField(
         max_length=16, choices=DISPATCH_SOURCE_CHOICES, default=DISPATCH_OWN, db_index=True,

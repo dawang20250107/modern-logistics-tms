@@ -84,12 +84,16 @@ def test_dispatch_order_creates_waybill_with_type():
 
 @pytest.mark.django_db
 def test_dispatch_with_trailer_and_multiple_drivers():
+    from datetime import date, timedelta
+
     from apps.masterdata.models import Driver
     from apps.ops.serializers import WaybillSerializer
 
     tractor = Vehicle.objects.create(plate_no="牵引沪A01", vehicle_class=Vehicle.CLASS_TRACTOR, load_capacity_ton=40)
     trailer = Vehicle.objects.create(plate_no="挂沪A02", vehicle_class=Vehicle.CLASS_TRAILER, load_capacity_ton=40)
-    main = Driver.objects.create(name="张师傅", phone="13800000001", employment_type=Driver.EMP_EMPLOYEE)
+    # 牵引车主驾须 A2 准驾（P0-3 调度合规硬校验）
+    main = Driver.objects.create(name="张师傅", phone="13800000001", employment_type=Driver.EMP_EMPLOYEE,
+                                 license_type="A2", license_expiry=date.today() + timedelta(days=365))
     co = Driver.objects.create(name="李师傅", phone="13800000002", employment_type=Driver.EMP_OUTSOURCED)
     order = _pooled_order(cargo_weight_ton=20)
 

@@ -58,15 +58,46 @@ def _assert_resource_free(vehicle, driver):
 
 
 def _assert_capacity_fit(vehicle, order):
-    """校验车辆核载/容积满足订单货量（运力未知则放行），避免误派超载车。"""
-    from .dispatch import vehicle_fit
+    """校验车辆核载/容积 + 车厢结构满足订单要求（运力未知则放行），避免误派超载/敞车拉冷链危货。"""
+    from .dispatch import body_type_mismatch, vehicle_fit, waybill_requirements
 
-    if vehicle and vehicle_fit(vehicle, order) is None:
+    if not vehicle:
+        return
+    reqs = waybill_requirements(order)
+    body_issue = body_type_mismatch(vehicle, reqs)
+    if body_issue:
+        raise AppError("VEHICLE_BODY_MISMATCH", f"车辆 {vehicle.plate_no} 车厢结构不符：{body_issue}。", status=409)
+    if vehicle_fit(vehicle, order, reqs=reqs) is None:
         raise AppError(
             "VEHICLE_OVERLOADED",
             f"车辆 {vehicle.plate_no} 核载/容积不足以承运该订单货量，请改派更大车型。",
             status=409,
         )
+
+
+def _assert_compliance(vehicle, driver, order):
+    """派单硬合规：证件过期车辆（可配置）与准驾不符/资质缺失的司机一律拦截，不上违规车。"""
+    from django.conf import settings
+
+    from .dispatch import driver_qualification_issues, vehicle_compliance_issues, waybill_requirements
+
+    if vehicle and getattr(settings, "DISPATCH_BLOCK_ON_EXPIRED", True):
+        issues = vehicle_compliance_issues(vehicle)
+        if issues:
+            raise AppError(
+                "VEHICLE_NON_COMPLIANT",
+                f"车辆 {vehicle.plate_no} 证件过期（{'/'.join(issues)}），不可派车。",
+                status=409,
+            )
+    if driver:
+        is_hazmat = waybill_requirements(order).get("is_hazmat", False)
+        d_issues = driver_qualification_issues(driver, vehicle, is_hazmat=is_hazmat)
+        if d_issues:
+            raise AppError(
+                "DRIVER_NON_QUALIFIED",
+                f"司机 {driver.name} 资质不符（{'/'.join(d_issues)}），不可派单。",
+                status=409,
+            )
 
 
 def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None,
@@ -89,6 +120,7 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
             driver = Driver.objects.select_for_update().get(id=driver.id)
         _assert_resource_free(vehicle, driver)
         _assert_capacity_fit(vehicle, order)
+        _assert_compliance(vehicle, driver, order)
         waybill = convert_order_to_waybill(
             order, carrier=carrier, vehicle=vehicle, driver=driver, trailer=trailer,
             co_drivers=co_drivers, dispatch_type=dispatch_type, operator=operator,

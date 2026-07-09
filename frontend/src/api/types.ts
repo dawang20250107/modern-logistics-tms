@@ -454,9 +454,14 @@ export const SLA_STATUS_LABEL: Record<string, string> = {
   pending: "进行中", at_risk: "临期", on_time: "准时", breached: "超时",
 };
 
+export const BODY_TYPE_LABEL: Record<string, string> = {
+  stake: "高栏", flatbed: "平板", van: "厢式", reefer: "冷藏",
+  hazmat: "危运", fence: "仓栅", wing: "飞翼", tank: "罐式",
+};
+
 export interface DispatchSuggestion {
   order_no: string;
-  vehicle_candidates: Array<{ vehicle_id?: string; plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean }>;
+  vehicle_candidates: Array<{ vehicle_id?: string; plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean; body_type?: string; vehicle_length_m?: number }>;
   carrier_quotes: Array<{ carrier_id?: string; carrier: string; quote: number }>;
   ymm_quote?: YmmQuote;
   external_signals: Array<{ type: string; level: string; note: string }>;

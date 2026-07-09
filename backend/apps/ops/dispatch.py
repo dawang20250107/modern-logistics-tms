@@ -49,8 +49,57 @@ def vehicle_compliance_issues(vehicle) -> list[str]:
     return issues
 
 
-def vehicle_fit(vehicle, waybill) -> dict | None:
-    """车辆对运单的装载适配；不满足核载/容积返回 None，否则返回评分（slack 越小越优）。"""
+def waybill_requirements(obj) -> dict:
+    """从运单或订单推导对车辆的硬性要求：冷链需冷藏车、危险品需危运/罐车。
+
+    兼容传入 Order（自身带 is_hazardous 等）或 Waybill（要素在 waybill.order 上）。
+    """
+    src = obj if hasattr(obj, "is_hazardous") else getattr(obj, "order", None)
+    needs_reefer = is_hazmat = False
+    if src is not None:
+        is_hazmat = bool(getattr(src, "is_hazardous", False))
+        biz_cold = getattr(src, "BIZ_COLDCHAIN", "coldchain")
+        needs_reefer = bool(getattr(src, "temperature_range", "")) or getattr(src, "business_type", "") == biz_cold
+    return {"needs_reefer": needs_reefer, "is_hazmat": is_hazmat}
+
+
+def body_type_mismatch(vehicle, reqs) -> str:
+    """车厢结构是否满足货物要求；返回不匹配原因，空串表示匹配。"""
+    from apps.masterdata.models import Vehicle
+
+    if reqs.get("needs_reefer") and vehicle.body_type != Vehicle.BODY_REEFER:
+        return "冷链货需冷藏车"
+    if reqs.get("is_hazmat") and vehicle.body_type not in (Vehicle.BODY_HAZMAT, Vehicle.BODY_TANK):
+        return "危险品需危运/罐式车"
+    return ""
+
+
+def driver_qualification_issues(driver, vehicle=None, is_hazmat=False) -> list[str]:
+    """司机资质硬校验：准驾车型匹配车辆、驾照/从业资格有效、危运资格。空表示合规。"""
+    from apps.masterdata.models import Vehicle
+
+    today = timezone.localdate()
+    issues = []
+    lt = (driver.license_type or "").upper()
+    # 牵引车/挂车须 A2 准驾（空或不符均拦截）；普通货车不因未登记准驾而阻断
+    needs_a2 = vehicle is not None and vehicle.vehicle_class in (Vehicle.CLASS_TRACTOR, Vehicle.CLASS_TRAILER)
+    if needs_a2 and "A2" not in lt:
+        issues.append("准驾不足(牵引挂车需A2)")
+    if driver.license_expiry and driver.license_expiry < today:
+        issues.append("驾照过期")
+    if is_hazmat:
+        if not driver.qualification_cert_no:
+            issues.append("缺危运从业资格")
+        elif driver.qualification_expiry and driver.qualification_expiry < today:
+            issues.append("危运从业资格过期")
+    return issues
+
+
+def vehicle_fit(vehicle, waybill, reqs=None) -> dict | None:
+    """车辆对运单的适配；不满足核载/容积/车厢结构返回 None（硬性排除），
+    否则返回评分（slack 越小越优）+ 合规屏蔽标记（证件过期默认硬阻断）。"""
+    from django.conf import settings
+
     cap_t = float(vehicle.load_capacity_ton or 0)
     cap_v = float(vehicle.volume_capacity_cbm or 0)
     need_t = float(waybill.cargo_weight_ton or 0)
@@ -59,28 +108,41 @@ def vehicle_fit(vehicle, waybill) -> dict | None:
         return None
     if cap_v and need_v > cap_v:
         return None
-    # 余量（运力未知按 0 处理，排在后面）
+    reqs = reqs if reqs is not None else waybill_requirements(waybill)
+    if body_type_mismatch(vehicle, reqs):
+        return None  # 车厢结构不满足（冷链/危险品）——硬性排除，不派敞车拉冷链/危货
     slack = (cap_t - need_t if cap_t else 1e9) + (cap_v - need_v if cap_v else 1e9)
     util = (need_t / cap_t) if cap_t else 0.0
     compliance = vehicle_compliance_issues(vehicle)
+    block = bool(compliance) and getattr(settings, "DISPATCH_BLOCK_ON_EXPIRED", True)
     return {
         "plate_no": vehicle.plate_no,
+        "body_type": vehicle.body_type,
+        "vehicle_length_m": float(vehicle.vehicle_length_m or 0),
         "slack": round(slack, 2),
         "utilization": round(util, 3),
         "compliance": compliance,
         "compliance_ok": not compliance,
+        "blocked": block,
+        "block_reason": ("证件过期屏蔽：" + "/".join(compliance)) if block else "",
     }
 
 
-def rank_vehicles(waybill, vehicles=None) -> list[dict]:
+def rank_vehicles(waybill, vehicles=None, *, include_blocked=False) -> list[dict]:
+    """按适配度排名可派车辆。默认剔除证件过期被屏蔽的车（硬阻断），
+    include_blocked=True 时保留并标记，供前端展示屏蔽原因。"""
     vehicles = list(available_vehicles()) if vehicles is None else vehicles
+    reqs = waybill_requirements(waybill)
     scored = []
     for v in vehicles:
-        fit = vehicle_fit(v, waybill)
-        if fit is not None:
-            fit["vehicle_id"] = str(v.id)
-            scored.append((v, fit))
-    # 合规车辆优先，其次紧凑装载优先；证件过期车下沉、不做硬阻断（仍可人工选择）
+        fit = vehicle_fit(v, waybill, reqs=reqs)
+        if fit is None:
+            continue
+        if fit["blocked"] and not include_blocked:
+            continue
+        fit["vehicle_id"] = str(v.id)
+        scored.append((v, fit))
+    # 合规车辆优先，其次紧凑装载优先
     scored.sort(key=lambda x: (not x[1]["compliance_ok"], x[1]["slack"]))
     return [fit for _v, fit in scored]
 

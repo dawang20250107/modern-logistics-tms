@@ -201,7 +201,11 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="eta")
     def eta(self, request, waybill_no=None):
+        """ETA：优先按当前定位+剩余里程+均速动态预测（数据不足则回退已存值）。"""
+        from .eta import predict_eta
+
         waybill = self.get_object()
+        prediction = predict_eta(waybill)
         return Response(
             {
                 "waybill_no": waybill.waybill_no,
@@ -209,6 +213,9 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
                 "estimated_arrival": waybill.estimated_arrival,
                 "eta_drift_minutes": waybill.eta_drift_minutes,
                 "risk_level": waybill.risk_level,
+                "predicted": bool(prediction),
+                "remaining_km": prediction["remaining_km"] if prediction else None,
+                "avg_speed_kmh": prediction["avg_speed_kmh"] if prediction else None,
                 "reason": "route_deviation_detected"
                 if waybill.risk_level == Waybill.RISK_HIGH
                 else "traffic_or_capacity_risk",

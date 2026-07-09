@@ -64,17 +64,21 @@ def in_transit(*, start, end, dimension, filters):
     return {"value": Waybill.objects.filter(status=Waybill.STATUS_IN_TRANSIT).count()}
 
 
-@metric("ops.on_time_rate", "准时率", DOMAIN_OPS, unit="%", description="已送达运单中 ETA 未偏移占比")
+@metric("ops.on_time_rate", "准班率", DOMAIN_OPS, unit="%", description="实际到达不晚于计划到达的运单占比（真实时间戳对比）")
 def on_time_rate(*, start, end, dimension, filters):
+    from django.db.models import F
+
     from apps.ops.models import Waybill
 
     s, e = _range(start, end)
+    # 只统计既有计划到达又有实际到达时间的运单，按真实时间戳判准班（而非静态 eta_drift）
     done = Waybill.objects.filter(
         status__in=[Waybill.STATUS_ARRIVED, Waybill.STATUS_SIGNED, Waybill.STATUS_DELIVERED, Waybill.STATUS_SETTLED],
+        planned_arrival__isnull=False, arrived_at__isnull=False,
         created_at__date__gte=s, created_at__date__lte=e,
     )
     total = done.count()
-    on_time = done.filter(eta_drift_minutes__lte=0).count()
+    on_time = done.filter(arrived_at__lte=F("planned_arrival")).count()
     return {"value": _rate(on_time, total), "numerator": on_time, "denominator": total}
 
 

@@ -49,6 +49,10 @@ export function WaybillDetailPage() {
     queryKey: ["waybill", no, "trajectory"],
     queryFn: () => apiGet<Trajectory>(`/telematics/waybills/${no}/trajectory`),
   });
+  const eta = useQuery({
+    queryKey: ["waybill", no, "eta"],
+    queryFn: () => apiGet<{ predicted: boolean; estimated_arrival: string | null; planned_arrival: string | null; eta_drift_minutes: number; remaining_km: number | null; avg_speed_kmh: number | null }>(`/waybills/${no}/eta`),
+  });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["waybill", no] });
 
@@ -283,6 +287,26 @@ export function WaybillDetailPage() {
         {/* === 左侧：运营与在途物理视图 === */}
         <div className="stack">
           {/* 在途轨迹追踪舱 */}
+          {eta.data?.predicted && (
+            <div className="panel">
+              <div className="panel-head" style={{ borderLeft: "4px solid var(--brand)" }}>
+                🛰️ ETA 智能预测
+                <span className="ai-pill">定位 + 剩余里程 + 均速</span>
+              </div>
+              <div className="kv" style={{ padding: "12px 16px" }}>
+                <div><span>预计到达</span><b>{eta.data.estimated_arrival ? new Date(eta.data.estimated_arrival).toLocaleString() : "-"}</b></div>
+                <div><span>剩余里程</span><b>{eta.data.remaining_km ?? "-"} km</b></div>
+                <div><span>当前均速</span><b>{eta.data.avg_speed_kmh ?? "-"} km/h</b></div>
+                <div>
+                  <span>相对计划</span>
+                  <b style={{ color: eta.data.eta_drift_minutes > 0 ? "var(--red)" : "var(--green)" }}>
+                    {eta.data.eta_drift_minutes > 0 ? `晚 ${eta.data.eta_drift_minutes} 分` : eta.data.eta_drift_minutes < 0 ? `早 ${-eta.data.eta_drift_minutes} 分` : "准点"}
+                  </b>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="panel">
             <div className="panel-head" style={{ borderLeft: "4px solid var(--brand)" }}>📍 IoT 车联网在途追踪舱</div>
             {traj.isLoading ? (

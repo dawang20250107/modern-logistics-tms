@@ -55,9 +55,12 @@ def flush_tracking_points(batch: int = 1000) -> int:
 
 @shared_task(name="ops.scan_eta_risks")
 def scan_eta_risks(medium_minutes: int = 120, high_minutes: int = 240) -> int:
-    """扫描在途运单，按 ETA 偏移更新风险等级并生成预警建议。"""
+    """扫描在途运单：先按当前定位刷新真实 ETA 偏移，再按偏移分级更新风险并预警。"""
     from apps.ai.models import AgentSuggestion
 
+    from .eta import refresh_all_in_transit_eta
+
+    refresh_all_in_transit_eta()  # 先动态预测，确保下方按真实偏移而非静态值分级
     risky = Waybill.objects.filter(
         status=Waybill.STATUS_IN_TRANSIT, eta_drift_minutes__gte=medium_minutes
     )

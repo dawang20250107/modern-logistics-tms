@@ -18,6 +18,7 @@ from .models import (
     RoleAssignment,
     ServiceArea,
 )
+from .permissions import HasPermission
 from .serializers import (
     AccountHandoverSerializer,
     DepartmentSerializer,
@@ -29,7 +30,13 @@ from .serializers import (
     RoleSerializer,
     ServiceAreaSerializer,
 )
-from .services import build_org_tree, handover_account, resolve_coverage
+from .services import build_org_tree, effective_permissions, handover_account, resolve_coverage
+
+# 组织中台权限点：查看/组织维护/员工维护/角色权限管理（最敏感）
+PERM_VIEW = "org.view"
+PERM_MANAGE = "org.manage"
+PERM_EMPLOYEE = "org.employee"
+PERM_RBAC = "org.rbac"
 
 
 class MeView(APIView):
@@ -50,6 +57,8 @@ class MeView(APIView):
                 "is_superuser": user.is_superuser,
                 "organization_id": str(user.organization_id) if user.organization_id else None,
                 "roles": roles,
+                # 前端据此收敛导航与操作入口（超管为 ["*"]）
+                "permissions": sorted(effective_permissions(user)),
             }
         )
 
@@ -57,6 +66,8 @@ class MeView(APIView):
 class OrganizationViewSet(viewsets.ModelViewSet):
     queryset = Organization.objects.select_related("parent").all()
     serializer_class = OrganizationSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW, "write": PERM_MANAGE, "tree": PERM_VIEW, "export": PERM_VIEW}
     search_fields = ["code", "name", "short_name", "manager_name"]
     filterset_fields = ["type", "org_property", "is_active", "parent"]
     ordering_fields = ["sort_order", "code", "created_at"]
@@ -98,6 +109,8 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.select_related("organization", "manager", "parent").all()
     serializer_class = DepartmentSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW, "write": PERM_MANAGE}
     search_fields = ["code", "name"]
     filterset_fields = ["organization", "is_active", "parent"]
     ordering_fields = ["sort_order", "code"]
@@ -106,6 +119,8 @@ class DepartmentViewSet(viewsets.ModelViewSet):
 class EmployeeGroupViewSet(viewsets.ModelViewSet):
     queryset = EmployeeGroup.objects.prefetch_related("roles").all()
     serializer_class = EmployeeGroupSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW, "write": PERM_MANAGE}
     search_fields = ["code", "name"]
     filterset_fields = ["is_active"]
     ordering_fields = ["code"]
@@ -114,6 +129,8 @@ class EmployeeGroupViewSet(viewsets.ModelViewSet):
 class ServiceAreaViewSet(viewsets.ModelViewSet):
     queryset = ServiceArea.objects.select_related("organization").all()
     serializer_class = ServiceAreaSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW, "write": PERM_MANAGE}
     search_fields = ["region_name", "region_code", "city", "province"]
     filterset_fields = ["organization", "area_type", "is_active", "province", "city"]
     ordering_fields = ["priority", "region_name"]
@@ -126,6 +143,13 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         .all()
     )
     serializer_class = EmployeeSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {
+        "read": PERM_VIEW, "write": PERM_EMPLOYEE,
+        "disable": PERM_EMPLOYEE, "enable": PERM_EMPLOYEE,
+        "reset_password": PERM_EMPLOYEE, "handover": PERM_EMPLOYEE, "import_csv": PERM_EMPLOYEE,
+        "roles": PERM_RBAC,  # 授予角色是最敏感动作，须角色权限管理权
+    }
     search_fields = ["employee_no", "name", "phone", "position"]
     filterset_fields = ["organization", "department", "status", "supervisor"]
     ordering_fields = ["employee_no", "hire_date", "created_at"]
@@ -277,6 +301,8 @@ class EmployeeViewSet(viewsets.ModelViewSet):
 class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_RBAC}
     search_fields = ["code", "name", "module"]
     filterset_fields = ["module"]
     ordering_fields = ["module", "code"]
@@ -285,6 +311,8 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
 class RoleViewSet(viewsets.ModelViewSet):
     queryset = Role.objects.prefetch_related("permissions").all()
     serializer_class = RoleSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_RBAC, "write": PERM_RBAC, "set_permissions": PERM_RBAC}
     search_fields = ["code", "name"]
     filterset_fields = ["is_active", "data_scope"]
     ordering_fields = ["code"]
@@ -301,7 +329,8 @@ class RoleViewSet(viewsets.ModelViewSet):
 class RbacMatrixView(APIView):
     """角色 × 权限点矩阵：一屏看清谁能做什么——G7 的扁平用户组所无。"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = PERM_RBAC
 
     def get(self, request):
         perms = list(Permission.objects.all())
@@ -329,6 +358,8 @@ class AccountHandoverViewSet(viewsets.ReadOnlyModelViewSet):
         "from_employee", "to_employee", "operator"
     ).all()
     serializer_class = AccountHandoverSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {"read": PERM_VIEW}
     filterset_fields = ["from_employee", "to_employee"]
     ordering_fields = ["created_at"]
 
@@ -350,7 +381,8 @@ class CoverageResolveView(APIView):
 class OrgOverviewView(APIView):
     """组织中台总览看板：组织/人员/区划多维 KPI——G7 没有的经营视角。"""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = PERM_VIEW
 
     def get(self, request):
         org_by_property = dict(

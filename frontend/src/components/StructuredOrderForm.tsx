@@ -22,6 +22,9 @@ interface FormState {
   business_type: string;
   priority: string;
   settlement_type: string;
+  freight_term: string;
+  freight_payer: string;
+  cod_amount: string;
   origin: string;
   destination: string;
   cargo_value: string;
@@ -36,7 +39,8 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   customer: "", channel: "cs", source: "", source_type: "enterprise", business_type: "ftl",
-  priority: "normal", settlement_type: "monthly", origin: "", destination: "", cargo_value: "",
+  priority: "normal", settlement_type: "monthly", freight_term: "prepaid", freight_payer: "shipper",
+  cod_amount: "", origin: "", destination: "", cargo_value: "",
   package_type: "", is_hazardous: false, temperature_range: "", quoted_amount: "",
   expected_pickup_at: "", expected_delivery_at: "", remark: "",
 };
@@ -138,7 +142,10 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
     fields: {
       customer: form.customer || undefined,
       source_type: form.source_type, business_type: form.business_type, priority: form.priority,
-      settlement_type: form.settlement_type, origin: form.origin, destination: form.destination,
+      settlement_type: form.settlement_type,
+      freight_term: form.freight_term, freight_payer: form.freight_payer,
+      cod_amount: form.cod_amount || undefined,
+      origin: form.origin, destination: form.destination,
       cargo_value: form.cargo_value || undefined, package_type: form.package_type,
       is_hazardous: form.is_hazardous, temperature_range: form.temperature_range,
       quoted_amount: form.quoted_amount || undefined,
@@ -594,6 +601,29 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                 <label>
                   投保声明货值 (¥)
                   <input className="search" placeholder="0.00" value={form.cargo_value} onChange={(e) => set("cargo_value", e.target.value)} />
+                </label>
+              </div>
+              <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginTop: 12 }}>
+                <label>
+                  运费付款方式
+                  <select className="search" value={form.freight_term} onChange={(e) => set("freight_term", e.target.value)}>
+                    <option value="prepaid">现付</option>
+                    <option value="collect">到付</option>
+                    <option value="receipt">回单付</option>
+                    <option value="monthly">月结</option>
+                  </select>
+                </label>
+                <label>
+                  运费承担方
+                  <select className="search" value={form.freight_payer} onChange={(e) => set("freight_payer", e.target.value)}>
+                    <option value="shipper">发货方</option>
+                    <option value="consignee">收货方</option>
+                    <option value="third_party">第三方</option>
+                  </select>
+                </label>
+                <label>
+                  代收货款 COD (¥)
+                  <input className="search" placeholder="0.00 无则留空" value={form.cod_amount} onChange={(e) => set("cod_amount", e.target.value)} />
                 </label>
               </div>
             </div>

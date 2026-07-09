@@ -251,3 +251,75 @@ def merge_waybills(waybills: list[Waybill], *, operator=None, route_name: str = 
     )
     publish_event("waybill_merge", {"waybill_no": merged.waybill_no, "sources": [w.waybill_no for w in waybills]})
     return merged
+
+
+# ── 运费付款方式与代收货款(COD) ─────────────────────────────
+
+
+def driver_collection(waybill) -> dict:
+    """司机在送达时应向收货人收取的款项明细：到付运费 + 代收货款。
+
+    到付运费仅当 freight_term=collect（到付）时由司机现场收取；应收运费取该运单
+    应收费用合计，无费用记录时回退订单报价。代收货款为货主委托代收的货款。
+    """
+    from decimal import Decimal
+
+    from django.db.models import Sum
+
+    from apps.finance.models import ExpenseRecord
+
+    from .models import Order
+
+    collect_freight = Decimal("0")
+    if waybill.freight_term == Order.FREIGHT_COLLECT:
+        ar = waybill.expenses.filter(direction=ExpenseRecord.DIRECTION_RECEIVABLE).aggregate(
+            t=Sum("amount")
+        )["t"]
+        if ar is None and waybill.order_id:
+            ar = waybill.order.quoted_amount
+        collect_freight = Decimal(str(ar or 0))
+    cod = Decimal(str(waybill.cod_amount or 0))
+    return {
+        "waybill_no": waybill.waybill_no,
+        "freight_term": waybill.freight_term,
+        "collect_freight": float(collect_freight),
+        "cod_amount": float(cod),
+        "cod_status": waybill.cod_status,
+        "total_to_collect": float(collect_freight + cod),
+    }
+
+
+def collect_cod(waybill, *, operator=None):
+    """司机确认已向收货人代收货款。"""
+    from .models import Order
+
+    if not waybill.cod_amount or waybill.cod_amount <= 0:
+        raise AppError("NO_COD", "该运单无代收货款。", status=409)
+    if waybill.cod_status == Order.COD_REMITTED:
+        raise AppError("COD_REMITTED", "代收货款已回款，不能重复代收。", status=409)
+    waybill.cod_status = Order.COD_COLLECTED
+    waybill.cod_collected_at = timezone.now()
+    waybill.save(update_fields=["cod_status", "cod_collected_at", "updated_at"])
+    WaybillEvent.objects.create(
+        waybill=waybill, event_type="cod_collected", event_time=timezone.now(),
+        resource=waybill.waybill_no, source="settlement",
+        payload={"amount": str(waybill.cod_amount)},
+    )
+    return waybill
+
+
+def remit_cod(waybill, *, operator=None):
+    """财务确认代收货款已回款给货主。"""
+    from .models import Order
+
+    if waybill.cod_status != Order.COD_COLLECTED:
+        raise AppError("COD_NOT_COLLECTED", "仅已代收的货款可回款。", status=409)
+    waybill.cod_status = Order.COD_REMITTED
+    waybill.cod_remitted_at = timezone.now()
+    waybill.save(update_fields=["cod_status", "cod_remitted_at", "updated_at"])
+    WaybillEvent.objects.create(
+        waybill=waybill, event_type="cod_remitted", event_time=timezone.now(),
+        resource=waybill.waybill_no, source="settlement",
+        payload={"amount": str(waybill.cod_amount)},
+    )
+    return waybill

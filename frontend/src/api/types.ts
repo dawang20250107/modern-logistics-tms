@@ -106,6 +106,15 @@ export interface Waybill {
   departed_at: string | null;
   arrived_at: string | null;
   signed_at: string | null;
+  freight_term: string;
+  freight_term_label: string;
+  freight_payer: string;
+  freight_payer_label: string;
+  cod_amount: string;
+  cod_status: string;
+  cod_status_label: string;
+  cod_collected_at: string | null;
+  cod_remitted_at: string | null;
   cargo: { quantity: number; weight_ton: number; volume_cbm: number };
   created_at: string;
 }
@@ -324,6 +333,24 @@ export const ALERT_TYPE_LABEL: Record<AlertType, string> = {
 
 // ── 多渠道订单 ──────────────────────────────────────────
 export type OrderChannel = "cs" | "self" | "miniprogram" | "wechat_group" | "api";
+export const FREIGHT_TERM_LABEL: Record<string, string> = {
+  prepaid: "现付", collect: "到付", receipt: "回单付", monthly: "月结",
+};
+export const FREIGHT_PAYER_LABEL: Record<string, string> = {
+  shipper: "发货方", consignee: "收货方", third_party: "第三方",
+};
+export const COD_STATUS_LABEL: Record<string, string> = {
+  none: "无代收", pending: "待代收", collected: "已代收", remitted: "已回款",
+};
+export interface DriverCollection {
+  waybill_no: string;
+  freight_term: string;
+  collect_freight: number;
+  cod_amount: number;
+  cod_status: string;
+  total_to_collect: number;
+}
+
 export interface Order {
   id: string;
   order_no: string;
@@ -335,6 +362,12 @@ export interface Order {
   business_type: string;
   priority: string;
   settlement_type: string;
+  freight_term: string;
+  freight_term_label: string;
+  freight_payer: string;
+  freight_payer_label: string;
+  cod_amount: string;
+  cod_status: string;
   status: string;
   contact_name: string;
   contact_phone: string;

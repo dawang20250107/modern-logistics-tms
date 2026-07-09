@@ -5,7 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { fmtDateTime } from "../api/format";
 import { toast } from "../api/toast";
-import { REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
+import { COD_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
@@ -79,6 +79,21 @@ export function WaybillDetailPage() {
   const sign = useMutation({
     mutationFn: () => apiPost(`/waybills/${no}/sign`, { signatory, signature, sign_source: "driver" }),
     onSuccess: () => { setSignatory(""); setSignature(""); invalidate(); },
+  });
+
+  const collection = useQuery({
+    queryKey: ["waybill", no, "collection"],
+    queryFn: () => apiGet<DriverCollection>(`/waybills/${no}/collection`),
+    enabled: Boolean(detail.data),
+  });
+  const codAction = useMutation({
+    mutationFn: (action: "collect-cod" | "remit-cod") => apiPost(`/waybills/${no}/${action}`, {}),
+    onSuccess: (_d, action) => {
+      toast.success(action === "collect-cod" ? "已确认代收货款" : "已确认回款给货主");
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["waybill", no, "collection"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const fileInput = useRef<HTMLInputElement>(null);
@@ -405,6 +420,44 @@ export function WaybillDetailPage() {
               </ul>
             )}
           </div>
+
+          {/* 运费付款方式与代收货款 */}
+          {detail.data && (
+            <div className="panel">
+              <div className="panel-head" style={{ borderLeft: "4px solid var(--green)" }}>💴 运费付款与代收货款</div>
+              <div style={{ padding: "14px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                  <div className="small"><span className="muted">付款方式：</span><b>{detail.data.freight_term_label}</b></div>
+                  <div className="small"><span className="muted">承担方：</span><b>{detail.data.freight_payer_label}</b></div>
+                </div>
+                {collection.data && collection.data.freight_term === "collect" && collection.data.collect_freight > 0 && (
+                  <div className="small" style={{ color: "var(--amber)" }}>
+                    ⚠️ 到付：司机送达时需向收货人收取运费 ¥{collection.data.collect_freight.toLocaleString()}
+                  </div>
+                )}
+                {Number(detail.data.cod_amount) > 0 && (
+                  <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8, padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: "bold" }}>代收货款 COD ¥{Number(detail.data.cod_amount).toLocaleString()}</div>
+                        <div className="muted small">状态：{COD_STATUS_LABEL[detail.data.cod_status] ?? detail.data.cod_status}
+                          {collection.data ? ` · 司机应收合计 ¥${collection.data.total_to_collect.toLocaleString()}` : ""}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {detail.data.cod_status === "pending" && (
+                          <button className="btn-primary" style={{ padding: "4px 12px", fontSize: 12 }} disabled={codAction.isPending} onClick={() => codAction.mutate("collect-cod")}>司机确认代收</button>
+                        )}
+                        {detail.data.cod_status === "collected" && (
+                          <button className="btn-primary" style={{ padding: "4px 12px", fontSize: 12 }} disabled={codAction.isPending} onClick={() => codAction.mutate("remit-cod")}>财务确认回款</button>
+                        )}
+                        {detail.data.cod_status === "remitted" && <span className="tag tag-low">已回款货主</span>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* 业财微型 P&L 台账 */}
           <div className="panel">

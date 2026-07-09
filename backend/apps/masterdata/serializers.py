@@ -16,7 +16,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         model = Customer
         fields = [
             "id", "code", "name", "contact_name", "contact_phone", "wechat_group",
-            "settlement_type", "is_active", "history",
+            "settlement_type", "credit_limit", "credit_days", "billing_day", "is_active", "history",
         ]
 
     def get_history(self, obj):

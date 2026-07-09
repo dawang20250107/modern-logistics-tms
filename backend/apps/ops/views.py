@@ -91,6 +91,9 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         "dispatch_recommendation": "waybill.view",
         "dispatch_plan": "waybill.view",
         "sign": "waybill.manage",
+        "collection": "waybill.view",
+        "collect_cod_action": "waybill.manage",
+        "remit_cod_action": "waybill.manage",
     }
     lookup_field = "waybill_no"
     lookup_value_regex = "[^/]+"
@@ -328,6 +331,29 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         from .serializers import ReceiptSerializer
 
         return Response({"waybill_no": waybill.waybill_no, "status": waybill.status, "receipt": ReceiptSerializer(receipt).data}, status=201)
+
+    @action(detail=True, methods=["get"], url_path="collection")
+    def collection(self, request, waybill_no=None):
+        """司机送达应收明细：到付运费 + 代收货款合计。"""
+        from .services import driver_collection
+
+        return Response(driver_collection(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="collect-cod")
+    def collect_cod_action(self, request, waybill_no=None):
+        """司机确认已代收货款。"""
+        from .services import collect_cod
+
+        waybill = collect_cod(self.get_object(), operator=request.user)
+        return Response(WaybillDetailSerializer(waybill).data)
+
+    @action(detail=True, methods=["post"], url_path="remit-cod")
+    def remit_cod_action(self, request, waybill_no=None):
+        """财务确认代收货款已回款给货主。"""
+        from .services import remit_cod
+
+        waybill = remit_cod(self.get_object(), operator=request.user)
+        return Response(WaybillDetailSerializer(waybill).data)
 
     @action(detail=True, methods=["get"], url_path="tracking")
     def tracking(self, request, waybill_no=None):

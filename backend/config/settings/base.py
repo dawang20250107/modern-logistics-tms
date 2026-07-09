@@ -149,6 +149,8 @@ REST_FRAMEWORK = {
         "apps.core.throttling.BurstRateThrottle",
         "apps.core.throttling.SustainedRateThrottle",
         "apps.core.throttling.ApiKeyRateThrottle",
+        # 仅对声明 throttle_scope 的视图生效（如 AI/LLM 调用），其余返回 None 不限流
+        "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "burst": env("THROTTLE_BURST", default="120/min"),
@@ -156,6 +158,8 @@ REST_FRAMEWORK = {
         "anon": env("THROTTLE_ANON", default="60/min"),
         "apikey": env("THROTTLE_APIKEY", default="600/min"),
         "driver_login": env("THROTTLE_DRIVER_LOGIN", default="10/min"),
+        # LLM/Agent 调用单独限额，防 token 成本 DoS
+        "ai": env("THROTTLE_AI", default="30/min"),
     },
     "EXCEPTION_HANDLER": "apps.core.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",

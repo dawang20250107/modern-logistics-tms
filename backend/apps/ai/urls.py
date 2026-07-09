@@ -9,7 +9,7 @@ from .views import (
     AgentToolsView,
     DeepSeekChatView,
     DeepSeekStatusView,
-    query_waybill,
+    QueryWaybillView,
 )
 
 router = DefaultRouter(trailing_slash=False)
@@ -18,7 +18,7 @@ router.register("ai/suggestions", AgentSuggestionViewSet, basename="agent-sugges
 urlpatterns = [
     path("ai/deepseek/status", DeepSeekStatusView.as_view(), name="deepseek-status"),
     path("ai/deepseek/chat", DeepSeekChatView.as_view(), name="deepseek-chat"),
-    path("ai/query-waybill", query_waybill, name="ai-query-waybill"),
+    path("ai/query-waybill", QueryWaybillView.as_view(), name="ai-query-waybill"),
     path("agent/tools", AgentToolsView.as_view(), name="agent-tools"),
     path("agent/tools/execute", AgentToolExecuteView.as_view(), name="agent-tool-execute"),
     # LangGraph ReAct Agent（增量并存，旧工具端点保留向后兼容）

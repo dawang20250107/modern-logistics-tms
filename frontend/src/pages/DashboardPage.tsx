@@ -28,6 +28,20 @@ function formatValue(m: MetricCard): string {
   return `${m.value.toLocaleString()}${m.unit}`;
 }
 
+// 用序列首尾计算区间变化幅度；返回方向与百分比，供 KPI 趋势角标展示。
+function trendDelta(points?: Array<{ value: number }>): { dir: "up" | "down" | "flat"; label: string } | null {
+  if (!points || points.length < 2) return null;
+  const first = points[0].value;
+  const last = points[points.length - 1].value;
+  if (!isFinite(first) || !isFinite(last)) return null;
+  const diff = last - first;
+  const base = Math.abs(first) > 1e-9 ? Math.abs(first) : 1;
+  const pct = (diff / base) * 100;
+  if (Math.abs(pct) < 0.5) return { dir: "flat", label: "持平" };
+  const dir = diff > 0 ? "up" : "down";
+  return { dir, label: `${diff > 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%` };
+}
+
 const DOMAIN_ORDER = ["ops", "fleet", "order", "finance"];
 const TONE: Record<string, string> = { ops: "blue", fleet: "blue", order: "amber", finance: "" };
 
@@ -59,12 +73,11 @@ export function DashboardPage() {
 
   return (
     <div className="stack">
-      <div className="panel" style={{ background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)", color: "#fff", border: "none" }}>
+      <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
               经营看板
-              <span className="tag" style={{ background: "rgba(37,99,235,0.2)", border: "1px solid rgba(37,99,235,0.4)", color: "#93c5fd" }}></span>
             </div>
             <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
               基于实收实付台账自动生成。
@@ -150,26 +163,32 @@ export function DashboardPage() {
           <div key={g.domain} className="panel">
             <div className="panel-head">{METRIC_DOMAIN_LABEL[g.domain] ?? g.domain}</div>
             <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
-              {g.items.map((m) => (
-                <div key={m.code} className={`kpi${TONE[g.domain] ? ` kpi-${TONE[g.domain]}` : ""}`}>
-                  <div className="kpi-value">{formatValue(m)}</div>
-                  <div className="kpi-label">{m.name}</div>
-                  {trends[m.code] && trends[m.code].length > 1 && (
-                    <div style={{ marginTop: 12 }}>
-                      <Sparkline values={trends[m.code].map((p) => p.value)} />
+              {g.items.map((m) => {
+                const delta = trendDelta(trends[m.code]);
+                return (
+                  <div key={m.code} className={`kpi${TONE[g.domain] ? ` kpi-${TONE[g.domain]}` : ""}`}>
+                    <div className="kpi-top">
+                      <span className="kpi-label">{m.name}</span>
+                      {delta && <span className={`kpi-delta ${delta.dir}`}>{delta.label}</span>}
                     </div>
-                  )}
-                  {m.breakdown && m.breakdown.length > 0 && (
-                    <div className="small muted" style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {m.breakdown.slice(0, 4).map((b) => (
-                        <span key={b.key} style={{ background: "var(--bg)", padding: "2px 6px", borderRadius: 4 }}>
-                          {b.key}: <b>{b.value}</b>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    <div className="kpi-value">{formatValue(m)}</div>
+                    {trends[m.code] && trends[m.code].length > 1 && (
+                      <div className="kpi-spark">
+                        <Sparkline values={trends[m.code].map((p) => p.value)} />
+                      </div>
+                    )}
+                    {m.breakdown && m.breakdown.length > 0 && (
+                      <div className="kpi-foot" style={{ flexWrap: "wrap" }}>
+                        {m.breakdown.slice(0, 4).map((b) => (
+                          <span key={b.key} style={{ background: "var(--panel-3)", padding: "2px 7px", borderRadius: 4 }}>
+                            {b.key}: <b style={{ color: "var(--ink-2)" }}>{b.value}</b>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))

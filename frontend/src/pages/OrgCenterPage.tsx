@@ -369,7 +369,6 @@ function CoverageRouter() {
     <div className="panel">
       <div className="panel-head">
         区划路由
-        <span className="ai-pill"></span>
       </div>
       <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
         <input className="search" style={{ width: 130 }} placeholder="城市，如 上海市" value={city} onChange={(e) => setCity(e.target.value)} />
@@ -604,7 +603,6 @@ export function OrgCenterPage() {
       <div className="panel">
         <div className="panel-head">
           组织中心
-          <span className="ai-pill"></span>
         </div>
         <div className="form-row" style={{ gap: 6, padding: "10px 16px" }}>
           {tabs.map((t) => (

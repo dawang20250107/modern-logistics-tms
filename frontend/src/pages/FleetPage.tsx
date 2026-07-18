@@ -131,7 +131,6 @@ export function FleetPage() {
       <div className="panel">
         <div className="panel-head">
           车队合规预警
-          <span className="ai-pill"></span>
         </div>
         <div className="form-row">
           <span className="muted small">预警窗口</span>

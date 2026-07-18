@@ -70,7 +70,7 @@ export function DriverPortalPage() {
       <div className="public-page" style={{ background: "#f8fafc", padding: "10vh 20px" }}>
         <div className="public-card driver-card" style={{ padding: "40px 30px", border: "none", boxShadow: "0 20px 40px rgba(0,0,0,0.08)" }}>
           <div style={{ textAlign: "center", marginBottom: 30 }}>
-            <div style={{ width: 64, height: 64, background: "var(--grad)", borderRadius: 16, margin: "0 auto 16px", display: "grid", placeItems: "center", fontSize: 32, boxShadow: "0 10px 20px rgba(37,99,235,0.3)" }}></div>
+            <div style={{ width: 64, height: 64, background: "var(--grad)", borderRadius: 16, margin: "0 auto 16px", display: "grid", placeItems: "center", fontSize: 32, boxShadow: "0 10px 20px rgba(75,88,240,0.3)" }}></div>
             <div className="public-brand" style={{ fontSize: 24, letterSpacing: 1 }}>智运 · 司机端</div>
             <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>手机号 + 身份证后6位 安全登录</p>
           </div>
@@ -110,7 +110,7 @@ export function DriverPortalPage() {
     <div className="public-page" style={{ alignItems: "flex-start", padding: "20px 16px", background: "#f1f5f9" }}>
       <div className="public-card driver-card" style={{ padding: 0, overflow: "hidden", border: "none", boxShadow: "0 10px 30px rgba(0,0,0,0.06)" }}>
         {/* 顶部深色司机身份面板 */}
-        <div style={{ background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)", color: "#fff", padding: "24px 20px" }}>
+        <div style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", padding: "24px 20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, border: "2px solid rgba(255,255,255,0.2)" }}>
@@ -135,7 +135,7 @@ export function DriverPortalPage() {
         <div style={{ padding: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <h3 style={{ margin: 0, fontSize: 16, color: "var(--ink)" }}>在途运输任务</h3>
-            <span className="tag" style={{ background: "rgba(37,99,235,0.1)", color: "var(--brand)", fontWeight: "bold" }}>
+            <span className="tag" style={{ background: "rgba(75,88,240,0.1)", color: "var(--brand)", fontWeight: "bold" }}>
               {tasks?.waybills.length ?? 0} 单进行中
             </span>
           </div>
@@ -163,7 +163,7 @@ export function DriverPortalPage() {
       {active && (
         <div className="driver-modal-mask" style={{ backdropFilter: "blur(4px)" }}>
           <div className="driver-modal" style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{ background: "linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)", color: "#fff", padding: "20px 24px" }}>
+            <div style={{ background: "linear-gradient(135deg, #d0242c 0%, #a81d24 100%)", color: "#fff", padding: "20px 24px" }}>
               <div className="driver-modal-title" style={{ color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 22 }}></span> 调度中心指令 (必读)
               </div>
@@ -171,12 +171,12 @@ export function DriverPortalPage() {
             </div>
             
             <div style={{ padding: 24 }}>
-              <div style={{ background: "#fff5f5", color: "#c0392b", padding: 16, borderRadius: 12, fontSize: 14, lineHeight: 1.6, fontWeight: "bold", borderLeft: "4px solid #e74c3c" }}>
+              <div style={{ background: "#fff5f5", color: "#a81d24", padding: 16, borderRadius: 12, fontSize: 14, lineHeight: 1.6, fontWeight: "bold", borderLeft: "4px solid #d0242c" }}>
                 {active.content}
               </div>
               <button 
                 className="btn-primary" 
-                style={{ width: "100%", marginTop: 24, padding: 14, fontSize: 15, background: "#e74c3c", boxShadow: "0 4px 12px rgba(231, 76, 60, 0.3)" }} 
+                style={{ width: "100%", marginTop: 24, padding: 14, fontSize: 15, background: "#d0242c", boxShadow: "0 4px 12px rgba(208,36,44,0.3)" }} 
                 onClick={() => ackReminder(active)}
               >
                 {active.ack_required ? "✓ 我已阅读并严格执行" : "✓ 确认"}
@@ -235,7 +235,7 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
         <div style={{ display: "flex", gap: 12 }}>
           <button 
             style={{ 
-              flex: 1, padding: 14, background: "rgba(37,99,235,0.05)", border: "1px solid rgba(37,99,235,0.2)", 
+              flex: 1, padding: 14, background: "rgba(75,88,240,0.05)", border: "1px solid rgba(75,88,240,0.2)", 
               color: "var(--brand)", borderRadius: 10, fontWeight: "bold", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 
             }} 
             disabled={busy} 
@@ -249,7 +249,7 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
             <div style={{ 
               width: "100%", padding: 14, background: "var(--grad)", color: "#fff", 
               borderRadius: 10, fontWeight: "bold", fontSize: 14, textAlign: "center", 
-              boxShadow: "0 6px 16px rgba(37,99,235,0.3)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 
+              boxShadow: "0 6px 16px rgba(75,88,240,0.3)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 
             }}>
               <span style={{ fontSize: 16 }}></span> {busy ? "上传中…" : "现场拍照打卡"}
             </div>

@@ -89,12 +89,11 @@ export function ExceptionsPage() {
     <div className="stack" style={{ position: "relative" }}>
       
       {/* 头部 */}
-      <div className="panel" style={{ background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)", color: "#fff", border: "none" }}>
+      <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
               异常处置
-              <span className="tag" style={{ background: "rgba(231,76,60,0.2)", border: "1px solid rgba(231,76,60,0.4)", color: "#fca5a5" }}></span>
             </div>
             <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
               管理设备报警生成的在途异常，或手动提报异常。

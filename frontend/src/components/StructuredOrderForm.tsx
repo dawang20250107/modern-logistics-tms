@@ -268,7 +268,6 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
       <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 18 }}>新建订单</span>
-          <span className="tag tag-low" style={{ background: "rgba(39,174,96,0.1)", color: "#27ae60" }}></span>
         </div>
         {templates.data && templates.data.items.length > 0 && (
           <select style={{ width: 140, padding: "4px 8px" }} defaultValue="" onChange={(e) => { if (e.target.value) applyTpl(e.target.value); e.target.value = ""; }}>
@@ -298,7 +297,6 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
           <div className="stack" style={{ gap: 10 }}>
             <div className="section-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span>粘贴微信消息 / EDI 报文</span>
-              <span className="tag tag-medium" style={{ fontSize: 10 }}></span>
             </div>
             <textarea
               className="search"

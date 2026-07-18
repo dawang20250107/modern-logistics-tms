@@ -71,7 +71,7 @@ function OverviewTab() {
                 <tr key={k}><td>{AREA_TYPE_LABEL[k] ?? k}</td><td className="mono">{v}</td></tr>
               ))}
               {Object.keys(d.service_areas.by_type).length === 0 && (
-                <tr><td className="muted small" colSpan={2}>暂无区划，执行 seed_org 生成演示数据</td></tr>
+                <tr><td className="muted small" colSpan={2}>暂无区划</td></tr>
               )}
             </tbody>
           </table>
@@ -168,13 +168,13 @@ function OrgTab() {
     <div className="panel">
       <div className="panel-head">
         组织架构树
-        <span className="ai-pill">含子树在职人头汇总</span>
+        <span className="ai-pill">含子树在职人数合计</span>
         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => apiDownload("/org/organizations/export", "organizations.csv")}>导出 CSV</button>
       </div>
       {q.isLoading ? (
         <div className="muted" style={{ padding: 16 }}>加载中…</div>
       ) : (q.data?.tree.length ?? 0) === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无组织，执行 <code>python manage.py seed_org</code> 生成演示数据。</div>
+        <div className="muted" style={{ padding: 16 }}>暂无组织。</div>
       ) : (
         <table className="table">
           <thead>
@@ -288,7 +288,7 @@ function EmployeesTab() {
       <EmployeeCreateForm orgs={orgs.data ?? []} onDone={invalidate} />
       <div className="panel">
         <div className="panel-head">
-          员工名录 · 汇报线 + 账号生命周期
+          员工名录
           <div className="form-row" style={{ marginLeft: "auto", gap: 6 }}>
             <label className="btn-ghost" style={{ cursor: "pointer" }}>
               {importCsv.isPending ? "导入中…" : "导入 CSV"}
@@ -306,7 +306,7 @@ function EmployeesTab() {
             <tr><th>工号</th><th>姓名</th><th>组织</th><th>职位</th><th>直接上级</th><th>账号</th><th>状态</th><th>操作</th></tr>
           </thead>
           <tbody>
-            {employees.length === 0 && <tr><td colSpan={8} className="muted small">暂无员工，执行 seed_org 生成演示数据。</td></tr>}
+            {employees.length === 0 && <tr><td colSpan={8} className="muted small">暂无员工。</td></tr>}
             {employees.map((e) => (
               <tr key={e.id}>
                 <td className="mono">{e.employee_no}</td>
@@ -368,8 +368,8 @@ function CoverageRouter() {
   return (
     <div className="panel">
       <div className="panel-head">
-        智能区划路由
-        <span className="ai-pill">覆盖匹配 · 排他 · 优先级仲裁</span>
+        区划路由
+        <span className="ai-pill"></span>
       </div>
       <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
         <input className="search" style={{ width: 130 }} placeholder="城市，如 上海市" value={city} onChange={(e) => setCity(e.target.value)} />
@@ -458,7 +458,7 @@ function AreasTab() {
     <div className="stack">
       <CoverageRouter />
       <AreaCreateForm orgs={orgs.data ?? []} onDone={() => qc.invalidateQueries({ queryKey: ["org-areas"] })} />
-      <div className="muted small">网点服务区划：决定智能接单与派单的覆盖路由——派送/中转/特殊/不派送/不中转五类。</div>
+      <div className="muted small">网点服务区划：派送、中转、特殊、不派送、不中转五类，用于接单与派单的覆盖路由。</div>
       <div className="ct-grid">
         {types.filter((t) => grouped[t]?.length).map((t) => (
           <div className="panel" key={t}>
@@ -478,7 +478,7 @@ function AreasTab() {
           </div>
         ))}
         {(q.data?.items.length ?? 0) === 0 && (
-          <div className="muted" style={{ padding: 16 }}>暂无服务区划，执行 seed_org 生成演示数据。</div>
+          <div className="muted" style={{ padding: 16 }}>暂无服务区划。</div>
         )}
       </div>
     </div>
@@ -531,7 +531,7 @@ function RbacTab() {
 
   if (!matrix) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
   if (matrix.roles.length === 0)
-    return <div className="muted" style={{ padding: 16 }}>暂无角色，执行 <code>python manage.py seed_org</code> 生成演示数据。</div>;
+    return <div className="muted" style={{ padding: 16 }}>暂无角色。</div>;
 
   return (
     <div className="panel">
@@ -587,7 +587,7 @@ function RbacTab() {
 }
 
 const TABS: { key: Tab; label: string; perm?: string }[] = [
-  { key: "overview", label: "经营总览" },
+  { key: "overview", label: "运营总览" },
   { key: "org", label: "组织架构" },
   { key: "employees", label: "员工名录" },
   { key: "areas", label: "服务区划" },
@@ -603,8 +603,8 @@ export function OrgCenterPage() {
     <div className="stack">
       <div className="panel">
         <div className="panel-head">
-          组织中台 · 企业管理中枢
-          <span className="ai-pill">超越 G7 · 汇报线 · 账号移交 · 区划路由</span>
+          组织中心
+          <span className="ai-pill"></span>
         </div>
         <div className="form-row" style={{ gap: 6, padding: "10px 16px" }}>
           {tabs.map((t) => (

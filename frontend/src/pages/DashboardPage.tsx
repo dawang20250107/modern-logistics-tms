@@ -63,11 +63,11 @@ export function DashboardPage() {
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
-              经营看盘 · 高级可视化大屏
-              <span className="tag" style={{ background: "rgba(37,99,235,0.2)", border: "1px solid rgba(37,99,235,0.4)", color: "#93c5fd" }}>BI · ECharts</span>
+              经营看板
+              <span className="tag" style={{ background: "rgba(37,99,235,0.2)", border: "1px solid rgba(37,99,235,0.4)", color: "#93c5fd" }}></span>
             </div>
             <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
-              基于实收实付台账自动生成；全域统一数据元供底层 AI 直接调用测算。
+              基于实收实付台账自动生成。
             </div>
           </div>
         </div>
@@ -79,7 +79,7 @@ export function DashboardPage() {
           {/* 左侧：营业额与利润趋势组合图 */}
           <div className="panel" style={{ padding: 18, height: 380, display: "flex", flexDirection: "column" }}>
             <div className="section-label" style={{ marginBottom: 16 }}>
-              📈 营业额与利润趋势 ({financeMetrics.data.period})
+              营业额与利润趋势 ({financeMetrics.data.period})
             </div>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={financeMetrics.data.trend} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
@@ -107,7 +107,7 @@ export function DashboardPage() {
           {/* 右侧：车队成本构成 Donut 图 */}
           <div className="panel" style={{ padding: 18, height: 380, display: "flex", flexDirection: "column" }}>
             <div className="section-label">
-              🍩 车队运营成本构成占比
+              车队运营成本构成占比
             </div>
             {pieData.length === 0 ? (
               <div className="muted" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>

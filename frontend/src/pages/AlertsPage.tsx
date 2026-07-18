@@ -66,7 +66,7 @@ export function AlertsPage() {
       </div>
 
       <div className="panel">
-        <div className="panel-head">主动安全预警中心</div>
+        <div className="panel-head">报警列表</div>
         {list.isLoading ? (
           <div className="muted" style={{ padding: 16 }}>加载中…</div>
         ) : items.length === 0 ? (

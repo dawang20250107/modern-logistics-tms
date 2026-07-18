@@ -100,7 +100,7 @@ export function PricingPage() {
       <div className="panel">
         <div className="panel-head">
           {editing ? "编辑合同价 / 计价规则" : "新增合同价 / 计价规则"}
-          <span className="ai-pill">驱动录单自动报价</span>
+          
         </div>
         <div className="form-section" style={{ borderBottom: "none" }}>
           <div className="grid-form">

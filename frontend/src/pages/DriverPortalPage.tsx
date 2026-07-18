@@ -8,9 +8,9 @@ interface WaybillBrief { waybill_no: string; route_name: string; origin: string;
 interface Tasks { driver: { name: string; phone: string }; waybills: WaybillBrief[]; pending_reminders: Reminder[] }
 
 const NODES: [string, string][] = [
-  ["depart", "🛫 出发"], ["arrive_pickup", "📍 到达装货地"], ["queuing", "⏳ 排队"], ["loading", "📦 装货"],
-  ["depart_loaded", "🚚 满载发车"], ["in_transit", "🛣️ 在途打卡"], ["arrive_delivery", "📍 到达卸货地"],
-  ["unloading", "📥 卸货"], ["receipt", "🧾 回单签收"], ["finish", "✅ 订单结束"],
+  ["depart", "出发"], ["arrive_pickup", "到达装货地"], ["queuing", "排队"], ["loading", "装货"],
+  ["depart_loaded", "满载发车"], ["in_transit", "在途打卡"], ["arrive_delivery", "到达卸货地"],
+  ["unloading", "卸货"], ["receipt", "回单签收"], ["finish", "订单结束"],
 ];
 const CRED_TYPES: [string, string][] = [
   ["vehicle_license", "车头行驶证"], ["trailer_license", "车挂行驶证"], ["driving_license", "驾驶证"],
@@ -70,7 +70,7 @@ export function DriverPortalPage() {
       <div className="public-page" style={{ background: "#f8fafc", padding: "10vh 20px" }}>
         <div className="public-card driver-card" style={{ padding: "40px 30px", border: "none", boxShadow: "0 20px 40px rgba(0,0,0,0.08)" }}>
           <div style={{ textAlign: "center", marginBottom: 30 }}>
-            <div style={{ width: 64, height: 64, background: "var(--grad)", borderRadius: 16, margin: "0 auto 16px", display: "grid", placeItems: "center", fontSize: 32, boxShadow: "0 10px 20px rgba(37,99,235,0.3)" }}>🚛</div>
+            <div style={{ width: 64, height: 64, background: "var(--grad)", borderRadius: 16, margin: "0 auto 16px", display: "grid", placeItems: "center", fontSize: 32, boxShadow: "0 10px 20px rgba(37,99,235,0.3)" }}></div>
             <div className="public-brand" style={{ fontSize: 24, letterSpacing: 1 }}>智运 · 司机端</div>
             <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>手机号 + 身份证后6位 安全登录</p>
           </div>
@@ -114,7 +114,7 @@ export function DriverPortalPage() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, border: "2px solid rgba(255,255,255,0.2)" }}>
-                👨‍✈️
+               ‍
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <span style={{ fontSize: 18, fontWeight: "bold", letterSpacing: 1 }}>{tasks?.driver.name}</span>
@@ -134,7 +134,7 @@ export function DriverPortalPage() {
         {/* 任务流与打卡区 */}
         <div style={{ padding: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: "var(--ink)" }}>🚚 在途运输任务</h3>
+            <h3 style={{ margin: 0, fontSize: 16, color: "var(--ink)" }}>在途运输任务</h3>
             <span className="tag" style={{ background: "rgba(37,99,235,0.1)", color: "var(--brand)", fontWeight: "bold" }}>
               {tasks?.waybills.length ?? 0} 单进行中
             </span>
@@ -142,7 +142,7 @@ export function DriverPortalPage() {
 
           {(tasks?.waybills.length ?? 0) === 0 ? (
             <div style={{ background: "#fff", padding: 30, borderRadius: 12, textAlign: "center", border: "1px dashed var(--line-strong)" }}>
-              <div style={{ fontSize: 32, opacity: 0.5, marginBottom: 10 }}>🏖️</div>
+              <div style={{ fontSize: 32, opacity: 0.5, marginBottom: 10 }}></div>
               <div className="muted" style={{ fontSize: 14 }}>当前暂无在途任务，请等待调度派单。</div>
             </div>
           ) : (
@@ -165,7 +165,7 @@ export function DriverPortalPage() {
           <div className="driver-modal" style={{ padding: 0, overflow: "hidden" }}>
             <div style={{ background: "linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)", color: "#fff", padding: "20px 24px" }}>
               <div className="driver-modal-title" style={{ color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 22 }}>⚠️</span> 调度中心指令 (必读)
+                <span style={{ fontSize: 22 }}></span> 调度中心指令 (必读)
               </div>
               <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>{active.title}{active.waybill_no ? ` · ${active.waybill_no}` : ""}</div>
             </div>
@@ -215,14 +215,14 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
       <div style={{ padding: "16px 18px", borderBottom: "1px dashed var(--line)", background: "rgba(0,0,0,0.01)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <b style={{ fontSize: 16, letterSpacing: -0.5 }}>{wb.waybill_no}</b>
-          <span className="muted" style={{ fontSize: 12 }}>🛣️ {wb.route_name}</span>
+          <span className="muted" style={{ fontSize: 12 }}>{wb.route_name}</span>
         </div>
         <span className="tag" style={{ background: "rgba(39,174,96,0.1)", color: "#27ae60", padding: "4px 8px" }}>运输中</span>
       </div>
 
       {/* 轨迹上报控制台 */}
       <div style={{ padding: 18 }}>
-        <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 12 }}>📍 时空节点打卡 (同步 AI 调度大屏)</div>
+        <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 12 }}>时空节点打卡 (同步 AI 调度大屏)</div>
         
         <select 
           value={node} 
@@ -251,7 +251,7 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
               borderRadius: 10, fontWeight: "bold", fontSize: 14, textAlign: "center", 
               boxShadow: "0 6px 16px rgba(37,99,235,0.3)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 
             }}>
-              <span style={{ fontSize: 16 }}>📸</span> {busy ? "上传中…" : "现场拍照打卡"}
+              <span style={{ fontSize: 16 }}></span> {busy ? "上传中…" : "现场拍照打卡"}
             </div>
             <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
                    onChange={(e) => { const f = e.target.files?.[0]; if (f) checkin(f); e.target.value = ""; }} />

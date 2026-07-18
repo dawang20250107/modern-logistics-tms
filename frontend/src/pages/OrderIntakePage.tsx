@@ -78,7 +78,7 @@ export function OrderIntakePage() {
 
       <div className="panel">
         <div className="panel-head">
-          订单（全流程）· {total}
+          订单 · {total}
           <button className="btn-ghost" onClick={() => apiDownload(`/orders/export?page_size=5000${filterQs}`, "orders.csv")}>导出 CSV</button>
         </div>
         <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -121,7 +121,7 @@ export function OrderIntakePage() {
         ) : items.length === 0 ? (
           <EmptyState
             title={statusFilter || search ? "没有匹配的订单" : "暂无订单"}
-            hint={statusFilter || search ? "试试调整状态过滤或搜索条件" : "用上方「标准录单」创建第一单"}
+            hint={statusFilter || search ? "试试调整状态过滤或搜索条件" : "使用上方表单创建订单"}
           />
         ) : (
           <table className="table">

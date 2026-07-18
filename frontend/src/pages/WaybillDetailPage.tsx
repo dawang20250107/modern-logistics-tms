@@ -19,18 +19,18 @@ const EXC_STATUS_LABEL: Record<string, string> = {
   pending_handle: "待处理", handling: "处理中", pending_audit: "待审核", closed: "已关闭", rejected: "已驳回",
 };
 
-// 运单业务状态全生命周期映射
+// 运单状态流转
 const WORKFLOW_STEPS = [
   { status: "draft", label: "草稿", icon: "📝" },
-  { status: "pending_dispatch", label: "待调度", icon: "🕒" },
-  { status: "dispatching", label: "派单中", icon: "⏳" },
-  { status: "dispatched", label: "已派发", icon: "🎯" },
-  { status: "departed", label: "发车", icon: "🛫" },
-  { status: "in_transit", label: "在途", icon: "🛣️" },
-  { status: "arrived", label: "到达", icon: "📍" },
+  { status: "pending_dispatch", label: "待调度", icon: "" },
+  { status: "dispatching", label: "派单中", icon: "" },
+  { status: "dispatched", label: "已派发", icon: "" },
+  { status: "departed", label: "发车", icon: "" },
+  { status: "in_transit", label: "在途", icon: "" },
+  { status: "arrived", label: "到达", icon: "" },
   { status: "signed", label: "签收", icon: "✍️" },
-  { status: "delivered", label: "回单交接", icon: "🧾" },
-  { status: "settled", label: "完结核销", icon: "✅" }
+  { status: "delivered", label: "回单交接", icon: "" },
+  { status: "settled", label: "完结核销", icon: "" }
 ];
 
 export function WaybillDetailPage() {
@@ -173,7 +173,7 @@ export function WaybillDetailPage() {
     }),
     onSuccess: () => {
       setRmContent(""); setRmTpl("");
-      toast.success("提醒已下发至司机端");
+      toast.success("提醒已发送");
       queryClient.invalidateQueries({ queryKey: ["waybill", no, "reminders"] });
     },
   });
@@ -214,7 +214,7 @@ export function WaybillDetailPage() {
     },
   });
 
-  if (detail.isLoading) return <div className="muted" style={{ padding: 40, textAlign: "center" }}>正在进入 360° 运单数字孪生舱…</div>;
+  if (detail.isLoading) return <div className="muted" style={{ padding: 40, textAlign: "center" }}>加载中…</div>;
   if (detail.isError || !detail.data) return <div className="muted" style={{ padding: 40, textAlign: "center" }}>运单不存在或无权访问。</div>;
   
   const w = detail.data;
@@ -224,21 +224,20 @@ export function WaybillDetailPage() {
 
   return (
     <div className="stack" style={{ gap: 16 }}>
-      {/* === 顶部：孪生数字座舱头部 === */}
+      {/* 运单头部 */}
       <div className="panel" style={{ overflow: "visible" }}>
         <div style={{ background: "#09090b", color: "#f4f4f5", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
           <div className="stack" style={{ gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>{w.waybill_no}</span>
               <span className="tag" style={{ background: "rgba(255,255,255,0.1)", color: "#e4e4e7", border: "1px solid rgba(255,255,255,0.2)", fontWeight: "500" }}>
-                Digital Twin
               </span>
               {w.receipt_status === "returned" && <span className="tag tag-low">POD Verified</span>}
             </div>
             <div style={{ color: "#a1a1aa", fontSize: 13, display: "flex", gap: 16, fontWeight: "400" }}>
-              <span>🛣 {w.route_name} ({w.origin} → {w.destination})</span>
-              <span>🏢 {w.customer_name || "Unknown"}</span>
-              <span>🚛 {w.vehicle_plate || "Self-Fleet"}</span>
+              <span>{w.route_name} ({w.origin} → {w.destination})</span>
+              <span>{w.customer_name || "Unknown"}</span>
+              <span>{w.vehicle_plate || "Self-Fleet"}</span>
             </div>
           </div>
           
@@ -248,8 +247,7 @@ export function WaybillDetailPage() {
             </span>
             <div className="row-actions">
               <button className="btn-ghost" style={{ color: "#fff", border: "1px solid rgba(255,255,255,0.2)", background: "transparent" }} disabled={analyze.isPending} onClick={() => analyze.mutate()}>
-                ⌘ AI Analysis
-              </button>
+风险分析              </button>
               {w.next_statuses.map((s) => (
                 <button
                   key={s}
@@ -258,14 +256,14 @@ export function WaybillDetailPage() {
                   disabled={transition.isPending}
                   onClick={() => transition.mutate(s)}
                 >
-                  Push: {STATUS_LABEL[s] ?? s}
+                  {STATUS_LABEL[s] ?? s}
                 </button>
               ))}
             </div>
           </div>
         </div>
 
-        {/* 流水线 Stepper */}
+        {/* 状态流转 */}
         <div style={{ padding: "16px 24px", background: "var(--panel)" }}>
           <div className="wf-track">
             {WORKFLOW_STEPS.map((step, i) => {
@@ -284,14 +282,13 @@ export function WaybillDetailPage() {
       </div>
 
       <div className="ct-grid" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
-        {/* === 左侧：运营与在途物理视图 === */}
+        {/* 左侧：在途与运营 */}
         <div className="stack">
-          {/* 在途轨迹追踪舱 */}
+          {/* ETA 预测 */}
           {eta.data?.predicted && (
             <div className="panel">
               <div className="panel-head" style={{ borderLeft: "4px solid var(--brand)" }}>
-                🛰️ ETA 智能预测
-                <span className="ai-pill">定位 + 剩余里程 + 均速</span>
+                ETA 预测
               </div>
               <div className="kv" style={{ padding: "12px 16px" }}>
                 <div><span>预计到达</span><b>{eta.data.estimated_arrival ? new Date(eta.data.estimated_arrival).toLocaleString() : "-"}</b></div>
@@ -308,13 +305,13 @@ export function WaybillDetailPage() {
           )}
 
           <div className="panel">
-            <div className="panel-head" style={{ borderLeft: "4px solid var(--brand)" }}>📍 IoT 车联网在途追踪舱</div>
+            <div className="panel-head">在途轨迹</div>
             {traj.isLoading ? (
-              <div className="muted" style={{ padding: 24, textAlign: "center" }}>拉取车联网 GPS 数据帧…</div>
+              <div className="muted" style={{ padding: 24, textAlign: "center" }}>加载轨迹数据…</div>
             ) : traj.data ? (
               <TrajectoryMap traj={traj.data} />
             ) : (
-              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>暂无车辆绑定的轨迹流数据。</div>
+              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>暂无轨迹数据。</div>
             )}
             
             {w.stops && w.stops.length > 0 && (
@@ -344,9 +341,9 @@ export function WaybillDetailPage() {
             )}
           </div>
 
-          {/* 异常上报提报 */}
+          {/* 异常上报 */}
           <div className="panel">
-            <div className="panel-head" style={{ borderLeft: "4px solid var(--red)" }}>⚠️ 在途异常处置台</div>
+            <div className="panel-head">异常处置</div>
             <div className="form-row" style={{ flexWrap: "wrap", gap: 10, background: "rgba(239, 68, 68, 0.04)" }}>
               <select value={excType} onChange={(e) => setExcType(e.target.value)}>
                 {Object.entries(EXC_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -374,32 +371,32 @@ export function WaybillDetailPage() {
             )}
           </div>
 
-          {/* 车队作业提醒 (Driver Reminders) */}
+          {/* 司机提醒 */}
           <div className="panel">
-            <div className="panel-head">作业提醒 · 司机端强管控</div>
+            <div className="panel-head">司机提醒</div>
             <div style={{ padding: "16px 20px" }} className="stack">
               <div className="form-row" style={{ gap: 10, flexWrap: "wrap", padding: 0 }}>
                 <select value={rmTpl} onChange={(e) => { setRmTpl(e.target.value); const t = (reminderTpls.data?.items ?? []).find((x) => x.id === e.target.value); if (t) setRmContent(t.content); }}>
-                  <option value="">调取话术模板…</option>
+                  <option value="">选择模板…</option>
                   {(reminderTpls.data?.items ?? []).map((t) => <option key={t.id} value={t.id}>{t.category ? `[${t.category}] ` : ""}{t.name}</option>)}
                 </select>
                 <label className="small" style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: "bold" }}>
-                  <input type="checkbox" checked={rmAck} onChange={(e) => setRmAck(e.target.checked)} />强迫司机阅读确认
+                  <input type="checkbox" checked={rmAck} onChange={(e) => setRmAck(e.target.checked)} />需确认阅读
                 </label>
                 <span style={{ flex: 1 }} />
-                <button className="btn-primary" disabled={sendReminder.isPending || !rmContent.trim()} onClick={() => sendReminder.mutate()}>推流至司机 App</button>
+                <button className="btn-primary" disabled={sendReminder.isPending || !rmContent.trim()} onClick={() => sendReminder.mutate()}>发送提醒</button>
               </div>
               <textarea className="search" style={{ width: "100%", minHeight: 70 }} placeholder="提醒下发内容（支持多行）" value={rmContent} onChange={(e) => setRmContent(e.target.value)} />
               {(reminders.data?.length ?? 0) > 0 && (
                 <table className="table">
-                  <thead><tr style={{ background: "var(--panel-2)" }}><th>标题</th><th>强控确认</th><th>下发时间</th><th>App 响应状态</th></tr></thead>
+                  <thead><tr style={{ background: "var(--panel-2)" }}><th>标题</th><th>需确认</th><th>发送时间</th><th>状态</th></tr></thead>
                   <tbody>
                     {(reminders.data ?? []).map((r) => (
                       <tr key={r.id}>
                         <td className="small"><strong>{r.title}</strong></td>
                         <td className="small">{r.ack_required ? "是" : "否"}</td>
                         <td className="small mono muted">{fmt(r.sent_at)}</td>
-                        <td><span className={`tag${r.status === "acknowledged" ? " tag-low" : " tag-high"}`}>{r.status === "acknowledged" ? `已确认 ${fmt(r.acknowledged_at)}` : "司机未读"}</span></td>
+                        <td><span className={`tag${r.status === "acknowledged" ? " tag-low" : " tag-high"}`}>{r.status === "acknowledged" ? `已确认 ${fmt(r.acknowledged_at)}` : "未读"}</span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -409,15 +406,14 @@ export function WaybillDetailPage() {
           </div>
         </div>
 
-        {/* === 右侧：业财结算与电子签单 === */}
+        {/* 右侧：财务与签收 */}
         <div className="stack">
-          {/* AI 建议与智能审批 */}
+          {/* AI 建议 */}
           <div className="panel" style={{ border: "1px solid var(--violet)" }}>
             <div className="panel-head" style={{ background: "rgba(139,92,246,0.06)", color: "var(--violet)", borderBottomColor: "var(--violet)" }}>
-              🤖 专属 AI Agent 大脑建议
-            </div>
+              AI 建议            </div>
             {w.agent_suggestions.length === 0 ? (
-              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>AI 监控中，暂无异常建议</div>
+              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>暂无建议</div>
             ) : (
               <ul className="suggestions" style={{ padding: "12px 18px" }}>
                 {w.agent_suggestions.map((s) => (
@@ -448,7 +444,7 @@ export function WaybillDetailPage() {
           {/* 运费付款方式与代收货款 */}
           {detail.data && (
             <div className="panel">
-              <div className="panel-head" style={{ borderLeft: "4px solid var(--green)" }}>💴 运费付款与代收货款</div>
+              <div className="panel-head">运费付款与代收货款</div>
               <div style={{ padding: "14px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
                   <div className="small"><span className="muted">付款方式：</span><b>{detail.data.freight_term_label}</b></div>
@@ -456,7 +452,7 @@ export function WaybillDetailPage() {
                 </div>
                 {collection.data && collection.data.freight_term === "collect" && collection.data.collect_freight > 0 && (
                   <div className="small" style={{ color: "var(--amber)" }}>
-                    ⚠️ 到付：司机送达时需向收货人收取运费 ¥{collection.data.collect_freight.toLocaleString()}
+                    到付：司机送达时需向收货人收取运费 ¥{collection.data.collect_freight.toLocaleString()}
                   </div>
                 )}
                 {Number(detail.data.cod_amount) > 0 && (
@@ -483,11 +479,10 @@ export function WaybillDetailPage() {
             </div>
           )}
 
-          {/* 业财微型 P&L 台账 */}
+          {/* 费用台账 */}
           <div className="panel">
             <div className="panel-head" style={{ borderLeft: "4px solid var(--brand)" }}>
-              💰 微交易业财账本 (P&L Ledger)
-              <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }} disabled={genCosts.isPending} onClick={() => genCosts.mutate()}>重新轧账</button>
+              费用台账              <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }} disabled={genCosts.isPending} onClick={() => genCosts.mutate()}>重新生成</button>
             </div>
             {costs.data ? (
               <>
@@ -544,37 +539,37 @@ export function WaybillDetailPage() {
                 )}
               </>
             ) : (
-              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>正在聚合财务流水…</div>
+              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>加载费用数据…</div>
             )}
           </div>
 
-          {/* e-POD 回单与 AI 视觉签收区 */}
+          {/* 电子回单与签收 */}
           <div className="panel">
-            <div className="panel-head" style={{ borderLeft: "4px solid var(--amber)" }}>📸 e-POD 电子回单档案与 AI 签收</div>
+            <div className="panel-head">电子回单与签收</div>
             <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ background: "rgba(0,0,0,0.02)", padding: 16, borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
-                <span className="muted small" style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>上传纸质回单照片 (自动触发 AI Vision 签收人解析)</span>
+                <span className="muted small" style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>上传回单照片</span>
                 <input type="file" ref={fileInput} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); }} />
-                {upload.isPending && <span className="muted small" style={{ color: "var(--brand)" }}> 上传与图像解析中…</span>}
+                {upload.isPending && <span className="muted small" style={{ color: "var(--brand)" }}> 上传中…</span>}
               </div>
 
               {(receipts.data?.items ?? []).length === 0 ? (
-                <div className="muted small" style={{ textAlign: "center", padding: "10px 0" }}>暂无电子回单影像存档</div>
+                <div className="muted small" style={{ textAlign: "center", padding: "10px 0" }}>暂无电子回单</div>
               ) : (
                 <div className="stack" style={{ gap: 8 }}>
                   {(receipts.data?.items ?? []).map((r) => (
                     <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 12, background: "#fff", border: "1px solid var(--line)", borderRadius: 8 }}>
                       <div className="stack" style={{ gap: 4 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontWeight: "bold", fontSize: 13 }}>📄 签收电子档</span>
+                          <span style={{ fontWeight: "bold", fontSize: 13 }}>回单</span>
                           <span className={`tag tag-${r.ocr_status === "done" ? "low" : "medium"}`} style={{ fontSize: 10 }}>OCR {r.ocr_status === "done" ? "识别完成" : "提取中"}</span>
                         </div>
                         {r.signatory && (
                           <div style={{ fontSize: 12, color: "var(--brand)" }}>
-                            <strong>AI视觉提取签收人：</strong> {r.signatory}
+                            <strong>签收人：</strong> {r.signatory}
                           </div>
                         )}
-                        <a href={r.file_url} target="_blank" className="link small">查看高清原件</a>
+                        <a href={r.file_url} target="_blank" className="link small">查看原件</a>
                       </div>
                     </div>
                   ))}
@@ -582,10 +577,10 @@ export function WaybillDetailPage() {
               )}
             </div>
             
-            {/* 手工介入/司机玻璃板手写签收 */}
+            {/* 手写签收 */}
             {(w.status === "in_transit" || w.status === "arrived") && (
               <div style={{ borderTop: "1px solid var(--line)", padding: "16px 20px", background: "rgba(0,0,0,0.01)" }}>
-                <div className="muted small" style={{ marginBottom: 8, fontWeight: "bold" }}>现场手工无纸化签批</div>
+                <div className="muted small" style={{ marginBottom: 8, fontWeight: "bold" }}>现场签收</div>
                 <input className="search" style={{ width: "100%", marginBottom: 10 }} placeholder="输入实际提货/签收人姓名" value={signatory} onChange={(e) => setSignatory(e.target.value)} />
                 <div style={{ background: "#fff", borderRadius: 8, border: "1px dashed var(--line)", overflow: "hidden" }}>
                   <SignaturePad onChange={setSignature} />

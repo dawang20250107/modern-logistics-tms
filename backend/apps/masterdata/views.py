@@ -20,10 +20,16 @@ from .serializers import (
     VehicleSerializer,
 )
 
+# 主数据统一权限：读=masterdata.view，写/自定义动作=masterdata.manage。
+# 用 read/write 键覆盖全部安全/非安全方法，自定义动作按 HTTP 方法自动归类。
+_MD_PERMS = {"read": "masterdata.view", "write": "masterdata.manage"}
+
 
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = _MD_PERMS
     search_fields = ["code", "name", "contact_phone"]
     filterset_fields = ["is_active"]
     ordering_fields = ["code", "name", "created_at"]
@@ -62,6 +68,8 @@ class CarrierViewSet(viewsets.ModelViewSet):
 class VehicleViewSet(viewsets.ModelViewSet):
     queryset = Vehicle.objects.select_related("carrier").all()
     serializer_class = VehicleSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = _MD_PERMS
     search_fields = ["plate_no", "vehicle_type"]
     filterset_fields = ["is_active", "carrier", "vehicle_class", "dispatch_source"]
     ordering_fields = ["plate_no", "created_at"]
@@ -70,6 +78,8 @@ class VehicleViewSet(viewsets.ModelViewSet):
 class DriverViewSet(viewsets.ModelViewSet):
     queryset = Driver.objects.select_related("carrier").all()
     serializer_class = DriverSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = _MD_PERMS
     search_fields = ["name", "phone", "wechat"]
     filterset_fields = ["is_active", "carrier", "employment_type", "app_registered"]
     ordering_fields = ["name", "created_at", "cumulative_waybills", "cumulative_freight"]
@@ -103,6 +113,8 @@ class DriverCredentialViewSet(viewsets.ModelViewSet):
     """司机证件库：上传(自传/代上传) → OCR 自动识别建档。"""
 
     serializer_class = None  # set below
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = _MD_PERMS
     filterset_fields = ["driver", "cred_type", "ocr_status"]
     ordering_fields = ["created_at", "expiry_date"]
 
@@ -136,6 +148,8 @@ class DriverCredentialViewSet(viewsets.ModelViewSet):
 class RouteViewSet(viewsets.ModelViewSet):
     queryset = Route.objects.all()
     serializer_class = RouteSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = _MD_PERMS
     search_fields = ["code", "name", "origin", "destination"]
     filterset_fields = ["is_active"]
     ordering_fields = ["code", "created_at"]
@@ -147,6 +161,9 @@ class ExpiringCredentialsView(APIView):
     每条含 days_left（负数=已过期）与 severity（expired/critical/warning），
     并按紧迫度（已过期/天数升序）排序，便于车队合规台一眼锁定风险。
     """
+
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = "masterdata.view"
 
     def get(self, request):
         days = int(request.query_params.get("days") or 30)
@@ -229,6 +246,8 @@ class B2BPartnerViewSet(viewsets.ModelViewSet):
 
     queryset = B2BPartner.objects.all()
     serializer_class = B2BPartnerSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = _MD_PERMS
     search_fields = ["code", "name", "contact_phone", "city"]
     filterset_fields = ["partner_type", "is_active"]
     ordering_fields = ["code", "name", "created_at"]

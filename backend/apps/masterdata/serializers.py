@@ -29,9 +29,22 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 
 class CarrierSerializer(serializers.ModelSerializer):
+    grade_label = serializers.CharField(source="get_grade_display", read_only=True, default="")
+    dispatch_blocked = serializers.SerializerMethodField()
+
     class Meta:
         model = Carrier
-        fields = ["id", "code", "name", "contact_name", "contact_phone", "settlement_type", "is_active"]
+        fields = [
+            "id", "code", "name", "contact_name", "contact_phone", "settlement_type", "is_active",
+            "grade", "grade_label", "blacklisted", "blacklist_reason",
+            "business_license_no", "qualification_expiry",
+            "credit_limit", "credit_days", "billing_day",
+            "dispatch_blocked",
+        ]
+
+    def get_dispatch_blocked(self, obj) -> str:
+        """当前是否因风控不可派单（黑名单/停用/资质过期）；可派单为空串。"""
+        return obj.dispatch_block_reason()
 
 
 class VehicleSerializer(serializers.ModelSerializer):

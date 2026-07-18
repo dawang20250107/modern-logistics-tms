@@ -32,12 +32,39 @@ class Customer(BaseModel, SoftDeleteModel):
 
 
 class Carrier(BaseModel, SoftDeleteModel):
+    GRADE_CHOICES = [
+        ("A", "A · 优质"),
+        ("B", "B · 良好"),
+        ("C", "C · 关注"),
+        ("D", "D · 高风险"),
+    ]
+
     code = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=120)
     contact_name = models.CharField(max_length=64, blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
     settlement_type = models.CharField(max_length=32, blank=True)
     is_active = models.BooleanField(default=True)
+
+    # ── 风控：分级 / 黑名单 ──
+    grade = models.CharField(
+        max_length=1, choices=GRADE_CHOICES, default="B", help_text="承运商综合评级"
+    )
+    blacklisted = models.BooleanField(default=False, help_text="拉黑后不可被派单")
+    blacklist_reason = models.CharField(max_length=255, blank=True)
+
+    # ── 承运资质与到期（营业执照 / 道路运输经营许可）──
+    business_license_no = models.CharField(max_length=64, blank=True, help_text="营业执照号")
+    qualification_expiry = models.DateField(
+        null=True, blank=True, help_text="承运资质/经营许可到期日；过期不可派单"
+    )
+
+    # ── 账期与信用（应付侧，镜像客户；供对账与结算参考）──
+    credit_limit = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, help_text="对我方授信额度（0 表示不限）"
+    )
+    credit_days = models.IntegerField(default=30, help_text="账期天数（账单日后 N 天到期）")
+    billing_day = models.IntegerField(default=1, help_text="账单日（每月几号出账，1-28）")
 
     class Meta:
         db_table = "md_carrier"
@@ -47,6 +74,24 @@ class Carrier(BaseModel, SoftDeleteModel):
 
     def __str__(self) -> str:
         return f"{self.code} {self.name}"
+
+    def dispatch_block_reason(self, today=None, *, block_on_expired: bool = True) -> str:
+        """返回不可派单的原因；可派单时返回空串。集中承运商风控硬阻断规则。
+
+        - 已拉黑 / 已停用：始终拦截。
+        - 承运资质过期：受 block_on_expired 开关控制（与车辆证件硬阻断一致）。
+        """
+        if self.blacklisted:
+            return f"承运商 {self.name} 已列入黑名单" + (f"（{self.blacklist_reason}）" if self.blacklist_reason else "")
+        if not self.is_active:
+            return f"承运商 {self.name} 已停用"
+        if block_on_expired and self.qualification_expiry:
+            from django.utils import timezone
+
+            today = today or timezone.localdate()
+            if self.qualification_expiry < today:
+                return f"承运商 {self.name} 承运资质已于 {self.qualification_expiry:%Y-%m-%d} 到期"
+        return ""
 
 
 class Vehicle(BaseModel, SoftDeleteModel):

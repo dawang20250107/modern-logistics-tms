@@ -154,7 +154,8 @@ def carrier_quotes(waybill) -> list[dict]:
 
     weight = waybill.cargo_weight_ton
     quotes = []
-    for carrier in Carrier.objects.filter(is_active=True):
+    # 风控：黑名单承运商不进入比价建议（避免推荐后又在派单时被硬阻断）
+    for carrier in Carrier.objects.filter(is_active=True, blacklisted=False):
         rules = PricingRule.objects.filter(
             is_active=True, price_type=PricingRule.PRICE_TYPE_COST
         ).filter(Q(carrier=carrier) | Q(carrier__isnull=True))

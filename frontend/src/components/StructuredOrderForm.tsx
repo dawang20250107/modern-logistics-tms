@@ -13,6 +13,8 @@ import {
   SOURCE_TYPE_LABEL,
 } from "../api/types";
 import { IconSparkles, IconSave, IconPlus, IconX, IconCheck, IconZap } from "./Icons";
+import { CityCombobox } from "./CityCombobox";
+import { DateTimeField } from "./DateTimeField";
 
 interface FormState {
   customer: string;
@@ -506,8 +508,8 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
             </div>
 
             <div className="grid-form">
-              <label>始发城市 *<input value={form.origin} onChange={(e) => set("origin", e.target.value)} placeholder="如 无锡" /></label>
-              <label>目的城市 *<input value={form.destination} onChange={(e) => set("destination", e.target.value)} placeholder="如 上海" /></label>
+              <label>始发城市 *<CityCombobox value={form.origin} onChange={(v) => set("origin", v)} placeholder="输入或选择，如 无锡" /></label>
+              <label>目的城市 *<CityCombobox value={form.destination} onChange={(v) => set("destination", v)} placeholder="输入或选择，如 上海" /></label>
             </div>
 
             {form.customer && ((addressBook.data?.pickup.length ?? 0) > 0 || (addressBook.data?.delivery.length ?? 0) > 0) && (
@@ -528,7 +530,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                   <option value="pickup">提货网点</option>
                   <option value="delivery">送货网点</option>
                 </select>
-                <input placeholder="城市" style={{ width: 90 }} value={s.city} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, city: e.target.value } : x))} />
+                <CityCombobox value={s.city} onChange={(v) => setStops((p) => p.map((x, j) => j === i ? { ...x, city: v } : x))} style={{ width: 110 }} />
                 <input placeholder="详细提/送货物理地址" style={{ flex: 2 }} value={s.address} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} />
                 <input placeholder="联系人" style={{ width: 90 }} value={s.contact_name} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_name: e.target.value } : x))} />
                 <input placeholder="电话" style={{ width: 130 }} value={s.contact_phone} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_phone: e.target.value } : x))} />
@@ -565,15 +567,15 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
             
             {/* 4.1 时效红线 (SLA) */}
             <div style={{ background: "var(--panel-2)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>时效要求（SLA）</div>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>时效要求</div>
               <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <label>
                   期望提货窗口
-                  <input type="datetime-local" className="search" value={form.expected_pickup_at} onChange={(e) => set("expected_pickup_at", e.target.value)} />
+                  <DateTimeField value={form.expected_pickup_at} onChange={(v) => set("expected_pickup_at", v)} />
                 </label>
                 <label>
                   期望送达时间
-                  <input type="datetime-local" className="search" style={{ borderColor: form.expected_delivery_at ? "var(--amber-border)" : "var(--line-strong)" }} value={form.expected_delivery_at} onChange={(e) => set("expected_delivery_at", e.target.value)} />
+                  <DateTimeField value={form.expected_delivery_at} onChange={(v) => set("expected_delivery_at", v)} style={{ borderColor: form.expected_delivery_at ? "var(--amber-border)" : "var(--line-strong)" }} />
                 </label>
               </div>
             </div>

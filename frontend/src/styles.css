@@ -208,6 +208,18 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .wb-drawer-body { padding: 18px; overflow-y: auto; flex: 1; min-height: 0; }
 @media (max-width: 640px) { .wb-drawer { width: 100vw; } }
 
+/* ── City combobox ──────────────────────────────────── */
+.combobox { display: inline-block; }
+.combobox-menu {
+  position: absolute; z-index: 60; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px;
+  list-style: none; max-height: 240px; overflow-y: auto; background: var(--panel);
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+}
+.combobox-menu li {
+  padding: 7px 10px; border-radius: var(--radius-xs); font-size: 13px; color: var(--ink-2); cursor: pointer;
+}
+.combobox-menu li:hover, .combobox-menu li.active { background: var(--accent-weak); color: var(--accent); }
+
 /* ── Topbar hamburger toggle ────────────────────────── */
 .topbar-toggle {
   display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none;

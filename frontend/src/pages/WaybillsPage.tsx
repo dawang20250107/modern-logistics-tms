@@ -6,7 +6,7 @@ import { apiGet, apiPatch, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
-import { STATUS_LABEL } from "../api/types";
+import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
 
 const RISK_LABEL: Record<string, string> = { high: "高风险", medium: "中风险", low: "低风险", none: "无风险" };
 const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
@@ -281,60 +281,54 @@ export function WaybillsPage() {
         ) : (
           <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--line)" }}>
-                <th style={{ padding: "10px 12px", textAlign: "left" }}>运单号</th>
-                <th>线路</th>
-                <th>在途状态</th>
-                <th>风险级别</th>
-                <th>ETA 偏差</th>
-                <th>回单状态</th>
+              <tr>
+                <th>运单号</th>
                 <th>客户</th>
-                <th>车牌</th>
+                <th>线路</th>
+                <th>货物</th>
+                <th>车辆 / 司机</th>
+                <th>通道</th>
+                <th className="num">应收</th>
+                <th className="num">应付/成本</th>
+                <th className="num">代收货款</th>
+                <th>回单</th>
+                <th>状态</th>
               </tr>
             </thead>
             <tbody>
               {filteredRows.map((w) => {
                 const isSelected = drawerWaybill?.id === w.id;
+                const cod = Number(w.cod_amount) || 0;
                 return (
-                  <tr 
-                    key={w.id} 
+                  <tr
+                    key={w.id}
                     onContextMenu={(e) => handleRowContextMenu(e, w)}
                     onDoubleClick={() => handleRowDoubleClick(w)}
-                    style={{ 
-                      cursor: "context-menu", 
-                      transition: "all 0.15s ease",
-                      background: isSelected ? "var(--brand-light)" : "transparent",
-                      borderLeft: isSelected ? "3px solid var(--brand)" : "3px solid transparent"
-                    }}
+                    style={{ cursor: "context-menu", background: isSelected ? "var(--accent-weak)" : undefined }}
                     className="waybill-tr"
-                    
                   >
-                    <td style={{ padding: "12px", fontWeight: "bold" }}>
-                      <Link className="link mono interactive-text" to={`/waybills/${w.waybill_no}`}>
-                        {w.waybill_no}
-                      </Link>
-                    </td>
-                    <td className="interactive-text" title={w.route_name || "未知"}>{w.route_name ? w.route_name.substring(0, 10) + (w.route_name.length > 10 ? "..." : "") : "未知"}</td>
-                    <td>
-                      <span className={`tag`} style={{ background: "var(--bg)", border: "1px solid var(--line-strong)" }}>
-                        {STATUS_LABEL[w.status] ?? w.status}
-                      </span>
+                    <td><Link className="link mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link></td>
+                    <td title={w.customer_name}>{w.customer_name || "散客"}</td>
+                    <td>{w.origin || "?"} → {w.destination || "?"}</td>
+                    <td className="small">{w.cargo.quantity ? `${w.cargo.quantity}件 ` : ""}{w.cargo.weight_ton || 0}吨{w.cargo.volume_cbm ? ` / ${w.cargo.volume_cbm}方` : ""}</td>
+                    <td className="small">
+                      {w.vehicle_plate ? <span className="mono">{w.vehicle_plate}</span> : w.carrier_name || (w.channel === "网货" ? (w.platform_name || "平台") : "—")}
+                      {w.driver_name && <div className="muted" style={{ fontSize: 11 }}>{w.driver_name} {w.driver_phone}</div>}
                     </td>
                     <td>
-                      <span className={`tag tag-${w.risk_level}`}>
-                        {RISK_LABEL[w.risk_level] ?? w.risk_level}
-                      </span>
+                      {w.channel
+                        ? <span className={`tag ${CHANNEL_TAG[w.channel] ?? "tag-none"}`} title={w.dispatch_type_label}>{w.channel}{w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""}</span>
+                        : <span className="muted">—</span>}
                     </td>
-                    <td className="mono" style={{ color: Number(w.eta_drift_minutes) > 30 ? "var(--red)" : "inherit" }}>
-                      {w.eta_drift_minutes ? `⏱️ 偏离 ${w.eta_drift_minutes} 分` : "⏱️ 无偏移"}
-                    </td>
+                    <td className="num">{w.receivable_amount ? `¥${w.receivable_amount.toLocaleString()}` : "—"}</td>
+                    <td className="num">{w.payable_amount ? `¥${w.payable_amount.toLocaleString()}` : "—"}</td>
+                    <td className="num">{cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>¥{cod.toLocaleString()}</span> : "—"}</td>
                     <td>
                       <span className={`tag tag-${w.receipt_status === "returned" || w.receipt_status === "audited" ? "low" : "none"}`}>
-                        {w.receipt_status === "returned" ? "已回收" : w.receipt_status === "audited" ? "已审计核销" : "待追回"}
+                        {w.receipt_status === "returned" ? "已回收" : w.receipt_status === "audited" ? "已核销" : "待追回"}
                       </span>
                     </td>
-                    <td className="interactive-text" title={w.customer_name || "散客货主"}>{w.customer_name ? w.customer_name.substring(0, 8) + (w.customer_name.length > 8 ? "..." : "") : "散客货主"}</td>
-                    <td className="mono interactive-text" style={{ fontWeight: "bold" }}>{w.vehicle_plate || "—"}</td>
+                    <td><span className="tag tag-info">{STATUS_LABEL[w.status] ?? w.status}</span></td>
                   </tr>
                 );
               })}

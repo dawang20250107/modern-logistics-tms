@@ -69,6 +69,11 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = (
         Waybill.objects.select_related("customer", "carrier", "vehicle", "trailer", "driver")
         .prefetch_related("driver_assignments__driver")  # 消除列表 drivers 的 N+1
+        # 应收/应付按运单条件聚合，零 N+1，供运单列表直呈"钱"这条主线
+        .annotate(
+            receivable_total=Sum("expenses__amount", filter=Q(expenses__direction="receivable")),
+            payable_total=Sum("expenses__amount", filter=Q(expenses__direction="payable")),
+        )
         .all()
     )
     permission_classes = [IsAuthenticated, HasPermission]
@@ -767,7 +772,10 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         co_drivers = list(Driver.objects.filter(id__in=co_ids)) if co_ids else []
         waybill = dispatch_order(
             order, dispatch_type=data.get("dispatch_type", ""), carrier=carrier,
-            vehicle=vehicle, driver=driver, trailer=trailer, co_drivers=co_drivers, operator=request.user,
+            vehicle=vehicle, driver=driver, trailer=trailer, co_drivers=co_drivers,
+            platform_name=(data.get("platform_name") or "").strip(),
+            platform_order_no=(data.get("platform_order_no") or "").strip(),
+            operator=request.user,
         )
         return Response(WaybillSerializer(waybill).data, status=201)
 

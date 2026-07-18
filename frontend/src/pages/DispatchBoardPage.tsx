@@ -62,6 +62,8 @@ export function DispatchBoardPage() {
   const [driverId, setDriverId] = useState("");
   const [trailerId, setTrailerId] = useState("");
   const [coDriverIds, setCoDriverIds] = useState<string[]>([]);
+  const [platformName, setPlatformName] = useState("");
+  const [platformOrderNo, setPlatformOrderNo] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -228,6 +230,8 @@ export function DispatchBoardPage() {
         driver: driverId || undefined,
         trailer: trailerId || undefined,
         co_drivers: coDriverIds.filter((x) => x && x !== driverId),
+        platform_name: platformName || undefined,
+        platform_order_no: platformOrderNo || undefined,
       }),
     onSuccess: () => {
       closeWb();
@@ -250,6 +254,7 @@ export function DispatchBoardPage() {
     setTab(initialTab);
     setSuggestion(null);
     setVehicleId(""); setCarrierId(""); setDriverId(""); setTrailerId(""); setCoDriverIds([]);
+    setPlatformName(""); setPlatformOrderNo("");
     setExcDesc("");
     if (initialTab === "dispatch") suggest.mutate(o.id);
   }
@@ -617,7 +622,18 @@ export function DispatchBoardPage() {
                             {Object.entries(DISPATCH_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                           </select>
                         </label>
-                        {dispatchType === "third_party" ? (
+                        {dispatchType === "platform" ? (
+                          <>
+                            <label>
+                              网货平台
+                              <input value={platformName} onChange={(e) => setPlatformName(e.target.value)} placeholder="如 满帮 / 路歌" />
+                            </label>
+                            <label>
+                              平台单号（可选）
+                              <input value={platformOrderNo} onChange={(e) => setPlatformOrderNo(e.target.value)} placeholder="平台侧运单号" />
+                            </label>
+                          </>
+                        ) : dispatchType === "third_party" ? (
                           <label>
                             选择承运商
                             <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)}>
@@ -660,13 +676,13 @@ export function DispatchBoardPage() {
                         )}
                         <button
                           className="btn-primary"
-                          disabled={dispatch.isPending || activeGone || (dispatchType === "third_party" ? !carrierId : !vehicleId)}
+                          disabled={dispatch.isPending || activeGone || (dispatchType === "platform" ? !platformName : dispatchType === "third_party" ? !carrierId : !vehicleId)}
                           onClick={() => dispatch.mutate(active.id)}
                         >
                           {dispatch.isPending ? "派单中…" : "确认派单"}
                         </button>
-                        {(dispatchType === "third_party" ? !carrierId : !vehicleId) && (
-                          <div className="muted small">请先选择{dispatchType === "third_party" ? "承运商" : "车辆"}再派单</div>
+                        {(dispatchType === "platform" ? !platformName : dispatchType === "third_party" ? !carrierId : !vehicleId) && (
+                          <div className="muted small">请先{dispatchType === "platform" ? "填写网货平台" : `选择${dispatchType === "third_party" ? "承运商" : "车辆"}`}再派单</div>
                         )}
                       </div>
                     </div>

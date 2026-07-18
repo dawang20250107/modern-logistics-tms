@@ -400,17 +400,28 @@ class Waybill(BaseModel, OrgScopedModel):
     RISK_CHOICES = [(RISK_HIGH, "高"), (RISK_MEDIUM, "中"), (RISK_LOW, "低"), (RISK_NONE, "无")]
 
     # 派单类型：自有单车 / 自有车队 / 三方承运商
+    # 承运三通道：自营（自有单车/车队）、外包承运商、网货平台（接第三方平台）
     DISPATCH_OWN = "own_vehicle"
     DISPATCH_FLEET = "fleet"
     DISPATCH_THIRD_PARTY = "third_party"
+    DISPATCH_PLATFORM = "platform"
     DISPATCH_TYPE_CHOICES = [
-        (DISPATCH_OWN, "自有单车"),
-        (DISPATCH_FLEET, "自有车队"),
-        (DISPATCH_THIRD_PARTY, "三方承运商"),
+        (DISPATCH_OWN, "自营单车"),
+        (DISPATCH_FLEET, "自营车队"),
+        (DISPATCH_THIRD_PARTY, "外包承运商"),
+        (DISPATCH_PLATFORM, "网货平台"),
     ]
+    # 承运通道大类（自营 / 外包 / 网货），便于分通道对账与利润
+    CHANNEL_LABELS = {
+        DISPATCH_OWN: "自营", DISPATCH_FLEET: "自营",
+        DISPATCH_THIRD_PARTY: "外包", DISPATCH_PLATFORM: "网货",
+    }
 
     waybill_no = models.CharField(max_length=40, unique=True)
     dispatch_type = models.CharField(max_length=16, choices=DISPATCH_TYPE_CHOICES, blank=True)
+    # 网货平台通道：对接第三方平台（满帮/路歌等），合规由平台承担，我方只记录对接信息
+    platform_name = models.CharField(max_length=64, blank=True, help_text="网货平台名称，如 满帮/路歌")
+    platform_order_no = models.CharField(max_length=64, blank=True, help_text="平台侧运单/订单号")
     order = models.ForeignKey(
         Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )

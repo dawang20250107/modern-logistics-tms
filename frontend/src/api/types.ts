@@ -98,6 +98,13 @@ export interface Waybill {
   destination: string;
   status: string;
   dispatch_status: string;
+  dispatch_type: string;
+  dispatch_type_label: string;
+  channel: string;
+  platform_name: string;
+  platform_order_no: string;
+  receivable_amount: number;
+  payable_amount: number;
   risk_level: RiskLevel;
   receipt_status: string;
   eta_drift_minutes: number;
@@ -489,7 +496,11 @@ export const PRIORITY_LABEL: Record<string, string> = {
   normal: "普通", urgent: "加急", vip: "VIP",
 };
 export const DISPATCH_TYPE_LABEL: Record<string, string> = {
-  own_vehicle: "自有单车", fleet: "自有车队", third_party: "三方承运商",
+  own_vehicle: "自营单车", fleet: "自营车队", third_party: "外包承运商", platform: "网货平台",
+};
+// 承运通道大类配色（列表通道标签）
+export const CHANNEL_TAG: Record<string, string> = {
+  自营: "tag-low", 外包: "tag-info", 网货: "tag-medium",
 };
 export interface DuplicateOrder {
   id: string;

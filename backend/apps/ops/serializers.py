@@ -101,6 +101,10 @@ class WaybillSerializer(serializers.ModelSerializer):
     freight_term_label = serializers.CharField(source="get_freight_term_display", read_only=True)
     freight_payer_label = serializers.CharField(source="get_freight_payer_display", read_only=True)
     cod_status_label = serializers.CharField(source="get_cod_status_display", read_only=True)
+    dispatch_type_label = serializers.CharField(source="get_dispatch_type_display", read_only=True, default="")
+    channel = serializers.SerializerMethodField()
+    receivable_amount = serializers.SerializerMethodField()
+    payable_amount = serializers.SerializerMethodField()
 
     class Meta:
         model = Waybill
@@ -108,12 +112,24 @@ class WaybillSerializer(serializers.ModelSerializer):
             "id", "waybill_no", "customer_name", "carrier_name", "vehicle_plate", "trailer_plate",
             "driver_name", "driver_phone", "driver_employment", "drivers",
             "route_name", "ai_conversation_id", "origin", "destination", "status", "dispatch_status", "risk_level",
+            "dispatch_type", "dispatch_type_label", "channel", "platform_name", "platform_order_no",
             "receipt_status", "eta_drift_minutes", "planned_arrival", "estimated_arrival",
             "loaded_at", "departed_at", "arrived_at", "signed_at",
             "freight_term", "freight_term_label", "freight_payer", "freight_payer_label",
             "cod_amount", "cod_status", "cod_status_label", "cod_collected_at", "cod_remitted_at",
+            "receivable_amount", "payable_amount",
             "cargo", "created_at",
         ]
+
+    def get_channel(self, obj):
+        return Waybill.CHANNEL_LABELS.get(obj.dispatch_type, "")
+
+    def get_receivable_amount(self, obj):
+        # 由视图 annotate 注入；未聚合时回退 0，避免列表 N+1
+        return float(getattr(obj, "receivable_total", 0) or 0)
+
+    def get_payable_amount(self, obj):
+        return float(getattr(obj, "payable_total", 0) or 0)
 
     def get_drivers(self, obj):
         return [

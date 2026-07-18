@@ -702,8 +702,12 @@ def batch_orders(action: str, ids: list, *, operator=None) -> dict:
 
 
 def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver=None,
-                             trailer=None, co_drivers=None, dispatch_type="", operator=None) -> Waybill:
-    """订单转运单（人工确认/派单后）。可带承运商/牵引车/挂车/主副驾与派单类型，回写订单为已派单。"""
+                             trailer=None, co_drivers=None, dispatch_type="",
+                             platform_name="", platform_order_no="", operator=None) -> Waybill:
+    """订单转运单（人工确认/派单后）。可带承运商/牵引车/挂车/主副驾与派单类型，回写订单为已派单。
+
+    网货平台通道（dispatch_type=platform）带入平台名称与平台侧单号。
+    """
     from .models import WaybillDriver, WaybillStop
 
     if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED):
@@ -721,6 +725,8 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         driver=driver,
         trailer=trailer,
         dispatch_type=dispatch_type,
+        platform_name=platform_name,
+        platform_order_no=platform_order_no,
         ai_conversation_id=order.ai_conversation_id,
         route_name=route_name,
         origin=order.origin,

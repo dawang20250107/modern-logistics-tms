@@ -127,8 +127,8 @@ export function ControlTowerPage() {
       <div 
         className="panel" 
         style={{ 
-          background: "linear-gradient(135deg, rgba(37,99,235,0.03) 0%, rgba(37,99,235,0.08) 100%)", 
-          border: "1px solid rgba(37,99,235,0.15)",
+          background: "linear-gradient(135deg, rgba(75,88,240,0.03) 0%, rgba(75,88,240,0.08) 100%)", 
+          border: "1px solid rgba(75,88,240,0.15)",
           cursor: "pointer",
           transition: "all 0.2s"
         }}
@@ -136,8 +136,8 @@ export function ControlTowerPage() {
           const e = new KeyboardEvent("keydown", { ctrlKey: true, key: "k" });
           window.dispatchEvent(e);
         }}
-        onMouseEnter={(e) => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
-        onMouseLeave={(e) => e.currentTarget.style.background = "linear-gradient(135deg, rgba(37,99,235,0.03) 0%, rgba(37,99,235,0.08) 100%)"}
+        onMouseEnter={(e) => e.currentTarget.style.background = "rgba(75,88,240,0.06)"}
+        onMouseLeave={(e) => e.currentTarget.style.background = "linear-gradient(135deg, rgba(75,88,240,0.03) 0%, rgba(75,88,240,0.08) 100%)"}
       >
         <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

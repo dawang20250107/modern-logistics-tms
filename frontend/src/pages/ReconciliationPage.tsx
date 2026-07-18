@@ -82,7 +82,7 @@ export function ReconciliationPage() {
   return (
     <div className="stack" style={{ position: "relative" }}>
 
-      <div className="panel" style={{ background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)", color: "#fff", border: "none" }}>
+      <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
@@ -95,7 +95,7 @@ export function ReconciliationPage() {
           </div>
           <button
             className="btn-primary"
-            style={{ padding: "10px 18px", fontSize: 13, background: "var(--grad-ai)", boxShadow: "0 6px 16px rgba(139,92,246,0.3)" }}
+            style={{ padding: "10px 18px", fontSize: 13, background: "var(--grad-ai)", boxShadow: "0 6px 16px rgba(75,88,240,0.28)" }}
             onClick={() => auditAll.mutate()}
             disabled={auditAll.isPending || items.length === 0}
           >
@@ -298,7 +298,7 @@ export function ReconciliationPage() {
                                       <td className="muted mono">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
                                       <td>
                                         {l.is_anomaly ? (
-                                          <span style={{ color: "#e74c3c", fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}>
+                                          <span style={{ color: "var(--red)", fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}>
                                             超历史均值 ¥{fmtMoney(l.baseline_avg ?? "0")} {l.deviation_pct}%
                                           </span>
                                         ) : l.baseline_avg != null ? (

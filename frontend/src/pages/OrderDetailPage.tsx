@@ -259,7 +259,7 @@ export function OrderDetailPage() {
                 {kv("货物", o.cargo_desc)}
                 {kv("货量", `${o.cargo_weight_ton}吨 / ${o.cargo_quantity}件 / ${o.cargo_volume_cbm}方`)}
                 {kv("包装", o.package_type)}
-                {kv("危险品", o.is_hazardous ? "是 ⚠" : "否")}
+                {kv("危险品", o.is_hazardous ? "是" : "否")}
                 {kv("温区", o.temperature_range)}
               </div>
             )}

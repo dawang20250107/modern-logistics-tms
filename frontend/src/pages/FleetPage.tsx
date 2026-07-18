@@ -21,7 +21,7 @@ function CredTable({ title, rows, subjectLabel }: { title: string; rows: Credent
     <div className="panel">
       <div className="panel-head">{title} · {rows.length}</div>
       {rows.length === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>无到期证件 ✓</div>
+        <div className="muted" style={{ padding: 16 }}>无到期证件</div>
       ) : (
         <table className="table">
           <thead>
@@ -65,12 +65,12 @@ function CredentialLibrary() {
       fd.append("file", file);
       return apiUpload<DriverCredential>("/driver-credentials", fd);
     },
-    onSuccess: () => { toast.success("证件已上传，OCR 识别建档中"); lookup.mutate(); },
+    onSuccess: () => { toast.success("证件已上传，识别中"); lookup.mutate(); },
   });
 
   return (
     <div className="panel">
-      <div className="panel-head">司机证件库 · 姓名 + 身份证后6位带出</div>
+      <div className="panel-head">司机证件库</div>
       <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
         <input className="search" style={{ width: 130 }} placeholder="司机姓名" value={name} onChange={(e) => setName(e.target.value)} />
         <input className="search" style={{ width: 130 }} placeholder="身份证后6位" value={idTail} onChange={(e) => setIdTail(e.target.value)} />
@@ -131,7 +131,7 @@ export function FleetPage() {
       <div className="panel">
         <div className="panel-head">
           车队合规预警
-          <span className="ai-pill">证件到期 · 资质风控</span>
+          <span className="ai-pill"></span>
         </div>
         <div className="form-row">
           <span className="muted small">预警窗口</span>

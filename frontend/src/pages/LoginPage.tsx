@@ -38,21 +38,21 @@ export function LoginPage() {
           <span className="auth-logo">智运 TMS</span>
         </div>
         <div className="auth-hero-mid">
-          <h1 className="auth-slogan">成为世界级<br />物贸生态集团</h1>
-          <p className="auth-tagline">AI 驱动的智能运输中台 · TMS · CRM · ERP</p>
+          <h1 className="auth-slogan">运营 · 调度 · 结算<br />一体协同</h1>
+          <p className="auth-tagline">面向 B2B 公路货运的运输管理平台</p>
           <ul className="auth-points">
-            <li><span>🛰️</span> 全程在途可视 · 异常闭环处理</li>
-            <li><span>🎯</span> 智能调度 · 一键批量派单排线</li>
-            <li><span>🧾</span> 应收应付 · 上下游结算闭环</li>
+            <li>全程在途可视 · 异常闭环处理</li>
+            <li>批量派单排线</li>
+            <li>应收应付结算</li>
           </ul>
         </div>
         <div className="auth-foot">© 2026 智运 · Modern Logistics TMS</div>
       </aside>
       <main className="auth-form-wrap">
         <form className="auth-form" onSubmit={onSubmit}>
-          <div className="auth-form-brand">成为世界级物贸生态集团</div>
+          <div className="auth-form-brand">智运 TMS</div>
           <div className="auth-form-title">欢迎登录</div>
-          <div className="auth-form-sub">请输入账号信息进入控制塔</div>
+          <div className="auth-form-sub">请输入账号信息登录</div>
           <label className="field">
             <span>用户名</span>
             <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />

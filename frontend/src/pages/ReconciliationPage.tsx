@@ -44,7 +44,7 @@ export function ReconciliationPage() {
   });
   const confirm = useMutation({
     mutationFn: (id: string) => apiPost(`/finance/statements/${id}/confirm`, {}),
-    onSuccess: () => { toast.success("对账单已确认，准备推流资金池。"); invalidate(); },
+    onSuccess: () => { toast.success("对账单已确认。"); invalidate(); },
   });
   const detail = useQuery({
     queryKey: ["statement", expanded],
@@ -55,11 +55,11 @@ export function ReconciliationPage() {
   const cps = counterparties.data?.items ?? [];
   const items = statements.data?.items ?? [];
 
-  // === AI 异常审计：按同费用科目历史均值真实计算，非模拟（apps.finance.services.audit_statement）===
+  // 对账单异常审计：按费用科目历史均值计算
   const auditOne = useMutation({
     mutationFn: (id: string) => apiPost<StatementAuditResult>(`/finance/statements/${id}/audit`, {}),
     onSuccess: (r) => {
-      toast.success(`审计完成：核对 ${r.total_lines} 笔流水，发现 ${r.anomaly_count} 处异常过高费用。`);
+      toast.success(`审计完成：核对 ${r.total_lines} 笔明细，发现 ${r.anomaly_count} 处异常。`);
       queryClient.invalidateQueries({ queryKey: ["statement", expanded] });
       invalidate();
     },
@@ -73,7 +73,7 @@ export function ReconciliationPage() {
       );
     },
     onSuccess: (r) => {
-      toast.success(`🤖 批量审计完成：核对 ${items.length} 张账单共 ${r.lines} 笔流水，发现 ${r.anomalies} 处过高费用风险。`);
+      toast.success(`批量审计完成：核对 ${items.length} 张账单共 ${r.lines} 笔明细，发现 ${r.anomalies} 处异常。`);
       queryClient.invalidateQueries({ queryKey: ["statement", expanded] });
       invalidate();
     },
@@ -86,11 +86,11 @@ export function ReconciliationPage() {
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
-              AI 业财核销与对账台账
-              <span className="tag" style={{ background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.4)", color: "#c4b5fd" }}>AR/AP 引擎</span>
+              对账管理
+              
             </div>
             <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
-              管理与客户的应收（AR）、承运商的应付（AP）对账单。可启用 AI 对账机器人自动排查异常油费/路桥费与杂项。
+              管理客户应收（AR）与承运商应付（AP）对账单，自动排查异常费用。
             </div>
           </div>
           <button
@@ -99,7 +99,7 @@ export function ReconciliationPage() {
             onClick={() => auditAll.mutate()}
             disabled={auditAll.isPending || items.length === 0}
           >
-            {auditAll.isPending ? "🧠 深度对账审计中..." : `🤖 启动一键 AI 并发表单审计（${items.length} 张）`}
+            {auditAll.isPending ? "审计中…" : `批量审计（${items.length} 张）`}
           </button>
         </div>
       </div>
@@ -108,7 +108,7 @@ export function ReconciliationPage() {
         <div className="panel">
           <div className="panel-head">
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {direction === "receivable" ? "🟢 应收配置 (Accounts Receivable)" : "🔴 应付配置 (Accounts Payable)"}
+              {direction === "receivable" ? "应收配置 (AR)" : "应付配置 (AP)"}
             </span>
           </div>
           <div className="grid-form" style={{ padding: "16px 20px" }}>
@@ -118,20 +118,20 @@ export function ReconciliationPage() {
                 style={direction === "receivable" ? { background: "var(--green)", color: "#fff", borderColor: "var(--green)" } : {}}
                 onClick={() => { setDirection("receivable"); setCounterpartyId(""); }}
               >
-                收 客户款 (AR)
+                应收 (AR)
               </button>
               <button 
                 className="btn-ghost" 
                 style={direction === "payable" ? { background: "var(--red)", color: "#fff", borderColor: "var(--red)" } : {}}
                 onClick={() => { setDirection("payable"); setCounterpartyId(""); }}
               >
-                付 承运商/车队款 (AP)
+                应付 (AP)
               </button>
             </label>
             <label>
               对手方主体
               <select value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)} style={{ padding: "8px 10px" }}>
-                <option value="">请选择 {cpType === "customer" ? "签约货主" : "外协承运商/车队"}</option>
+                <option value="">请选择 {cpType === "customer" ? "客户" : "承运商"}</option>
                 {cps.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -144,23 +144,23 @@ export function ReconciliationPage() {
             </label>
             <div style={{ gridColumn: "1 / -1", marginTop: 12 }}>
               <button className="btn-primary" style={{ width: "100%", padding: 12, fontSize: 13 }} disabled={!counterpartyId || generate.isPending} onClick={() => generate.mutate()}>
-                {generate.isPending ? "账单轧帐与生成中…" : `🧾 一键汇总并生成 ${direction === 'receivable' ? '收款' : '付款'} 对账单`}
+                {generate.isPending ? "生成中…" : `生成${direction === 'receivable' ? '收款' : '付款'}对账单`}
               </button>
             </div>
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-head">动态账龄分析池 (Aging Report)</div>
+          <div className="panel-head">账龄分析 (Aging Report)</div>
           {aging.isLoading ? (
             <div className="muted" style={{ padding: 24, textAlign: "center" }}>加载账龄数据中…</div>
           ) : (aging.data?.rows.length ?? 0) === 0 ? (
-            <div className="muted" style={{ padding: 24, textAlign: "center" }}>暂无账龄坏账数据</div>
+            <div className="muted" style={{ padding: 24, textAlign: "center" }}>暂无账龄数据</div>
           ) : (
             <div style={{ maxHeight: 280, overflowY: "auto" }}>
               <table className="table" style={{ fontSize: 12 }}>
                 <thead>
-                  <tr><th>对手方主体</th><th>0-30天 (健康)</th><th>31-60天 (延期)</th><th>61-90天 (风险)</th><th>90天+ (坏账警告)</th><th>未结合计</th></tr>
+                  <tr><th>对手方</th><th>0-30天</th><th>31-60天</th><th>61-90天</th><th>90天+</th><th>未结合计</th></tr>
                 </thead>
                 <tbody>
                   {(aging.data?.rows ?? []).map((r, i) => (
@@ -193,21 +193,21 @@ export function ReconciliationPage() {
       <div className="panel" style={{ flex: 1 }}>
         <div className="panel-head">对账单核销台账 (Ledger)</div>
         {statements.isLoading ? (
-          <div className="muted" style={{ padding: 24, textAlign: "center" }}>极速拉取账单中…</div>
+          <div className="muted" style={{ padding: 24, textAlign: "center" }}>加载中…</div>
         ) : items.length === 0 ? (
-          <div className="muted" style={{ padding: 24, textAlign: "center" }}>暂无核销对账单记录</div>
+          <div className="muted" style={{ padding: 24, textAlign: "center" }}>暂无对账单</div>
         ) : (
           <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--line)" }}>
                 <th style={{ padding: "10px 12px" }}>系统结算单号</th>
                 <th>账单方向</th>
-                <th>结对实体主体</th>
-                <th>计费周期段</th>
-                <th>系统应结算金额</th>
+                <th>对手方</th>
+                <th>账期</th>
+                <th>应结金额</th>
                 <th>交易笔数</th>
-                <th>外部上报差异/损益</th>
-                <th>审批流状态</th>
+                <th>差异</th>
+                <th>状态</th>
                 <th>财务操作</th>
               </tr>
             </thead>
@@ -220,15 +220,15 @@ export function ReconciliationPage() {
                     </td>
                     <td>
                       <span className="tag" style={{ background: s.direction === "receivable" ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)", color: s.direction === "receivable" ? "var(--green)" : "var(--red)" }}>
-                        {s.direction === "receivable" ? "AR 收客户款" : "AP 付承运商"}
+                        {s.direction === "receivable" ? "AR 应收" : "AP 应付"}
                       </span>
                     </td>
-                    <td style={{ fontWeight: 600, color: "var(--ink)" }}>🏢 {s.counterparty_name}</td>
+                    <td style={{ fontWeight: 600, color: "var(--ink)" }}>{s.counterparty_name}</td>
                     <td className="small muted mono">{s.period_start} ~ {s.period_end}</td>
                     <td style={{ fontWeight: 800, fontSize: 14 }}>{fmtMoney(s.total_amount)}</td>
                     <td>{s.item_count} 笔</td>
                     <td className="mono" style={Number(s.diff) !== 0 ? { color: "var(--red)", fontWeight: "bold" } : { color: "var(--muted)" }}>
-                      {Number(s.diff) !== 0 ? `差异 ${fmtMoney(s.diff)}` : "精准无差"}
+                      {Number(s.diff) !== 0 ? `差异 ${fmtMoney(s.diff)}` : "无差异"}
                     </td>
                     <td>
                       <span className={`tag tag-${s.status === "confirmed" || s.status === "settled" ? "low" : "medium"}`}>
@@ -238,27 +238,27 @@ export function ReconciliationPage() {
                     <td>
                       {s.status === "draft" && (
                         <button className="btn-primary" style={{ padding: "4px 10px", fontSize: 11 }} disabled={confirm.isPending} onClick={(e) => { e.stopPropagation(); confirm.mutate(s.id); }}>
-                          ✓ 签发审批
+                          确认
                         </button>
                       )}
                     </td>
                   </tr>
                   
-                  {/* === 双击下拉抽屉 / 明细层：AI 审计区 === */}
+                  {/* 明细审计区 */}
                   {expanded === s.id && (
                     <tr style={{ background: "rgba(0,0,0,0.015)" }}>
                       <td colSpan={9} style={{ padding: "0 24px 24px" }}>
                         <div style={{ padding: "16px 20px", background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.05)", marginTop: 10 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "center" }}>
                             <div style={{ fontWeight: "bold", fontSize: 14 }}>
-                              <span style={{ fontSize: 16 }}>🧾</span> 账单微交易流水明细审计
+                              账单明细审计
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <span className="muted small">
                                 {detail.data?.audited_at
                                   ? `已审计 · ${new Date(detail.data.audited_at).toLocaleString()}`
                                   : "尚未审计"}
-                                {" · "}共 {detail.data?.lines?.length || 0} 笔子计费项
+                                {" · "}共 {detail.data?.lines?.length || 0} 笔明细
                               </span>
                               <button
                                 className="btn-ghost"
@@ -266,23 +266,23 @@ export function ReconciliationPage() {
                                 disabled={auditOne.isPending}
                                 onClick={(e) => { e.stopPropagation(); auditOne.mutate(s.id); }}
                               >
-                                {auditOne.isPending ? "审计中…" : "🤖 审计本单"}
+                                {auditOne.isPending ? "审计中…" : "审计本单"}
                               </button>
                             </div>
                           </div>
 
                           {detail.isLoading ? (
-                            <span className="muted small">加载微交易流水池…</span>
+                            <span className="muted small">加载明细…</span>
                           ) : (
                             <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
                               <table className="table" style={{ margin: 0, fontSize: 12 }}>
                                 <thead>
                                   <tr style={{ background: "var(--panel-2)" }}>
-                                    <th>业务源运单号</th>
-                                    <th>费用科目代码</th>
-                                    <th>子流水金额</th>
-                                    <th>发生时空戳</th>
-                                    <th>AI 审计校验结论</th>
+                                    <th>运单号</th>
+                                    <th>费用科目</th>
+                                    <th>金额</th>
+                                    <th>发生时间</th>
+                                    <th>审计结论</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -299,12 +299,11 @@ export function ReconciliationPage() {
                                       <td>
                                         {l.is_anomaly ? (
                                           <span style={{ color: "#e74c3c", fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}>
-                                            <span style={{ fontSize: 14 }}>🤖</span>
-                                            异常过高！超历史均值 ¥{fmtMoney(l.baseline_avg ?? "0")} 达 {l.deviation_pct}%
+                                            超历史均值 ¥{fmtMoney(l.baseline_avg ?? "0")} {l.deviation_pct}%
                                           </span>
                                         ) : l.baseline_avg != null ? (
                                           <span style={{ color: "#27ae60", display: "flex", alignItems: "center", gap: 4 }}>
-                                            ✓ AI 核验合规（基线 ¥{fmtMoney(l.baseline_avg)}）
+                                            合规（基线 ¥{fmtMoney(l.baseline_avg)}）
                                           </span>
                                         ) : (
                                           <span className="muted">{detail.data?.audited_at ? "样本不足，无基线" : "待审计"}</span>

@@ -21,7 +21,7 @@ export function AuditPage() {
   return (
     <div className="stack">
       <div className="panel">
-        <div className="panel-head">审计日志 · 操作溯源</div>
+        <div className="panel-head">审计日志</div>
         <div className="form-row">
           <input className="search" placeholder="搜索动作/路径/资源/RequestID" value={search} onChange={(e) => setSearch(e.target.value)} />
           <select value={resource} onChange={(e) => setResource(e.target.value)}>

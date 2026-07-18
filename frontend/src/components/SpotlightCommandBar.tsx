@@ -32,10 +32,10 @@ export function SpotlightCommandBar() {
 
   // 快捷菜单
   const navCommands = [
-    { label: "📋 进入：订单录入中心 (Order Intake)", path: "/intake", cmd: "/intake" },
-    { label: "🧭 进入：智能拼单调度台 (Dispatch Board)", path: "/dispatch-board", cmd: "/dispatch" },
-    { label: "🗺️ 进入：时空车辆监控监控舱 (Live Map)", path: "/monitor", cmd: "/monitoring" },
-    { label: "📊 进入：物流控制塔大屏 (Control Tower)", path: "/", cmd: "/dashboard" },
+    { label: "订单录入", path: "/intake", cmd: "/intake" },
+    { label: "调度台", path: "/dispatch-board", cmd: "/dispatch" },
+    { label: "车辆监控", path: "/monitor", cmd: "/monitoring" },
+    { label: "运营总览", path: "/", cmd: "/dashboard" },
   ];
 
   const filteredCommands = navCommands.filter((c) =>
@@ -123,9 +123,9 @@ export function SpotlightCommandBar() {
     try {
       const data = await apiPost<AgentResponse>("/agent/chat", { message: cleanQuery });
       setResponse(data);
-      toast.success("AI 协同分析已完成");
+      toast.success("分析已完成");
     } catch (err: any) {
-      toast.error("AI 指令分析失败，请检查网络和服务器配置");
+      toast.error("分析失败，请稍后重试");
     } finally {
       setLoading(false);
     }
@@ -153,7 +153,7 @@ export function SpotlightCommandBar() {
       >
         {/* 输入框 */}
         <form onSubmit={handleSearchSubmit} style={{ display: "flex", borderBottom: "1px solid rgba(255, 255, 255, 0.12)", padding: 14 }}>
-          <span style={{ fontSize: 20, marginRight: 10, display: "flex", alignItems: "center" }}>🔍</span>
+          <span style={{ fontSize: 20, marginRight: 10, display: "flex", alignItems: "center" }}></span>
           <input
             ref={inputRef}
             type="text"
@@ -162,7 +162,7 @@ export function SpotlightCommandBar() {
               outline: "none", fontSize: 16, padding: "4px 0",
               fontFamily: "var(--font-sans)"
             }}
-            placeholder="AI 协同指令舱：键盘 ↑↓ 选择，Enter 确认跳转，或提问..."
+            placeholder="搜索或输入指令，↑↓ 选择，Enter 确认"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -173,8 +173,8 @@ export function SpotlightCommandBar() {
         <div style={{ overflowY: "auto", flex: 1, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
           {loading && (
             <div style={{ padding: "30px", textAlign: "center", color: "rgba(255,255,255,0.6)", fontSize: 14 }} className="stack">
-              <span>🧠 AI 协同分析与工具编排中…</span>
-              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6 }}>系统正在调用 LangGraph 底座进行装载及运价测算...</span>
+              <span>分析中…</span>
+              
             </div>
           )}
 
@@ -182,8 +182,8 @@ export function SpotlightCommandBar() {
           {response && (
             <div style={{ padding: 14, background: "rgba(255,255,255,0.04)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--primary)" }}>
-                <span>🤖 AI 协同智能体应答</span>
-                <span className="tag" style={{ background: "rgba(39,174,96,0.15)", color: "#27ae60" }}>DeepSeek 实算</span>
+                <span>分析结果</span>
+                
               </div>
               <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap", color: "rgba(255,255,255,0.9)" }}>{response.answer}</p>
               
@@ -192,7 +192,7 @@ export function SpotlightCommandBar() {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
                   {response.tool_calls.map((t, idx) => (
                     <span key={idx} style={{ fontSize: 10, background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)", padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.04)" }}>
-                      🔧 已调用：{t.tool_name}
+                      {t.tool_name}
                     </span>
                   ))}
                 </div>
@@ -203,7 +203,7 @@ export function SpotlightCommandBar() {
           {/* 2. 快捷指令导航列表 */}
           {!loading && !response && (
             <div className="stack" style={{ gap: 4 }}>
-              <div style={{ padding: "6px 8px", fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: "bold" }}>⚡ 快捷功能导航 (键盘 ↑↓ 选择，Enter 跳转)</div>
+              <div style={{ padding: "6px 8px", fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: "bold" }}>快捷导航</div>
               {filteredCommands.map((c, idx) => {
                 const active = selectedIndex === idx;
                 return (
@@ -236,14 +236,13 @@ export function SpotlightCommandBar() {
               style={{
                 padding: "12px", borderRadius: 8, cursor: "pointer",
                 display: "flex", justifyContent: "space-between", alignItems: "center",
-                background: "rgba(230, 126, 34, 0.12)", border: "1px dashed rgba(230, 126, 34, 0.25)",
+                background: "rgba(99, 102, 241, 0.14)", border: "1px dashed rgba(99, 102, 241, 0.3)",
                 fontSize: 13
               }}
               onClick={() => handleSearchSubmit()}
             >
-              <span style={{ color: "#e67e22", display: "flex", alignItems: "center", gap: 6 }}>
-                <span>🤖</span>
-                发给 <strong>LangGraph 物流 Agent </strong>实算：“{query}”
+              <span style={{ color: "#a5b4fc", display: "flex", alignItems: "center", gap: 6 }}>
+                搜索：“{query}”
               </span>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>按 Enter 发送 ↵</span>
             </div>
@@ -252,8 +251,8 @@ export function SpotlightCommandBar() {
 
         {/* 底部指示 */}
         <div style={{ padding: "10px 14px", borderTop: "1px solid rgba(255, 255, 255, 0.08)", fontSize: 11, color: "rgba(255,255,255,0.3)", display: "flex", justifyContent: "space-between" }}>
-          <span>按 <kbd style={{ background: "rgba(255,255,255,0.08)", padding: "2px 4px", borderRadius: 4, fontFamily: "monospace" }}>ESC</kbd> 退出指令舱</span>
-          <span>双击键盘 <kbd style={{ background: "rgba(255,255,255,0.08)", padding: "2px 4px", borderRadius: 4, fontFamily: "monospace" }}>Ctrl+K</kbd> 呼出/隐藏</span>
+          <span>按 <kbd style={{ background: "rgba(255,255,255,0.08)", padding: "2px 4px", borderRadius: 4, fontFamily: "monospace" }}>ESC</kbd> 退出</span>
+          <span><kbd style={{ background: "rgba(255,255,255,0.08)", padding: "2px 4px", borderRadius: 4, fontFamily: "monospace" }}>Ctrl+K</kbd> 呼出/隐藏</span>
         </div>
       </div>
     </div>

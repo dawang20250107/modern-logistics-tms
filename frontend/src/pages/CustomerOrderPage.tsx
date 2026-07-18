@@ -46,10 +46,10 @@ export function CustomerOrderPage() {
   return (
     <div className="public-page">
       <div className="public-card">
-        <div className="public-brand">智运 · 在线下单</div>
+        <div className="public-brand">在线下单</div>
         {done ? (
           <div className="stack" style={{ textAlign: "center", gap: 14, padding: "10px 0" }}>
-            <div style={{ fontSize: 44 }}>✅</div>
+            <div style={{ fontSize: 44 }}></div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>下单成功</div>
             <div className="mono" style={{ fontSize: 16 }}>{done}</div>
             <div className="muted">客服将尽快与您电话确认。请保存订单号，可凭订单号 + 手机号查询进度。</div>

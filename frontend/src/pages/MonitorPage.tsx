@@ -10,32 +10,8 @@ import { LiveMap } from "../components/LiveMap";
 
 export function MonitorPage() {
   const queryClient = useQueryClient();
-  const [liveAlerts, setLiveAlerts] = useState<Array<{ message: string; level: string; t: number; type?: string; aiSuggest?: string; actionLabel?: string }>>([
-    {
-      message: "车辆 沪A77889 在 沪-蓉 路线温度偏高 (当前 -5.5℃, 设定 -18℃)",
-      level: "high",
-      t: Date.now() - 60000,
-      type: "temperature",
-      aiSuggest: "🤖 AI中台建议：高价冷链药品制剂，货值超 ¥200万！系统已自动拟定催告提醒，建议立刻电联司机张师傅检查冷机，防止升温变质。",
-      actionLabel: "📞 电话张师傅"
-    },
-    {
-      message: "车辆 苏B12345 偏航预警：偏离既定高速路线超出 5.2 公里",
-      level: "medium",
-      t: Date.now() - 180000,
-      type: "route",
-      aiSuggest: "🤖 AI中台建议：路线终点为北京顺义，偏航疑似逃避收费站或非计划绕行，点击微信群群呼司机说明偏航原因。",
-      actionLabel: "💬 微信群呼"
-    },
-    {
-      message: "车辆 沪B99881 油量骤降警告：5分钟内传感器油量下降 12.5%",
-      level: "high",
-      t: Date.now() - 300000,
-      type: "fuel",
-      aiSuggest: "🤖 AI中台建议：高油损预警！传感器突变可能存在盗油风险或油路故障。系统已启动应急响应，点击呼叫服务商排查。",
-      actionLabel: "🚨 派驻特调"
-    }
-  ]);
+  // 报警流从空开始，仅渲染真实 SSE 推送的告警（此前会预置演示假报警，误导为真实事件）
+  const [liveAlerts, setLiveAlerts] = useState<Array<{ message: string; level: string; t: number; type?: string; aiSuggest?: string; actionLabel?: string }>>([]);
 
   const live = useQuery({
     queryKey: ["telematics", "live"],
@@ -47,21 +23,21 @@ export function MonitorPage() {
     if (e.type === "alert") {
       const msg = String(e.data.message ?? "");
       let type = "general";
-      let aiSuggest = "🤖 AI中台建议：实时设备报警，请调度人员跟进并向承运商核实。";
-      let actionLabel = "📞 呼叫车队";
+      let aiSuggest = "设备报警，请跟进并向承运商核实。";
+      let actionLabel = "联系车队";
 
       if (msg.includes("温度")) {
         type = "temperature";
-        aiSuggest = "🤖 AI中台建议：检测到冷箱箱体温度波动，请立刻催促司机复核冷机状态，以防化冻产生货损。";
-        actionLabel = "📞 电话司机";
+        aiSuggest = "冷箱温度波动，请联系司机复核冷机状态。";
+        actionLabel = "联系司机";
       } else if (msg.includes("超速")) {
         type = "speed";
-        aiSuggest = "🤖 AI中ata建议：车辆超速行驶存在碰撞风险，请系统批量下发限速安全提醒话术。";
-        actionLabel = "💬 微信群呼";
+        aiSuggest = "车辆超速，请下发限速提醒。";
+        actionLabel = "联系司机";
       } else if (msg.includes("油") || msg.includes("燃油")) {
         type = "fuel";
-        aiSuggest = "🤖 AI中台建议：疑似存在盗油风险或漏油，已自动拟定特情排查工单，请联系就近服务站。";
-        actionLabel = "🚨 派驻特调";
+        aiSuggest = "疑似漏油或盗油，请联系就近服务站排查。";
+        actionLabel = "安排排查";
       }
 
       setLiveAlerts((prev) =>
@@ -101,11 +77,11 @@ export function MonitorPage() {
         {/* === 主动安全时空事件流 (Live Telematics Event Stream) === */}
         <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
           <div className="panel-head" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 10 }}>
-            🚨 时空主动安全流监控舱 (SSE + AI)
+            实时报警
           </div>
           <div style={{ flex: 1, padding: "12px 14px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, maxHeight: 380 }}>
             {liveAlerts.length === 0 ? (
-              <div className="muted small" style={{ textAlign: "center", padding: 20 }}>已连接车联网，等待异常告警接收…</div>
+              <div className="muted small" style={{ textAlign: "center", padding: 20 }}>暂无实时报警</div>
             ) : (
               liveAlerts.map((a, i) => {
                 const colors: Record<string, string> = {
@@ -134,7 +110,7 @@ export function MonitorPage() {
                     {/* 头部：报警类型、级别和时间 */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontSize: 13, fontWeight: "bold" }}>
-                        {a.type === "temperature" ? "🌡️ 冷链温度异常" : a.type === "route" ? "🗺️ 车辆偏航预警" : a.type === "fuel" ? "⛽ 高油损/盗油告警" : "⚠️ 设备主动安全报警"}
+                        {a.type === "temperature" ? "冷链温度异常" : a.type === "route" ? "车辆偏航预警" : a.type === "fuel" ? "油量异常" : "设备报警"}
                       </span>
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         <span className={`tag tag-${a.level === "high" ? "high" : "medium"}`} style={{ fontSize: 10 }}>{a.level === "high" ? "极高危" : "中危"}</span>
@@ -159,7 +135,7 @@ export function MonitorPage() {
                           {a.actionLabel}
                         </button>
                         <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => handleActionClick("微信群安全提醒")}>
-                          💬 微信群安全提醒
+                          发送提醒
                         </button>
                       </div>
                     )}

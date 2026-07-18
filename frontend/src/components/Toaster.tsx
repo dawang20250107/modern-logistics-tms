@@ -1,6 +1,6 @@
 import { dismissToast, useToasts } from "../api/toast";
 
-const ICON = { error: "⛔", success: "✅", info: "ℹ️" } as const;
+const ICON = { error: "✕", success: "✓", info: "ℹ" } as const;
 
 export function Toaster() {
   const toasts = useToasts();

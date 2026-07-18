@@ -88,7 +88,7 @@ export function AiWorkbenchPage() {
       <div className="panel">
         <div className="panel-head">
           AI 智能助手
-          <span className="ai-pill">LangGraph Agent</span>
+          
         </div>
         <div style={{ padding: 16, maxHeight: 380, overflow: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
           {chat.length === 0 ? (
@@ -107,7 +107,7 @@ export function AiWorkbenchPage() {
                 }}>{m.text}</div>
                 {m.tools && m.tools.length > 0 && (
                   <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {m.tools.map((t, j) => <span key={j} className="tag tag-info">🔧 {t}</span>)}
+                    {m.tools.map((t, j) => <span key={j} className="tag tag-info">{t}</span>)}
                   </div>
                 )}
               </div>
@@ -117,7 +117,7 @@ export function AiWorkbenchPage() {
         </div>
         <div className="ai-box" style={{ borderTop: "1px solid var(--line)" }}>
           <input
-            placeholder="问点什么…（多轮对话，自动调用系统工具）"
+            placeholder="输入问题…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}

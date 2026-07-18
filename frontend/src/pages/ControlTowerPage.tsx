@@ -107,7 +107,7 @@ export function ControlTowerPage() {
         </div>
 
         <div className="panel">
-          <div className="panel-head">实时事件流 (SSE)</div>
+          <div className="panel-head">实时事件流</div>
           {events.length === 0 ? (
             <div className="muted small" style={{ padding: 16 }}>已连接，等待事件…</div>
           ) : (
@@ -123,7 +123,7 @@ export function ControlTowerPage() {
         </div>
       </div>
 
-      {/* AI 全局指令舱入口 */}
+      
       <div 
         className="panel" 
         style={{ 
@@ -142,14 +142,14 @@ export function ControlTowerPage() {
         <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <div style={{ fontSize: 14, fontWeight: "600", color: "var(--brand)", display: "flex", alignItems: "center", gap: 8 }}>
-              <IconSparkles size={20} className="icon-offset" /> 智能协同调度引擎已就绪
+              <IconSparkles size={20} className="icon-offset" /> AI 助手
             </div>
             <div className="muted small" style={{ color: "var(--ink-2)" }}>
-              你可以随时使用自然语言唤起调度指令。例如：“帮我分析无锡方向拼单”、“查询苏B异常”、“测算单票利润”。
+              使用自然语言查询运单、拼单或利润测算。
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}><IconTerminal size={14} className="icon-offset" /> 快捷指令唤起</span>
+            <span className="muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}><IconTerminal size={14} className="icon-offset" /> 快捷键</span>
             <span style={{ background: "var(--panel)", color: "var(--ink)", padding: "4px 8px", borderRadius: 4, fontWeight: "500", fontFamily: "var(--font-mono)", fontSize: 12, border: "1px solid var(--line)" }}>
               Ctrl K
             </span>
@@ -158,27 +158,27 @@ export function ControlTowerPage() {
       </div>
 
       <div className="panel">
-        <div className="panel-head">时空预警与异常队列</div>
+        <div className="panel-head">风险与异常</div>
         {waybills.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>指标数据拉取中…</div>
+          <div className="muted" style={{ padding: 16 }}>加载中…</div>
         ) : risky.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>全网车辆运转正常，暂无活跃的异常风险。</div>
+          <div className="muted" style={{ padding: 16 }}>暂无风险运单。</div>
         ) : (
           <table className="table">
             <thead>
               <tr>
-                <th>系统运单号</th>
-                <th>共线线路</th>
+                <th>运单号</th>
+                <th>线路</th>
                 <th>风险等级</th>
-                <th>ETA 偏移时效(分)</th>
-                <th>回单回收状态</th>
+                <th>ETA 偏移(分钟)</th>
+                <th>回单状态</th>
               </tr>
             </thead>
             <tbody>
               {risky.map((w) => (
                 <tr key={w.id}>
                   <td>
-                    <Link className="link mono interactive-text" title="点击查看数字孪生档案" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>
+                    <Link className="link mono interactive-text" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>
                   </td>
                   <td><span title={`起讫：${w.origin} → ${w.destination}`}>{w.route_name}</span></td>
                   <td>

@@ -51,7 +51,7 @@ export function NotificationBell() {
   return (
     <div style={{ position: "relative" }} ref={ref}>
       <button className="btn-ghost" onClick={() => setOpen((v) => !v)} style={{ position: "relative" }}>
-        🔔
+       
         {unread > 0 && (
           <span style={{
             position: "absolute", top: -6, right: -6, background: "var(--red)", color: "#fff",

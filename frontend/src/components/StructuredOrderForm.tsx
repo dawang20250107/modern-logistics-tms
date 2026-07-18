@@ -59,11 +59,11 @@ interface B2BPartner {
 }
 
 const CHANNEL_META: Record<string, { icon: string; hint: string; sourcePlaceholder: string }> = {
-  cs: { icon: "🎧", hint: "客服代客户录入完整订单，信息最全。", sourcePlaceholder: "坐席/工号" },
-  self: { icon: "🧑‍💼", hint: "客户自助提交的订单，建议核对后确认。", sourcePlaceholder: "客户账号" },
+  cs: { icon: "🎧", hint: "客服代客户录入订单。", sourcePlaceholder: "坐席/工号" },
+  self: { icon: "🧑‍💼", hint: "客户自助提交的订单，请核对后确认。", sourcePlaceholder: "客户账号" },
   miniprogram: { icon: "📱", hint: "小程序下单，核对联系人与地址后确认。", sourcePlaceholder: "小程序用户" },
-  wechat_group: { icon: "💬", hint: "粘贴微信群消息到上方「AI 速录」一键解析填充。", sourcePlaceholder: "群名称" },
-  api: { icon: "🔌", hint: "开放 API/EDI 对接，系统自动接单，可在此补录。", sourcePlaceholder: "对接系统" },
+  wechat_group: { icon: "", hint: "粘贴微信群消息到上方解析框自动填充。", sourcePlaceholder: "群名称" },
+  api: { icon: "🔌", hint: "API/EDI 对接，系统自动接单，可在此补录。", sourcePlaceholder: "对接系统" },
 };
 
 const emptyCargo = (): OrderCargoItem => ({ name: "", quantity: "", weight_ton: "", volume_cbm: "", package_type: "", temperature_range: "", remark: "" });
@@ -121,7 +121,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
       contact_name: partner.contact_name,
       contact_phone: partner.contact_phone,
     });
-    toast.success(`已一键填充${type === "pickup" ? "发货方" : "收货方"}：${partner.name}`);
+    toast.success(`已填充${type === "pickup" ? "发货方" : "收货方"}：${partner.name}`);
   };
 
   const reset = () => {
@@ -160,7 +160,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   const submit = useMutation({
     mutationFn: (status: string) => apiPost("/orders/intake", payload(status)),
     onSuccess: (_d, status) => {
-      toast.success(status === "draft" ? "已存草稿" : "建单成功（并已执行 B2B 智能对齐补全！）");
+      toast.success(status === "draft" ? "已存草稿" : "建单成功");
       reset();
       onCreated();
     },
@@ -181,7 +181,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
       if (f.contact_phone) {
         setStops((prev) => prev.map((s, i) => (i === 0 ? { ...s, contact_phone: String(f.contact_phone) } : s)));
       }
-      toast.success("AI 智能提取并装填完毕，请核对微调");
+      toast.success("解析完成，请核对");
     },
   });
 
@@ -195,7 +195,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
       const cw = d.by_volume ? `（按抛重 ${d.chargeable_weight} 吨）` : "";
       if (d.matched) {
         set("quoted_amount", String(d.amount));
-        toast.success(`已按「${d.rule_name}」估价 ${fmtMoney(d.amount)}${cw}`);
+        toast.success(`已按「${d.rule_name}」计价 ${fmtMoney(d.amount)}${cw}`);
       } else {
         toast.info(`未匹配到计价规则，请手工填写报价${cw}`);
       }
@@ -249,7 +249,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
     },
     onSuccess: (r) => {
       setBulkText("");
-      toast.success(`批量建单成功：${r.ok_count} 单入库，${r.failed_count} 单失败`);
+      toast.success(`导入完成：${r.ok_count} 单成功，${r.failed_count} 单失败`);
       onCreated();
       setActiveMode("standard");
     },
@@ -267,8 +267,8 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
       {/* 标题 & 药丸标签 */}
       <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 18 }}>B2B 智能极速录单中心</span>
-          <span className="tag tag-low" style={{ background: "rgba(39,174,96,0.1)", color: "#27ae60" }}>AI + 物理对齐支持</span>
+          <span style={{ fontSize: 18 }}>新建订单</span>
+          <span className="tag tag-low" style={{ background: "rgba(39,174,96,0.1)", color: "#27ae60" }}></span>
         </div>
         {templates.data && templates.data.items.length > 0 && (
           <select style={{ width: 140, padding: "4px 8px" }} defaultValue="" onChange={(e) => { if (e.target.value) applyTpl(e.target.value); e.target.value = ""; }}>
@@ -281,13 +281,13 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
       {/* 模式选择 Tab 栏 */}
       <div className="form-row" style={{ padding: "12px 18px", background: "var(--input-bg)", borderBottom: "1px solid var(--line)", gap: 10, display: "flex", flexWrap: "wrap" }}>
         <button className={`chip ${activeMode === "standard" ? "chip-on" : ""}`} onClick={() => setActiveMode("standard")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
-          📋 标准 B2B 细案录单
+          标准录单
         </button>
         <button className={`chip ${activeMode === "ai" ? "chip-on" : ""}`} onClick={() => setActiveMode("ai")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
-          🤖 AI 协同智能速录
+          文本解析
         </button>
         <button className={`chip ${activeMode === "batch" ? "chip-on" : ""}`} onClick={() => setActiveMode("batch")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
-          ⚡ 多行文本/Excel批量秒录
+          批量导入
         </button>
       </div>
 
@@ -297,8 +297,8 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
           {/* 左侧：输入框 */}
           <div className="stack" style={{ gap: 10 }}>
             <div className="section-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span>✍️ 自由粘贴微信消息 / EDI报文</span>
-              <span className="tag tag-medium" style={{ fontSize: 10 }}>DeepSeek 抽取</span>
+              <span>粘贴微信消息 / EDI 报文</span>
+              <span className="tag tag-medium" style={{ fontSize: 10 }}></span>
             </div>
             <textarea
               className="search"
@@ -319,7 +319,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                 disabled={!paste.trim() || aiParse.isPending}
                 onClick={() => aiParse.mutate()}
               >
-                {aiParse.isPending ? <><IconSparkles size={16} className="icon-offset"/> 大模型思索构建图纸中 [请稍候]...</> : <><IconZap size={16} className="icon-offset"/> 提交深度解析 (Ctrl+Enter)</>}
+                {aiParse.isPending ? <><IconSparkles size={16} className="icon-offset"/> 解析中…</> : <><IconZap size={16} className="icon-offset"/> 解析 (Ctrl+Enter)</>}
               </button>
               <button className="btn-ghost" onClick={() => setPaste("")} disabled={!paste} style={{ display: "flex", alignItems: "center", gap: 6 }}><IconX size={14} className="icon-offset" /> 清空</button>
             </div>
@@ -327,7 +327,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
           {/* 右侧：解析预览 */}
           <div className="stack" style={{ gap: 10, background: "rgba(0,0,0,0.015)", padding: "18px 20px", borderRadius: 10, border: "1px solid var(--line)" }}>
-            <div className="section-label" style={{ color: "var(--brand)", fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><IconSparkles size={16} className="icon-offset" /> AI 动态数据映射蓝图核验</div>
+            <div className="section-label" style={{ color: "var(--brand)", fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><IconSparkles size={16} className="icon-offset" /> 解析结果</div>
             
             {aiParse.isPending ? (
               <div className="stack" style={{ gap: 16, marginTop: 10 }}>
@@ -352,14 +352,14 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                 
                 <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
                   <div className="muted small">
-                    💡 解析完成后的数据已安全挂载至「标准录单」。你可以直接在下方极速建单，或点击进入标准表单进行货物细项、多提多送站点的微调补全。
+                    解析结果已填入标准录单，可直接建单，或进入标准表单补全货物明细与提送站点。
                   </div>
                   <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
                     <button className="btn-secondary" style={{ flex: 1, padding: 12 }} onClick={() => setActiveMode("standard")}>
                       进入标准表单进行微调
                     </button>
                     <button className="btn-primary" style={{ flex: 1.5, padding: 12, background: "var(--green)", borderColor: "var(--green)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>
-                      <IconCheck size={16} className="icon-offset" /> 核验合规，极速进运力池
+                      <IconCheck size={16} className="icon-offset" /> 确认建单
                     </button>
                   </div>
                 </div>
@@ -374,7 +374,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
         <div style={{ padding: "18px 18px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
             <div className="stack" style={{ gap: 10 }}>
-              <div className="section-label">⚡ 粘贴多行文本 (Excel列直接复制)</div>
+              <div className="section-label">粘贴多行文本（可从 Excel 复制）</div>
               <textarea
                 className="search"
                 style={{ width: "100%", height: 160, resize: "none", fontSize: 13, fontFamily: "monospace", padding: 12 }}
@@ -388,12 +388,12 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                 onClick={() => bulkImportMut.mutate()}
                 style={{ padding: 12 }}
               >
-                {bulkImportMut.isPending ? "正在导入并落库中…" : `合并生成这 ${bulkRows.length} 张订单`}
+                {bulkImportMut.isPending ? "导入中…" : `导入 ${bulkRows.length} 张订单`}
               </button>
             </div>
 
             <div className="stack" style={{ gap: 10, background: "rgba(0,0,0,0.01)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
-              <div className="section-label">📋 实时预解析结果 ({bulkRows.length} 行)</div>
+              <div className="section-label">预览（{bulkRows.length} 行）</div>
               <div style={{ maxHeight: 160, overflowY: "auto", fontSize: 12 }}>
                 <table className="table" style={{ width: "100%" }}>
                   <thead>
@@ -478,30 +478,30 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
           {/* 2. 线路与上下游业务伙伴一键绑定 */}
           <div className="form-section" style={{ padding: "18px 18px 0" }}>
-            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8 }}>线路与装卸网点（上下游对齐）</div>
+            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8 }}>线路与装卸网点</div>
             
             {/* 核心上下游实体快速对齐 */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, margin: "10px 0" }}>
               <div style={{ background: "rgba(0,0,0,0.01)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
-                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>📍 一键对齐上游「发货方 / 供应商」库</span>
+                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择发货方 / 供应商</span>
                 <select 
                   style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
                   defaultValue="" 
                   onChange={(e) => { if (e.target.value) handlePartnerSelect("pickup", e.target.value); e.target.value = ""; }}
                 >
-                  <option value="">检索并发货方带出城市地址、联系人、电话…</option>
+                  <option value="">选择发货方…</option>
                   {shippers.map((s) => <option key={s.id} value={s.id}>[{s.city}] {s.name}</option>)}
                 </select>
               </div>
 
               <div style={{ background: "rgba(0,0,0,0.01)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
-                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>📍 一键对齐下游「收货方 / 仓储网点」库</span>
+                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择收货方 / 仓储网点</span>
                 <select 
                   style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
                   defaultValue="" 
                   onChange={(e) => { if (e.target.value) handlePartnerSelect("delivery", e.target.value); e.target.value = ""; }}
                 >
-                  <option value="">检索并收货方带出城市地址、联系人、电话…</option>
+                  <option value="">选择收货方…</option>
                   {consignees.map((c) => <option key={c.id} value={c.id}>[{c.city}] {c.name}</option>)}
                 </select>
               </div>
@@ -514,7 +514,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
             {form.customer && ((addressBook.data?.pickup.length ?? 0) > 0 || (addressBook.data?.delivery.length ?? 0) > 0) && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "8px 0" }}>
-                <span className="muted small">📒 历史常用提送：</span>
+                <span className="muted small">常用提送地址：</span>
                 {(addressBook.data?.pickup ?? []).map((a, i) => (
                   <button key={`p${i}`} className="chip" onClick={() => fillStopFromBook("pickup", a)}>提·{a.city}{a.address ? ` ${a.address.slice(0, 8)}` : ""}</button>
                 ))}
@@ -543,7 +543,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
           {/* 3. 货物明细列表 */}
           <div className="form-section" style={{ padding: "18px 18px 0" }}>
             <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-              <span>货物明细明细（一单多货，系统自适应缺损补全）</span>
+              <span>货物明细</span>
               <span className="muted small">合计: {totalQty} 件 / {totalWeight.toFixed(2)} 吨 / {totalVolume.toFixed(2)} 方</span>
               {volumetric > totalWeight && <span className="tag tag-medium">抛重 {chargeable.toFixed(2)} 吨 计费</span>}
             </div>
@@ -563,18 +563,18 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
           {/* 4. SLA 期望时效与报价 */}
           <div className="form-section" style={{ padding: "20px 18px 24px" }}>
-            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8, marginBottom: 16 }}>履约时效与商务核价</div>
+            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8, marginBottom: 16 }}>时效与运费</div>
             
             {/* 4.1 时效红线 (SLA) */}
             <div style={{ background: "var(--panel-2)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>⏱️ 履约时效要求 (SLA)</div>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>时效要求（SLA）</div>
               <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <label>
                   期望提货窗口
                   <input type="datetime-local" className="search" value={form.expected_pickup_at} onChange={(e) => set("expected_pickup_at", e.target.value)} />
                 </label>
                 <label>
-                  绝对送达红线
+                  期望送达时间
                   <input type="datetime-local" className="search" style={{ borderColor: form.expected_delivery_at ? "var(--amber-border)" : "var(--line-strong)" }} value={form.expected_delivery_at} onChange={(e) => set("expected_delivery_at", e.target.value)} />
                 </label>
               </div>
@@ -582,7 +582,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
             {/* 4.2 财务核价 (Financial) */}
             <div style={{ background: "#fff", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>💰 财务核价与货值声明</div>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>运费与货值</div>
               <div className="grid-form" style={{ gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
                 <label>
                   <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -593,7 +593,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                       disabled={quote.isPending} 
                       onClick={() => quote.mutate()}
                     >
-                      {quote.isPending ? "算价中…" : "⚡ AI 极速算价"}
+                      {quote.isPending ? "计算中…" : "计算运费"}
                     </button>
                   </span>
                   <input className="search" style={{ fontSize: 14, fontWeight: "bold", color: form.quoted_amount ? "var(--green)" : "inherit" }} placeholder="0.00" value={form.quoted_amount} onChange={(e) => set("quoted_amount", e.target.value)} />
@@ -630,7 +630,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
             {/* 4.3 特种保障 (Special Care) */}
             <div style={{ background: "#fff", padding: "14px 16px", borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>🛡️ 特种运输保障要求</div>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>特种运输要求</div>
               <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr auto", gap: 16, alignItems: "end" }}>
                 <label>
                   包装标准
@@ -651,14 +651,14 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
           {/* 5. 表单提交控制 */}
           <div className="form-actions" style={{ padding: "0 18px 20px", display: "flex", gap: 10, alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 14 }}>
-            <button className="btn-primary" style={{ padding: "10px 24px" }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>确认提交（待调度派单）</button>
+            <button className="btn-primary" style={{ padding: "10px 24px" }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>确认提交</button>
             <button className="btn-ghost" disabled={submit.isPending} onClick={() => submit.mutate("draft")}>暂存草稿</button>
             <button className="btn-ghost" onClick={reset}>清空</button>
             <span style={{ flex: 1 }} />
             <input placeholder="另存为新订单模板名" style={{ width: 160 }} value={tplName} onChange={(e) => setTplName(e.target.value)} />
             <button className="btn-ghost" disabled={!tplName.trim() || saveTpl.isPending} onClick={() => saveTpl.mutate()}>存为模板</button>
           </div>
-          {!valid && <div className="muted small" style={{ padding: "0 18px 14px", color: "#e74c3c" }}>⚠️ 请至少填写始发城市与目的城市（或套用发收货方库）即可点击提交</div>}
+          {!valid && <div className="muted small" style={{ padding: "0 18px 14px", color: "#e74c3c" }}>请至少填写始发城市与目的城市</div>}
         </div>
       )}
     </div>

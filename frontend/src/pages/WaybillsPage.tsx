@@ -120,14 +120,14 @@ export function WaybillsPage() {
     mutationFn: ({ no, level }: { no: string; level: string }) =>
       apiPatch<Waybill>(`/waybills/${no}`, { risk_level: level }),
     onSuccess: (_w, v) => {
-      toast.success(v.level === "high" ? `⚠️ 运单 ${v.no} 已标记为高风险。` : `运单 ${v.no} 风险标记已清除。`);
+      toast.success(v.level === "high" ? `运单 ${v.no} 已标记为高风险` : `运单 ${v.no} 风险标记已清除`);
       invalidateWaybills();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const voidWaybill = useMutation({
-    mutationFn: (no: string) => apiPost(`/waybills/${no}/transition`, { to_status: "voided", remark: "调度台手动废弃" }),
+    mutationFn: (no: string) => apiPost(`/waybills/${no}/transition`, { to_status: "voided", remark: "手动作废" }),
     onSuccess: (_d, no) => {
       toast.success(`运单 ${no} 已作废，关联运力已释放，可重新调度。`);
       invalidateWaybills();
@@ -158,7 +158,7 @@ export function WaybillsPage() {
 
   const handleRowDoubleClick = (w: Waybill) => {
     setDrawerWaybill(w);
-    toast.info(`💡 已为您载入单号为 ${w.waybill_no} 的极速详情侧边抽屉，可双击其他行切换！`);
+    
   };
 
   const handleClearFilters = () => {
@@ -170,7 +170,7 @@ export function WaybillsPage() {
     setSearchReceipt("");
     setFilter("");
     setStatusFilter("");
-    toast.success("所有筛选维度已清空");
+    
   };
 
   return (
@@ -180,13 +180,13 @@ export function WaybillsPage() {
         {/* 顶部标题 + 快速全局模糊查询 */}
         <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>运单综合台账工作台</span>
-            <span className="tag" style={{ background: "var(--primary)", color: "#fff", fontWeight: "bold" }}>B2B 运营舱</span>
+            <span style={{ fontSize: 18 }}>运单管理</span>
+            
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
               className="search"
-              placeholder="🔍 极速模糊搜索：单号/线路/车牌/货主..."
+              placeholder="搜索单号/线路/车牌/客户"
               style={{ width: 280 }}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -196,7 +196,7 @@ export function WaybillsPage() {
               onClick={() => setShowAdvanced(!showAdvanced)}
               style={{ padding: "8px 12px", background: showAdvanced ? "var(--line)" : "transparent" }}
             >
-              {showAdvanced ? "▲ 收起高级检索" : "▼ 多维维度检索"}
+              {showAdvanced ? "收起筛选" : "高级筛选"}
             </button>
             <button className="btn-ghost" onClick={handleClearFilters}>重置</button>
           </div>
@@ -225,12 +225,12 @@ export function WaybillsPage() {
               <input value={searchRoute} onChange={(e) => setSearchRoute(e.target.value)} placeholder="如 无锡" style={{ padding: "6px 8px" }} />
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: "bold" }}>
-              时空预警级别
+              风险级别
               <select value={searchRisk} onChange={(e) => setSearchRisk(e.target.value)} style={{ padding: "6px 8px" }}>
                 <option value="">全部风险</option>
-                <option value="high">🔴 高风险</option>
-                <option value="medium">🟡 中风险</option>
-                <option value="low">🟢 低风险</option>
+                <option value="high">高风险</option>
+                <option value="medium">中风险</option>
+                <option value="low">低风险</option>
                 <option value="none">⚪ 无风险</option>
               </select>
             </label>
@@ -270,7 +270,7 @@ export function WaybillsPage() {
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">⚠️</div>
+            <div className="empty-icon"></div>
             <div className="empty-title">未找到运单数据</div>
             <div className="empty-hint muted small">未查找到符合当前多维筛选组合的运单。您可以尝试清空筛选维度。</div>
           </div>
@@ -278,14 +278,14 @@ export function WaybillsPage() {
           <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--line)" }}>
-                <th style={{ padding: "10px 12px", textAlign: "left" }}>运单号 (双击极速查看)</th>
-                <th>共线线路</th>
+                <th style={{ padding: "10px 12px", textAlign: "left" }}>运单号</th>
+                <th>线路</th>
                 <th>在途状态</th>
-                <th>主动安全</th>
-                <th>时空偏航/延误</th>
-                <th>签单回单</th>
-                <th>合同B2B货主</th>
-                <th>分配运力车牌</th>
+                <th>风险级别</th>
+                <th>ETA 偏差</th>
+                <th>回单状态</th>
+                <th>客户</th>
+                <th>车牌</th>
               </tr>
             </thead>
             <tbody>
@@ -303,14 +303,14 @@ export function WaybillsPage() {
                       borderLeft: isSelected ? "3px solid var(--brand)" : "3px solid transparent"
                     }}
                     className="waybill-tr"
-                    title="💡 提示：双击此行弹出抽屉查看详情，右键此行唤出快捷指令菜单"
+                    
                   >
                     <td style={{ padding: "12px", fontWeight: "bold" }}>
                       <Link className="link mono interactive-text" to={`/waybills/${w.waybill_no}`}>
                         {w.waybill_no}
                       </Link>
                     </td>
-                    <td className="interactive-text" title={w.route_name || "未知"}>🛣️ {w.route_name ? w.route_name.substring(0, 10) + (w.route_name.length > 10 ? "..." : "") : "未知"}</td>
+                    <td className="interactive-text" title={w.route_name || "未知"}>{w.route_name ? w.route_name.substring(0, 10) + (w.route_name.length > 10 ? "..." : "") : "未知"}</td>
                     <td>
                       <span className={`tag`} style={{ background: "var(--bg)", border: "1px solid var(--line-strong)" }}>
                         {STATUS_LABEL[w.status] ?? w.status}
@@ -329,8 +329,8 @@ export function WaybillsPage() {
                         {w.receipt_status === "returned" ? "已回收" : w.receipt_status === "audited" ? "已审计核销" : "待追回"}
                       </span>
                     </td>
-                    <td className="interactive-text" title={w.customer_name || "散客货主"}>🏢 {w.customer_name ? w.customer_name.substring(0, 8) + (w.customer_name.length > 8 ? "..." : "") : "散客货主"}</td>
-                    <td className="mono interactive-text" style={{ fontWeight: "bold" }}>🚛 {w.vehicle_plate || "—"}</td>
+                    <td className="interactive-text" title={w.customer_name || "散客货主"}>{w.customer_name ? w.customer_name.substring(0, 8) + (w.customer_name.length > 8 ? "..." : "") : "散客货主"}</td>
+                    <td className="mono interactive-text" style={{ fontWeight: "bold" }}>{w.vehicle_plate || "—"}</td>
                   </tr>
                 );
               })}
@@ -340,7 +340,7 @@ export function WaybillsPage() {
 
         {/* 底部台账条目统计 */}
         <div className="muted small" style={{ padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
-          💡 <strong>高效操作指引</strong>：当前显示 {filteredRows.length} 条运单。在该台账中，您可以 <strong>双击任意行</strong> 极速从右侧拉出滑层，或 <strong>鼠标右键点击任意行</strong> 唤起快捷操作菜单。
+          共 {filteredRows.length} 条运单
         </div>
       </div>
 
@@ -355,21 +355,21 @@ export function WaybillsPage() {
             运单 {contextMenu.waybill.waybill_no}
           </div>
           <button onClick={() => handleAction("view", contextMenu.waybill)}>
-            <span>👁️</span> 进入 360° 档案舱 <span className="hotkey">↵</span>
+            <span>查看详情</span> <span className="hotkey">↵</span>
           </button>
           <button onClick={() => handleAction("track", contextMenu.waybill)}>
-            <span>📍</span> 车联网在途追踪
+            <span>在途追踪</span>
           </button>
           <div className="context-divider"></div>
           <button disabled={openContract.isPending} onClick={() => handleAction("print", contextMenu.waybill)}>
             <span>🖨️</span> 查看合同/回单 PDF
           </button>
           <button disabled={markRisk.isPending} onClick={() => handleAction("risk", contextMenu.waybill)} style={{ color: "var(--amber)" }}>
-            <span>⚠️</span> {contextMenu.waybill.risk_level === "high" ? "清除风险标记" : "手动标红置顶预警"}
+            {contextMenu.waybill.risk_level === "high" ? "清除风险标记" : "标记为高风险"}
           </button>
           <div className="context-divider"></div>
           <button disabled={voidWaybill.isPending} onClick={() => handleAction("cancel", contextMenu.waybill)} style={{ color: "var(--red)" }}>
-            <span>❌</span> 废弃运单释放运力 <span className="hotkey">⌫</span>
+            <span>作废运单</span> <span className="hotkey">⌫</span>
           </button>
         </div>
       )}
@@ -398,7 +398,7 @@ export function WaybillsPage() {
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.1)", paddingBottom: 16 }}>
             <h3 style={{ margin: 0, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 18 }}>🚚</span> 极速运单画像舱
+              运单详情
             </h3>
             <button 
               className="btn-ghost" 
@@ -412,13 +412,13 @@ export function WaybillsPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}>
             <div className="kv" style={{ padding: 0, gap: "10px 16px" }}>
               <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>运单号码</span><strong className="mono" style={{ color: "var(--brand-2)" }}>{drawerWaybill.waybill_no}</strong></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>共线线路</span><b>🛣️ {drawerWaybill.route_name || "未填写"}</b></div>
+              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>线路</span><b>{drawerWaybill.route_name || "未填写"}</b></div>
               <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>运单状态</span><b>{STATUS_LABEL[drawerWaybill.status] ?? drawerWaybill.status}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>在途时空预警</span><b>{RISK_LABEL[drawerWaybill.risk_level] ?? drawerWaybill.risk_level}</b></div>
+              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>风险级别</span><b>{RISK_LABEL[drawerWaybill.risk_level] ?? drawerWaybill.risk_level}</b></div>
               <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>ETA 飘移</span><b style={{ color: drawerWaybill.eta_drift_minutes ? "var(--red)" : "inherit" }}>{drawerWaybill.eta_drift_minutes ? `偏离 ${drawerWaybill.eta_drift_minutes} 分钟` : "正常"}</b></div>
               <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>回单回收状态</span><b style={{ color: drawerWaybill.receipt_status === "returned" ? "var(--green)" : "inherit" }}>{drawerWaybill.receipt_status === "returned" ? "已回收" : drawerWaybill.receipt_status === "audited" ? "已审计核销" : "等待中"}</b></div>
               <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>签约货主</span><b>{drawerWaybill.customer_name || "自营散客"}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>承运卡车</span><b className="mono">🚛 {drawerWaybill.vehicle_plate || "自营外协"}</b></div>
+              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>承运卡车</span><b className="mono">{drawerWaybill.vehicle_plate || "自营外协"}</b></div>
             </div>
 
             {/* 车辆车联网设备实时数据反馈 */}
@@ -439,14 +439,14 @@ export function WaybillsPage() {
               style={{ flex: 1, padding: 14, fontSize: 13, background: "var(--brand)", border: "none" }} 
               onClick={() => { setDrawerWaybill(null); navigate(`/waybills/${drawerWaybill.waybill_no}`); }}
             >
-              👁️ 进入完整电子档案
+              查看完整详情
             </button>
             <button 
               className="btn-ghost" 
               style={{ flex: 1, padding: 14, fontSize: 13, background: "rgba(255,255,255,0.1)", border: "none", color: "#fff" }} 
               onClick={() => { setDrawerWaybill(null); navigate(`/monitor?waybill=${drawerWaybill.waybill_no}`); }}
             >
-              📍 地图在途追踪
+              在途追踪
             </button>
           </div>
         </div>

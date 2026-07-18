@@ -41,7 +41,7 @@ export function DataCatalogPage() {
       </div>
       <div className="panel">
         <div className="panel-head">
-          数据资产目录 · 数据治理
+          数据资产目录
           <span className="ai-pill">{cat.data?.total_assets ?? 0} 张表</span>
         </div>
         <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: "repeat(3, 1fr)" }}>

@@ -92,7 +92,7 @@ export function CommandCenterPage() {
         <div className="panel">
           <div className="panel-head">实时报警 (SSE)</div>
           {liveAlerts.length === 0 ? (
-            <div className="muted small" style={{ padding: 16 }}>已连接，等待报警…</div>
+            <div className="muted small" style={{ padding: 16 }}>暂无报警</div>
           ) : (
             <ul className="event-feed" style={{ maxHeight: 420 }}>
               {liveAlerts.map((a, i) => (
@@ -110,7 +110,7 @@ export function CommandCenterPage() {
         <div className="panel-head">
           待调度池
           <button className="btn-primary" disabled={planAll.isPending} onClick={() => planAll.mutate()}>
-            {planAll.isPending ? "排线中…" : "AI 一键排线"}
+            {planAll.isPending ? "排线中…" : "一键排线"}
           </button>
         </div>
         {planAll.data && (
@@ -126,7 +126,7 @@ export function CommandCenterPage() {
         ) : (
           <table className="table">
             <thead>
-              <tr><th>运单号</th><th>线路</th><th>货量</th><th>AI 调度建议</th><th></th></tr>
+              <tr><th>运单号</th><th>线路</th><th>货量</th><th>调度建议</th><th></th></tr>
             </thead>
             <tbody>
               {pendings.map((w) => {
@@ -139,13 +139,13 @@ export function CommandCenterPage() {
                     <td className="small">
                       {rec
                         ? rec.best_vehicle
-                          ? `推荐 ${rec.best_vehicle.plate_no}（装载 ${Math.round(rec.best_vehicle.utilization * 100)}%）${rec.best_carrier ? ` · ${rec.best_carrier.carrier} ¥${rec.best_carrier.quote}` : ""}`
+                          ? `${rec.best_vehicle.plate_no}（装载 ${Math.round(rec.best_vehicle.utilization * 100)}%）${rec.best_carrier ? ` · ${rec.best_carrier.carrier} ¥${rec.best_carrier.quote}` : ""}`
                           : "无可用运力"
                         : "—"}
                     </td>
                     <td>
                       <button className="btn-ghost" disabled={recommend.isPending} onClick={() => recommend.mutate(w.waybill_no)}>
-                        AI 建议
+                        生成建议
                       </button>
                     </td>
                   </tr>

@@ -119,7 +119,7 @@ export function DispatchBoardPage() {
 
     // 1. 安全保护：超载拦截
     if (newWeight > trip.vehicle.load_capacity_ton) {
-      toast.error(`⚠️ 超载警告：该车辆核载 ${trip.vehicle.load_capacity_ton} 吨。拼单后总重将达 ${newWeight.toFixed(2)} 吨，已自动拦截安全过载！`);
+      toast.error(`超载：车辆核载 ${trip.vehicle.load_capacity_ton} 吨，拼单后总重 ${newWeight.toFixed(2)} 吨`);
       return;
     }
 
@@ -165,7 +165,7 @@ export function DispatchBoardPage() {
       };
     });
 
-    toast.success(`🎉 成功拖拽订单 ${o.order_no} 拼载入 [${trip.vehicle.plate_no}] 车厢中，实时重新估算利用率！`);
+    toast.success(`订单 ${o.order_no} 已配载至 ${trip.vehicle.plate_no}`);
   };
 
   const round = (num: number, decimals: number) => {
@@ -231,7 +231,7 @@ export function DispatchBoardPage() {
           {picked.size > 0 && (
             <div className="batch-bar">
               <span>已选 {picked.size} 单</span>
-              <button className="btn-primary" disabled={makePlan.isPending} onClick={() => makePlan.mutate()}>🧭 智能排线</button>
+              <button className="btn-primary" disabled={makePlan.isPending} onClick={() => makePlan.mutate()}>排线</button>
               <button className="btn-ghost" onClick={() => { setPicked(new Set()); setPlan(null); }}>清除</button>
             </div>
           )}
@@ -254,7 +254,7 @@ export function DispatchBoardPage() {
                     <td className="mono small" style={{ color: active?.id === o.id ? "#fff" : "var(--brand)" }}>{o.order_no}</td>
                     <td className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</td>
                     <td><b>{o.origin}</b> → <b>{o.destination}</b></td>
-                    <td>{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.is_hazardous ? " ⚠危" : ""}</td>
+                    <td>{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.is_hazardous ? "危" : ""}</td>
                     <td><span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span></td>
                     <td>{o.cargo_weight_ton}吨 / {o.cargo_volume_cbm}方</td>
                     <td className="small">
@@ -279,7 +279,7 @@ export function DispatchBoardPage() {
 
         <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
           <div className="panel-head" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-            <IconSparkles size={16} className="icon-offset" /> AI 协同派单工作台
+            派单工作台
             {active && <span className="ai-pill">{active.order_no}</span>}
           </div>
           {active && activeGone ? (
@@ -290,12 +290,12 @@ export function DispatchBoardPage() {
           ) : !active ? (
             <div className="muted small" style={{ padding: 40, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
               <IconSparkles size={40} style={{ opacity: 0.2 }} />
-              在左侧订单池点击「精准派单」，即可呼出 AI 运力与比价建议分析舱
+              在左侧订单池点击「精准派单」查看运力与比价建议
             </div>
           ) : suggest.isPending ? (
             <div className="muted stack" style={{ padding: 40, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
               <IconSearch size={24} className="icon-offset" />
-              <span>AI 深度测算中...（匹配车辆装载率及全网询价）</span>
+              <span>测算中…</span>
             </div>
           ) : suggestion ? (
             <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -318,7 +318,7 @@ export function DispatchBoardPage() {
                     <strong style={{ fontSize: 14, color: "var(--ink)" }}>
                       {suggestion.best_vehicle?.plate_no ?? "无可用自营车"}
                       {suggestion.best_vehicle && suggestion.best_vehicle.compliance_ok === false && (
-                        <span className="tag tag-high" style={{ marginLeft: 6 }}>⚠ {suggestion.best_vehicle.compliance?.join("/")} 过期</span>
+                        <span className="tag tag-high" style={{ marginLeft: 6 }}>{suggestion.best_vehicle.compliance?.join("/")} 过期</span>
                       )}
                     </strong>
                   </div>
@@ -336,7 +336,7 @@ export function DispatchBoardPage() {
                     </div>
                   )}
                   <div style={{ gridColumn: "1 / -1", background: "#fff", padding: "8px 12px", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid var(--line)" }}>
-                    <span>AI 最终派单裁定结论：</span>
+                    <span>建议委派方式：</span>
                     <strong style={{ color: "var(--brand)" }}>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</strong>
                   </div>
                 </div>
@@ -347,7 +347,7 @@ export function DispatchBoardPage() {
                   disabled={suggestion.suggested_dispatch_type === "third_party" ? !suggestion.best_carrier : !suggestion.best_vehicle}
                   onClick={adopt}
                 >
-                  <IconZap size={14} className="icon-offset"/> 一键采纳 AI 方案（自动回填）
+                  <IconZap size={14} className="icon-offset"/> 采纳建议
                 </button>
               </div>
 
@@ -361,7 +361,7 @@ export function DispatchBoardPage() {
                       {v.vehicle_length_m ? ` ${v.vehicle_length_m}m` : ""}
                       {v.body_type ? ` ${BODY_TYPE_LABEL[v.body_type] ?? v.body_type}` : ""}
                       {` (装载率 ${Math.round(v.utilization * 100)}%)`}
-                      {v.compliance_ok === false && ` ⚠${v.compliance?.join("/")}过期`}
+                      {v.compliance_ok === false && `${v.compliance?.join("/")}过期`}
                     </span>
                   ))}
                 </div>
@@ -369,7 +369,7 @@ export function DispatchBoardPage() {
 
               {/* 手工介入派单表单 */}
               <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-                <span className="muted small" style={{ fontWeight: "bold" }}>🛠️ 调度确认指派指令</span>
+                <span className="muted small" style={{ fontWeight: "bold" }}>指派</span>
                 <div className="grid-form" style={{ gridTemplateColumns: "1fr" }}>
                   <label>
                     委派方式
@@ -441,18 +441,18 @@ export function DispatchBoardPage() {
         <div className="panel" style={{ marginTop: 16 }}>
           <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 18, display: "flex", alignItems: "center", gap: 8 }}><IconTruck size={20} className="icon-offset"/> B2B 智能拼单配载沙盘</span>
+              <span style={{ fontSize: 18, display: "flex", alignItems: "center", gap: 8 }}><IconTruck size={20} className="icon-offset"/> 拼单配载</span>
               {plan.estimated_total_saving && plan.estimated_total_saving > 0 && (
                 <span className="tag" style={{ background: "#27ae60", color: "#fff", fontWeight: "bold", fontSize: 13, padding: "4px 10px", display: "flex", alignItems: "center", gap: 4 }}>
-                  <IconMoney size={16} className="icon-offset"/> 本次拼载节省约 ¥{plan.estimated_total_saving.toLocaleString()} 元！
+                  <IconMoney size={16} className="icon-offset"/> 预计节省 ¥{plan.estimated_total_saving.toLocaleString()}
                 </span>
               )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn-primary" disabled={planDispatch.isPending || plan.assignments.length === 0} onClick={confirmPlan}>
-                {planDispatch.isPending ? "派单生成中…" : `一键确认并指派所有拼车 (${plan.assignments.length} 单)`}
+                {planDispatch.isPending ? "派单生成中…" : `确认指派 (${plan.assignments.length} 单)`}
               </button>
-              <button className="btn-ghost" onClick={() => setPlan(null)}>关闭沙盘</button>
+              <button className="btn-ghost" onClick={() => setPlan(null)}>关闭</button>
             </div>
           </div>
 
@@ -573,7 +573,7 @@ export function DispatchBoardPage() {
                     {/* B2B 承运商实时全网竞价矩阵 */}
                     <div style={{ background: "rgba(0,0,0,0.015)", padding: 10, borderRadius: 8, border: "1px solid var(--line)" }}>
                       <div style={{ fontSize: 11, fontWeight: "bold", color: "var(--muted)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                        <IconSparkles size={12} className="icon-offset"/> 承运商全网竞价矩阵 (LTL vs. FTL)
+                        <IconSparkles size={12} className="icon-offset"/> 承运商比价
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: 11, flexWrap: "wrap" }}>
                         <div style={{ background: "rgba(39,174,96,0.1)", border: "1px solid #27ae60", padding: "4px 8px", borderRadius: 4, fontWeight: "bold", color: "#27ae60", display: "flex", alignItems: "center", gap: 4 }}>
@@ -604,7 +604,7 @@ export function DispatchBoardPage() {
             {plan.unassigned && plan.unassigned.length > 0 && (
               <div style={{ border: "1px solid #f5c6cb", borderRadius: 8, background: "rgba(231, 76, 60, 0.05)", padding: 14, color: "#721c24", borderLeft: "4px solid #e74c3c" }}>
                 <b style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
-                  <IconWarning size={16} className="icon-offset"/> 以下 {plan.unassigned.length} 笔订单无适配自营运力（鼠标按住拖拽放入上方卡车车厢即可手动配载）：
+                  <IconWarning size={16} className="icon-offset"/> 以下 {plan.unassigned.length} 笔订单无适配自营运力，可拖拽至上方车辆手动配载：
                 </b>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                   {plan.unassigned.map((u) => (
@@ -624,7 +624,7 @@ export function DispatchBoardPage() {
                       onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
                       onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
                     >
-                      <IconDragHandle size={14} className="icon-offset"/> 拖我 · 订单 {u.order_no}
+                      <IconDragHandle size={14} className="icon-offset"/> {u.order_no}
                     </span>
                   ))}
                 </div>

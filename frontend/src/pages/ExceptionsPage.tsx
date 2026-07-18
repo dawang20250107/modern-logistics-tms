@@ -59,14 +59,14 @@ export function ExceptionsPage() {
     },
   });
 
-  // === AI Agent 自动诊断与出具预案 ===
+  // 自动诊断与预案生成
   const aiResolve = useMutation({
     mutationFn: (id: string) => {
       setResolvingId(id);
       return apiPost<{ ai_resolution: string }>(`/exceptions/${id}/ai-resolve`, {});
     },
     onSuccess: (data, id) => {
-      toast.success("🤖 AI 协同智能体已完成异常环境诊断与核查！");
+      toast.success("诊断已完成");
       setResolvingId("");
       setExpandedId(id);
       invalidate();
@@ -88,20 +88,20 @@ export function ExceptionsPage() {
   return (
     <div className="stack" style={{ position: "relative" }}>
       
-      {/* 头部大屏 Banner */}
+      {/* 头部 */}
       <div className="panel" style={{ background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)", color: "#fff", border: "none" }}>
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
-              时空异常应急处置控制台
-              <span className="tag" style={{ background: "rgba(231,76,60,0.2)", border: "1px solid rgba(231,76,60,0.4)", color: "#fca5a5" }}>AI 自动诊断引擎</span>
+              异常处置
+              <span className="tag" style={{ background: "rgba(231,76,60,0.2)", border: "1px solid rgba(231,76,60,0.4)", color: "#fca5a5" }}></span>
             </div>
             <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
-              管理车联网主动安全报警自动生成的在途异常，或通过右侧手动进行人工异常提报。
+              管理设备报警生成的在途异常，或手动提报异常。
             </div>
           </div>
           <div className="form-row" style={{ gap: 10, background: "rgba(255,255,255,0.05)", padding: "10px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)" }}>
-            <span style={{ fontSize: 12, fontWeight: "bold" }}>手工建单提报：</span>
+            <span style={{ fontSize: 12, fontWeight: "bold" }}>手动提报：</span>
             <select value={type} onChange={(e) => setType(e.target.value)} style={{ padding: "6px 8px", width: 140 }}>
               {Object.entries(EXC_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
@@ -119,7 +119,7 @@ export function ExceptionsPage() {
       <div className="panel" style={{ flex: 1 }}>
         <div className="panel-head">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            未结异常处理池 
+            未结异常
             <span className="tag tag-medium" style={{ fontSize: 11, fontWeight: "bold" }}>{items.filter(i => i.status !== "closed").length} 待办</span>
           </div>
         </div>
@@ -133,21 +133,21 @@ export function ExceptionsPage() {
           <div className="empty-state">
             <div className="empty-icon">✓</div>
             <div className="empty-title">无活动异常</div>
-            <div className="empty-hint muted small">当前物流网络运转良好，暂无在途时空异常。</div>
+            <div className="empty-hint muted small">暂无在途异常。</div>
           </div>
         ) : (
           <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--line)" }}>
                 <th style={{ padding: "10px 12px", width: 40 }}></th>
-                <th>异常定性类型</th>
-                <th>危险预警等级</th>
+                <th>异常类型</th>
+                <th>风险等级</th>
                 <th>触发来源</th>
-                <th>涉及运单号</th>
-                <th>指派跟进人</th>
-                <th>定损理赔金额</th>
+                <th>运单号</th>
+                <th>跟进人</th>
+                <th>理赔金额</th>
                 <th>处置状态</th>
-                <th style={{ textAlign: "right", paddingRight: 20 }}>操作指挥</th>
+                <th style={{ textAlign: "right", paddingRight: 20 }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -170,7 +170,7 @@ export function ExceptionsPage() {
                       <td>
                         <span className="tag" style={{ background: "rgba(0,0,0,0.04)" }}>{e.source === "track" ? "车联网设备" : e.source}</span>
                       </td>
-                      <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{e.waybill_no || "全局预警"}</td>
+                      <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{e.waybill_no || "全局"}</td>
                       <td style={{ color: e.assignee_name ? "var(--ink)" : "var(--muted)" }}>{e.assignee_name || "待认领"}</td>
                       <td className="mono" style={{ color: Number(e.amount) > 0 ? "var(--red)" : "var(--muted)", fontWeight: "bold" }}>
                         {Number(e.amount) > 0 ? `¥${e.amount}` : "暂无"}
@@ -194,7 +194,7 @@ export function ExceptionsPage() {
                               onClick={(ev) => { ev.stopPropagation(); aiResolve.mutate(e.id); }}
                               disabled={resolvingId === e.id}
                             >
-                              {resolvingId === e.id ? "🧠 深度回溯中…" : "🤖 AI 智能诊断与预案"}
+                              {resolvingId === e.id ? "诊断中…" : "智能诊断"}
                             </button>
                           )}
                           {e.status !== "closed" && (
@@ -206,7 +206,7 @@ export function ExceptionsPage() {
                       </td>
                     </tr>
                     
-                    {/* === 异常下拉面板：诊断描述与解决流水 === */}
+                    {/* 异常详情 */}
                     {isExpanded && (
                       <tr style={{ background: "rgba(0,0,0,0.015)" }}>
                         <td colSpan={9} style={{ padding: "0 24px 24px" }}>
@@ -215,10 +215,10 @@ export function ExceptionsPage() {
                             {/* 左侧：传感器描述记录 */}
                             <div style={{ padding: "16px 20px", background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.02)" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--red)", fontWeight: "bold" }}>
-                                <span>🚨</span> 异常发生时空描述快照
+                                异常描述
                               </div>
                               <div style={{ background: "#fff5f5", padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.6, color: "#c0392b", borderLeft: "4px solid var(--red)" }}>
-                                {e.description || "暂无具体描述反馈"}
+                                {e.description || "暂无描述"}
                               </div>
                               <div className="muted small" style={{ marginTop: 12 }}>
                                 创建于：{new Date(e.created_at).toLocaleString()}
@@ -228,12 +228,12 @@ export function ExceptionsPage() {
                             {/* 右侧：AI 预案与执行流水 */}
                             <div style={{ padding: "16px 20px", background: "#fff", border: "1px solid var(--violet)", borderRadius: 12, boxShadow: "0 4px 12px rgba(139,92,246,0.05)" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--violet)", fontWeight: "bold" }}>
-                                <span>🤖</span> AI 协同专家智能预案 & 执行流水
+                                智能预案
                               </div>
                               
                               {resolvingId === e.id ? (
                                 <div className="muted small" style={{ padding: "20px 0", textAlign: "center" }}>
-                                  🧠 正在调用车联网数据与业务规则大模型，自动出具止损预案…
+                                  正在生成预案…
                                 </div>
                               ) : e.resolution ? (
                                 <pre style={{ 
@@ -245,20 +245,20 @@ export function ExceptionsPage() {
                                 </pre>
                               ) : (
                                 <div className="muted small" style={{ padding: "20px 0", textAlign: "center" }}>
-                                  尚未生成处理方案，请点击列表行上的「🤖 AI 智能诊断与预案」按钮进行自动回溯。
+                                  尚未生成处理方案，点击「智能诊断」按钮生成。
                                 </div>
                               )}
                             </div>
 
                           </div>
 
-                          {/* 处置全过程事件溯源：立案/指派/处理/AI诊断/闭环，真实留痕 */}
+                          {/* 处置流水 */}
                           <div style={{ marginTop: 16, padding: "16px 20px", background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 12 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--ink-2)", fontWeight: "bold" }}>
-                              <span>🕒</span> 处置全过程留痕
+                              处置流水
                             </div>
                             {timeline.isLoading ? (
-                              <span className="muted small">加载处置流水…</span>
+                              <span className="muted small">加载中…</span>
                             ) : (timeline.data?.length ?? 0) === 0 ? (
                               <span className="muted small">暂无留痕</span>
                             ) : (

@@ -614,8 +614,19 @@ export interface PricingRule {
 export const PRICE_TYPE_LABEL: Record<string, string> = { income: "收入价（报给客户）", cost: "支出价（付给承运商）" };
 
 // ── 主数据(精简) ───────────────────────────────────────
-export interface Customer { id: string; code: string; name: string; }
-export interface Carrier { id: string; code: string; name: string; }
+export interface Customer {
+  id: string; code: string; name: string;
+  contact_name?: string; contact_phone?: string; wechat_group?: string; settlement_type?: string;
+  credit_limit?: number | string; credit_days?: number; billing_day?: number; is_active?: boolean;
+}
+export interface Carrier {
+  id: string; code: string; name: string;
+  contact_name?: string; contact_phone?: string; settlement_type?: string; is_active?: boolean;
+  grade?: string; grade_label?: string; blacklisted?: boolean; blacklist_reason?: string;
+  business_license_no?: string; qualification_expiry?: string | null;
+  credit_limit?: number | string; credit_days?: number; billing_day?: number;
+  dispatch_blocked?: string;
+}
 
 // ── 指标与经营看板 ────────────────────────────────────────────
 export interface MetricCard {
@@ -632,8 +643,20 @@ export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   order: "订单 / 渠道",
   finance: "财务 / 对账",
 };
-export interface Vehicle { id: string; plate_no: string; vehicle_type: string; vehicle_class?: string; vehicle_class_label?: string; }
-export interface Driver { id: string; name: string; phone: string; employment_type?: string; employment_label?: string; }
+export interface Vehicle {
+  id: string; plate_no: string; vehicle_type: string; vehicle_class?: string; vehicle_class_label?: string;
+  body_type?: string; body_type_label?: string; vehicle_length_m?: number | string;
+  dispatch_source?: string; dispatch_source_label?: string;
+  carrier?: string; carrier_name?: string; load_capacity_ton?: number | string; volume_capacity_cbm?: number | string;
+  road_transport_cert_no?: string; inspection_expiry?: string | null; insurance_expiry?: string | null;
+  maintenance_due_date?: string | null; is_active?: boolean;
+}
+export interface Driver {
+  id: string; name: string; phone: string; employment_type?: string; employment_label?: string;
+  license_type?: string; license_no?: string; license_expiry?: string | null;
+  qualification_cert_no?: string; qualification_expiry?: string | null;
+  carrier?: string; carrier_name?: string; is_active?: boolean;
+}
 
 export interface DriverCredential {
   id: string;

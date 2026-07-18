@@ -1,9 +1,12 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { apiGet, apiUpload } from "../api/client";
 import { toast } from "../api/toast";
-import type { CredentialRow, CredSeverity, DriverCredential, DriverLookup, ExpiringCredentials } from "../api/types";
+import type {
+  Carrier, CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
+  ExpiringCredentials, Paginated, Vehicle,
+} from "../api/types";
 import { CRED_SEVERITY_LABEL, CRED_TYPE_LABEL } from "../api/types";
 
 const SEVERITY_TAG: Record<CredSeverity, string> = {
@@ -14,6 +17,120 @@ function daysText(d: number): string {
   if (d < 0) return `已逾期 ${-d} 天`;
   if (d === 0) return "今天到期";
   return `剩 ${d} 天`;
+}
+
+// ── 主数据列表通用外壳（搜索 + 表格） ─────────────────────────
+function ListPanel<T>({
+  queryKey, url, columns, searchKeys, placeholder,
+}: {
+  queryKey: string;
+  url: string;
+  columns: { header: string; render: (row: T) => React.ReactNode; num?: boolean }[];
+  searchKeys: (row: T) => string;
+  placeholder: string;
+}) {
+  const [kw, setKw] = useState("");
+  const q = useQuery({ queryKey: [queryKey], queryFn: () => apiGet<Paginated<T>>(url) });
+  const rows = useMemo(() => {
+    const items = q.data?.items ?? [];
+    const k = kw.trim().toLowerCase();
+    return k ? items.filter((r) => searchKeys(r).toLowerCase().includes(k)) : items;
+  }, [q.data, kw, searchKeys]);
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>清单<span className="ai-pill">{rows.length}</span></span>
+        <input className="search" style={{ width: 240 }} placeholder={placeholder} value={kw} onChange={(e) => setKw(e.target.value)} />
+      </div>
+      {q.isLoading ? (
+        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+      ) : rows.length === 0 ? (
+        <div className="muted" style={{ padding: 16 }}>暂无数据。</div>
+      ) : (
+        <table className="table">
+          <thead><tr>{columns.map((c, i) => <th key={i} className={c.num ? "num" : undefined}>{c.header}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri}>{columns.map((c, ci) => <td key={ci} className={c.num ? "num" : undefined}>{c.render(row)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function VehiclesTab() {
+  return (
+    <ListPanel<Vehicle>
+      queryKey="rh-vehicles" url="/vehicles?page_size=300" placeholder="搜索车牌 / 车型"
+      searchKeys={(v) => `${v.plate_no} ${v.vehicle_type ?? ""} ${v.carrier_name ?? ""}`}
+      columns={[
+        { header: "车牌", render: (v) => <span className="mono">{v.plate_no}</span> },
+        { header: "车型", render: (v) => v.vehicle_class_label || v.vehicle_type || "-" },
+        { header: "车厢", render: (v) => v.body_type_label || "-" },
+        { header: "核载(吨)", num: true, render: (v) => v.load_capacity_ton ?? "-" },
+        { header: "容积(方)", num: true, render: (v) => v.volume_capacity_cbm ?? "-" },
+        { header: "归属", render: (v) => v.carrier_name || (v.dispatch_source_label ?? "自有") },
+        { header: "状态", render: (v) => <span className={`tag ${v.is_active ? "tag-low" : "tag-none"}`}>{v.is_active ? "启用" : "停用"}</span> },
+      ]}
+    />
+  );
+}
+
+function DriversTab() {
+  return (
+    <ListPanel<Driver>
+      queryKey="rh-drivers" url="/drivers?page_size=300" placeholder="搜索姓名 / 电话"
+      searchKeys={(d) => `${d.name} ${d.phone ?? ""} ${d.carrier_name ?? ""}`}
+      columns={[
+        { header: "姓名", render: (d) => d.name },
+        { header: "电话", render: (d) => <span className="mono">{d.phone || "-"}</span> },
+        { header: "用工", render: (d) => d.employment_label || "-" },
+        { header: "准驾", render: (d) => d.license_type || "-" },
+        { header: "驾照有效期", render: (d) => d.license_expiry || "-" },
+        { header: "归属", render: (d) => d.carrier_name || "自有" },
+        { header: "状态", render: (d) => <span className={`tag ${d.is_active ? "tag-low" : "tag-none"}`}>{d.is_active ? "在职" : "停用"}</span> },
+      ]}
+    />
+  );
+}
+
+function CustomersTab() {
+  return (
+    <ListPanel<Customer>
+      queryKey="rh-customers" url="/customers?page_size=300" placeholder="搜索编码 / 名称 / 电话"
+      searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`}
+      columns={[
+        { header: "编码", render: (c) => <span className="mono">{c.code}</span> },
+        { header: "客户名称", render: (c) => c.name },
+        { header: "联系人", render: (c) => c.contact_name || "-" },
+        { header: "电话", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
+        { header: "授信额度", num: true, render: (c) => Number(c.credit_limit) > 0 ? `¥${Number(c.credit_limit).toLocaleString()}` : "不限" },
+        { header: "账期(天)", num: true, render: (c) => c.credit_days },
+        { header: "状态", render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
+      ]}
+    />
+  );
+}
+
+function CarriersTab() {
+  return (
+    <ListPanel<Carrier>
+      queryKey="rh-carriers" url="/carriers?page_size=300" placeholder="搜索编码 / 名称 / 电话"
+      searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`}
+      columns={[
+        { header: "编码", render: (c) => <span className="mono">{c.code}</span> },
+        { header: "承运商", render: (c) => c.name },
+        { header: "评级", render: (c) => <span className={`tag ${c.grade === "A" ? "tag-low" : c.grade === "D" ? "tag-high" : "tag-none"}`}>{c.grade_label || c.grade || "-"}</span> },
+        { header: "联系电话", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
+        { header: "账期(天)", num: true, render: (c) => c.credit_days ?? "-" },
+        { header: "风控", render: (c) => c.blacklisted ? <span className="tag tag-high">黑名单</span> : <span className="tag tag-low">正常</span> },
+        { header: "状态", render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
+      ]}
+    />
+  );
 }
 
 function CredTable({ title, rows, subjectLabel }: { title: string; rows: CredentialRow[]; subjectLabel: string }) {
@@ -116,22 +233,19 @@ function CredentialLibrary() {
   );
 }
 
-export function FleetPage() {
+function ComplianceTab() {
   const [days, setDays] = useState(30);
   const q = useQuery({
     queryKey: ["credentials", days],
     queryFn: () => apiGet<ExpiringCredentials>(`/credentials/expiring?days=${days}`),
     refetchInterval: 60000,
   });
-
   const s = q.data?.summary;
 
   return (
     <div className="stack">
       <div className="panel">
-        <div className="panel-head">
-          车队合规预警
-        </div>
+        <div className="panel-head">证件合规预警</div>
         <div className="form-row">
           <span className="muted small">预警窗口</span>
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
@@ -160,8 +274,30 @@ export function FleetPage() {
           <CredTable title="司机资质" rows={q.data?.drivers ?? []} subjectLabel="司机" />
         </div>
       )}
-
       <CredentialLibrary />
+    </div>
+  );
+}
+
+const RESOURCE_TABS: { key: string; label: string; render: () => React.ReactNode }[] = [
+  { key: "vehicles", label: "车辆", render: () => <VehiclesTab /> },
+  { key: "drivers", label: "司机", render: () => <DriversTab /> },
+  { key: "customers", label: "客户", render: () => <CustomersTab /> },
+  { key: "carriers", label: "承运商", render: () => <CarriersTab /> },
+  { key: "compliance", label: "证件合规", render: () => <ComplianceTab /> },
+];
+
+export function FleetPage() {
+  const [tab, setTab] = useState("vehicles");
+  const current = RESOURCE_TABS.find((t) => t.key === tab) ?? RESOURCE_TABS[0];
+  return (
+    <div className="stack">
+      <div className="seg-tabs">
+        {RESOURCE_TABS.map((t) => (
+          <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>
+        ))}
+      </div>
+      {current.render()}
     </div>
   );
 }

@@ -208,6 +208,15 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .wb-drawer-body { padding: 18px; overflow-y: auto; flex: 1; min-height: 0; }
 @media (max-width: 640px) { .wb-drawer { width: 100vw; } }
 
+/* ── Segmented tabs (resource hub etc.) ─────────────── */
+.seg-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--panel-3); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.seg-tabs button {
+  padding: 7px 16px; border: 0; background: transparent; border-radius: var(--radius-xs); cursor: pointer;
+  font-size: 13px; font-weight: 550; color: var(--muted); transition: color var(--speed), background var(--speed);
+}
+.seg-tabs button:hover { color: var(--ink-2); }
+.seg-tabs button.active { background: var(--panel); color: var(--accent); box-shadow: var(--shadow-xs); }
+
 /* ── City combobox ──────────────────────────────────── */
 .combobox { display: inline-block; }
 .combobox-menu {

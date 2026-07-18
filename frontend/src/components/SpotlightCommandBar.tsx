@@ -117,7 +117,7 @@ export function SpotlightCommandBar() {
 
     if (!cleanQuery) return;
 
-    // 2. 否则调用后端 LangGraph ReAct 智能体进行业务对话与拼单分析
+    // 2. 否则调用后端 LangGraph ReAct Agent 进行业务对话与拼单分析
     setLoading(true);
     setResponse(null);
     try {

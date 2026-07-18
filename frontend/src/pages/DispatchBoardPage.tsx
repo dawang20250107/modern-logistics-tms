@@ -328,7 +328,7 @@ export function DispatchBoardPage() {
                   </div>
                   {suggestion.ymm_quote && (
                     <div style={{ gridColumn: "1 / -1", borderTop: "1px dashed var(--line)", paddingTop: 10, marginTop: 4 }}>
-                      <span className="muted" style={{ display: "block", marginBottom: 2, fontSize: 11 }}>满帮全网竞价参比</span>
+                      <span className="muted" style={{ display: "block", marginBottom: 2, fontSize: 11 }}>市场运价参比</span>
                       <strong style={{ fontSize: 14, color: "var(--brand)" }}>
                         {suggestion.ymm_quote.avg != null ? `¥${suggestion.ymm_quote.low} ~ ¥${suggestion.ymm_quote.high}（中枢均价 ¥${suggestion.ymm_quote.avg}）` : "—"}
                       </strong>
@@ -457,7 +457,7 @@ export function DispatchBoardPage() {
           </div>
 
           <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 20 }}>
-            {/* 1. 拼单成功的车厢沙盘 (Cargo Tetris Blocks) */}
+            {/* 1. 拼单成功的车厢装载视图 */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20 }}>
               {plan.consolidated_trips?.map((trip, idx) => {
                 const weightPct = Math.min(100, (trip.total_weight_ton / trip.vehicle.load_capacity_ton) * 100);
@@ -499,7 +499,7 @@ export function DispatchBoardPage() {
                       {trip.vehicle.compliance_ok === false && <span style={{ color: "#e74c3c", display: "flex", alignItems: "center", gap: 4 }}><IconWarning size={14} className="icon-offset"/> 证件过期</span>}
                     </div>
 
-                    {/* 可视化车厢沙盘 (Tetris Board) */}
+                    {/* 可视化车厢装载图 */}
                     <div style={{ 
                       position: "relative", height: 100, background: "var(--bg)", 
                       borderRadius: 8, border: "2px solid var(--line)", overflow: "hidden", 
@@ -570,7 +570,7 @@ export function DispatchBoardPage() {
                       </div>
                     </div>
 
-                    {/* B2B 承运商实时全网竞价矩阵 */}
+                    {/* B2B 承运商竞价矩阵 */}
                     <div style={{ background: "rgba(0,0,0,0.015)", padding: 10, borderRadius: 8, border: "1px solid var(--line)" }}>
                       <div style={{ fontSize: 11, fontWeight: "bold", color: "var(--muted)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
                         <IconSparkles size={12} className="icon-offset"/> 承运商比价
@@ -586,7 +586,7 @@ export function DispatchBoardPage() {
                           京东大件：¥{Math.round(trip.consolidated_cost * 1.12)}
                         </div>
                         <div style={{ background: "rgba(0,0,0,0.03)", padding: "4px 8px", borderRadius: 4, color: "var(--muted)" }}>
-                          满帮公网：¥{Math.round(trip.consolidated_cost * 1.05)}
+                          市场行情：¥{Math.round(trip.consolidated_cost * 1.05)}
                         </div>
                       </div>
                     </div>

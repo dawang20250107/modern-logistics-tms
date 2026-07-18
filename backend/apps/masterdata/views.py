@@ -3,8 +3,12 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from apps.core.exceptions import AppError
+from apps.iam.permissions import HasPermission
 
 from .models import B2BPartner, Carrier, Customer, Driver, Route, Vehicle
 from .serializers import (
@@ -26,11 +30,33 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
 
 class CarrierViewSet(viewsets.ModelViewSet):
+    """承运商主数据 + 风控：分级 / 黑名单 / 账期。写操作受 carrier.manage 权限约束。"""
+
     queryset = Carrier.objects.all()
     serializer_class = CarrierSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {
+        "list": "carrier.view", "retrieve": "carrier.view",
+        "create": "carrier.manage", "update": "carrier.manage",
+        "partial_update": "carrier.manage", "destroy": "carrier.manage",
+        "blacklist": "carrier.manage",
+    }
     search_fields = ["code", "name", "contact_phone"]
-    filterset_fields = ["is_active"]
-    ordering_fields = ["code", "name", "created_at"]
+    filterset_fields = ["is_active", "grade", "blacklisted"]
+    ordering_fields = ["code", "name", "grade", "created_at"]
+
+    @action(detail=True, methods=["post"], url_path="blacklist")
+    def blacklist(self, request, pk=None):
+        """拉黑 / 解除拉黑承运商。body: {blacklisted: bool, reason?: str}"""
+        carrier = self.get_object()
+        blacklisted = bool(request.data.get("blacklisted", True))
+        reason = (request.data.get("reason") or "").strip()
+        if blacklisted and not reason:
+            raise AppError("REASON_REQUIRED", "拉黑承运商需填写原因。", status=400)
+        carrier.blacklisted = blacklisted
+        carrier.blacklist_reason = reason if blacklisted else ""
+        carrier.save(update_fields=["blacklisted", "blacklist_reason", "updated_at"])
+        return Response(self.get_serializer(carrier).data)
 
 
 class VehicleViewSet(viewsets.ModelViewSet):
@@ -168,16 +194,34 @@ class ExpiringCredentialsView(APIView):
                         "severity": severity(days_left),
                     })
 
+        carriers = []
+        for c in Carrier.objects.filter(is_active=True, qualification_expiry__isnull=False):
+            expiry = c.qualification_expiry
+            if expiry and expiry <= deadline:
+                days_left = (expiry - today).days
+                carriers.append({
+                    "subject": c.name,
+                    "name": c.name,
+                    "credential": "承运资质",
+                    "expiry": expiry.isoformat(),
+                    "days_left": days_left,
+                    "severity": severity(days_left),
+                })
+
         vehicles.sort(key=lambda r: r["days_left"])
         drivers.sort(key=lambda r: r["days_left"])
-        rows = vehicles + drivers
+        carriers.sort(key=lambda r: r["days_left"])
+        rows = vehicles + drivers + carriers
         summary = {
             "total": len(rows),
             "expired": sum(1 for r in rows if r["severity"] == "expired"),
             "critical": sum(1 for r in rows if r["severity"] == "critical"),
             "warning": sum(1 for r in rows if r["severity"] == "warning"),
         }
-        return Response({"days": days, "summary": summary, "vehicles": vehicles, "drivers": drivers})
+        return Response({
+            "days": days, "summary": summary,
+            "vehicles": vehicles, "drivers": drivers, "carriers": carriers,
+        })
 
 
 class B2BPartnerViewSet(viewsets.ModelViewSet):

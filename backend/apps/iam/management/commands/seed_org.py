@@ -68,6 +68,8 @@ _PERMISSIONS = [
     ("组织", "org.employee", "员工管理"),
     ("组织", "org.rbac", "角色权限管理"),
     ("风控", "risk.view", "风控查看"),
+    ("承运商", "carrier.view", "查看承运商"),
+    ("承运商", "carrier.manage", "承运商风控维护（分级/黑名单/账期）"),
     ("AI", "ai.use", "使用 AI 助手/查单"),
     ("经营分析", "analytics.view", "经营看板/指标查看"),
     ("车联网", "telematics.view", "车联网/轨迹查看"),
@@ -79,10 +81,12 @@ _ROLES = [
     ("admin", "系统管理员", "all", ["*"]),
     ("dispatcher", "调度主管", "org_sub",
      ["waybill.view", "waybill.edit", "waybill.dispatch", "order.view", "order.create", "org.view",
-      "ai.use", "analytics.view", "telematics.view", "telematics.manage"]),
-    ("finance", "财务专员", "org", ["finance.view", "finance.settle", "org.view", "analytics.view"]),
+      "carrier.view", "carrier.manage", "ai.use", "analytics.view", "telematics.view", "telematics.manage"]),
+    ("finance", "财务专员", "org",
+     ["finance.view", "finance.settle", "org.view", "carrier.view", "analytics.view"]),
     ("operator", "运营专员", "org",
-     ["order.view", "order.create", "waybill.view", "org.view", "ai.use", "analytics.view", "telematics.view"]),
+     ["order.view", "order.create", "waybill.view", "org.view", "carrier.view", "ai.use",
+      "analytics.view", "telematics.view"]),
 ]
 
 # (org_code, area_type, region_name) —— 服务区划覆盖

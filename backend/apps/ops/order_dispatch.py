@@ -100,6 +100,19 @@ def _assert_compliance(vehicle, driver, order):
             )
 
 
+def _assert_carrier_allowed(carrier):
+    """承运商风控硬阻断：黑名单/停用一律拦截，承运资质过期按开关拦截。自有车派单 carrier 为空则放行。"""
+    if carrier is None:
+        return
+    from django.conf import settings
+
+    reason = carrier.dispatch_block_reason(
+        block_on_expired=getattr(settings, "DISPATCH_BLOCK_ON_EXPIRED", True)
+    )
+    if reason:
+        raise AppError("CARRIER_NOT_ALLOWED", f"{reason}，不可派单。", status=409)
+
+
 def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None,
                    trailer=None, co_drivers=None, operator=None):
     """派单：生成运单并落承运信息（牵引车/挂车/主副驾）与派单类型，回写订单为已派单。
@@ -118,6 +131,7 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
             vehicle = Vehicle.objects.select_for_update().get(id=vehicle.id)
         if driver:
             driver = Driver.objects.select_for_update().get(id=driver.id)
+        _assert_carrier_allowed(carrier)
         _assert_resource_free(vehicle, driver)
         _assert_capacity_fit(vehicle, order)
         _assert_compliance(vehicle, driver, order)

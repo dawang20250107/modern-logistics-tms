@@ -25,13 +25,6 @@ export function ReconciliationPage() {
     queryKey: ["statements"],
     queryFn: () => apiGet<Paginated<Statement>>("/finance/statements?page_size=50"),
   });
-  const aging = useQuery({
-    queryKey: ["aging", direction],
-    queryFn: () => apiGet<{
-      rows: Array<{ counterparty_name: string; b0_30: number; b31_60: number; b61_90: number; b90: number; total: number }>;
-      totals: { b0_30: number; b31_60: number; b61_90: number; b90: number; total: number };
-    }>(`/finance/aging?direction=${direction}`),
-  });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["statements"] });
 
   const generate = useMutation({
@@ -54,6 +47,16 @@ export function ReconciliationPage() {
 
   const cps = counterparties.data?.items ?? [];
   const items = statements.data?.items ?? [];
+
+  // 对账一体化摘要：应收/应付金额、单据状态、差异张数（由台账实时汇总）
+  const num = (v: unknown) => Number(v) || 0;
+  const summary = {
+    recvAmt: items.filter((s) => s.direction === "receivable").reduce((a, s) => a + num(s.total_amount), 0),
+    payAmt: items.filter((s) => s.direction === "payable").reduce((a, s) => a + num(s.total_amount), 0),
+    draft: items.filter((s) => s.status === "draft").length,
+    confirmed: items.filter((s) => s.status === "confirmed").length,
+    withDiff: items.filter((s) => Math.abs(num(s.external_total) - num(s.total_amount)) > 0.01 && num(s.external_total) > 0).length,
+  };
 
   // 对账单异常审计：按费用科目历史均值计算
   const auditOne = useMutation({
@@ -90,7 +93,7 @@ export function ReconciliationPage() {
               
             </div>
             <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
-              管理客户应收（AR）与承运商应付（AP）对账单，自动排查异常费用。
+              管理客户应收与承运商应付对账单，自动排查异常费用。
             </div>
           </div>
           <button
@@ -108,7 +111,7 @@ export function ReconciliationPage() {
         <div className="panel">
           <div className="panel-head">
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {direction === "receivable" ? "应收配置 (AR)" : "应付配置 (AP)"}
+              {direction === "receivable" ? "应收配置" : "应付配置"}
             </span>
           </div>
           <div className="grid-form" style={{ padding: "16px 20px" }}>
@@ -117,16 +120,12 @@ export function ReconciliationPage() {
                 className="btn-ghost" 
                 style={direction === "receivable" ? { background: "var(--green)", color: "#fff", borderColor: "var(--green)" } : {}}
                 onClick={() => { setDirection("receivable"); setCounterpartyId(""); }}
-              >
-                应收 (AR)
-              </button>
+              >应收</button>
               <button 
                 className="btn-ghost" 
                 style={direction === "payable" ? { background: "var(--red)", color: "#fff", borderColor: "var(--red)" } : {}}
                 onClick={() => { setDirection("payable"); setCounterpartyId(""); }}
-              >
-                应付 (AP)
-              </button>
+              >应付</button>
             </label>
             <label>
               对手方主体
@@ -151,47 +150,22 @@ export function ReconciliationPage() {
         </div>
 
         <div className="panel">
-          <div className="panel-head">账龄分析 (Aging Report)</div>
-          {aging.isLoading ? (
-            <div className="muted" style={{ padding: 24, textAlign: "center" }}>加载账龄数据中…</div>
-          ) : (aging.data?.rows.length ?? 0) === 0 ? (
-            <div className="muted" style={{ padding: 24, textAlign: "center" }}>暂无账龄数据</div>
-          ) : (
-            <div style={{ maxHeight: 280, overflowY: "auto" }}>
-              <table className="table" style={{ fontSize: 12 }}>
-                <thead>
-                  <tr><th>对手方</th><th>0-30天</th><th>31-60天</th><th>61-90天</th><th>90天+</th><th>未结合计</th></tr>
-                </thead>
-                <tbody>
-                  {(aging.data?.rows ?? []).map((r, i) => (
-                    <tr key={i}>
-                      <td><b style={{ color: "var(--ink-2)" }}>{r.counterparty_name || "-"}</b></td>
-                      <td>{fmtMoney(r.b0_30)}</td>
-                      <td>{fmtMoney(r.b31_60)}</td>
-                      <td style={r.b61_90 > 0 ? { color: "var(--amber)", fontWeight: "bold" } : {}}>{fmtMoney(r.b61_90)}</td>
-                      <td style={r.b90 > 0 ? { color: "var(--red)", fontWeight: "bold", background: "#fff5f5" } : {}}>{fmtMoney(r.b90)}</td>
-                      <td><b style={{ color: "var(--brand)" }}>{fmtMoney(r.total)}</b></td>
-                    </tr>
-                  ))}
-                  {aging.data && (
-                    <tr style={{ background: "rgba(0,0,0,0.02)", fontWeight: 800 }}>
-                      <td>全局汇总</td>
-                      <td>{fmtMoney(aging.data.totals.b0_30)}</td>
-                      <td>{fmtMoney(aging.data.totals.b31_60)}</td>
-                      <td>{fmtMoney(aging.data.totals.b61_90)}</td>
-                      <td style={aging.data.totals.b90 > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(aging.data.totals.b90)}</td>
-                      <td>{fmtMoney(aging.data.totals.total)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <div className="panel-head">对账摘要</div>
+          <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: "1fr 1fr" }}>
+            <div className="kpi kpi-blue"><div className="kpi-top"><span className="kpi-label">应收合计</span></div><div className="kpi-value" style={{ fontSize: 22 }}>{fmtMoney(summary.recvAmt)}</div></div>
+            <div className="kpi kpi-red"><div className="kpi-top"><span className="kpi-label">应付合计</span></div><div className="kpi-value" style={{ fontSize: 22 }}>{fmtMoney(summary.payAmt)}</div></div>
+          </div>
+          <div className="kv">
+            <div><span>对账单总数</span><b>{items.length}</b></div>
+            <div><span>待确认草稿</span><b style={summary.draft > 0 ? { color: "var(--amber)" } : {}}>{summary.draft}</b></div>
+            <div><span>已确认</span><b>{summary.confirmed}</b></div>
+            <div><span>存在差异</span><b style={summary.withDiff > 0 ? { color: "var(--red)" } : {}}>{summary.withDiff}</b></div>
+          </div>
         </div>
       </div>
 
       <div className="panel" style={{ flex: 1 }}>
-        <div className="panel-head">对账单核销台账 (Ledger)</div>
+        <div className="panel-head">对账单核销台账</div>
         {statements.isLoading ? (
           <div className="muted" style={{ padding: 24, textAlign: "center" }}>加载中…</div>
         ) : items.length === 0 ? (

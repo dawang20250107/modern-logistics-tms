@@ -261,7 +261,7 @@ export function ReconciliationPage() {
                                 </thead>
                                 <tbody>
                                   {(detail.data?.lines ?? []).map((l) => (
-                                    <tr key={l.id} style={l.is_anomaly ? { background: "#fff5f5" } : {}}>
+                                    <tr key={l.id} style={l.is_anomaly ? { background: "var(--red-weak)" } : {}}>
                                       <td className="mono link" style={{ cursor: "pointer" }}>{l.waybill_no}</td>
                                       <td>
                                         <span className="tag" style={{ background: "rgba(0,0,0,0.04)" }}>{l.expense_item_code}</span>

@@ -171,7 +171,7 @@ export function DriverPortalPage() {
             </div>
             
             <div style={{ padding: 24 }}>
-              <div style={{ background: "#fff5f5", color: "#a81d24", padding: 16, borderRadius: 12, fontSize: 14, lineHeight: 1.6, fontWeight: "bold", borderLeft: "4px solid #d0242c" }}>
+              <div style={{ background: "var(--red-weak)", color: "#a81d24", padding: 16, borderRadius: 12, fontSize: 14, lineHeight: 1.6, fontWeight: "bold", borderLeft: "4px solid #d0242c" }}>
                 {active.content}
               </div>
               <button 

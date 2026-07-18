@@ -216,7 +216,7 @@ export function ExceptionsPage() {
                               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--red)", fontWeight: "bold" }}>
                                 异常描述
                               </div>
-                              <div style={{ background: "#fff5f5", padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.6, color: "#c0392b", borderLeft: "4px solid var(--red)" }}>
+                              <div style={{ background: "var(--red-weak)", padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.6, color: "var(--red)", borderLeft: "4px solid var(--red)" }}>
                                 {e.description || "暂无描述"}
                               </div>
                               <div className="muted small" style={{ marginTop: 12 }}>

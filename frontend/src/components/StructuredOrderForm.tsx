@@ -279,17 +279,18 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
         )}
       </div>
 
-      {/* 模式选择 Tab 栏 */}
-      <div className="form-row" style={{ padding: "12px 18px", background: "var(--input-bg)", borderBottom: "1px solid var(--line)", gap: 10, display: "flex", flexWrap: "wrap" }}>
-        <button className={`chip ${activeMode === "standard" ? "chip-on" : ""}`} onClick={() => setActiveMode("standard")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
-          标准录单
-        </button>
-        <button className={`chip ${activeMode === "ai" ? "chip-on" : ""}`} onClick={() => setActiveMode("ai")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
-          文本解析
-        </button>
-        <button className={`chip ${activeMode === "batch" ? "chip-on" : ""}`} onClick={() => setActiveMode("batch")} style={{ padding: "8px 16px", fontSize: 13, cursor: "pointer", transition: "all 0.2s" }}>
-          批量导入
-        </button>
+      {/* 录入模式选择 */}
+      <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div className="seg-tabs">
+          <button className={activeMode === "standard" ? "active" : ""} onClick={() => setActiveMode("standard")}>标准录单</button>
+          <button className={activeMode === "ai" ? "active" : ""} onClick={() => setActiveMode("ai")}>文本解析</button>
+          <button className={activeMode === "batch" ? "active" : ""} onClick={() => setActiveMode("batch")}>批量导入</button>
+        </div>
+        <span className="muted small">
+          {activeMode === "standard" ? "逐项精准录入 B2B 细案订单"
+            : activeMode === "ai" ? "粘贴微信群 / 邮件消息，自动解析为结构化订单"
+            : "多行文本 / Excel 复制批量录单"}
+        </span>
       </div>
 
       {/* === 模式一：AI 协同智能速录 === */}
@@ -302,7 +303,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
             </div>
             <textarea
               className="search"
-              style={{ width: "100%", height: 220, resize: "none", fontSize: 14, lineHeight: 1.6, padding: 16, borderRadius: 8, background: "rgba(0,0,0,0.02)", border: "1px dashed var(--line-strong)" }}
+              style={{ width: "100%", height: 220, resize: "none", fontSize: 14, lineHeight: 1.6, padding: 16, borderRadius: 8, background: "var(--panel-3)", border: "1px dashed var(--line-strong)" }}
               placeholder="请粘贴微信群、邮件中的非结构化发货指令：&#10;&#10;例如：“李总，明天下午2点去苏州工业园区星湖街提货，大概5吨的医疗器械，要求冷链2-8度，送到北京海淀医院，收货人王医生 13800138000。这单加急！”"
               value={paste}
               onChange={(e) => setPaste(e.target.value)}
@@ -326,7 +327,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
           </div>
 
           {/* 右侧：解析预览 */}
-          <div className="stack" style={{ gap: 10, background: "rgba(0,0,0,0.015)", padding: "18px 20px", borderRadius: 10, border: "1px solid var(--line)" }}>
+          <div className="stack" style={{ gap: 10, background: "var(--panel-2)", padding: "18px 20px", borderRadius: 10, border: "1px solid var(--line)" }}>
             <div className="section-label" style={{ color: "var(--brand)", fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><IconSparkles size={16} className="icon-offset" /> 解析结果</div>
             
             {aiParse.isPending ? (
@@ -392,7 +393,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
               </button>
             </div>
 
-            <div className="stack" style={{ gap: 10, background: "rgba(0,0,0,0.01)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
+            <div className="stack" style={{ gap: 10, background: "var(--panel-2)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
               <div className="section-label">预览（{bulkRows.length} 行）</div>
               <div style={{ maxHeight: 160, overflowY: "auto", fontSize: 12 }}>
                 <table className="table" style={{ width: "100%" }}>
@@ -437,7 +438,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
         <div style={{ display: "flex", flexDirection: "column" }}>
           {/* 1. 基础关系与契约 */}
           <div className="form-section" style={{ padding: "18px 18px 0" }}>
-            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8 }}>基础契约与客户信息</div>
+            <div className="section-label">基础契约与客户信息</div>
             <div className="grid-form" style={{ marginTop: 12 }}>
               <label>订单来源
                 <select value={form.channel} onChange={(e) => set("channel", e.target.value)}>
@@ -478,11 +479,11 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
           {/* 2. 线路与上下游业务伙伴一键绑定 */}
           <div className="form-section" style={{ padding: "18px 18px 0" }}>
-            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8 }}>线路与装卸网点</div>
+            <div className="section-label">线路与装卸网点</div>
             
             {/* 核心上下游实体快速对齐 */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, margin: "10px 0" }}>
-              <div style={{ background: "rgba(0,0,0,0.01)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
+              <div style={{ background: "var(--panel-2)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
                 <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择发货方 / 供应商</span>
                 <select 
                   style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
@@ -494,7 +495,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                 </select>
               </div>
 
-              <div style={{ background: "rgba(0,0,0,0.01)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
+              <div style={{ background: "var(--panel-2)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
                 <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择收货方 / 仓储网点</span>
                 <select 
                   style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
@@ -542,7 +543,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
           {/* 3. 货物明细列表 */}
           <div className="form-section" style={{ padding: "18px 18px 0" }}>
-            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <div className="section-label" style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
               <span>货物明细</span>
               <span className="muted small">合计: {totalQty} 件 / {totalWeight.toFixed(2)} 吨 / {totalVolume.toFixed(2)} 方</span>
               {volumetric > totalWeight && <span className="tag tag-medium">抛重 {chargeable.toFixed(2)} 吨 计费</span>}
@@ -563,7 +564,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
 
           {/* 4. SLA 期望时效与报价 */}
           <div className="form-section" style={{ padding: "20px 18px 24px" }}>
-            <div className="section-label" style={{ borderLeft: "3px solid var(--primary)", paddingLeft: 8, marginBottom: 16 }}>时效与运费</div>
+            <div className="section-label" style={{ marginBottom: 16 }}>时效与运费</div>
             
             {/* 4.1 时效红线 (SLA) */}
             <div style={{ background: "var(--panel-2)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>

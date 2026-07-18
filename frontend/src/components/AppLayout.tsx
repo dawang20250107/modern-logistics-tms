@@ -26,6 +26,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: "资源与合规",
     items: [
       { to: "/fleet", label: "资源库", icon: <IconTruck size={18} /> },
+      { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} /> },
       { to: "/monitor", label: "在途监控", icon: <IconMapPin size={18} />, perm: "telematics.view" },
       { to: "/alerts", label: "安全预警", icon: <IconAlert size={18} />, perm: "telematics.view" },
       { to: "/exceptions", label: "异常处置", icon: <IconGitBranch size={18} /> },
@@ -35,7 +36,6 @@ const NAV_GROUPS: NavGroup[] = [
     title: "结算",
     items: [
       { to: "/reconciliation", label: "对账中心", icon: <IconReceipt size={18} /> },
-      { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} /> },
     ],
   },
   {

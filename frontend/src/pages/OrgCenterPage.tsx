@@ -26,7 +26,7 @@ function useOrgOptions() {
   });
 }
 
-type Tab = "overview" | "org" | "employees" | "areas" | "rbac";
+type Tab = "overview" | "org" | "employees" | "areas" | "rbac" | "audit";
 
 const STATUS_TAG: Record<string, string> = { active: "low", disabled: "medium", left: "high" };
 const PROPERTY_TAG: Record<string, string> = {
@@ -585,12 +585,62 @@ function RbacTab() {
   );
 }
 
+interface LoginAttempt {
+  id: string; username: string; success: boolean; result: string; result_label: string;
+  ip: string; user_agent: string; created_at: string;
+}
+
+function LoginAuditTab() {
+  const [only, setOnly] = useState<"" | "success" | "fail">("");
+  const qs = only === "success" ? "&success=true" : only === "fail" ? "&success=false" : "";
+  const q = useQuery({
+    queryKey: ["login-audit", only],
+    queryFn: () => apiGet<Paginated<LoginAttempt>>(`/org/login-audit?page_size=100&ordering=-created_at${qs}`),
+    refetchInterval: 30000,
+  });
+  const rows = q.data?.items ?? [];
+  const fails = rows.filter((r) => !r.success).length;
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>登录审计<span className="ai-pill">{rows.length} 条 · 失败 {fails}</span></span>
+        <div className="panel-actions">
+          <button className={`chip${only === "" ? " chip-on" : ""}`} onClick={() => setOnly("")}>全部</button>
+          <button className={`chip${only === "success" ? " chip-on" : ""}`} onClick={() => setOnly("success")}>成功</button>
+          <button className={`chip${only === "fail" ? " chip-on" : ""}`} onClick={() => setOnly("fail")}>失败</button>
+        </div>
+      </div>
+      {q.isLoading ? (
+        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+      ) : rows.length === 0 ? (
+        <div className="muted" style={{ padding: 16 }}>暂无登录记录。</div>
+      ) : (
+        <table className="table">
+          <thead><tr><th>时间</th><th>用户名</th><th>结果</th><th>IP</th><th>客户端</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="mono small">{new Date(r.created_at).toLocaleString("zh-CN")}</td>
+                <td>{r.username}</td>
+                <td><span className={`tag ${r.success ? "tag-low" : "tag-high"}`}>{r.result_label || (r.success ? "成功" : "失败")}</span></td>
+                <td className="mono small">{r.ip || "-"}</td>
+                <td className="small muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.user_agent}>{r.user_agent || "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 const TABS: { key: Tab; label: string; perm?: string }[] = [
   { key: "overview", label: "运营总览" },
   { key: "org", label: "组织架构" },
   { key: "employees", label: "员工名录" },
   { key: "areas", label: "服务区划" },
   { key: "rbac", label: "权限授权", perm: "org.rbac" },
+  { key: "audit", label: "登录审计", perm: "org.view" },
 ];
 
 export function OrgCenterPage() {
@@ -600,27 +650,17 @@ export function OrgCenterPage() {
   const tabs = TABS.filter((t) => !t.perm || hasPerm(user, t.perm));
   return (
     <div className="stack">
-      <div className="panel">
-        <div className="panel-head">
-          组织中心
-        </div>
-        <div className="form-row" style={{ gap: 6, padding: "10px 16px" }}>
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              className={tab === t.key ? "btn-primary" : "btn-ghost"}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="seg-tabs">
+        {tabs.map((t) => (
+          <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>
+        ))}
       </div>
       {tab === "overview" && <OverviewTab />}
       {tab === "org" && <OrgTab />}
       {tab === "employees" && <EmployeesTab />}
       {tab === "areas" && <AreasTab />}
       {tab === "rbac" && <RbacTab />}
+      {tab === "audit" && <LoginAuditTab />}
     </div>
   );
 }

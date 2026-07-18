@@ -9,6 +9,18 @@ import { IconSparkles, IconTerminal, IconSearch } from "../components/Icons";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
 
+const EVT_LABEL: Record<string, string> = {
+  risk: "风险", alert: "报警", order_pooled: "进池", order_claimed: "认领",
+  order_dispatched: "派单", waybill_status: "运单", waybill_split: "拆单", waybill_merge: "合单",
+  receipt_ocr: "回单", agent_suggestions: "智能建议", notification: "通知", order_sla: "时效",
+};
+function evtText(e: { data?: Record<string, unknown> }): string {
+  const d = (e.data ?? {}) as Record<string, string | number>;
+  if (d.waybill_no) return `运单 ${d.waybill_no}${d.risk_level ? " 风险变化" : ""}`;
+  if (d.order_no) return `订单 ${d.order_no}`;
+  return "有新动态";
+}
+
 function Kpi({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
     <div className={`kpi${tone ? ` kpi-${tone}` : ""}`}>
@@ -91,31 +103,41 @@ export function ControlTowerPage() {
 
       <div className="ct-grid">
         <div className="panel">
-          <div className="panel-head">运输态势</div>
-          <div className="situation">
-            {items.length === 0 ? (
-              <div className="muted small" style={{ padding: 16 }}>暂无运单</div>
-            ) : (
-              items.map((w) => (
-                <Link key={w.id} to={`/waybills/${w.waybill_no}`} className={`route-chip rc-${w.risk_level}`}>
-                  <span className="rc-no mono">{w.waybill_no}</span>
-                  <span className="rc-route">{w.origin} → {w.destination}</span>
-                </Link>
-              ))
-            )}
+          <div className="panel-head">
+            在途运单
+            <Link to="/monitor" className="link small">在途监控 →</Link>
           </div>
+          {inTransit.length === 0 ? (
+            <div className="muted small" style={{ padding: 16 }}>暂无在途运单。</div>
+          ) : (
+            <table className="table">
+              <thead><tr><th>运单号</th><th>线路</th><th>风险</th><th className="num">ETA 偏移</th></tr></thead>
+              <tbody>
+                {inTransit.slice(0, 10).map((wb2) => (
+                  <tr key={wb2.id}>
+                    <td><Link className="link mono" to={`/waybills/${wb2.waybill_no}`}>{wb2.waybill_no}</Link></td>
+                    <td>{wb2.origin} → {wb2.destination}</td>
+                    <td><span className={`tag tag-${wb2.risk_level}`}>{RISK_LABEL[wb2.risk_level]}</span></td>
+                    <td className="num" style={{ color: wb2.eta_drift_minutes > 0 ? "var(--red)" : "var(--muted)" }}>
+                      {wb2.eta_drift_minutes > 0 ? `+${wb2.eta_drift_minutes}` : wb2.eta_drift_minutes} 分
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="panel">
-          <div className="panel-head">实时事件流</div>
+          <div className="panel-head">最近动态</div>
           {events.length === 0 ? (
-            <div className="muted small" style={{ padding: 16 }}>已连接，等待事件…</div>
+            <div className="muted small" style={{ padding: 16 }}>已连接，暂无新动态。</div>
           ) : (
             <ul className="event-feed">
-              {events.map((e, i) => (
+              {events.slice(0, 12).map((e, i) => (
                 <li key={`${e.t}-${i}`}>
-                  <span className={`evt evt-${e.type}`}>{e.type}</span>
-                  <span className="mono small">{JSON.stringify(e.data)}</span>
+                  <span className={`evt evt-${e.type}`}>{EVT_LABEL[e.type] ?? "动态"}</span>
+                  <span className="small">{evtText(e)}</span>
                 </li>
               ))}
             </ul>

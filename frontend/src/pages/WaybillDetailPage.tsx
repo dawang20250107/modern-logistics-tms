@@ -232,7 +232,7 @@ export function WaybillDetailPage() {
               <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>{w.waybill_no}</span>
               <span className="tag" style={{ background: "rgba(255,255,255,0.1)", color: "#e4e4e7", border: "1px solid rgba(255,255,255,0.2)", fontWeight: "500" }}>
               </span>
-              {w.receipt_status === "returned" && <span className="tag tag-low">POD Verified</span>}
+              {w.receipt_status === "returned" && <span className="tag tag-low">回单已核验</span>}
             </div>
             <div style={{ color: "#a1a1aa", fontSize: 13, display: "flex", gap: 16, fontWeight: "400" }}>
               <span>{w.route_name} ({w.origin} → {w.destination})</span>

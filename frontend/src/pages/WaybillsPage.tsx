@@ -427,7 +427,7 @@ export function WaybillsPage() {
 
             {/* 车辆车联网设备实时数据反馈 */}
             <div style={{ background: "rgba(255,255,255,0.06)", padding: 16, borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "rgba(255,255,255,0.6)" }}>📡 关联车联网传感器实时心跳 (Ping)</div>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "rgba(255,255,255,0.6)" }}>关联车联网传感器实时心跳</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
                 <div>车厢温度: <strong style={{ color: "#3498db" }}>-18.4 ℃ (正常)</strong></div>
                 <div>油箱余量: <strong style={{ color: "#2ecc71" }}>85%</strong></div>

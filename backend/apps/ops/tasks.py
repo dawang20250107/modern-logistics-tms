@@ -128,15 +128,21 @@ def process_receipt_ocr(receipt_id: str) -> bool:
     receipt.save(update_fields=["ocr_status", "updated_at"])
     try:
         result = run_ocr(receipt)
+        fields = result.get("fields", {})
         receipt.ocr_result = result
-        receipt.signatory = result.get("fields", {}).get("signatory", "") or receipt.signatory
-        receipt.ocr_status = "done"
+        # 绝不覆盖司机/人工已录入的签收人；仅在为空且 OCR 识别到时填充建议值
+        ocr_signatory = fields.get("signatory") or ""
+        if ocr_signatory and not receipt.signatory:
+            receipt.signatory = ocr_signatory
+        # 状态取 OCR 结果：无引擎→manual（待人工），有引擎识别成功→done
+        receipt.ocr_status = result.get("status", "done")
         receipt.save(update_fields=["ocr_result", "signatory", "ocr_status", "updated_at"])
         publish_event(
             "receipt_ocr",
-            {"waybill_no": receipt.waybill.waybill_no, "receipt_id": str(receipt.id), "status": "done"},
+            {"waybill_no": receipt.waybill.waybill_no, "receipt_id": str(receipt.id),
+             "status": receipt.ocr_status},
         )
-        return True
+        return receipt.ocr_status == "done"
     except Exception:  # noqa: BLE001
         receipt.ocr_status = "failed"
         receipt.save(update_fields=["ocr_status", "updated_at"])

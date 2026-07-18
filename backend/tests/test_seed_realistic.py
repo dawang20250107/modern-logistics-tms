@@ -34,7 +34,7 @@ def test_seed_realistic_populates_all_modules():
     assert PricingRule.objects.exists()
     assert Driver.objects.exists()
     assert Vehicle.objects.filter(vehicle_class="trailer").exists()  # 含挂车
-    assert DriverCredential.objects.filter(ocr_status="done").exists()  # 证件 OCR 已建档
+    assert DriverCredential.objects.filter(ocr_status="manual").exists()  # 证件待人工核验（不伪造）
     _ = ExceptionRecord  # 异常按概率生成，不强断言
 
     # 订单状态有多样性（既有完成也有在途/早期）

@@ -100,4 +100,4 @@ def test_driver_self_upload_credential(driver):
     assert resp.status_code == 201, resp.content
     cred = DriverCredential.objects.get(driver=driver, cred_type="driving_license")
     assert cred.self_uploaded is True
-    assert cred.ocr_status == "done"
+    assert cred.ocr_status == "manual"  # 无 OCR 引擎→待人工核验

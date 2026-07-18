@@ -115,18 +115,10 @@ export function ReconciliationPage() {
             </span>
           </div>
           <div className="grid-form" style={{ padding: "16px 20px" }}>
-            <label style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "row", gap: 12, marginBottom: 10 }}>
-              <button 
-                className="btn-ghost" 
-                style={direction === "receivable" ? { background: "var(--green)", color: "#fff", borderColor: "var(--green)" } : {}}
-                onClick={() => { setDirection("receivable"); setCounterpartyId(""); }}
-              >应收</button>
-              <button 
-                className="btn-ghost" 
-                style={direction === "payable" ? { background: "var(--red)", color: "#fff", borderColor: "var(--red)" } : {}}
-                onClick={() => { setDirection("payable"); setCounterpartyId(""); }}
-              >应付</button>
-            </label>
+            <div className="seg-tabs" style={{ gridColumn: "1 / -1", marginBottom: 4 }}>
+              <button className={direction === "receivable" ? "active" : ""} onClick={() => { setDirection("receivable"); setCounterpartyId(""); }}>应收（客户）</button>
+              <button className={direction === "payable" ? "active" : ""} onClick={() => { setDirection("payable"); setCounterpartyId(""); }}>应付（承运商）</button>
+            </div>
             <label>
               对手方主体
               <select value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)} style={{ padding: "8px 10px" }}>

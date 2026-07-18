@@ -90,28 +90,34 @@ export function ExceptionsPage() {
       
       {/* 头部 */}
       <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
-        <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
-              异常处置
-            </div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
-              管理设备报警生成的在途异常，或手动提报异常。
-            </div>
+        <div style={{ padding: "20px 24px" }}>
+          <div style={{ fontSize: 22, fontWeight: "bold" }}>异常处置</div>
+          <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
+            管理设备报警生成的在途异常，或手动提报异常。
           </div>
-          <div className="form-row" style={{ gap: 10, background: "rgba(255,255,255,0.05)", padding: "10px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)" }}>
-            <span style={{ fontSize: 12, fontWeight: "bold" }}>手动提报：</span>
-            <select value={type} onChange={(e) => setType(e.target.value)} style={{ padding: "6px 8px", width: 140 }}>
+        </div>
+      </div>
+
+      {/* 手动提报异常 */}
+      <div className="panel">
+        <div className="panel-head">手动提报异常</div>
+        <div className="grid-form" style={{ padding: "16px 18px", gridTemplateColumns: "180px 140px 1fr auto", alignItems: "end", gap: 12 }}>
+          <label>异常类型
+            <select value={type} onChange={(e) => setType(e.target.value)}>
               {Object.entries(EXC_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
-            <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ padding: "6px 8px" }}>
+          </label>
+          <label>紧急程度
+            <select value={level} onChange={(e) => setLevel(e.target.value)}>
               <option value="high">高风险</option><option value="medium">中风险</option><option value="low">低风险</option>
             </select>
-            <input className="search" placeholder="异常状况描述..." value={desc} onChange={(e) => setDesc(e.target.value)} style={{ width: 220 }} />
-            <button className="btn-primary" disabled={create.isPending || !desc.trim()} onClick={() => create.mutate()} style={{ background: "var(--red)" }}>
-              + 立案
-            </button>
-          </div>
+          </label>
+          <label>情况描述
+            <input placeholder="时间 / 地点 / 货物 / 责任方等" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          </label>
+          <button className="btn-primary" disabled={create.isPending || !desc.trim()} onClick={() => create.mutate()}>
+            {create.isPending ? "提报中…" : "立案提报"}
+          </button>
         </div>
       </div>
 

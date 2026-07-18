@@ -129,22 +129,30 @@ function OrgCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void
   return (
     <div className="panel">
       <div className="panel-head">新增组织</div>
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <input className="search" style={{ width: 110 }} placeholder="编码" value={form.code} onChange={(e) => set("code", e.target.value)} />
-        <input className="search" style={{ width: 150 }} placeholder="名称" value={form.name} onChange={(e) => set("name", e.target.value)} />
-        <input className="search" style={{ width: 100 }} placeholder="简称" value={form.short_name} onChange={(e) => set("short_name", e.target.value)} />
-        <select value={form.type} onChange={(e) => set("type", e.target.value)}>
-          {Object.entries(ORG_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select value={form.org_property} onChange={(e) => set("org_property", e.target.value)}>
-          {Object.entries(ORG_PROPERTY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select value={form.parent} onChange={(e) => set("parent", e.target.value)}>
-          <option value="">无上级（根）</option>
-          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <input className="search" style={{ width: 90 }} placeholder="负责人" value={form.manager_name} onChange={(e) => set("manager_name", e.target.value)} />
-        <button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()}>新增</button>
+      <div className="grid-form" style={{ padding: "16px 18px" }}>
+        <label>编码 *<input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="如 SH01" /></label>
+        <label>名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如 上海分公司" /></label>
+        <label>简称<input value={form.short_name} onChange={(e) => set("short_name", e.target.value)} placeholder="如 上海" /></label>
+        <label>类型
+          <select value={form.type} onChange={(e) => set("type", e.target.value)}>
+            {Object.entries(ORG_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label>经营属性
+          <select value={form.org_property} onChange={(e) => set("org_property", e.target.value)}>
+            {Object.entries(ORG_PROPERTY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label>上级组织
+          <select value={form.parent} onChange={(e) => set("parent", e.target.value)}>
+            <option value="">无上级（根）</option>
+            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+        <label>负责人<input value={form.manager_name} onChange={(e) => set("manager_name", e.target.value)} placeholder="负责人姓名" /></label>
+      </div>
+      <div className="form-actions">
+        <button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()}>新增组织</button>
       </div>
     </div>
   );
@@ -201,16 +209,20 @@ function EmployeeCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () =>
   return (
     <div className="panel">
       <div className="panel-head">新增员工</div>
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <input className="search" style={{ width: 110 }} placeholder="工号" value={form.employee_no} onChange={(e) => set("employee_no", e.target.value)} />
-        <input className="search" style={{ width: 110 }} placeholder="姓名" value={form.name} onChange={(e) => set("name", e.target.value)} />
-        <input className="search" style={{ width: 130 }} placeholder="手机号" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
-        <select value={form.organization} onChange={(e) => set("organization", e.target.value)}>
-          <option value="">选择所属组织</option>
-          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <input className="search" style={{ width: 120 }} placeholder="职位" value={form.position} onChange={(e) => set("position", e.target.value)} />
-        <button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()}>新增</button>
+      <div className="grid-form" style={{ padding: "16px 18px" }}>
+        <label>工号 *<input value={form.employee_no} onChange={(e) => set("employee_no", e.target.value)} placeholder="如 2026001" /></label>
+        <label>姓名 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="员工姓名" /></label>
+        <label>手机号<input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="手机号" /></label>
+        <label>所属组织
+          <select value={form.organization} onChange={(e) => set("organization", e.target.value)}>
+            <option value="">选择所属组织</option>
+            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+        <label>职位<input value={form.position} onChange={(e) => set("position", e.target.value)} placeholder="如 调度专员" /></label>
+      </div>
+      <div className="form-actions">
+        <button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()}>新增员工</button>
       </div>
     </div>
   );
@@ -424,17 +436,23 @@ function AreaCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => voi
   return (
     <div className="panel">
       <div className="panel-head">新增服务区划</div>
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <select value={org} onChange={(e) => setOrg(e.target.value)}>
-          <option value="">选择归属网点</option>
-          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <select value={areaType} onChange={(e) => setAreaType(e.target.value)}>
-          {Object.entries(AREA_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <input className="search" style={{ width: 200 }} placeholder="区划名，如 上海市浦东新区" value={regionName} onChange={(e) => setRegionName(e.target.value)} />
-        <input className="search" style={{ width: 90 }} type="number" placeholder="优先级" value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
-        <button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()}>新增</button>
+      <div className="grid-form" style={{ padding: "16px 18px" }}>
+        <label>归属网点 *
+          <select value={org} onChange={(e) => setOrg(e.target.value)}>
+            <option value="">选择归属网点</option>
+            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+        <label>区划类型
+          <select value={areaType} onChange={(e) => setAreaType(e.target.value)}>
+            {Object.entries(AREA_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label>区划名称 *<input placeholder="如 上海市浦东新区" value={regionName} onChange={(e) => setRegionName(e.target.value)} /></label>
+        <label>优先级<input type="number" placeholder="数值大者优先" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
+      </div>
+      <div className="form-actions">
+        <button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()}>新增区划</button>
       </div>
     </div>
   );

@@ -487,6 +487,22 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     search_fields = ["order_no", "remark", "contact_phone", "origin", "destination"]
     ordering_fields = ["created_at", "order_no", "priority"]
 
+    @action(detail=False, methods=["get"], url_path="funnel")
+    def funnel(self, request):
+        """订单生命周期漏斗：按状态/渠道计数 + 今日建单数，供建单工作台"从哪来到哪去"管道。"""
+        from django.db.models import Count
+        from django.utils import timezone
+
+        qs = self.get_queryset()
+        by_status = {r["status"]: r["n"] for r in qs.values("status").annotate(n=Count("id"))}
+        by_channel = {r["channel"]: r["n"] for r in qs.values("channel").annotate(n=Count("id"))}
+        return Response({
+            "by_status": by_status,
+            "by_channel": by_channel,
+            "today_created": qs.filter(created_at__date=timezone.localdate()).count(),
+            "total": qs.count(),
+        })
+
     @action(detail=False, methods=["post"], url_path="intake")
     def intake(self, request):
         """多渠道建单入口：传 text(自然语言/微信群) 或 fields(结构化)，可带货物明细/站点/草稿。"""

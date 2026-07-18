@@ -8,6 +8,7 @@ import { toast } from "../api/toast";
 import type { Order, OrderChannel, Paginated } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
+import { OrderLifecycle } from "../components/OrderLifecycle";
 import { StructuredOrderForm } from "../components/StructuredOrderForm";
 
 export function OrderIntakePage() {
@@ -74,11 +75,12 @@ export function OrderIntakePage() {
 
   return (
     <div className="stack">
+      <OrderLifecycle />
       <StructuredOrderForm onCreated={invalidate} />
 
       <div className="panel">
         <div className="panel-head">
-          订单 · {total}
+          最近建单 · 去向跟踪 · {total}
           <button className="btn-ghost" onClick={() => apiDownload(`/orders/export?page_size=5000${filterQs}`, "orders.csv")}>导出 CSV</button>
         </div>
         <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>

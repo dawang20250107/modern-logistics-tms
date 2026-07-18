@@ -61,3 +61,24 @@ def test_waybill_list_annotates_receivable_payable_and_channel():
     assert row["platform_name"] == "满帮"
     assert row["receivable_amount"] == 3000.0
     assert row["payable_amount"] == 2500.0  # 2400 + 100
+
+
+@pytest.mark.django_db
+def test_order_funnel_counts_by_status_and_channel():
+    from django.contrib.auth import get_user_model
+
+    get_user_model().objects.create_superuser(username="b", password="pw-strong-123")
+    client = APIClient()
+    tok = client.post("/api/v1/auth/token", {"username": "b", "password": "pw-strong-123"}, format="json")
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tok.json()['data']['access']}")
+
+    Order.objects.create(order_no="OF1", status="pooled", channel="cs")
+    Order.objects.create(order_no="OF2", status="pooled", channel="wechat_group")
+    Order.objects.create(order_no="OF3", status="confirmed", channel="cs")
+
+    data = client.get("/api/v1/orders/funnel").json()["data"]
+    assert data["by_status"]["pooled"] == 2
+    assert data["by_status"]["confirmed"] == 1
+    assert data["by_channel"]["cs"] == 2
+    assert data["total"] == 3
+    assert data["today_created"] == 3

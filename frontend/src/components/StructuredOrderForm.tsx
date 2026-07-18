@@ -218,7 +218,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
     toast.success(`已套用模板「${tpl.name}」`);
   };
 
-  // === 批量 CSV/TEXT 极速录单解析 ===
+  // === 批量 CSV / TEXT 录单解析 ===
   const parseBulkLines = () => {
     return bulkText.split("\n").map((l) => l.trim()).filter(Boolean).map((line, idx) => {
       const parts = line.split(/[,，\t]/).map((s) => s.trim());
@@ -369,7 +369,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
         </div>
       )}
 
-      {/* === 模式二：多行/Excel批量极速秒录 === */}
+      {/* === 模式二：多行 / Excel 批量录入 === */}
       {activeMode === "batch" && (
         <div style={{ padding: "18px 18px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>

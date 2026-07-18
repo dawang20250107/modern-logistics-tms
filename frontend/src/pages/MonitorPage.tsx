@@ -74,7 +74,7 @@ export function MonitorPage() {
           <LiveMap vehicles={vehicles} />
         </div>
         
-        {/* === 主动安全时空事件流 (Live Telematics Event Stream) === */}
+        {/* === 主动安全事件流（实时车联网事件） === */}
         <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
           <div className="panel-head" style={{ borderBottom: "1px solid var(--line)", paddingBottom: 10 }}>
             实时报警

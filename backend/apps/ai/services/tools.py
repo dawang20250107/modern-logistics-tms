@@ -442,7 +442,7 @@ _EXCEPTION_SCHEMA = {
 
 @tool(
     "logistics.exception_handler",
-    "调阅时空轨迹及业务规则库，对突发异常（偏航、温控、油损等）进行 AI 自动化诊断，输出详尽的处理建议与防范措施。",
+    "调阅轨迹与业务规则库，对突发异常（偏航、温控、油损等）进行诊断，输出处理建议与防范措施。",
     _EXCEPTION_SCHEMA,
 )
 def exception_handler(arguments):

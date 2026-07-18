@@ -37,7 +37,7 @@ class Organization(BaseModel):
     # 物化路径（"祖先id/.../自身id"），便于按组织子树做数据权限过滤
     path = models.CharField(max_length=512, blank=True, db_index=True)
 
-    # ── 落地属性（超越 G7：结构化地址 + 坐标 + 多类联系电话 + 回单地址）──
+    # ── 落地属性：结构化地址 + 坐标 + 多类联系电话 + 回单地址 ──
     province = models.CharField(max_length=32, blank=True)
     city = models.CharField(max_length=32, blank=True)
     district = models.CharField(max_length=32, blank=True)
@@ -171,7 +171,7 @@ class ApiKey(BaseModel):
 
 
 class EmployeeGroup(BaseModel):
-    """用户组：用于权限批量授予与通知分发（对标 G7「用户组」并可挂角色）。"""
+    """用户组：用于权限批量授予与通知分发，并可挂载角色。"""
 
     code = models.CharField(max_length=64, unique=True)
     name = models.CharField(max_length=64)
@@ -218,7 +218,7 @@ class Department(BaseModel):
 
 
 class Employee(BaseModel):
-    """员工档案：超越 G7 的工号 + 汇报线（直接上级）+ 用户组 + 账号生命周期。"""
+    """员工档案：工号 + 汇报线（直接上级）+ 用户组 + 账号生命周期。"""
 
     STATUS_CHOICES = [
         ("active", "在职"),

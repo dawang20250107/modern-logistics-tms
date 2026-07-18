@@ -222,7 +222,7 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
 
       {/* 轨迹上报控制台 */}
       <div style={{ padding: 18 }}>
-        <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 12 }}>时空节点打卡 (同步 AI 调度大屏)</div>
+        <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 12 }}>运输节点打卡</div>
         
         <select 
           value={node} 

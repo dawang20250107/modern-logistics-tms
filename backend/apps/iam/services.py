@@ -154,7 +154,7 @@ def handover_account(from_employee, to_employee, *, operator=None, reason="", di
 
 
 def resolve_coverage(province: str = "", city: str = "", district: str = "") -> dict:
-    """按目的地解析「哪个网点负责」——G7 只罗列区划，我们做覆盖匹配+排他+优先级仲裁。
+    """按目的地解析「哪个网点负责」：覆盖匹配 + 排他 + 优先级仲裁。
 
     规则：
       - 命中 派送/中转 区划的网点进入候选；优先按 district、其次 city 匹配。

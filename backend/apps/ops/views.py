@@ -781,10 +781,10 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
             raise AppError("INTAKE_EMPTY", "text 必填。", status=400)
         parsed = parse_order_text(text)
         meta = parsed.pop("_meta", {})
-        # AI 赋能客服：指出关键信息缺口，建议补全
+        # 客服辅助：指出关键信息缺口，建议补全
         important = {"origin": "始发地", "destination": "目的地", "contact_phone": "联系电话", "cargo_weight_ton": "货量"}
         missing = [{"field": f, "label": label} for f, label in important.items() if not parsed.get(f)]
-        # AI 赋能客服：近 24h 同电话/同线路查重，防重复下单
+        # 客服辅助：近 24h 同电话/同线路查重，防重复下单
         dups = find_duplicate_orders(
             contact_phone=parsed.get("contact_phone", ""),
             origin=parsed.get("origin", ""),

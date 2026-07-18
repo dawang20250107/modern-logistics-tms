@@ -74,7 +74,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def tree(self, request):
-        """组织树（含各组织自身+子树在职人头），一棵树看清编制分布——G7 所无。"""
+        """组织树（含各组织自身+子树在职人头），用于查看编制分布。"""
         orgs = list(Organization.objects.filter(is_active=True))
         counts = dict(
             Employee.objects.filter(status="active")
@@ -86,7 +86,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request):
-        """导出组织为 CSV（迁移就绪：可作为 G7 → 本系统的中转格式）。"""
+        """导出组织为 CSV（可作为组织数据迁移的中转格式）。"""
         import csv
 
         from django.http import HttpResponse
@@ -327,7 +327,7 @@ class RoleViewSet(viewsets.ModelViewSet):
 
 
 class RbacMatrixView(APIView):
-    """角色 × 权限点矩阵：一屏看清谁能做什么——G7 的扁平用户组所无。"""
+    """角色 × 权限点矩阵：集中查看各角色的权限授予情况。"""
 
     permission_classes = [IsAuthenticated, HasPermission]
     required_permissions = PERM_RBAC
@@ -379,7 +379,7 @@ class CoverageResolveView(APIView):
 
 
 class OrgOverviewView(APIView):
-    """组织中台总览看板：组织/人员/区划多维 KPI——G7 没有的经营视角。"""
+    """组织总览看板：组织 / 人员 / 区划多维 KPI 经营视角。"""
 
     permission_classes = [IsAuthenticated, HasPermission]
     required_permissions = PERM_VIEW

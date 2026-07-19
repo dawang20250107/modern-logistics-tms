@@ -646,6 +646,17 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 }
 .om-stat-n { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
 .om-stat-l { font-size: 11px; color: var(--muted); margin-top: 1px; }
+/* 更紧凑：让筛选与表格尽量少占空间，表格主导 */
+.om-stats-slim { gap: 8px; }
+.om-stats-slim .om-stat { padding: 6px 11px; }
+.om-stats-slim .om-stat-n { font-size: 16px; }
+.om-panel { display: flex; flex-direction: column; }
+.om-filterbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.om-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; font-size: 14px; white-space: nowrap; }
+.om-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.btn-ghost.on-accent { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
+/* 表格主导：内部滚动，占据视口大部分高度 */
+.om-panel .dt-scroll { max-height: calc(100vh - 300px); min-height: 340px; }
 .om-clickable { cursor: pointer; font: inherit; transition: border-color var(--speed), box-shadow var(--speed); }
 .om-clickable:hover { border-color: var(--accent-weak-2); box-shadow: var(--shadow-xs); }
 .om-clickable.on { border-color: var(--accent); box-shadow: var(--ring); }
@@ -1084,9 +1095,10 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dt-scroll { overflow: auto; max-width: 100%; }
 .dt-table { table-layout: fixed; min-width: 760px; }
 /* DataTable 自管布局：去掉页面级 sticky 表头(top:56px)，避免相对定位把表头下移到首行下方 */
-.dt-table thead th { position: relative; top: 0; user-select: none; }
+/* 表头在内部滚动容器内吸顶（配合 .dt-scroll max-height）*/
+.dt-table thead th { position: sticky; top: 0; z-index: 5; background: var(--panel-2); user-select: none; }
 .dt-table th { user-select: none; }
-.dt-table thead th.dt-sticky { position: sticky; top: 0; }
+.dt-table thead th.dt-sticky { position: sticky; top: 0; z-index: 6; }
 .dt-sortable { cursor: pointer; }
 .dt-sortable:hover { color: var(--accent); }
 /* 列内字段筛选 */
@@ -1109,6 +1121,32 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .doc-waybill { display: inline-flex; align-items: center; gap: 3px; color: var(--violet); text-decoration: none; padding: 1px 6px; border: 1px solid var(--violet-line); border-radius: 5px; background: var(--violet-weak); }
 .doc-waybill::before { content: "🚚"; font-size: 10px; }
 .doc-waybill:hover { border-color: var(--violet); }
+
+/* ── 高级多条件筛选器 ─────────────────────────────────── */
+.fb-pop {
+  position: absolute; top: 100%; right: 0; z-index: 80; margin-top: 6px; width: min(680px, 92vw);
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.fb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--line); font-weight: 650; font-size: 13.5px; }
+.fb-comb { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.fb-comb button { border: none; background: var(--panel); color: var(--ink-2); font-size: 12px; padding: 5px 11px; cursor: pointer; }
+.fb-comb button.on { background: var(--accent); color: #fff; font-weight: 600; }
+.fb-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; }
+.fb-row { display: grid; grid-template-columns: 130px 96px 1fr 26px; gap: 8px; align-items: center; }
+.fb-row > .search { padding: 6px 9px; }
+.fb-val { min-width: 0; }
+.fb-val > .search { width: 100%; }
+.fb-enum { display: flex; flex-wrap: wrap; gap: 5px; }
+.fb-between { display: inline-flex; align-items: center; gap: 6px; width: 100%; }
+.fb-between .search { flex: 1; padding: 6px 9px; }
+.fb-del { border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-3); border-radius: 6px; width: 26px; height: 30px; cursor: pointer; font-size: 15px; line-height: 1; }
+.fb-del:hover { color: var(--red); border-color: var(--red-line); background: var(--red-weak); }
+.fb-foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel-2); }
+@media (max-width: 640px) { .fb-row { grid-template-columns: 1fr 1fr; } .fb-val { grid-column: 1 / -1; } }
+/* 活动筛选 chips */
+.filter-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; border-radius: 6px; background: var(--accent-weak); color: var(--accent); font-size: 12px; border: 1px solid var(--accent-weak-2); }
+.filter-chip button { border: none; background: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; opacity: 0.7; }
+.filter-chip button:hover { opacity: 1; }
 .dt-th { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-sortic { font-size: 9px; color: var(--accent); }
 .dt-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }

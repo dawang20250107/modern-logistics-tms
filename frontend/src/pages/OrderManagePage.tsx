@@ -12,6 +12,7 @@ import {
 } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
+import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import { WaybillsPage } from "./WaybillsPage";
@@ -19,61 +20,64 @@ import { WaybillsPage } from "./WaybillsPage";
 const LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
 const LOCK_LABEL: Record<string, string> = { mine: "我锁定", locked: "他人锁定", assigned_mine: "分派给我", assigned_other: "已分派", free: "" };
 const LOCK_TONE: Record<string, string> = { mine: "tag-low", locked: "tag-medium", assigned_mine: "tag-info", assigned_other: "tag-none", free: "" };
-// 订单生命周期状态过滤链
-const STATUS_CHAIN = ["draft", "pending_confirm", "confirmed", "pooled", "dispatching", "converted", "completed", "cancelled"];
+
+const enumOpts = (rec: Record<string, string>) => Object.entries(rec).map(([value, label]) => ({ value, label }));
+// 订单高级筛选字段（文本/枚举/数值/日期）
+const ORDER_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "order_no", label: "订单号", type: "text", accessor: (o) => (o as Order).order_no },
+  { key: "customer", label: "客户", type: "text", accessor: (o) => (o as Order).customer_name || "" },
+  { key: "route", label: "线路", type: "text", accessor: (o) => `${(o as Order).origin || ""}→${(o as Order).destination || ""}` },
+  { key: "creator", label: "建单人", type: "text", accessor: (o) => (o as Order).created_by_name || "" },
+  { key: "status", label: "订单状态", type: "enum", options: enumOpts(ORDER_STATUS_LABEL), accessor: (o) => (o as Order).status },
+  { key: "channel", label: "渠道", type: "enum", options: enumOpts(ORDER_CHANNEL_LABEL), accessor: (o) => (o as Order).channel },
+  { key: "business_type", label: "业务类型", type: "enum", options: enumOpts(BUSINESS_TYPE_LABEL), accessor: (o) => (o as Order).business_type },
+  { key: "priority", label: "优先级", type: "enum", options: enumOpts(PRIORITY_LABEL), accessor: (o) => (o as Order).priority },
+  { key: "settlement", label: "结算方式", type: "enum", options: enumOpts(SETTLEMENT_LABEL), accessor: (o) => (o as Order).settlement_type },
+  { key: "level", label: "客户等级", type: "enum", options: ["S", "A", "B", "C", "D"].map((v) => ({ value: v, label: `${v} 级` })), accessor: (o) => (o as Order).customer_level || "" },
+  { key: "sla", label: "SLA", type: "enum", options: enumOpts(SLA_STATUS_LABEL), accessor: (o) => (o as Order).sla_status },
+  { key: "exception", label: "异常", type: "enum", options: [{ value: "1", label: "有异常" }, { value: "0", label: "无异常" }], accessor: (o) => ((o as Order).exception_count ?? 0) > 0 ? "1" : "0" },
+  { key: "amount", label: "报价(元)", type: "number", accessor: (o) => Number((o as Order).quoted_amount) || 0 },
+  { key: "weight", label: "货量(吨)", type: "number", accessor: (o) => Number((o as Order).cargo_weight_ton) || 0 },
+  { key: "created_at", label: "建单时间", type: "date", accessor: (o) => (o as Order).created_at },
+];
 
 // ── 订单视图（护城河主视图）──────────────────────────────
 function OrdersTab() {
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState("");
-  const [channel, setChannel] = useState("");
-  const [bizType, setBizType] = useState("");
-  const [priority, setPriority] = useState("");
-  const [level, setLevel] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
   const [search, setSearch] = useState("");
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
+  const [showBuilder, setShowBuilder] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [excOrder, setExcOrder] = useState<Order | null>(null);
 
-  // 快捷日期范围：设置起止日期（YYYY-MM-DD）
-  const fmtD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const setQuickRange = (kind: string) => {
-    const now = new Date();
-    if (kind === "today") { setDateFrom(fmtD(now)); setDateTo(fmtD(now)); }
-    else if (kind === "7") { const f = new Date(now); f.setDate(f.getDate() - 6); setDateFrom(fmtD(f)); setDateTo(fmtD(now)); }
-    else if (kind === "30") { const f = new Date(now); f.setDate(f.getDate() - 29); setDateFrom(fmtD(f)); setDateTo(fmtD(now)); }
-    else if (kind === "month") { setDateFrom(fmtD(new Date(now.getFullYear(), now.getMonth(), 1))); setDateTo(fmtD(now)); }
-    else { setDateFrom(""); setDateTo(""); }
-  };
-
-  // 保存的筛选视图（localStorage 持久化，无需后端）
-  type Preset = { name: string; status: string; channel: string; bizType: string; priority: string; level: string; dateFrom: string; dateTo: string; search: string };
-  const PRESET_KEY = "om-order-presets-v2";
+  // 保存的筛选视图（localStorage：搜索词 + 高级条件模型）
+  type Preset = { name: string; search: string; model: FilterModel };
+  const PRESET_KEY = "om-order-presets-v3";
   const [presets, setPresets] = useState<Preset[]>(() => {
     try { return JSON.parse(localStorage.getItem(PRESET_KEY) || "[]"); } catch { return []; }
   });
   const persistPresets = (next: Preset[]) => { setPresets(next); localStorage.setItem(PRESET_KEY, JSON.stringify(next)); };
-  const applyPreset = (p: Preset) => { setStatus(p.status); setChannel(p.channel); setBizType(p.bizType); setPriority(p.priority); setLevel(p.level); setDateFrom(p.dateFrom || ""); setDateTo(p.dateTo || ""); setSearch(p.search); };
+  const applyPreset = (p: Preset) => { setSearch(p.search); setModel(p.model ?? EMPTY_MODEL); };
   const savePreset = () => {
     const name = window.prompt("为当前筛选视图命名：", "")?.trim();
     if (!name) return;
-    const p: Preset = { name, status, channel, bizType, priority, level, dateFrom, dateTo, search };
-    persistPresets([...presets.filter((x) => x.name !== name), p]);
+    persistPresets([...presets.filter((x) => x.name !== name), { name, search, model }]);
     toast.success(`已保存筛选视图「${name}」`);
   };
-  const anyFilter = Boolean(status || channel || bizType || priority || level || search || dateFrom || dateTo);
-  const resetFilters = () => { setStatus(""); setChannel(""); setBizType(""); setPriority(""); setLevel(""); setDateFrom(""); setDateTo(""); setSearch(""); };
-
-  const filterQs = [
-    status && `status=${status}`, channel && `channel=${channel}`,
-    bizType && `business_type=${bizType}`, priority && `priority=${priority}`,
-    search && `search=${encodeURIComponent(search)}`,
-  ].filter(Boolean).join("&");
+  const activeCount = activeConditionCount(model, ORDER_FILTER_FIELDS);
+  const anyFilter = Boolean(search) || activeCount > 0;
+  const resetFilters = () => { setSearch(""); setModel(EMPTY_MODEL); };
+  // 一键状态筛选（stat 卡片 / 快捷）：替换为单条状态条件
+  const quickStatus = (st: string) => setModel((m) => {
+    const others = m.conditions.filter((c) => c.field !== "status");
+    const has = m.conditions.some((c) => c.field === "status" && Array.isArray(c.value) && (c.value as string[]).includes(st) && (c.value as string[]).length === 1);
+    return has ? { ...m, conditions: others } : { combinator: m.combinator, conditions: [...others, { id: `st${Date.now()}`, field: "status", op: "in", value: [st] }] };
+  });
+  const statusActive = (st: string) => model.conditions.some((c) => c.field === "status" && Array.isArray(c.value) && (c.value as string[]).length === 1 && (c.value as string[])[0] === st);
 
   const q = useQuery({
-    queryKey: ["orders-manage", status, channel, bizType, priority, search],
-    queryFn: () => apiGet<Paginated<Order>>(`/orders?page_size=300&ordering=-created_at${filterQs ? `&${filterQs}` : ""}`),
+    queryKey: ["orders-manage"],
+    queryFn: () => apiGet<Paginated<Order>>("/orders?page_size=500&ordering=-created_at"),
   });
   const dispatchers = useQuery({
     queryKey: ["dispatchers"],
@@ -81,20 +85,13 @@ function OrdersTab() {
   });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orders-manage"] });
 
-  // 客户等级 + 日期范围在已加载集上二次过滤（服务端未建索引字段）
+  // 快速搜索（订单号/客户/线路）+ 高级多条件（AND/OR）全在客户端求值
   const rows = useMemo(() => {
     let items = q.data?.items ?? [];
-    if (level) items = items.filter((o) => (o.customer_level || "") === level);
-    if (dateFrom) {
-      const from = new Date(`${dateFrom}T00:00:00`).getTime();
-      items = items.filter((o) => new Date(o.created_at).getTime() >= from);
-    }
-    if (dateTo) {
-      const to = new Date(`${dateTo}T23:59:59`).getTime();
-      items = items.filter((o) => new Date(o.created_at).getTime() <= to);
-    }
-    return items;
-  }, [q.data, level, dateFrom, dateTo]);
+    const kw = search.trim().toLowerCase();
+    if (kw) items = items.filter((o) => [o.order_no, o.customer_name, o.origin, o.destination, o.contact_phone].some((x) => String(x ?? "").toLowerCase().includes(kw)));
+    return applyFilterModel(items, model, ORDER_FILTER_FIELDS);
+  }, [q.data, search, model]);
   const total = rows.length;
 
   const BATCH_LABEL: Record<string, string> = { confirm: "确认", pool: "进池", cancel: "取消", delete: "删除" };
@@ -237,81 +234,61 @@ function OrdersTab() {
 
   return (
     <>
-    {/* 台账概览 */}
-    <div className="om-stats">
+    {/* 台账概览（超紧凑单行）+ 快捷状态筛选 */}
+    <div className="om-stats om-stats-slim">
       <div className="om-stat"><div className="om-stat-n">{stats.total}</div><div className="om-stat-l">订单总数</div></div>
-      <button className={`om-stat om-clickable${status === "pending_confirm" ? " on" : ""}`} onClick={() => setStatus(status === "pending_confirm" ? "" : "pending_confirm")}><div className="om-stat-n" style={{ color: stats.pending ? "var(--amber)" : undefined }}>{stats.pending}</div><div className="om-stat-l">待确认 →</div></button>
-      <button className={`om-stat om-clickable${status === "pooled" ? " on" : ""}`} onClick={() => setStatus(status === "pooled" ? "" : "pooled")}><div className="om-stat-n" style={{ color: stats.pooled ? "var(--blue)" : undefined }}>{stats.pooled}</div><div className="om-stat-l">池中待派 →</div></button>
+      <button className={`om-stat om-clickable${statusActive("pending_confirm") ? " on" : ""}`} onClick={() => quickStatus("pending_confirm")}><div className="om-stat-n" style={{ color: stats.pending ? "var(--amber)" : undefined }}>{stats.pending}</div><div className="om-stat-l">待确认 →</div></button>
+      <button className={`om-stat om-clickable${statusActive("pooled") ? " on" : ""}`} onClick={() => quickStatus("pooled")}><div className="om-stat-n" style={{ color: stats.pooled ? "var(--blue)" : undefined }}>{stats.pooled}</div><div className="om-stat-l">池中待派 →</div></button>
       <div className="om-stat"><div className="om-stat-n" style={{ color: stats.dispatched ? "var(--green)" : undefined }}>{stats.dispatched}</div><div className="om-stat-l">已派/完成</div></div>
       <div className="om-stat"><div className="om-stat-n">{stats.today}</div><div className="om-stat-l">今日新建</div></div>
       <div className="om-stat"><div className="om-stat-n" style={{ fontSize: 14 }}>{fmtMoney(stats.amount)}</div><div className="om-stat-l">报价合计</div></div>
     </div>
 
-    <div className="panel">
-      <div className="panel-head" style={{ flexWrap: "wrap", gap: 10 }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>订单台账<span className="ai-pill">{total}</span></span>
-        <button className="btn-ghost" onClick={() => apiDownload(`/orders/export?page_size=5000${filterQs ? `&${filterQs}` : ""}`, "orders.csv")}>导出 CSV</button>
-      </div>
-
-      {/* 状态链筛选 */}
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <button className={`chip${status === "" ? " chip-on" : ""}`} onClick={() => setStatus("")}>全部状态</button>
-        {STATUS_CHAIN.map((s) => <button key={s} className={`chip${status === s ? " chip-on" : ""}`} onClick={() => setStatus(s)}>{ORDER_STATUS_LABEL[s] ?? s}</button>)}
-      </div>
-      {/* 维度筛选 */}
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0 }}>
-        <select className="search" style={{ minWidth: 110, padding: "7px 10px" }} value={channel} onChange={(e) => setChannel(e.target.value)}>
-          <option value="">全部渠道</option>{Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={bizType} onChange={(e) => setBizType(e.target.value)}>
-          <option value="">全部业务</option>{Object.entries(BUSINESS_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={priority} onChange={(e) => setPriority(e.target.value)}>
-          <option value="">全部优先级</option>{Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={level} onChange={(e) => setLevel(e.target.value)}>
-          <option value="">全部等级</option>{["S", "A", "B", "C", "D"].map((l) => <option key={l} value={l}>{l} 级客户</option>)}
-        </select>
-        <input className="search" style={{ minWidth: 200, flex: 1 }} placeholder="搜索订单号 / 电话 / 始发 / 目的地" value={search} onChange={(e) => setSearch(e.target.value)} />
-      </div>
-      {/* 日期范围组（建单时间）*/}
-      <div className="form-row date-range-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0, alignItems: "center" }}>
-        <span className="muted small" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>建单日期
-        </span>
-        <input type="date" className="search" style={{ padding: "6px 9px" }} value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} />
-        <span className="muted">—</span>
-        <input type="date" className="search" style={{ padding: "6px 9px" }} value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} />
-        <button className="chip" onClick={() => setQuickRange("today")}>今天</button>
-        <button className="chip" onClick={() => setQuickRange("7")}>近7天</button>
-        <button className="chip" onClick={() => setQuickRange("30")}>近30天</button>
-        <button className="chip" onClick={() => setQuickRange("month")}>本月</button>
-        {(dateFrom || dateTo) && <button className="linkish small" onClick={() => setQuickRange("")}>清除日期</button>}
-      </div>
-
-      {/* 保存的筛选视图 */}
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0, alignItems: "center" }}>
-        <span className="muted small" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2z" /></svg>筛选视图
-        </span>
-        {presets.length === 0 && <span className="muted small">保存常用筛选组合，一键切换</span>}
-        {presets.map((p) => (
-          <span key={p.name} className="preset-chip">
-            <button className="chip" onClick={() => applyPreset(p)}>{p.name}</button>
-            <button className="preset-x" title="删除视图" onClick={() => persistPresets(presets.filter((x) => x.name !== p.name))}>×</button>
-          </span>
-        ))}
+    <div className="panel om-panel">
+      {/* 单行筛选栏：搜索 + 高级筛选 + 视图 + 重置/保存 */}
+      <div className="om-filterbar">
+        <span className="om-title">订单台账<span className="ai-pill">{total}</span></span>
+        <input className="search" style={{ minWidth: 190, flex: 1, maxWidth: 320 }} placeholder="搜索 订单号 / 客户 / 电话 / 线路" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div style={{ position: "relative" }}>
+          <button className={`btn-ghost${activeCount > 0 || showBuilder ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowBuilder((v) => !v); }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+              高级筛选{activeCount > 0 ? ` · ${activeCount}` : ""}
+            </span>
+          </button>
+          {showBuilder && <FilterBuilder fields={ORDER_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
+        </div>
+        {presets.length > 0 && (
+          <select className="search" style={{ maxWidth: 130 }} value="" onChange={(e) => { const p = presets.find((x) => x.name === e.target.value); if (p) applyPreset(p); e.target.value = ""; }}>
+            <option value="">筛选视图…</option>
+            {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>
+        )}
         <div style={{ flex: 1 }} />
-        {anyFilter && <button className="linkish small" onClick={resetFilters}>重置筛选</button>}
-        <button className="btn-ghost small" disabled={!anyFilter} onClick={savePreset}>+ 保存当前筛选</button>
+        {anyFilter && <button className="linkish small" onClick={resetFilters}>重置</button>}
+        <button className="btn-ghost small" disabled={!anyFilter} onClick={savePreset}>保存视图</button>
+        <button className="btn-ghost small" onClick={() => apiDownload("/orders/export?page_size=5000", "orders.csv")}>导出全部</button>
       </div>
+
+      {/* 活动筛选条件 chips */}
+      {(activeCount > 0 || presets.some(() => false)) && (
+        <div className="om-chips">
+          <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+          {model.conditions.map((c) => {
+            const label = describeCondition(c, ORDER_FILTER_FIELDS);
+            if (!label) return null;
+            return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+          })}
+          <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
+        </div>
+      )}
 
       {q.isLoading ? (
         <StateView kind="loading" compact />
       ) : q.isError ? (
         <StateView kind="error" onRetry={() => q.refetch()} />
       ) : rows.length === 0 ? (
-        (status || channel || bizType || priority || level || search) ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" /> : <StateView kind="empty" scene="cs-empty" />
+        anyFilter ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" /> : <StateView kind="empty" scene="cs-empty" />
       ) : (
         <DataTable<Order>
           columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage-v2" exportName="订单台账"

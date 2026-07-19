@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
-import { fmtRelative } from "../api/format";
+import { fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { EmptyState } from "../components/EmptyState";
 import { StateView } from "../components/StateView";
@@ -435,7 +435,7 @@ export function DispatchBoardPage() {
               <span style={{ fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}><IconTruck size={18} className="icon-offset"/> 拼单配载</span>
               {plan.estimated_total_saving && plan.estimated_total_saving > 0 && (
                 <span className="tag tag-low" style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
-                  <IconMoney size={14} className="icon-offset"/> 预计节省 ¥{plan.estimated_total_saving.toLocaleString()}
+                  <IconMoney size={14} className="icon-offset"/> 预计节省 {fmtMoney(plan.estimated_total_saving)}
                 </span>
               )}
             </div>
@@ -478,7 +478,7 @@ export function DispatchBoardPage() {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <b style={{ fontSize: 15 }}>{trip.route}</b>
-                      <span className="tag tag-low" style={{ fontWeight: 700 }}>拼单降本 -¥{trip.money_saved}</span>
+                      <span className="tag tag-low" style={{ fontWeight: 700 }}>拼单降本 -{fmtMoney(trip.money_saved)}</span>
                     </div>
 
                     <div className="muted small" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -535,15 +535,15 @@ export function DispatchBoardPage() {
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: 11, flexWrap: "wrap" }}>
                         <div className="tag tag-low" style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
-                          <IconCheckCircle size={12} className="icon-offset"/> 自营配载：¥{trip.consolidated_cost}
+                          <IconCheckCircle size={12} className="icon-offset"/> 自营配载：{fmtMoney(trip.consolidated_cost)}
                         </div>
-                        <div style={{ background: "var(--panel-3)", padding: "3px 8px", borderRadius: 4, color: "var(--muted)" }}>市场行情：¥{Math.round(trip.consolidated_cost * 1.05)}</div>
+                        <div style={{ background: "var(--panel-3)", padding: "3px 8px", borderRadius: 4, color: "var(--muted)" }}>市场行情：{fmtMoney(Math.round(trip.consolidated_cost * 1.05))}</div>
                       </div>
                     </div>
 
                     <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 12 }} className="muted">
-                      <span>分单单独派车：¥{trip.separate_cost}</span>
-                      <span>合拼整车费：¥{trip.consolidated_cost}</span>
+                      <span>分单单独派车：{fmtMoney(trip.separate_cost)}</span>
+                      <span>合拼整车费：{fmtMoney(trip.consolidated_cost)}</span>
                     </div>
                   </div>
                 );
@@ -645,7 +645,7 @@ export function DispatchBoardPage() {
                           </div>
                           {suggestion.recommendation.suggested_price_band && (
                             <div style={{ fontSize: 13 }}>建议成交价：
-                              <strong style={{ color: "var(--accent)" }}>¥{suggestion.recommendation.suggested_price_band[0].toLocaleString()} ~ ¥{suggestion.recommendation.suggested_price_band[1].toLocaleString()}</strong>
+                              <strong style={{ color: "var(--accent)" }}>{fmtMoney(suggestion.recommendation.suggested_price_band[0])} ~ {fmtMoney(suggestion.recommendation.suggested_price_band[1])}</strong>
                             </div>
                           )}
                           {suggestion.recommendation.reasons.length > 0 && (
@@ -675,8 +675,8 @@ export function DispatchBoardPage() {
                               {suggestion.carrier_recommendations.map((r) => (
                                 <tr key={r.carrier_id} className={carrierId === r.carrier_id ? "row-sel" : ""}>
                                   <td>{r.carrier} <span className="muted small">{r.carrier_grade}</span></td>
-                                  <td className="num">{r.recent_deal_price ? `¥${r.recent_deal_price.toLocaleString()}` : "—"}</td>
-                                  <td className="num">{r.quote != null ? `¥${r.quote.toLocaleString()}` : "—"}</td>
+                                  <td className="num">{r.recent_deal_price ? fmtMoney(r.recent_deal_price) : "—"}</td>
+                                  <td className="num">{r.quote != null ? fmtMoney(r.quote) : "—"}</td>
                                   <td className="num">{r.deals ? `${Math.round(r.on_time_rate * 100)}%` : "—"}</td>
                                   <td className="num">{r.deals ? `${Math.round(r.exception_rate * 100)}%` : "—"}</td>
                                   <td className="num">{r.deals ? `${Math.round(r.receipt_timely_rate * 100)}%` : "—"}</td>

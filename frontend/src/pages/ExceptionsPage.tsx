@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, Fragment } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { ExceptionEvent, ExceptionRecord, Paginated } from "../api/types";
 import { EXC_EVENT_LABEL } from "../api/types";
@@ -159,7 +160,7 @@ export function ExceptionsPage() {
                 
                 return (
                   <Fragment key={e.id}>
-                    <tr style={{ background: isExpanded ? "rgba(0,0,0,0.015)" : "transparent", cursor: "pointer", transition: "all 0.2s" }} onClick={() => setExpandedId(isExpanded ? "" : e.id)}>
+                    <tr style={{ background: isExpanded ? "var(--panel-2)" : "transparent", cursor: "pointer", transition: "all 0.2s" }} onClick={() => setExpandedId(isExpanded ? "" : e.id)}>
                       <td style={{ textAlign: "center", color: "var(--brand)", fontSize: 14 }}>
                         {isExpanded ? "▼" : "▶"}
                       </td>
@@ -175,7 +176,7 @@ export function ExceptionsPage() {
                       <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{e.waybill_no || "全局"}</td>
                       <td style={{ color: e.assignee_name ? "var(--ink)" : "var(--muted)" }}>{e.assignee_name || "待认领"}</td>
                       <td className="mono" style={{ color: Number(e.amount) > 0 ? "var(--red)" : "var(--muted)", fontWeight: "bold" }}>
-                        {Number(e.amount) > 0 ? `¥${e.amount}` : "暂无"}
+                        {Number(e.amount) > 0 ? fmtMoney(e.amount) : "暂无"}
                       </td>
                       <td>
                         <span className={`tag tag-${e.status === "closed" ? "low" : "medium"}`}>
@@ -210,7 +211,7 @@ export function ExceptionsPage() {
                     
                     {/* 异常详情 */}
                     {isExpanded && (
-                      <tr style={{ background: "rgba(0,0,0,0.015)" }}>
+                      <tr style={{ background: "var(--panel-2)" }}>
                         <td colSpan={9} style={{ padding: "0 24px 24px" }}>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 10 }}>
                             

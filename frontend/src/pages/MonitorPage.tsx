@@ -85,16 +85,16 @@ export function MonitorPage() {
             ) : (
               liveAlerts.map((a, i) => {
                 const colors: Record<string, string> = {
-                  temperature: "rgba(41,128,185,0.06)",
-                  route: "rgba(155,89,182,0.06)",
-                  fuel: "rgba(230,126,34,0.06)",
-                  speed: "rgba(241,196,15,0.06)"
+                  temperature: "var(--blue-weak)",
+                  route: "var(--violet-weak)",
+                  fuel: "var(--amber-weak)",
+                  speed: "var(--accent-weak)"
                 };
                 const borderColors: Record<string, string> = {
-                  temperature: "#2980b9",
-                  route: "#9b59b6",
-                  fuel: "#e67e22",
-                  speed: "#f1c40f"
+                  temperature: "var(--blue)",
+                  route: "var(--violet)",
+                  fuel: "var(--amber)",
+                  speed: "var(--accent)"
                 };
                 
                 return (
@@ -102,7 +102,7 @@ export function MonitorPage() {
                     key={i} 
                     style={{ 
                       padding: 12, borderRadius: 8, borderLeft: `4px solid ${borderColors[a.type || "general"] || "var(--primary)"}`,
-                      background: colors[a.type || "general"] || "rgba(0,0,0,0.01)", borderTop: "1px solid var(--line)",
+                      background: colors[a.type || "general"] || "var(--panel-2)", borderTop: "1px solid var(--line)",
                       borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)",
                       display: "flex", flexDirection: "column", gap: 6, transition: "all 0.15s ease"
                     }}
@@ -123,7 +123,7 @@ export function MonitorPage() {
 
                     {/* AI 运营建议（拼单降本 / 风险核查） */}
                     {a.aiSuggest && (
-                      <div style={{ padding: "6px 10px", background: "rgba(0,0,0,0.02)", borderRadius: 6, fontSize: 11, lineHeight: 1.5, color: "var(--text-soft)", border: "1px dashed var(--line-strong)" }}>
+                      <div style={{ padding: "6px 10px", background: "var(--panel-3)", borderRadius: 6, fontSize: 11, lineHeight: 1.5, color: "var(--text-soft)", border: "1px dashed var(--line-strong)" }}>
                         {a.aiSuggest}
                       </div>
                     )}

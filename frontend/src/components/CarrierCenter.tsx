@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { apiGet } from "../api/client";
+import { fmtMoney } from "../api/format";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
 import { DataTable, type DataColumn } from "./DataTable";
 import { StateView } from "./StateView";
@@ -128,7 +129,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                         <tr key={l.id}>
                           <td>{l.origin_city}→{l.dest_city}</td>
                           <td className="small">{l.vehicle_type || "—"}{l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}</td>
-                          <td className="num">¥{Number(l.standard_price).toLocaleString()}</td>
+                          <td className="num">{fmtMoney(l.standard_price)}</td>
                           <td className="num">{Number(l.last_deal_price) > 0 ? `¥${Number(l.last_deal_price).toLocaleString()}` : "—"}</td>
                           <td>{l.is_recommended ? <span className="tag tag-low">推荐</span> : l.is_preferred ? <span className="tag tag-info">常用</span> : "—"}</td>
                         </tr>

@@ -127,9 +127,9 @@ export function ReconciliationPage() {
                   <td className="muted mono">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
                   <td>
                     {l.is_anomaly
-                      ? <span style={{ color: "var(--red)", fontWeight: 700 }}>超历史均值 ¥{fmtMoney(l.baseline_avg ?? "0")} {l.deviation_pct}%</span>
+                      ? <span style={{ color: "var(--red)", fontWeight: 700 }}>超历史均值 {fmtMoney(l.baseline_avg ?? "0")} {l.deviation_pct}%</span>
                       : l.baseline_avg != null
-                        ? <span style={{ color: "var(--green)" }}>合规（基线 ¥{fmtMoney(l.baseline_avg)}）</span>
+                        ? <span style={{ color: "var(--green)" }}>合规（基线 {fmtMoney(l.baseline_avg)}）</span>
                         : <span className="muted">{detail.data?.audited_at ? "样本不足，无基线" : "待审计"}</span>}
                   </td>
                 </tr>

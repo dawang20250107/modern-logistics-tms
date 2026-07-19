@@ -6,6 +6,7 @@ import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
+import { StatusTag } from "../components/StatusTag";
 import type { Order, OrderEvent, OrderWorkflow } from "../api/types";
 import {
   APPROVAL_STATUS_LABEL,
@@ -121,9 +122,9 @@ export function OrderDetailPage() {
             <div className="muted small">{ORDER_CHANNEL_LABEL[o.channel]} · {SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type} · 建单 {o.created_by_name || "-"}</div>
           </div>
           <div className="wb-status">
-            <span className="status-pill">{ORDER_STATUS_LABEL[o.status] ?? o.status}</span>
+            <StatusTag kind="order" value={o.status} />
             {o.sla_status && o.sla_status !== "pending" && (
-              <span className={`tag tag-sla_${o.sla_status}`}>{SLA_STATUS_LABEL[o.sla_status]}</span>
+              <StatusTag kind="sla" value={o.sla_status} />
             )}
           </div>
         </div>

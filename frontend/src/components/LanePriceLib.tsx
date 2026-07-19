@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
 import { DataTable, type DataColumn } from "./DataTable";
@@ -59,7 +60,7 @@ export function LanePriceLib() {
     { key: "lane", header: "线路", width: 130, alwaysVisible: true, sortValue: (l) => `${l.origin_city}${l.dest_city}`, exportValue: (l) => `${l.origin_city}→${l.dest_city}`, render: (l) => <>{l.origin_city}→{l.dest_city}</> },
     { key: "carrier", header: "承运商", width: 150, sortValue: (l) => l.carrier_name || "", exportValue: (l) => l.carrier_name || "", render: (l) => l.carrier_name },
     { key: "vehicle", header: "车型/车长", width: 120, exportValue: (l) => `${l.vehicle_type || ""}${l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}`, render: (l) => <span className="small">{l.vehicle_type || "—"}{l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}</span> },
-    { key: "standard", header: "标准价", width: 100, align: "right", sortValue: (l) => Number(l.standard_price) || 0, exportValue: (l) => Number(l.standard_price) || 0, render: (l) => <>¥{Number(l.standard_price).toLocaleString()}</> },
+    { key: "standard", header: "标准价", width: 100, align: "right", sortValue: (l) => Number(l.standard_price) || 0, exportValue: (l) => Number(l.standard_price) || 0, render: (l) => <>{fmtMoney(l.standard_price)}</> },
     { key: "band", header: "区间", width: 130, align: "right", exportValue: (l) => `${l.min_price}~${l.max_price}`, render: (l) => <span className="small">{Number(l.min_price) > 0 || Number(l.max_price) > 0 ? `¥${Number(l.min_price).toLocaleString()}~${Number(l.max_price).toLocaleString()}` : "—"}</span> },
     { key: "last", header: "最近成交", width: 100, align: "right", sortValue: (l) => Number(l.last_deal_price) || 0, exportValue: (l) => Number(l.last_deal_price) || 0, render: (l) => <>{Number(l.last_deal_price) > 0 ? `¥${Number(l.last_deal_price).toLocaleString()}` : "—"}</> },
     { key: "flag", header: "标记", width: 80, sortValue: (l) => (l.is_recommended ? "0" : l.is_preferred ? "1" : "2"), exportValue: (l) => (l.is_recommended ? "推荐" : l.is_preferred ? "常用" : ""), render: (l) => l.is_recommended ? <span className="tag tag-low">推荐</span> : l.is_preferred ? <span className="tag tag-info">常用</span> : <span className="muted">—</span> },

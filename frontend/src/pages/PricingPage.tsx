@@ -177,12 +177,12 @@ export function PricingPage() {
                 <tr key={r.id} style={editing === r.id ? { background: "var(--brand-light)" } : {}}>
                   <td style={{ fontWeight: "bold" }}>{r.name}</td>
                   <td><span className={`tag tag-${r.price_type === "income" ? "low" : "medium"}`}>{r.price_type === "income" ? "应收" : "应付"}</span></td>
-                  <td><span className="tag" style={{ background: "rgba(37,99,235,0.08)", color: "var(--brand)" }}>{CHARGE_METHOD_LABEL[r.charge_method] ?? r.charge_method}</span></td>
+                  <td><span className="tag tag-info">{CHARGE_METHOD_LABEL[r.charge_method] ?? r.charge_method}</span></td>
                   <td>{r.customer_name || "全局通用"}</td>
                   <td>{r.carrier_name || "全局通用"}</td>
                   <td>{r.route_name || "全局通用"}</td>
                   <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{fmtMoney(r.base_price)}</td>
-                  <td>{r.tier_prices && r.tier_prices.length > 0 ? <span className="tag" style={{ background: "rgba(0,0,0,0.05)" }}>{r.tier_prices.length} 级</span> : "—"}</td>
+                  <td>{r.tier_prices && r.tier_prices.length > 0 ? <span className="tag tag-none">{r.tier_prices.length} 级</span> : "—"}</td>
                   <td>{r.volumetric_factor}</td>
                   <td>{Number(r.fuel_surcharge_pct) > 0 ? <span className="tag tag-high">+{fmtNum(Number(r.fuel_surcharge_pct) * 100, 1)}%</span> : "—"}</td>
                   <td>

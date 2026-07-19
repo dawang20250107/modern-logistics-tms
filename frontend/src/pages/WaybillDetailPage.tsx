@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
-import { fmtDateTime } from "../api/format";
+import { fmtDateTime, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { COD_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
@@ -21,14 +21,14 @@ const EXC_STATUS_LABEL: Record<string, string> = {
 
 // 运单状态流转
 const WORKFLOW_STEPS = [
-  { status: "draft", label: "草稿", icon: "📝" },
+  { status: "draft", label: "草稿", icon: "" },
   { status: "pending_dispatch", label: "待调度", icon: "" },
   { status: "dispatching", label: "派单中", icon: "" },
   { status: "dispatched", label: "已派发", icon: "" },
   { status: "departed", label: "发车", icon: "" },
   { status: "in_transit", label: "在途", icon: "" },
   { status: "arrived", label: "到达", icon: "" },
-  { status: "signed", label: "签收", icon: "✍️" },
+  { status: "signed", label: "签收", icon: "" },
   { status: "delivered", label: "回单交接", icon: "" },
   { status: "settled", label: "完结核销", icon: "" }
 ];
@@ -454,16 +454,16 @@ export function WaybillDetailPage() {
                 </div>
                 {collection.data && collection.data.freight_term === "collect" && collection.data.collect_freight > 0 && (
                   <div className="small" style={{ color: "var(--amber)" }}>
-                    到付：司机送达时需向收货人收取运费 ¥{collection.data.collect_freight.toLocaleString()}
+                    到付：司机送达时需向收货人收取运费 {fmtMoney(collection.data.collect_freight)}
                   </div>
                 )}
                 {Number(detail.data.cod_amount) > 0 && (
-                  <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8, padding: 12 }}>
+                  <div style={{ background: "var(--amber-weak)", border: "1px solid var(--amber-line)", borderRadius: 8, padding: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
-                        <div style={{ fontWeight: "bold" }}>代收货款 COD ¥{Number(detail.data.cod_amount).toLocaleString()}</div>
+                        <div style={{ fontWeight: "bold" }}>代收货款 COD {fmtMoney(detail.data.cod_amount)}</div>
                         <div className="muted small">状态：{COD_STATUS_LABEL[detail.data.cod_status] ?? detail.data.cod_status}
-                          {collection.data ? ` · 司机应收合计 ¥${collection.data.total_to_collect.toLocaleString()}` : ""}</div>
+                          {collection.data ? ` · 司机应收合计 ${fmtMoney(collection.data.total_to_collect)}` : ""}</div>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         {detail.data.cod_status === "pending" && (
@@ -489,17 +489,17 @@ export function WaybillDetailPage() {
             {costs.data ? (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "16px 20px" }}>
-                  <div style={{ background: "rgba(39,174,96,0.06)", border: "1px solid rgba(39,174,96,0.2)", borderRadius: 8, padding: 14 }}>
+                  <div style={{ background: "var(--green-weak)", border: "1px solid var(--green-line)", borderRadius: 8, padding: 14 }}>
                     <div className="muted small" style={{ fontWeight: "bold" }}>向客户应收 (AR)</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--green)", marginTop: 4 }}>¥{costs.data.receivable_total.toFixed(2)}</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--green)", marginTop: 4 }}>{fmtMoney(costs.data.receivable_total)}</div>
                   </div>
-                  <div style={{ background: "rgba(231,76,60,0.06)", border: "1px solid rgba(231,76,60,0.2)", borderRadius: 8, padding: 14 }}>
+                  <div style={{ background: "var(--red-weak)", border: "1px solid var(--red-line)", borderRadius: 8, padding: 14 }}>
                     <div className="muted small" style={{ fontWeight: "bold" }}>付承运商成本 (AP)</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--red)", marginTop: 4 }}>¥{costs.data.payable_total.toFixed(2)}</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--red)", marginTop: 4 }}>{fmtMoney(costs.data.payable_total)}</div>
                   </div>
                 </div>
                 <div className="kv" style={{ paddingTop: 0, paddingBottom: 10 }}>
-                  <div><span>账面毛利预估</span><b style={{ fontSize: 16 }}>¥{costs.data.gross_profit.toFixed(2)}</b></div>
+                  <div><span>账面毛利预估</span><b style={{ fontSize: 16 }}>{fmtMoney(costs.data.gross_profit)}</b></div>
                   <div><span>毛利率测算</span><b>{(costs.data.gross_margin * 100).toFixed(1)}%</b></div>
                 </div>
                 
@@ -511,7 +511,7 @@ export function WaybillDetailPage() {
                         <tr key={e.id}>
                           <td><span className={`tag${e.direction === "receivable" ? " tag-low" : " tag-high"}`}>{e.direction === "receivable" ? "应收" : "应付"}</span></td>
                           <td><strong>{e.item_label}</strong></td>
-                          <td className="mono" style={{ fontWeight: "bold" }}>¥{e.amount.toFixed(2)}</td>
+                          <td className="mono num" style={{ fontWeight: "bold" }}>{fmtMoney(e.amount)}</td>
                           <td className="muted">{e.payee_label}</td>
                         </tr>
                       ))}
@@ -549,7 +549,7 @@ export function WaybillDetailPage() {
           <div className="panel">
             <div className="panel-head">电子回单与签收</div>
             <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ background: "rgba(0,0,0,0.02)", padding: 16, borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
+              <div style={{ background: "var(--panel-2)", padding: 16, borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
                 <span className="muted small" style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>上传回单照片</span>
                 <input type="file" ref={fileInput} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); }} />
                 {upload.isPending && <span className="muted small" style={{ color: "var(--brand)" }}> 上传中…</span>}
@@ -581,7 +581,7 @@ export function WaybillDetailPage() {
             
             {/* 手写签收 */}
             {(w.status === "in_transit" || w.status === "arrived") && (
-              <div style={{ borderTop: "1px solid var(--line)", padding: "16px 20px", background: "rgba(0,0,0,0.01)" }}>
+              <div style={{ borderTop: "1px solid var(--line)", padding: "16px 20px", background: "var(--panel-2)" }}>
                 <div className="muted small" style={{ marginBottom: 8, fontWeight: "bold" }}>现场签收</div>
                 <input className="search" style={{ width: "100%", marginBottom: 10 }} placeholder="输入实际提货/签收人姓名" value={signatory} onChange={(e) => setSignatory(e.target.value)} />
                 <div style={{ background: "var(--panel)", borderRadius: 8, border: "1px dashed var(--line)", overflow: "hidden" }}>

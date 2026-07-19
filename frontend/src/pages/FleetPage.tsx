@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { apiGet, apiUpload } from "../api/client";
+import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { CarrierCenter } from "../components/CarrierCenter";
 import { DataTable, type DataColumn } from "../components/DataTable";
@@ -112,7 +113,7 @@ const customerColumns: DataColumn<Customer>[] = [
   { key: "name", header: "客户名称", width: 160, sortValue: (c) => c.name, exportValue: (c) => c.name, render: (c) => c.name },
   { key: "contact", header: "联系人", width: 100, sortValue: (c) => c.contact_name || "", exportValue: (c) => c.contact_name || "", render: (c) => c.contact_name || "-" },
   { key: "phone", header: "电话", width: 130, sortValue: (c) => c.contact_phone || "", exportValue: (c) => c.contact_phone || "", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
-  { key: "credit", header: "授信额度", width: 120, align: "right", sortValue: (c) => Number(c.credit_limit) || 0, exportValue: (c) => Number(c.credit_limit) || 0, render: (c) => Number(c.credit_limit) > 0 ? `¥${Number(c.credit_limit).toLocaleString()}` : "不限" },
+  { key: "credit", header: "授信额度", width: 120, align: "right", sortValue: (c) => Number(c.credit_limit) || 0, exportValue: (c) => Number(c.credit_limit) || 0, render: (c) => Number(c.credit_limit) > 0 ? fmtMoney(c.credit_limit) : "不限" },
   { key: "days", header: "账期(天)", width: 90, align: "right", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => c.credit_days ?? "", render: (c) => c.credit_days },
   { key: "active", header: "状态", width: 80, sortValue: (c) => (c.is_active ? "1" : "0"), exportValue: (c) => (c.is_active ? "启用" : "停用"), render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
 ];

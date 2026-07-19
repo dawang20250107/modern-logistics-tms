@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { apiGet, apiPatch, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
+import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
@@ -297,9 +298,9 @@ export function WaybillsPage() {
       key: "channel", header: "通道", width: 100, sortValue: (w) => w.channel || "", exportValue: (w) => w.channel || "",
       render: (w) => w.channel ? <StatusTag kind="channel" value={w.channel} title={w.dispatch_type_label} suffix={w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""} /> : <span className="muted">—</span>,
     },
-    { key: "receivable", header: "应收", width: 100, align: "right", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{w.receivable_amount ? `¥${w.receivable_amount.toLocaleString()}` : "—"}</> },
-    { key: "payable", header: "应付/成本", width: 110, align: "right", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{w.payable_amount ? `¥${w.payable_amount.toLocaleString()}` : "—"}</> },
-    { key: "cod", header: "代收货款", width: 110, align: "right", sortValue: (w) => Number(w.cod_amount) || 0, exportValue: (w) => Number(w.cod_amount) || 0, render: (w) => { const cod = Number(w.cod_amount) || 0; return cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>¥{cod.toLocaleString()}</span> : <>—</>; } },
+    { key: "receivable", header: "应收", width: 100, align: "right", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{w.receivable_amount ? fmtMoney(w.receivable_amount) : "—"}</> },
+    { key: "payable", header: "应付/成本", width: 110, align: "right", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{w.payable_amount ? fmtMoney(w.payable_amount) : "—"}</> },
+    { key: "cod", header: "代收货款", width: 110, align: "right", sortValue: (w) => Number(w.cod_amount) || 0, exportValue: (w) => Number(w.cod_amount) || 0, render: (w) => { const cod = Number(w.cod_amount) || 0; return cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>{fmtMoney(cod)}</span> : <>—</>; } },
     { key: "receipt", header: "回单", width: 90, sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <StatusTag kind="receipt" value={w.receipt_status} /> },
     { key: "status", header: "状态", width: 100, sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <StatusTag kind="waybill" value={w.status} /> },
     {
@@ -446,7 +447,7 @@ export function WaybillsPage() {
           <button onClick={() => handleAction("track", contextMenu.waybill)}><span>在途追踪</span></button>
           <div className="context-divider"></div>
           <button disabled={openContract.isPending} onClick={() => handleAction("print", contextMenu.waybill)}>
-            <span>🖨️</span> 查看合同/回单 PDF
+            <span>查看合同/回单 PDF</span>
           </button>
           <div className="context-divider"></div>
           <button disabled={voidWaybill.isPending} onClick={() => handleAction("cancel", contextMenu.waybill)} style={{ color: "var(--red)" }}>
@@ -469,7 +470,7 @@ export function WaybillsPage() {
             <div className="wb-drawer-body">
               <div className="stack" style={{ gap: 14 }}>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span className="tag tag-info">{STATUS_LABEL[drawerWaybill.status] ?? drawerWaybill.status}</span>
+                  <StatusTag kind="waybill" value={drawerWaybill.status} />
                   {drawerWaybill.channel && (
                     <span className={`tag ${CHANNEL_TAG[drawerWaybill.channel] ?? "tag-none"}`}>
                       {drawerWaybill.channel}{drawerWaybill.channel === "网货" && drawerWaybill.platform_name ? `·${drawerWaybill.platform_name}` : ""}
@@ -490,9 +491,9 @@ export function WaybillsPage() {
 
                 <div className="section-label">费用</div>
                 <div className="kv">
-                  <div><span>应收</span><b className="num">{drawerWaybill.receivable_amount ? `¥${drawerWaybill.receivable_amount.toLocaleString()}` : "—"}</b></div>
-                  <div><span>应付 / 成本</span><b className="num">{drawerWaybill.payable_amount ? `¥${drawerWaybill.payable_amount.toLocaleString()}` : "—"}</b></div>
-                  <div><span>代收货款</span><b className="num" style={{ color: Number(drawerWaybill.cod_amount) > 0 ? "var(--amber)" : undefined }}>{Number(drawerWaybill.cod_amount) > 0 ? `¥${Number(drawerWaybill.cod_amount).toLocaleString()}` : "—"}</b></div>
+                  <div><span>应收</span><b className="num">{drawerWaybill.receivable_amount ? fmtMoney(drawerWaybill.receivable_amount) : "—"}</b></div>
+                  <div><span>应付 / 成本</span><b className="num">{drawerWaybill.payable_amount ? fmtMoney(drawerWaybill.payable_amount) : "—"}</b></div>
+                  <div><span>代收货款</span><b className="num" style={{ color: Number(drawerWaybill.cod_amount) > 0 ? "var(--amber)" : undefined }}>{Number(drawerWaybill.cod_amount) > 0 ? fmtMoney(drawerWaybill.cod_amount) : "—"}</b></div>
                 </div>
 
                 <div className="section-label">单票财务卡</div>

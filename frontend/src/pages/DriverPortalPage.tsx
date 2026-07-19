@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { API_BASE_URL } from "../api/client";
+import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { StateView } from "../components/StateView";
+import { StatusTag } from "../components/StatusTag";
 
 interface Reminder { id: string; title: string; content: string; level?: string; ack_required: boolean; waybill_no: string }
 
@@ -218,14 +220,14 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
           <b style={{ fontSize: 16 }}>{wb.origin || "?"} → {wb.destination || "?"}</b>
           <span className="muted mono" style={{ fontSize: 12 }}>{wb.waybill_no}</span>
         </div>
-        <span className="tag tag-info">{wb.status_label}</span>
+        <StatusTag kind="waybill" value={wb.status} title={wb.status_label} />
       </div>
 
       {/* 地址区 */}
       <div className="drv-addr">
         {wb.pickup_address && <div><span className="drv-dot drv-dot-o" />装：{wb.pickup_address}</div>}
         {wb.delivery_address && <div><span className="drv-dot drv-dot-d" />卸：{wb.delivery_address}</div>}
-        {wb.cod_amount > 0 && <div className="drv-cod">⚠ 需代收货款 ¥{wb.cod_amount.toLocaleString()}，请向收货人收齐后确认</div>}
+        {wb.cod_amount > 0 && <div className="drv-cod">需代收货款 {fmtMoney(wb.cod_amount)}，请向收货人收齐后确认</div>}
       </div>
 
       {/* 下一步：单主按钮（拍照打卡） */}

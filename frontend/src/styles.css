@@ -563,7 +563,6 @@ select {
 .wb-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px; border-bottom: 1px solid var(--line); }
 .wb-no { font-size: 20px; font-weight: 700; margin: 4px 0; letter-spacing: -0.02em; font-variant-numeric: tabular-nums slashed-zero; }
 .wb-status { display: flex; gap: 10px; align-items: center; }
-.status-pill { background: var(--accent-weak); color: var(--accent); padding: 3px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1px solid var(--accent-weak-2); }
 .wb-actions { display: flex; gap: 10px; padding: 14px 18px; flex-wrap: wrap; align-items: center; }
 .wb-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; align-items: start; }
 

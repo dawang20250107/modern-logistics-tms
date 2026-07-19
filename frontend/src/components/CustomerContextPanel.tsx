@@ -2,12 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { apiGet } from "../api/client";
+import { fmtMoney } from "../api/format";
 import type { CustomerContext } from "../api/types";
 import { StatusTag } from "./StatusTag";
-
-function money(n: number): string {
-  return `¥${Math.round(n).toLocaleString()}`;
-}
 
 // 客服工作台：选中客户即带出上下文（账期/授信/常用线路地址/未完成·异常·回单未返）
 export function CustomerContextPanel({ customerId }: { customerId: string }) {
@@ -48,7 +45,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
         <div className="ctx-sec">
           <div className="muted small" style={{ marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
             <span>授信占用</span>
-            <span style={{ color: cr.over_limit ? "var(--red)" : "var(--ink-2)" }}>{money(cr.outstanding)} / {money(cr.limit)}</span>
+            <span style={{ color: cr.over_limit ? "var(--red)" : "var(--ink-2)" }}>{fmtMoney(cr.outstanding)} / {fmtMoney(cr.limit)}</span>
           </div>
           <div style={{ height: 6, borderRadius: 4, background: "var(--panel-3)", overflow: "hidden" }}>
             <div style={{ width: `${Math.min((cr.used_pct ?? 0) * 100, 100)}%`, height: "100%", background: cr.over_limit ? "var(--red)" : "var(--accent)" }} />

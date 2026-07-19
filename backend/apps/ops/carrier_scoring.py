@@ -84,6 +84,37 @@ def carrier_performance(carrier, origin: str, destination: str, *, days: int = 9
     }
 
 
+def frequent_routes(carrier, *, days: int = 90, top: int = 5) -> list[dict]:
+    """从运单历史统计承运商常跑线路（起点→终点 + 成交票数）。"""
+    from django.db.models import Count
+
+    from .models import Waybill
+
+    since = timezone.now() - timedelta(days=days)
+    rows = (
+        Waybill.objects.filter(carrier=carrier, created_at__gte=since)
+        .exclude(status="voided").exclude(origin="").exclude(destination="")
+        .values("origin", "destination")
+        .annotate(deals=Count("id")).order_by("-deals")[:top]
+    )
+    return [{"origin": r["origin"], "destination": r["destination"], "deals": r["deals"]} for r in rows]
+
+
+def lane_price_for(carrier, origin: str, destination: str):
+    """线路价库中该承运商在此线路的报价（优先推荐/常用），无则 None。"""
+    if not (origin and destination):
+        return None
+    from apps.masterdata.models import CarrierLanePrice
+
+    return (
+        CarrierLanePrice.objects.filter(
+            carrier=carrier, origin_city=origin, dest_city=destination, is_active=True
+        )
+        .order_by("-is_recommended", "-is_preferred", "standard_price")
+        .first()
+    )
+
+
 def _score(perf: dict, price_pos: float) -> tuple[int, dict]:
     """把经营表现 + 报价位置(0..1，越高越便宜)折算为 0-100 综合分。"""
     parts = {
@@ -152,13 +183,21 @@ def score_carriers(obj, *, top: int = 6, days: int = 90) -> list[dict]:
     for carrier in Carrier.objects.filter(is_active=True, blacklisted=False):
         if carrier.dispatch_block_reason():
             continue
-        rules = PricingRule.objects.filter(
-            is_active=True, price_type=PricingRule.PRICE_TYPE_COST
-        ).filter(Q(carrier=carrier) | Q(carrier__isnull=True))
-        prices = [rule.quote(weight).get("amount", 0) for rule in rules]
-        quote = float(min(prices)) if prices else None
+        # 报价优先取线路价库（标准价），无则回退成本报价规则
+        lane = lane_price_for(carrier, origin, destination)
+        if lane and lane.standard_price:
+            quote = float(lane.standard_price)
+        else:
+            rules = PricingRule.objects.filter(
+                is_active=True, price_type=PricingRule.PRICE_TYPE_COST
+            ).filter(Q(carrier=carrier) | Q(carrier__isnull=True))
+            prices = [rule.quote(weight).get("amount", 0) for rule in rules]
+            quote = float(min(prices)) if prices else None
         perf = carrier_performance(carrier, origin, destination, days=days)
-        candidates.append({"carrier": carrier, "quote": quote, "perf": perf})
+        # 线路价库最近成交价可补历史成交价的空缺
+        if perf["recent_deal_price"] is None and lane and lane.last_deal_price:
+            perf["recent_deal_price"] = float(lane.last_deal_price)
+        candidates.append({"carrier": carrier, "quote": quote, "perf": perf, "lane": lane})
 
     if not candidates:
         return []
@@ -169,7 +208,7 @@ def score_carriers(obj, *, top: int = 6, days: int = 90) -> list[dict]:
 
     rows = []
     for c in candidates:
-        carrier, quote, perf = c["carrier"], c["quote"], c["perf"]
+        carrier, quote, perf, lane = c["carrier"], c["quote"], c["perf"], c["lane"]
         # 报价位置：越便宜分越高；无报价给中性 0.5
         if quote is None or hi == lo:
             price_pos = 0.5
@@ -186,6 +225,8 @@ def score_carriers(obj, *, top: int = 6, days: int = 90) -> list[dict]:
             "carrier": carrier.name,
             "carrier_grade": getattr(carrier, "grade", "B"),
             "quote": quote,
+            "from_lane_price": bool(lane and lane.standard_price),
+            "lane_preferred": bool(lane and (lane.is_recommended or lane.is_preferred)),
             "recent_deal_price": perf["recent_deal_price"],
             "suggested_price_band": price_band,
             "deals": perf["deals"],

@@ -10,9 +10,10 @@ from rest_framework.views import APIView
 from apps.core.exceptions import AppError
 from apps.iam.permissions import HasPermission
 
-from .models import B2BPartner, Carrier, Customer, Driver, Route, Vehicle
+from .models import B2BPartner, Carrier, CarrierLanePrice, Customer, Driver, Route, Vehicle
 from .serializers import (
     B2BPartnerSerializer,
+    CarrierLanePriceSerializer,
     CarrierSerializer,
     CustomerSerializer,
     DriverSerializer,
@@ -47,9 +48,21 @@ class CarrierViewSet(viewsets.ModelViewSet):
         "partial_update": "carrier.manage", "destroy": "carrier.manage",
         "blacklist": "carrier.manage",
     }
-    search_fields = ["code", "name", "contact_phone"]
-    filterset_fields = ["is_active", "grade", "blacklisted"]
+    search_fields = ["code", "name", "contact_phone", "city"]
+    filterset_fields = ["is_active", "grade", "blacklisted", "carrier_type"]
     ordering_fields = ["code", "name", "grade", "created_at"]
+
+    @action(detail=True, methods=["get"], url_path="performance")
+    def performance(self, request, pk=None):
+        """承运商经营表现 + 常跑线路（可选 origin/destination 聚焦本线路准班/异常）。"""
+        from apps.ops.carrier_scoring import carrier_performance, frequent_routes
+
+        carrier = self.get_object()
+        origin = request.query_params.get("origin", "")
+        destination = request.query_params.get("destination", "")
+        perf = carrier_performance(carrier, origin, destination)
+        perf["frequent_routes"] = frequent_routes(carrier)
+        return Response(perf)
 
     @action(detail=True, methods=["post"], url_path="blacklist")
     def blacklist(self, request, pk=None):
@@ -63,6 +76,22 @@ class CarrierViewSet(viewsets.ModelViewSet):
         carrier.blacklist_reason = reason if blacklisted else ""
         carrier.save(update_fields=["blacklisted", "blacklist_reason", "updated_at"])
         return Response(self.get_serializer(carrier).data)
+
+
+class CarrierLanePriceViewSet(viewsets.ModelViewSet):
+    """线路承运商价库：起点→终点 找谁、多少钱。写受 carrier.manage 约束。"""
+
+    queryset = CarrierLanePrice.objects.select_related("carrier").all()
+    serializer_class = CarrierLanePriceSerializer
+    permission_classes = [IsAuthenticated, HasPermission]
+    required_permissions = {
+        "list": "carrier.view", "retrieve": "carrier.view",
+        "create": "carrier.manage", "update": "carrier.manage",
+        "partial_update": "carrier.manage", "destroy": "carrier.manage",
+    }
+    search_fields = ["origin_city", "dest_city", "carrier__name", "vehicle_type"]
+    filterset_fields = ["origin_city", "dest_city", "carrier", "is_active", "is_recommended", "is_preferred"]
+    ordering_fields = ["origin_city", "dest_city", "standard_price", "created_at"]
 
 
 class VehicleViewSet(viewsets.ModelViewSet):

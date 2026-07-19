@@ -1,6 +1,9 @@
+from datetime import timedelta
+
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import B2BPartner, Carrier, Customer, Driver, DriverCredential, Route, Vehicle
+from .models import B2BPartner, Carrier, CarrierLanePrice, Customer, Driver, DriverCredential, Route, Vehicle
 
 
 def _is_list(serializer) -> bool:
@@ -30,21 +33,61 @@ class CustomerSerializer(serializers.ModelSerializer):
 
 class CarrierSerializer(serializers.ModelSerializer):
     grade_label = serializers.CharField(source="get_grade_display", read_only=True, default="")
+    carrier_type_label = serializers.CharField(source="get_carrier_type_display", read_only=True, default="")
     dispatch_blocked = serializers.SerializerMethodField()
+    expiry_alerts = serializers.SerializerMethodField()
+    performance = serializers.SerializerMethodField()
 
     class Meta:
         model = Carrier
         fields = [
-            "id", "code", "name", "contact_name", "contact_phone", "settlement_type", "is_active",
+            "id", "code", "name", "carrier_type", "carrier_type_label",
+            "contact_name", "contact_phone", "city", "service_area", "settlement_type", "is_active",
             "grade", "grade_label", "blacklisted", "blacklist_reason",
-            "business_license_no", "qualification_expiry",
+            "business_license_no", "transport_license_no", "qualification_expiry",
+            "contract_expiry", "insurance_expiry", "tax_no",
             "credit_limit", "credit_days", "billing_day",
-            "dispatch_blocked",
+            "dispatch_blocked", "expiry_alerts", "performance",
         ]
 
     def get_dispatch_blocked(self, obj) -> str:
         """当前是否因风控不可派单（黑名单/停用/资质过期）；可派单为空串。"""
         return obj.dispatch_block_reason()
+
+    def get_expiry_alerts(self, obj) -> list:
+        """资质/合同/保险到期预警（今日起 30 天内到期或已过期）。"""
+        today = timezone.localdate()
+        soon = today + timedelta(days=30)
+        alerts = []
+        for field, label in [
+            ("qualification_expiry", "承运资质"), ("contract_expiry", "合作合同"), ("insurance_expiry", "承运人责任险"),
+        ]:
+            d = getattr(obj, field, None)
+            if d and d <= soon:
+                alerts.append({"field": field, "label": label, "date": d.isoformat(), "expired": d < today})
+        return alerts
+
+    def get_performance(self, obj) -> dict | None:
+        # 经营表现聚合较重，仅详情页计算，避免列表 N+1
+        if _is_list(self):
+            return None
+        from apps.ops.carrier_scoring import carrier_performance, frequent_routes
+
+        perf = carrier_performance(obj, "", "")
+        perf["frequent_routes"] = frequent_routes(obj)
+        return perf
+
+
+class CarrierLanePriceSerializer(serializers.ModelSerializer):
+    carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")
+
+    class Meta:
+        model = CarrierLanePrice
+        fields = [
+            "id", "carrier", "carrier_name", "origin_city", "dest_city", "vehicle_type", "vehicle_length_m",
+            "standard_price", "min_price", "max_price", "last_deal_price",
+            "effective_from", "effective_to", "is_preferred", "is_recommended", "note", "is_active",
+        ]
 
 
 class VehicleSerializer(serializers.ModelSerializer):

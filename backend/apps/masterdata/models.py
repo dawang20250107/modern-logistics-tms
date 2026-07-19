@@ -39,10 +39,28 @@ class Carrier(BaseModel, SoftDeleteModel):
         ("D", "D · 高风险"),
     ]
 
+    # 承运商类型：外协为主的 B2B 业务，主力是个体/公司车队与网货平台
+    TYPE_OWNER_FLEET = "owner_fleet"    # 个体车队（车老板）
+    TYPE_COMPANY_FLEET = "company_fleet"  # 公司车队
+    TYPE_PLATFORM = "platform"          # 网货平台
+    TYPE_TEMPORARY = "temporary"        # 临时承运商
+    CARRIER_TYPE_CHOICES = [
+        (TYPE_OWNER_FLEET, "个体车队"),
+        (TYPE_COMPANY_FLEET, "公司车队"),
+        (TYPE_PLATFORM, "网货平台"),
+        (TYPE_TEMPORARY, "临时承运商"),
+    ]
+
     code = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=120)
+    carrier_type = models.CharField(
+        max_length=16, choices=CARRIER_TYPE_CHOICES, default=TYPE_OWNER_FLEET, db_index=True,
+        help_text="个体车队/公司车队/网货平台/临时承运商",
+    )
     contact_name = models.CharField(max_length=64, blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
+    city = models.CharField(max_length=64, blank=True, help_text="所在城市")
+    service_area = models.CharField(max_length=255, blank=True, help_text="服务区域/常跑区域，逗号分隔")
     settlement_type = models.CharField(max_length=32, blank=True)
     is_active = models.BooleanField(default=True)
 
@@ -53,11 +71,15 @@ class Carrier(BaseModel, SoftDeleteModel):
     blacklisted = models.BooleanField(default=False, help_text="拉黑后不可被派单")
     blacklist_reason = models.CharField(max_length=255, blank=True)
 
-    # ── 承运资质与到期（营业执照 / 道路运输经营许可）──
+    # ── 承运资质与到期（营业执照 / 道路运输经营许可 / 合同 / 保险）──
     business_license_no = models.CharField(max_length=64, blank=True, help_text="营业执照号")
+    transport_license_no = models.CharField(max_length=64, blank=True, help_text="道路运输经营许可证号")
     qualification_expiry = models.DateField(
         null=True, blank=True, help_text="承运资质/经营许可到期日；过期不可派单"
     )
+    contract_expiry = models.DateField(null=True, blank=True, help_text="合作合同有效期至")
+    insurance_expiry = models.DateField(null=True, blank=True, help_text="承运人责任险到期日")
+    tax_no = models.CharField(max_length=64, blank=True, help_text="开票税号")
 
     # ── 账期与信用（应付侧，镜像客户；供对账与结算参考）──
     credit_limit = models.DecimalField(
@@ -316,3 +338,39 @@ class B2BPartner(BaseModel, SoftDeleteModel):
 
     def __str__(self) -> str:
         return f"[{self.get_partner_type_display()}] {self.code} {self.name}"
+
+
+class CarrierLanePrice(BaseModel, SoftDeleteModel):
+    """线路承运商价库：这条线路，找谁，多少钱，靠不靠谱。
+
+    B2B 外协为主的调度核心资产——调度员按 起点→终点 直接查到候选承运商与标准/最近成交价，
+    不再靠脑子记价、记熟车。
+    """
+
+    carrier = models.ForeignKey(Carrier, on_delete=models.CASCADE, related_name="lane_prices")
+    origin_city = models.CharField(max_length=64, db_index=True, help_text="起点城市")
+    dest_city = models.CharField(max_length=64, db_index=True, help_text="终点城市")
+    vehicle_type = models.CharField(max_length=64, blank=True, help_text="车型，如 高栏/厢式")
+    vehicle_length_m = models.DecimalField(max_digits=4, decimal_places=1, default=0, help_text="车长(米)")
+
+    standard_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="标准价")
+    min_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="最低价")
+    max_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="最高价")
+    last_deal_price = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="最近成交价")
+
+    effective_from = models.DateField(null=True, blank=True, help_text="有效期起")
+    effective_to = models.DateField(null=True, blank=True, help_text="有效期止")
+    is_preferred = models.BooleanField(default=False, help_text="是否常用")
+    is_recommended = models.BooleanField(default=False, help_text="是否推荐")
+    note = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "md_carrier_lane_price"
+        ordering = ["origin_city", "dest_city", "standard_price"]
+        indexes = [models.Index(fields=["origin_city", "dest_city", "is_active"])]
+        verbose_name = "线路承运商价库"
+        verbose_name_plural = "线路承运商价库"
+
+    def __str__(self) -> str:
+        return f"{self.origin_city}→{self.dest_city} {self.carrier_id} ¥{self.standard_price}"

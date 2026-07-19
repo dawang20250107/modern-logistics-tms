@@ -119,3 +119,59 @@ def test_new_carrier_without_history_needs_approval():
     rec = recommend_dispatch_for_order(_order())["recommendation"]
     assert rec is not None
     assert rec["needs_approval"] is True
+
+
+@pytest.mark.django_db
+def test_lane_price_library_drives_quote_and_frequent_routes():
+    """线路价库标准价作为调度报价来源；常跑线路由历史聚合。"""
+    from apps.masterdata.models import CarrierLanePrice
+    from apps.ops.carrier_scoring import frequent_routes, score_carriers
+
+    c = _carrier("C-LANE", "价库车队")
+    CarrierLanePrice.objects.create(
+        carrier=c, origin_city="上海", dest_city="杭州", vehicle_type="高栏",
+        standard_price=1888, last_deal_price=1850, is_recommended=True,
+    )
+    for _ in range(4):
+        _wb(c, "上海", "杭州", on_time=True, payable=1850)
+
+    rows = score_carriers(_order())
+    row = next(r for r in rows if r["carrier"] == "价库车队")
+    assert row["quote"] == 1888.0  # 取自线路价库标准价
+    assert row["from_lane_price"] is True
+    assert row["lane_preferred"] is True
+
+    routes = frequent_routes(c)
+    assert routes and routes[0]["origin"] == "上海" and routes[0]["destination"] == "杭州"
+    assert routes[0]["deals"] == 4
+
+
+@pytest.mark.django_db
+def test_carrier_endpoints_expose_new_profile_and_performance():
+    """承运商序列化暴露类型/城市/到期预警；performance 端点返回经营表现。"""
+    from django.contrib.auth import get_user_model
+    from rest_framework.test import APIClient
+
+    from apps.masterdata.models import Carrier
+
+    admin = get_user_model().objects.create_superuser(username="cadmin", password="pw-strong-123")
+    client = APIClient()
+    tok = client.post("/api/v1/auth/token", {"username": "cadmin", "password": "pw-strong-123"}, format="json")
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tok.json()['data']['access']}")
+
+    c = Carrier.objects.create(
+        code="C-PROF", name="档案车队", carrier_type=Carrier.TYPE_COMPANY_FLEET, city="上海",
+        insurance_expiry=timezone.localdate() - timedelta(days=2),  # 已过期 → 预警
+    )
+    for _ in range(3):
+        _wb(c, "上海", "杭州", on_time=True)
+
+    detail = client.get(f"/api/v1/carriers/{c.id}").json()["data"]
+    assert detail["carrier_type_label"] == "公司车队"
+    assert detail["city"] == "上海"
+    assert any(a["field"] == "insurance_expiry" and a["expired"] for a in detail["expiry_alerts"])
+    assert detail["performance"]["deals"] == 3
+
+    perf = client.get(f"/api/v1/carriers/{c.id}/performance").json()["data"]
+    assert perf["deals"] == 3
+    assert perf["frequent_routes"][0]["destination"] == "杭州"

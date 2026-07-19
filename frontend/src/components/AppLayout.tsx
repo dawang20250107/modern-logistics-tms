@@ -131,7 +131,10 @@ export function AppLayout() {
           </div>
           <div className="topbar-user">
             <NotificationBell />
-            <span>{user?.nickname || user?.username}</span>
+            <NavLink to="/profile" className="topbar-account" title="个人中心">
+              <span className="topbar-avatar">{((user?.nickname || user?.username || "?").trim()[0] ?? "?").toUpperCase()}</span>
+              <span className="topbar-account-name">{user?.nickname || user?.username}</span>
+            </NavLink>
             <button className="btn-ghost" onClick={logout}>
               退出
             </button>

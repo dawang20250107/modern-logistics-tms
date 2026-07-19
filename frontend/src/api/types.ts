@@ -5,11 +5,26 @@ export interface CurrentUser {
   username: string;
   nickname: string;
   phone: string;
+  email: string;
   is_staff: boolean;
   is_superuser: boolean;
   organization_id: string | null;
+  organization_name: string | null;
+  date_joined: string | null;
+  last_login: string | null;
   roles: string[];
+  role_names: string[];
   permissions: string[];
+}
+
+export interface LoginAttemptRow {
+  id: string;
+  username: string;
+  success: boolean;
+  result: string;
+  ip: string | null;
+  user_agent: string;
+  created_at: string;
 }
 
 export interface Contract {

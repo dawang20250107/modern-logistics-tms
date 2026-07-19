@@ -5,6 +5,8 @@ from .models import (
     ExpenseRecord,
     PaymentRequest,
     PricingRule,
+    Statement,
+    StatementPayment,
     Webhook,
     WebhookDelivery,
 )
@@ -49,3 +51,17 @@ class WebhookAdmin(admin.ModelAdmin):
 class WebhookDeliveryAdmin(admin.ModelAdmin):
     list_display = ("webhook", "event_type", "status", "response_code", "attempts", "created_at")
     list_filter = ("status", "event_type")
+
+
+@admin.register(Statement)
+class StatementAdmin(admin.ModelAdmin):
+    list_display = ("statement_no", "direction", "counterparty_name", "total_amount", "settled_amount", "status", "due_date")
+    list_filter = ("direction", "status")
+    search_fields = ("statement_no", "counterparty_name")
+
+
+@admin.register(StatementPayment)
+class StatementPaymentAdmin(admin.ModelAdmin):
+    list_display = ("statement", "amount", "method", "paid_at", "reference_no")
+    list_filter = ("method",)
+    raw_id_fields = ("statement",)

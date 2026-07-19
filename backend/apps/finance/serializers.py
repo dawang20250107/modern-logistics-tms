@@ -9,6 +9,7 @@ from .models import (
     PricingRule,
     Statement,
     StatementLine,
+    StatementPayment,
     Webhook,
     WebhookDelivery,
 )
@@ -112,18 +113,36 @@ class StatementLineSerializer(serializers.ModelSerializer):
         ]
 
 
+class StatementPaymentSerializer(serializers.ModelSerializer):
+    method_label = serializers.CharField(source="get_method_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
+
+    class Meta:
+        model = StatementPayment
+        fields = [
+            "id", "statement", "amount", "method", "method_label", "paid_at",
+            "reference_no", "remark", "created_by_name", "created_at",
+        ]
+        read_only_fields = ["created_at"]
+
+
 class StatementSerializer(serializers.ModelSerializer):
     diff = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    outstanding = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
     lines = StatementLineSerializer(many=True, read_only=True)
 
     class Meta:
         model = Statement
         fields = [
             "id", "statement_no", "direction", "counterparty_type", "counterparty_id", "counterparty_name",
-            "period_start", "period_end", "total_amount", "item_count", "external_total", "diff",
-            "status", "confirmed_at", "audited_at", "created_at", "lines",
+            "period_start", "period_end", "due_date", "total_amount", "item_count", "external_total", "diff",
+            "settled_amount", "outstanding", "settled_at", "status", "status_label",
+            "confirmed_at", "audited_at", "created_at", "lines",
         ]
-        read_only_fields = ["status", "total_amount", "item_count", "confirmed_at", "audited_at"]
+        read_only_fields = [
+            "status", "total_amount", "item_count", "settled_amount", "settled_at", "confirmed_at", "audited_at",
+        ]
 
 
 class StatementListSerializer(StatementSerializer):

@@ -225,6 +225,11 @@ def generate_costs(waybill) -> dict:
                     )
                     result["payable"] += 1
 
+    # 回填发生时间：以运单建单时间为费用发生时点，使对账（按账期归集）与账龄可正确纳入本批费用。
+    waybill.expenses.filter(source_system="pricing", occurred_at__isnull=True).update(
+        occurred_at=waybill.created_at
+    )
+
     emit_event("cost.generated", {"waybill_no": waybill.waybill_no, "generated": result})
     return result
 
@@ -256,7 +261,7 @@ def emit_event(event_type: str, payload: dict) -> int:
     return count
 
 
-def generate_statement(*, direction, counterparty_type, counterparty_id, start, end, external_total=0):
+def generate_statement(*, direction, counterparty_type, counterparty_id, start, end, external_total=0, due_date=None):
     """按客户(应收)/承运商(应付)在账期内归集费用，生成对账单与明细。"""
 
 
@@ -281,6 +286,7 @@ def generate_statement(*, direction, counterparty_type, counterparty_id, start, 
         counterparty_name=name,
         period_start=start,
         period_end=end,
+        due_date=due_date or None,
         total_amount=total,
         item_count=len(records),
         external_total=external_total or 0,
@@ -433,6 +439,130 @@ def confirm_statement(statement, *, operator=None):
     statement.confirmed_at = timezone.now()
     statement.save(update_fields=["status", "confirmed_by", "confirmed_at", "updated_at"])
     return statement
+
+
+def settle_statement(statement, *, amount, method="bank", paid_at=None, reference_no="", remark="", operator=None):
+    """收付款核销：对已确认/部分结算的对账单登记一笔实际收/付款。
+
+    支持分次部分核销：累加至 settled_amount，并驱动单据状态
+    confirmed → partial（未结清） → settled（已结清，settled_amount ≥ total_amount）。
+    金额需 >0 且不超过未结余额（留 0.01 容差防浮点）。调用方需在事务内 select_for_update 锁行。
+    """
+    from django.utils import timezone
+
+    from apps.core.exceptions import AppError
+
+    from .models import Statement, StatementPayment
+
+    if statement.status not in (Statement.STATUS_CONFIRMED, Statement.STATUS_PARTIAL):
+        raise AppError("INVALID_STATEMENT_STATUS", "仅已确认或部分结算的对账单可登记收付款。", status=409)
+    amt = Decimal(str(amount or 0))
+    if amt <= 0:
+        raise AppError("INVALID_AMOUNT", "核销金额需大于 0。", status=400)
+    outstanding = statement.total_amount - statement.settled_amount
+    if amt > outstanding + Decimal("0.01"):
+        raise AppError("AMOUNT_EXCEEDS_OUTSTANDING", f"核销金额 {amt} 超过未结余额 {outstanding}。", status=400)
+
+    payment = StatementPayment.objects.create(
+        statement=statement,
+        amount=amt,
+        method=method or "bank",
+        paid_at=paid_at or timezone.localdate(),
+        reference_no=reference_no or "",
+        remark=remark or "",
+        created_by=operator if operator and getattr(operator, "is_authenticated", False) else None,
+    )
+    statement.settled_amount = statement.settled_amount + amt
+    fields = ["settled_amount", "status", "updated_at"]
+    if statement.settled_amount >= statement.total_amount - Decimal("0.01"):
+        statement.status = Statement.STATUS_SETTLED
+        statement.settled_at = timezone.now()
+        fields.append("settled_at")
+    else:
+        statement.status = Statement.STATUS_PARTIAL
+    statement.save(update_fields=fields)
+    emit_event("statement.settled", {
+        "statement_no": statement.statement_no, "amount": float(amt),
+        "settled_amount": float(statement.settled_amount), "status": statement.status,
+    })
+    return payment
+
+
+def statement_overview() -> dict:
+    """对账总览看板：应收/应付的应结·已核销·未结、单据状态分布、逾期敞口、本期新增、Top 对手方。"""
+    from django.db.models import Count, Sum
+    from django.utils import timezone
+
+    from .models import Statement
+
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+
+    def _dir_summary(direction):
+        qs = Statement.objects.filter(direction=direction)
+        agg = qs.aggregate(total=Sum("total_amount"), settled=Sum("settled_amount"), n=Count("id"))
+        total = agg["total"] or Decimal("0")
+        settled = agg["settled"] or Decimal("0")
+        by_status = {row["status"]: row["c"] for row in qs.values("status").annotate(c=Count("id"))}
+        return {
+            "total": float(total),
+            "settled": float(settled),
+            "outstanding": float(total - settled),
+            "count": agg["n"] or 0,
+            "draft": by_status.get(Statement.STATUS_DRAFT, 0),
+            "confirmed": by_status.get(Statement.STATUS_CONFIRMED, 0),
+            "partial": by_status.get(Statement.STATUS_PARTIAL, 0),
+            "settled_count": by_status.get(Statement.STATUS_SETTLED, 0),
+        }
+
+    ar = _dir_summary(Statement.DIRECTION_RECEIVABLE)
+    ap = _dir_summary(Statement.DIRECTION_PAYABLE)
+
+    # 逾期敞口：到期日已过且未结清（含未确认）
+    def _overdue(direction):
+        rows = Statement.objects.filter(
+            direction=direction, due_date__lt=today
+        ).exclude(status=Statement.STATUS_SETTLED)
+        amt = sum((s.total_amount - s.settled_amount for s in rows), Decimal("0"))
+        return {"amount": float(amt), "count": rows.count()}
+
+    overdue = {"receivable": _overdue("receivable"), "payable": _overdue("payable")}
+
+    # 本期（当月）新增
+    this_period = Statement.objects.filter(created_at__date__gte=month_start)
+    period = {
+        "label": today.strftime("%Y-%m"),
+        "count": this_period.count(),
+        "receivable": float(this_period.filter(direction="receivable").aggregate(s=Sum("total_amount"))["s"] or 0),
+        "payable": float(this_period.filter(direction="payable").aggregate(s=Sum("total_amount"))["s"] or 0),
+    }
+
+    # Top 对手方（按未结余额归集，跨账单合并）
+    def _top(direction):
+        rows: dict = {}
+        for s in Statement.objects.filter(direction=direction).exclude(status=Statement.STATUS_SETTLED):
+            out = s.total_amount - s.settled_amount
+            if out <= 0:
+                continue
+            r = rows.setdefault(s.counterparty_id, {"name": s.counterparty_name, "outstanding": Decimal("0"), "count": 0})
+            r["outstanding"] += out
+            r["count"] += 1
+        result = [
+            {"counterparty_id": k, "counterparty_name": v["name"], "outstanding": float(v["outstanding"]), "count": v["count"]}
+            for k, v in rows.items()
+        ]
+        result.sort(key=lambda x: x["outstanding"], reverse=True)
+        return result[:6]
+
+    return {
+        "receivable": ar,
+        "payable": ap,
+        "overdue": overdue,
+        "period": period,
+        "top_receivable": _top("receivable"),
+        "top_payable": _top("payable"),
+        "net_position": round(ar["outstanding"] - ap["outstanding"], 2),
+    }
 
 
 def aging_report(direction: str) -> dict:

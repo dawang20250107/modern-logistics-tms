@@ -52,6 +52,7 @@ class StatementViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewset
             start=data["period_start"],
             end=data["period_end"],
             external_total=data.get("external_total") or 0,
+            due_date=data.get("due_date") or None,
         )
         return Response(StatementSerializer(statement).data, status=201)
 
@@ -61,6 +62,39 @@ class StatementViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewset
 
         statement = confirm_statement(self.get_object(), operator=request.user)
         return Response(StatementSerializer(statement).data)
+
+    @action(detail=True, methods=["post"], url_path="settle")
+    def settle(self, request, pk=None):
+        """收付款核销：登记一笔实际收/付款（支持分次部分核销）。行级锁避免并发超额核销。"""
+        from django.db import transaction
+
+        from .serializers import StatementPaymentSerializer
+        from .services import settle_statement
+
+        data = request.data
+        with transaction.atomic():
+            statement = Statement.objects.select_for_update().get(pk=pk)
+            payment = settle_statement(
+                statement,
+                amount=data.get("amount"),
+                method=data.get("method", "bank"),
+                paid_at=data.get("paid_at") or None,
+                reference_no=data.get("reference_no", ""),
+                remark=data.get("remark", ""),
+                operator=request.user,
+            )
+        return Response(
+            {"payment": StatementPaymentSerializer(payment).data, "statement": StatementSerializer(statement).data},
+            status=201,
+        )
+
+    @action(detail=True, methods=["get"], url_path="payments")
+    def payments(self, request, pk=None):
+        """对账单的收付款核销流水。"""
+        from .serializers import StatementPaymentSerializer
+
+        statement = self.get_object()
+        return Response(StatementPaymentSerializer(statement.payments.all(), many=True).data)
 
     @action(detail=True, methods=["post"], url_path="audit")
     def audit(self, request, pk=None):
@@ -200,6 +234,15 @@ class AgingView(APIView):
         if direction not in (ExpenseRecord.DIRECTION_RECEIVABLE, ExpenseRecord.DIRECTION_PAYABLE):
             raise AppError("INVALID_DIRECTION", "direction 必须是 receivable 或 payable。", status=400)
         return Response(aging_report(direction))
+
+
+class StatementOverviewView(APIView):
+    """对账总览看板：应收/应付敞口、单据状态分布、逾期、本期新增、Top 对手方。"""
+
+    def get(self, request):
+        from .services import statement_overview
+
+        return Response(statement_overview())
 
 
 class FinancialDashboardMetricsView(APIView):

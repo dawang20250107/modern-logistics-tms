@@ -683,14 +683,31 @@ export interface Statement {
   counterparty_name: string;
   period_start: string;
   period_end: string;
+  due_date: string | null;
   total_amount: string;
   item_count: number;
   external_total: string;
   diff: string;
+  settled_amount: string;
+  outstanding: string;
+  settled_at: string | null;
   status: string;
+  status_label?: string;
   audited_at: string | null;
   created_at: string;
   lines?: StatementLine[];
+}
+export interface StatementPayment {
+  id: string;
+  statement: string;
+  amount: string;
+  method: string;
+  method_label: string;
+  paid_at: string;
+  reference_no: string;
+  remark: string;
+  created_by_name: string;
+  created_at: string;
 }
 export interface StatementAuditResult {
   total_lines: number;
@@ -701,8 +718,59 @@ export interface StatementAuditResult {
 export const STATEMENT_STATUS_LABEL: Record<string, string> = {
   draft: "草稿",
   confirmed: "已确认",
+  partial: "部分结算",
   settled: "已结算",
 };
+export const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  bank: "银行转账",
+  cash: "现金",
+  wechat: "微信",
+  alipay: "支付宝",
+  offset: "冲抵/对冲",
+  acceptance: "承兑汇票",
+  other: "其他",
+};
+
+// ── 对账总览 / 账龄 ─────────────────────────────────────
+export interface DirSummary {
+  total: number;
+  settled: number;
+  outstanding: number;
+  count: number;
+  draft: number;
+  confirmed: number;
+  partial: number;
+  settled_count: number;
+}
+export interface TopCounterparty {
+  counterparty_id: string;
+  counterparty_name: string;
+  outstanding: number;
+  count: number;
+}
+export interface StatementOverview {
+  receivable: DirSummary;
+  payable: DirSummary;
+  overdue: { receivable: { amount: number; count: number }; payable: { amount: number; count: number } };
+  period: { label: string; count: number; receivable: number; payable: number };
+  top_receivable: TopCounterparty[];
+  top_payable: TopCounterparty[];
+  net_position: number;
+}
+export interface AgingRow {
+  counterparty_id: string;
+  counterparty_name: string;
+  b0_30: number;
+  b31_60: number;
+  b61_90: number;
+  b90: number;
+  total: number;
+}
+export interface AgingReport {
+  direction: "receivable" | "payable";
+  rows: AgingRow[];
+  totals: { b0_30: number; b31_60: number; b61_90: number; b90: number; total: number };
+}
 
 // ── 车队合规预警 ────────────────────────────────────────
 export type CredSeverity = "expired" | "critical" | "warning";

@@ -343,8 +343,14 @@ class Statement(BaseModel):
 
     STATUS_DRAFT = "draft"
     STATUS_CONFIRMED = "confirmed"
+    STATUS_PARTIAL = "partial"
     STATUS_SETTLED = "settled"
-    STATUS_CHOICES = [(STATUS_DRAFT, "草稿"), (STATUS_CONFIRMED, "已确认"), (STATUS_SETTLED, "已结算")]
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "草稿"),
+        (STATUS_CONFIRMED, "已确认"),
+        (STATUS_PARTIAL, "部分结算"),
+        (STATUS_SETTLED, "已结算"),
+    ]
 
     statement_no = models.CharField(max_length=40, unique=True)
     direction = models.CharField(max_length=16, choices=DIRECTION_CHOICES)
@@ -353,9 +359,13 @@ class Statement(BaseModel):
     counterparty_name = models.CharField(max_length=160, blank=True)
     period_start = models.DateField()
     period_end = models.DateField()
+    due_date = models.DateField(null=True, blank=True, help_text="约定收/付款到期日，用于账龄与逾期判定")
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     item_count = models.IntegerField(default=0)
     external_total = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="对方提供金额，用于差异稽核")
+    # 核销：实际已收/付金额，随 StatementPayment 累加，驱动 draft→confirmed→partial→settled
+    settled_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="累计已收/付款（核销）金额")
+    settled_at = models.DateTimeField(null=True, blank=True, help_text="全额结清时间")
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT)
     confirmed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="confirmed_statements"
@@ -373,6 +383,11 @@ class Statement(BaseModel):
     @property
     def diff(self):
         return self.total_amount - self.external_total
+
+    @property
+    def outstanding(self):
+        """未结余额 = 应结金额 − 已核销金额。"""
+        return self.total_amount - self.settled_amount
 
     def __str__(self) -> str:
         return self.statement_no
@@ -395,3 +410,42 @@ class StatementLine(BaseModel):
     class Meta:
         db_table = "fin_statement_line"
         ordering = ["occurred_at"]
+
+
+class StatementPayment(BaseModel):
+    """收付款核销流水：对账单确认后登记实际收/付款，支持分次部分核销。
+
+    每笔核销累加至 Statement.settled_amount，并驱动单据状态
+    confirmed → partial（部分结算） → settled（已结清）。
+    """
+
+    METHOD_BANK = "bank"
+    METHOD_CHOICES = [
+        (METHOD_BANK, "银行转账"),
+        ("cash", "现金"),
+        ("wechat", "微信"),
+        ("alipay", "支付宝"),
+        ("offset", "冲抵/对冲"),
+        ("acceptance", "承兑汇票"),
+        ("other", "其他"),
+    ]
+
+    statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name="payments")
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    method = models.CharField(max_length=16, choices=METHOD_CHOICES, default=METHOD_BANK)
+    paid_at = models.DateField(help_text="实际收/付款日期")
+    reference_no = models.CharField(max_length=80, blank=True, help_text="银行流水号/凭证号")
+    remark = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="statement_payments"
+    )
+
+    class Meta:
+        db_table = "fin_statement_payment"
+        ordering = ["-paid_at", "-created_at"]
+        indexes = [models.Index(fields=["statement"])]
+        verbose_name = "收付款核销"
+        verbose_name_plural = "收付款核销"
+
+    def __str__(self) -> str:
+        return f"{self.statement.statement_no}:{self.amount}"

@@ -30,3 +30,9 @@ def waybill_no(now) -> str:
 def contract_no(now) -> str:
     day = now.strftime("%Y%m%d")
     return f"HT{day}{next_sequence(f'contract:{day}'):06d}"
+
+
+def batch_no(now) -> str:
+    """派车批次号 PC + 日期 + 6 位日序号（如 PC20260719000001）。"""
+    day = now.strftime("%Y%m%d")
+    return f"PC{day}{next_sequence(f'batch:{day}'):06d}"

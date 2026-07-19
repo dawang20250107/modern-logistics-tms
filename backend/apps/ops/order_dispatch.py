@@ -11,7 +11,8 @@ from apps.core.exceptions import AppError
 from apps.core.redis import publish_event
 
 from .intake import convert_order_to_waybill, record_order_event
-from .models import Order, Waybill
+from .models import DispatchBatch, Order, Waybill
+from .numbering import batch_no as gen_batch_no
 
 # 占用运力的运单状态（视为不可再次派给同一车辆/司机）
 _BUSY_STATUSES = [
@@ -378,6 +379,133 @@ class _LaneNeed:
         self.destination = destination
         self.cargo_weight_ton = weight_ton
         self.cargo_volume_cbm = volume_cbm
+
+
+def _allocate_payable(total, orders, allocation, manual_map=None):
+    """把批次总应付分摊到各订单：按吨占比 / 均摊 / 逐单指定。返回 {order_id: Decimal}。
+
+    末单兜底：把四舍五入误差补到最后一单，保证分摊之和 == 批次总额。
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+
+    ids = [o.id for o in orders]
+    if allocation == DispatchBatch.ALLOC_MANUAL and manual_map:
+        return {oid: Decimal(str(manual_map.get(str(oid), manual_map.get(oid, 0)) or 0)) for oid in ids}
+    total = Decimal(str(total or 0))
+    if total <= 0 or not ids:
+        return {oid: Decimal("0") for oid in ids}
+    weights = [Decimal(str(o.cargo_weight_ton or 0)) for o in orders]
+    wsum = sum(weights)
+    alloc = {}
+    if allocation == DispatchBatch.ALLOC_BY_WEIGHT and wsum > 0:
+        running = Decimal("0")
+        for i, o in enumerate(orders):
+            if i == len(orders) - 1:
+                alloc[o.id] = (total - running)
+            else:
+                part = (total * weights[i] / wsum).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                alloc[o.id] = part
+                running += part
+    else:  # 均摊
+        each = (total / len(ids)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        running = Decimal("0")
+        for i, o in enumerate(orders):
+            alloc[o.id] = (total - running) if i == len(orders) - 1 else each
+            running += each
+    return alloc
+
+
+def batch_dispatch_orders(order_ids, *, carrier_id=None, dispatch_type="third_party",
+                          platform_name="", total_payable=0, allocation="by_weight",
+                          manual_payables=None, note="", operator=None) -> dict:
+    """批量派承运商：多单一次委托同一承运商/网货平台，生成派车批次 + N 张独立运单。
+
+    每个订单仍各转一张运单（独立回单/签收/对账），批次做商务归集与应付分摊。
+    并发/权限完全复用 dispatch_order：非总调度只能批派分派/锁定给自己的单，逐单行锁，
+    已转/已取消/状态不符者自动跳过。
+    """
+    from decimal import Decimal
+
+    from apps.masterdata.models import Carrier
+
+    if dispatch_type not in dict(DispatchBatch.DISPATCH_TYPE_CHOICES):
+        raise AppError("INVALID_BATCH_DISPATCH_TYPE", "批次派单仅支持外包承运商 / 网货平台。", status=400)
+    carrier = None
+    if dispatch_type == "third_party":
+        carrier = Carrier.objects.filter(id=carrier_id).first() if carrier_id else None
+        if carrier is None:
+            raise AppError("CARRIER_REQUIRED", "外包批次需选择承运商。", status=400)
+    elif dispatch_type == "platform" and not platform_name:
+        raise AppError("PLATFORM_REQUIRED", "网货批次需填写平台名称。", status=400)
+
+    ids = list(order_ids or [])
+    if not ids:
+        raise AppError("IDS_REQUIRED", "请选择要批派的订单。", status=400)
+    if len(ids) > 200:
+        raise AppError("BATCH_TOO_LARGE", "单个批次最多 200 单，请分批。", status=400)
+
+    # 预取订单，做归属/状态预筛（真正落库时逐单行锁）
+    prefetched = list(Order.objects.filter(id__in=ids))
+    dispatchable = []
+    skipped = []
+    for o in prefetched:
+        if o.status not in (Order.STATUS_POOLED, Order.STATUS_DISPATCHING, Order.STATUS_CONFIRMED):
+            skipped.append({"order_no": o.order_no, "reason": "状态不可派单"})
+            continue
+        if operator is not None and not is_chief_dispatcher(operator):
+            if getattr(operator, "id", None) not in {o.claimed_by_id, o.assigned_to_id}:
+                skipped.append({"order_no": o.order_no, "reason": "未分派/锁定给你"})
+                continue
+        dispatchable.append(o)
+    if not dispatchable:
+        raise AppError("NO_DISPATCHABLE", "所选订单均不可批派（状态或归属不满足）。", status=409)
+
+    alloc = _allocate_payable(total_payable, dispatchable, allocation, manual_payables)
+
+    batch = DispatchBatch.objects.create(
+        batch_no=gen_batch_no(timezone.now()),
+        dispatch_type=dispatch_type, carrier=carrier, platform_name=platform_name,
+        status=DispatchBatch.STATUS_DISPATCHED, allocation=allocation,
+        total_payable=Decimal(str(total_payable or 0)),
+        note=note or "", created_by=operator if getattr(operator, "id", None) else None,
+    )
+
+    ok, failed = [], []
+    total_weight = Decimal("0")
+    for o in dispatchable:
+        try:
+            waybill = dispatch_order(
+                o, dispatch_type=dispatch_type, carrier=carrier,
+                platform_name=platform_name,
+                agreed_payable_amount=alloc.get(o.id) or None,
+                price_source="batch", price_remark=f"批次 {batch.batch_no} 分摊应付",
+                operator=operator,
+            )
+            waybill.batch = batch
+            waybill.save(update_fields=["batch", "updated_at"])
+            total_weight += Decimal(str(o.cargo_weight_ton or 0))
+            ok.append({"order_no": o.order_no, "waybill_no": waybill.waybill_no,
+                       "payable": float(alloc.get(o.id) or 0),
+                       "customer": o.customer.name if o.customer_id else ""})
+        except AppError as exc:
+            failed.append({"order_no": o.order_no, "reason": exc.message})
+
+    if not ok:
+        # 全部失败：作废空批次，避免留下 0 单批次脏数据
+        batch.delete()
+        raise AppError("BATCH_DISPATCH_FAILED", "批次派单全部失败：" + "；".join(f["reason"] for f in failed), status=409)
+
+    batch.order_count = len(ok)
+    batch.total_weight_ton = total_weight
+    batch.save(update_fields=["order_count", "total_weight_ton", "updated_at"])
+    publish_event("batch_dispatched", {"batch_no": batch.batch_no, "count": len(ok)})
+    return {
+        "batch_no": batch.batch_no, "batch_id": str(batch.id),
+        "carrier": carrier.name if carrier else (platform_name or ""),
+        "dispatch_type": dispatch_type, "allocation": allocation,
+        "total_payable": float(batch.total_payable), "order_count": len(ok),
+        "ok": ok, "failed": failed, "skipped": skipped,
+    }
 
 
 def plan_dispatch_orders(orders) -> dict:

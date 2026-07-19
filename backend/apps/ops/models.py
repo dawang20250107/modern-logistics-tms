@@ -370,6 +370,68 @@ class OrderEvent(BaseModel):
         return f"{self.order_id}:{self.event_type}"
 
 
+class DispatchBatch(BaseModel, OrgScopedModel):
+    """派车批次：一次委托、同一承运商、统一议定应付的商务归集层。
+
+    一批 → N 张独立运单（每票货各自回单/签收/对账），批次只做商务分组与应付归集，
+    不合并运输。支持同客户多单、跨客户多单批量派给同一承运商/网货平台。
+    """
+
+    STATUS_DRAFT = "draft"
+    STATUS_DISPATCHED = "dispatched"
+    STATUS_PARTIAL = "partial"
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "草稿"),
+        (STATUS_DISPATCHED, "已派车"),
+        (STATUS_PARTIAL, "部分完成"),
+        (STATUS_COMPLETED, "已完成"),
+        (STATUS_CANCELLED, "已取消"),
+    ]
+
+    ALLOC_BY_WEIGHT = "by_weight"
+    ALLOC_EVEN = "even"
+    ALLOC_MANUAL = "manual"
+    ALLOC_CHOICES = [
+        (ALLOC_BY_WEIGHT, "按吨占比"),
+        (ALLOC_EVEN, "均摊"),
+        (ALLOC_MANUAL, "逐单指定"),
+    ]
+
+    # 承运通道：批次以外包承运商 / 网货平台为主（自营逐单车辆不同，不走批次）
+    DISPATCH_TYPE_CHOICES = [("third_party", "外包承运商"), ("platform", "网货平台")]
+
+    batch_no = models.CharField(max_length=40, unique=True)
+    dispatch_type = models.CharField(max_length=16, choices=DISPATCH_TYPE_CHOICES, default="third_party")
+    carrier = models.ForeignKey(
+        "masterdata.Carrier", null=True, blank=True, on_delete=models.SET_NULL, related_name="dispatch_batches"
+    )
+    platform_name = models.CharField(max_length=64, blank=True, help_text="网货平台名称，如 满帮/路歌")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DISPATCHED, db_index=True)
+    allocation = models.CharField(max_length=16, choices=ALLOC_CHOICES, default=ALLOC_BY_WEIGHT)
+    total_payable = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="批次总议定应付")
+    order_count = models.IntegerField(default=0)
+    total_weight_ton = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    note = models.CharField(max_length=200, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_batches"
+    )
+
+    class Meta:
+        db_table = "ops_dispatch_batch"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["carrier", "status"]),
+        ]
+        verbose_name = "派车批次"
+        verbose_name_plural = "派车批次"
+
+    def __str__(self) -> str:
+        return self.batch_no
+
+
 class Waybill(BaseModel, OrgScopedModel):
     # 运单状态机
     STATUS_DRAFT = "draft"
@@ -440,6 +502,10 @@ class Waybill(BaseModel, OrgScopedModel):
     )
     carrier = models.ForeignKey(
         "masterdata.Carrier", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
+    )
+    # 派车批次：多单一次委托同一承运商时归集（批次层做统一应付/对账分组）
+    batch = models.ForeignKey(
+        DispatchBatch, null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )
     vehicle = models.ForeignKey(
         "masterdata.Vehicle", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"

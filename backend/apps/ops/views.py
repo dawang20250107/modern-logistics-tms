@@ -786,6 +786,26 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
         return Response(OrderSerializer(unassign_order(self.get_object(), request.user)).data)
 
+    @action(detail=False, methods=["post"], url_path="batch-dispatch")
+    def batch_dispatch(self, request):
+        """批量派承运商：{ids, dispatch_type, carrier, platform_name, total_payable, allocation, note}
+        → 生成派车批次 + N 张独立运单（同/跨客户多单一次委托同一承运商）。"""
+        from .order_dispatch import batch_dispatch_orders
+
+        d = request.data
+        result = batch_dispatch_orders(
+            d.get("ids") or [],
+            carrier_id=d.get("carrier") or None,
+            dispatch_type=d.get("dispatch_type") or "third_party",
+            platform_name=d.get("platform_name") or "",
+            total_payable=d.get("total_payable") or 0,
+            allocation=d.get("allocation") or "by_weight",
+            manual_payables=d.get("manual_payables") or None,
+            note=d.get("note") or "",
+            operator=request.user,
+        )
+        return Response(result, status=201)
+
     @action(detail=False, methods=["get"], url_path="dispatchers")
     def dispatchers(self, request):
         """可分派的调度成员（供总调度分单选择）+ 当前用户是否总调度。"""
@@ -921,6 +941,31 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
         waybill = convert_order_to_waybill(self.get_object(), operator=request.user)
         return Response(WaybillSerializer(waybill).data, status=201)
+
+
+class DispatchBatchViewSet(OrgScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+    """派车批次台账：多单一次委托同一承运商的商务归集，展开为各票独立运单。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        from .models import DispatchBatch
+
+        qs = DispatchBatch.objects.select_related("carrier", "created_by").prefetch_related(
+            "waybills__customer", "waybills__order__customer", "waybills__expenses",
+        ).order_by("-created_at")
+        status = self.request.query_params.get("status")
+        if status:
+            qs = qs.filter(status=status)
+        carrier = self.request.query_params.get("carrier")
+        if carrier:
+            qs = qs.filter(carrier_id=carrier)
+        return qs
+
+    def get_serializer_class(self):
+        from .serializers import DispatchBatchDetailSerializer, DispatchBatchSerializer
+
+        return DispatchBatchDetailSerializer if self.action == "retrieve" else DispatchBatchSerializer
 
 
 class OrderTemplateViewSet(viewsets.ModelViewSet):

@@ -10,6 +10,7 @@ import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { FinanceCard } from "../components/FinanceCard";
 import { ReplyCard } from "../components/ReplyCard";
+import { StatusTag } from "../components/StatusTag";
 
 const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
 const FILTER_KEY = "waybills.filters.v1";
@@ -294,13 +295,13 @@ export function WaybillsPage() {
     },
     {
       key: "channel", header: "通道", width: 100, sortValue: (w) => w.channel || "", exportValue: (w) => w.channel || "",
-      render: (w) => w.channel ? <span className={`tag ${CHANNEL_TAG[w.channel] ?? "tag-none"}`} title={w.dispatch_type_label}>{w.channel}{w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""}</span> : <span className="muted">—</span>,
+      render: (w) => w.channel ? <StatusTag kind="channel" value={w.channel} title={w.dispatch_type_label} suffix={w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""} /> : <span className="muted">—</span>,
     },
     { key: "receivable", header: "应收", width: 100, align: "right", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{w.receivable_amount ? `¥${w.receivable_amount.toLocaleString()}` : "—"}</> },
     { key: "payable", header: "应付/成本", width: 110, align: "right", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{w.payable_amount ? `¥${w.payable_amount.toLocaleString()}` : "—"}</> },
     { key: "cod", header: "代收货款", width: 110, align: "right", sortValue: (w) => Number(w.cod_amount) || 0, exportValue: (w) => Number(w.cod_amount) || 0, render: (w) => { const cod = Number(w.cod_amount) || 0; return cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>¥{cod.toLocaleString()}</span> : <>—</>; } },
-    { key: "receipt", header: "回单", width: 90, sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <span className={`tag tag-${w.receipt_status === "returned" || w.receipt_status === "audited" ? "low" : "none"}`}>{RECEIPT_LABEL[w.receipt_status] ?? "待追回"}</span> },
-    { key: "status", header: "状态", width: 100, sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <span className="tag tag-info">{STATUS_LABEL[w.status] ?? w.status}</span> },
+    { key: "receipt", header: "回单", width: 90, sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <StatusTag kind="receipt" value={w.receipt_status} /> },
+    { key: "status", header: "状态", width: 100, sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <StatusTag kind="waybill" value={w.status} /> },
     {
       key: "actions", header: "操作", width: 170, alwaysVisible: true,
       render: (w) => (

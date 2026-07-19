@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { apiPost } from "../api/client";
 import { toast } from "../api/toast";
 
@@ -59,19 +59,49 @@ export function SpotlightCommandBar() {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const { pathname } = useLocation();
+  // 上下文加权：当前所在页相关命令优先展示
+  const contextKeys: Record<string, string[]> = {
+    "/dispatch-board": ["nav-dispatch", "new-order", "report-exception"],
+    "/reconciliation": ["nav-recon", "nav-waybills"],
+    "/waybills": ["nav-waybills", "report-exception"],
+    "/intake": ["new-order", "nav-waybills"],
+    "/exceptions": ["report-exception", "nav-dispatch"],
+  };
+  const boost = contextKeys[pathname] ?? [];
+
   const q = query.trim().toLowerCase().replace(/^\//, "");
-  const matched = useMemo(
-    () => COMMANDS.filter((c) => !q || c.label.toLowerCase().includes(q) || c.keywords.toLowerCase().includes(q)),
-    [q],
-  );
+  const matched = useMemo(() => {
+    const list = COMMANDS.filter((c) => !q || c.label.toLowerCase().includes(q) || c.keywords.toLowerCase().includes(q));
+    if (q) return list;
+    // 无查询时按上下文加权排序，本页相关命令置顶
+    return [...list].sort((a, b) => {
+      const ai = boost.indexOf(a.id), bi = boost.indexOf(b.id);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, pathname]);
+
+  // 查单跳转：输入像单号/车牌/电话（含数字）即提供直达运单/订单
+  const lookup = query.trim();
+  const looksCode = lookup.length >= 4 && /\d/.test(lookup) && !lookup.startsWith("/");
+  const jumpItems = looksCode
+    ? [
+        { label: `查看运单 ${lookup}`, path: `/waybills/${encodeURIComponent(lookup)}` },
+        { label: `查看订单 ${lookup}`, path: `/orders/${encodeURIComponent(lookup)}` },
+      ]
+    : [];
+
   const showAi = query.trim().length > 0 && !query.trim().startsWith("/");
-  // 可选中的扁平结果：命令 + （可选）AI 分析行
+  // 可选中的扁平结果：查单跳转 + 命令 + （可选）AI 分析行
   const results = useMemo(
     () => [
-      ...matched.map((c) => ({ kind: c.kind as string, cmd: c })),
-      ...(showAi ? [{ kind: "ai" as string, cmd: null }] : []),
+      ...jumpItems.map((j) => ({ kind: "jump" as string, cmd: null, jump: j })),
+      ...matched.map((c) => ({ kind: c.kind as string, cmd: c, jump: null })),
+      ...(showAi ? [{ kind: "ai" as string, cmd: null, jump: null }] : []),
     ],
-    [matched, showAi],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [matched, showAi, lookup],
   );
 
   useEffect(() => {
@@ -83,6 +113,11 @@ export function SpotlightCommandBar() {
     if (!item) return;
     if (item.kind === "ai") {
       handleSearchSubmit();
+      return;
+    }
+    if (item.kind === "jump" && item.jump) {
+      navigate(item.jump.path);
+      setIsOpen(false);
       return;
     }
     if (item.cmd) {
@@ -208,6 +243,19 @@ export function SpotlightCommandBar() {
                     <div key="ai" className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
                       <span>用 AI 分析：“{query.trim()}”</span>
                       <span className="cmdk-kbd">Enter ↵</span>
+                    </div>
+                  );
+                }
+                if (item.kind === "jump" && item.jump) {
+                  const header = lastSection !== "查单跳转" ? "查单跳转" : null;
+                  lastSection = "查单跳转";
+                  return (
+                    <div key={item.jump.path}>
+                      {header && <div className="cmdk-section">查单跳转</div>}
+                      <div className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                        <span className="cmdk-item-main"><span className="cmdk-badge">直达</span><span className="cmdk-item-label">{item.jump.label}</span></span>
+                        <span className="cmdk-item-path">↵</span>
+                      </div>
                     </div>
                   );
                 }

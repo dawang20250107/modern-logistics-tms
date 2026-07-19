@@ -698,6 +698,16 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
   font-size: 13px; line-height: 1.7; color: var(--ink);
 }
 
+/* ── 五态统一视图（加载/错误/空/离线/无权限） ───────── */
+.state-view { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 44px 20px; gap: 4px; }
+.state-icon { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; margin-bottom: 10px; background: var(--panel-3); color: var(--muted); }
+.state-title { font-weight: 600; font-size: 15px; color: var(--ink-2); }
+.state-hint { max-width: 360px; margin-top: 4px; }
+.state-actions { margin-top: 14px; display: flex; gap: 8px; }
+.state-error .state-icon { background: var(--red-weak); color: var(--red); }
+.state-offline .state-icon { background: var(--amber-weak); color: var(--amber); }
+.state-forbidden .state-icon { background: var(--panel-3); color: var(--ink-2); }
+
 /* ── Empty state ────────────────────────────────────── */
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 44px 20px; text-align: center; }
 .empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.6; }

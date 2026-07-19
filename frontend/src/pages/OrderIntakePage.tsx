@@ -8,6 +8,7 @@ import { toast } from "../api/toast";
 import type { Order, OrderChannel, Paginated } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL } from "../api/types";
 import { CustomerContextPanel } from "../components/CustomerContextPanel";
+import { DataTable, type DataColumn } from "../components/DataTable";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import { OrderLifecycle } from "../components/OrderLifecycle";
@@ -76,6 +77,44 @@ export function OrderIntakePage() {
   const items = orders.data?.items ?? [];
   const total = orders.data?.total ?? 0;
 
+  const toggleAllOrders = () =>
+    setSelected((prev) => (items.length > 0 && items.every((o) => prev.has(o.id)) ? new Set() : new Set(items.map((o) => o.id))));
+
+  const orderColumns: DataColumn<Order>[] = [
+    { key: "order_no", header: "订单号", width: 160, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono" to={`/orders/${o.id}`}>{o.order_no}</Link> },
+    { key: "channel", header: "渠道", width: 100, sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel },
+    { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <>{o.origin || "?"} → {o.destination || "?"}</> },
+    { key: "cargo", header: "货量", width: 120, sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <>{o.cargo_weight_ton}吨 / {o.cargo_quantity}件</> },
+    { key: "status", header: "状态", width: 110, sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
+    { key: "sla", header: "SLA", width: 90, sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
+    {
+      key: "actions", header: "操作", width: 220, alwaysVisible: true,
+      render: (o) => (
+        <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+          {(o.status === "draft" || o.status === "pending_confirm") && <button disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "confirm" })}>确认</button>}
+          {(o.status === "pending_confirm" || o.status === "confirmed") && <button disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "convert" })}>转运单</button>}
+          <button disabled={clone.isPending} onClick={() => clone.mutate(o.id)}>复制</button>
+          {(o.waybill_nos ?? []).map((no) => <Link key={no} className="link mono small" to={`/waybills/${no}`} style={{ marginLeft: 6 }}>{no}</Link>)}
+        </div>
+      ),
+    },
+  ];
+
+  const orderBatchBar = selected.size > 0 ? (
+    <div className="batch-bar">
+      <span>已选 <b style={{ color: "var(--accent)" }}>{selected.size}</b> 单</span>
+      <div style={{ flex: 1 }} />
+      <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>批量确认</button>
+      <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>批量进池</button>
+      <button className="btn-ghost" disabled={merge.isPending || selected.size < 2} onClick={async () => {
+        if (await confirmAction({ message: `将选中的 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]);
+      }}>合单</button>
+      <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>批量取消</button>
+      <button className="btn-ghost" disabled={batch.isPending} style={{ color: "var(--red)" }} onClick={() => runBatch("delete")}>批量删除</button>
+      <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除</button>
+    </div>
+  ) : null;
+
   return (
     <div className="stack">
       <OrderLifecycle />
@@ -111,19 +150,6 @@ export function OrderIntakePage() {
             <button key={k} className={`chip${channelFilter === k ? " chip-on" : ""}`} onClick={() => setChannelFilter(k)}>{v}</button>
           ))}
         </div>
-        {selected.size > 0 && (
-          <div className="batch-bar">
-            <span>已选 {selected.size} 单</span>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>批量确认</button>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>批量进池</button>
-            <button className="btn-ghost" disabled={merge.isPending || selected.size < 2} onClick={async () => {
-              if (await confirmAction({ message: `将选中的 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]);
-            }}>合单</button>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>批量取消</button>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("delete")}>批量删除</button>
-            <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除选择</button>
-          </div>
-        )}
         {orders.isLoading ? (
           <StateView kind="loading" compact />
         ) : orders.isError ? (
@@ -133,45 +159,20 @@ export function OrderIntakePage() {
             ? <StateView kind="empty" title="没有匹配的订单" hint="试试调整状态/来源过滤或搜索条件。" />
             : <StateView kind="empty" scene="cs-empty" />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: 36 }}>
-                  <input
-                    type="checkbox"
-                    checked={items.length > 0 && items.every((o) => selected.has(o.id))}
-                    onChange={(e) => setSelected(e.target.checked ? new Set(items.map((o) => o.id)) : new Set())}
-                  />
-                </th>
-                <th>订单号</th><th>渠道</th><th>线路</th><th>货量</th><th>状态</th><th>SLA</th><th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((o) => (
-                <tr key={o.id} style={selected.has(o.id) ? { background: "#f1f5fb" } : {}}>
-                  <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} /></td>
-                  <td className="mono"><Link className="link" to={`/orders/${o.id}`}>{o.order_no}</Link></td>
-                  <td>{ORDER_CHANNEL_LABEL[o.channel]}</td>
-                  <td>{o.origin} → {o.destination}</td>
-                  <td>{o.cargo_weight_ton}吨 / {o.cargo_quantity}件</td>
-                  <td><StatusTag kind="order" value={o.status} /></td>
-                  <td><StatusTag kind="sla" value={o.sla_status} /></td>
-                  <td className="row-actions">
-                    {(o.status === "draft" || o.status === "pending_confirm") && (
-                      <button className="btn-ghost" disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "confirm" })}>确认</button>
-                    )}
-                    {(o.status === "pending_confirm" || o.status === "confirmed") && (
-                      <button className="btn-ghost" disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "convert" })}>转运单</button>
-                    )}
-                    <button className="btn-ghost" disabled={clone.isPending} onClick={() => clone.mutate(o.id)}>复制</button>
-                    {(o.waybill_nos ?? []).map((no) => (
-                      <Link key={no} className="link mono small" to={`/waybills/${no}`} style={{ marginLeft: 6 }}>{no}</Link>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable<Order>
+            columns={orderColumns}
+            rows={items}
+            rowKey={(o) => o.id}
+            viewKey="orders"
+            exportName="订单"
+            selectable
+            selected={selected}
+            onToggle={toggle}
+            onToggleAll={toggleAllOrders}
+            stickyFirst
+            batchBar={orderBatchBar}
+            toolbarLeft={<span className="muted small">共 {total} 单{selected.size ? ` · 已选 ${selected.size}` : ""} · 点击表头排序 · 「列」增减字段</span>}
+          />
         )}
       </div>
     </div>

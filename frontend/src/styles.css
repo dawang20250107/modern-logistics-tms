@@ -724,7 +724,10 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .dt-colreset:hover { background: var(--accent-weak); }
 .dt-scroll { overflow-x: auto; }
 .dt-table { table-layout: fixed; }
-.dt-table th { position: relative; user-select: none; }
+/* DataTable 自管布局：去掉页面级 sticky 表头(top:56px)，避免相对定位把表头下移到首行下方 */
+.dt-table thead th { position: relative; top: 0; user-select: none; }
+.dt-table th { user-select: none; }
+.dt-table thead th.dt-sticky { position: sticky; top: 0; }
 .dt-sortable { cursor: pointer; }
 .dt-sortable:hover { color: var(--accent); }
 .dt-th { display: inline-flex; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -736,6 +739,9 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .dt-table thead .dt-sticky { z-index: 3; background: var(--panel-2); }
 .dt-table tbody tr:hover .dt-sticky { background: var(--panel-2); }
 .dt-table tbody tr.row-sel .dt-sticky { background: var(--accent-weak); }
+.dt-table tbody tr.dt-clickable { cursor: pointer; }
+.dt-expandrow > td { padding: 0; background: var(--panel-2); }
+.dt-expandrow:hover > td { background: var(--panel-2); }
 
 /* ── Mini stat tile (customer context etc.) ─────────── */
 .stat-mini { text-align: center; padding: 8px 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm); }

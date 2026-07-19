@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 // 顶尖 SaaS 表格：列显隐 / 列宽拖拽 / 固定首列 / 多字段排序 / 保存视图 / 批量 / 行内 / 右键 / 导出
 export interface DataColumn<T> {
@@ -28,7 +28,8 @@ function loadView(viewKey: string): ViewState | null {
 
 export function DataTable<T>({
   columns, rows, rowKey, viewKey, selectable, selected, onToggle, onToggleAll,
-  onRowContextMenu, onRowDoubleClick, rowClassName, stickyFirst, toolbarLeft, batchBar, exportName,
+  onRowContextMenu, onRowDoubleClick, onRowClick, rowClassName, stickyFirst, toolbarLeft, batchBar, exportName,
+  expandedKey, renderExpanded,
 }: {
   columns: DataColumn<T>[];
   rows: T[];
@@ -40,6 +41,9 @@ export function DataTable<T>({
   onToggleAll?: () => void;
   onRowContextMenu?: (e: React.MouseEvent, row: T) => void;
   onRowDoubleClick?: (row: T) => void;
+  onRowClick?: (row: T) => void;
+  expandedKey?: string;
+  renderExpanded?: (row: T) => React.ReactNode;
   rowClassName?: (row: T) => string;
   stickyFirst?: boolean;
   toolbarLeft?: React.ReactNode;
@@ -197,12 +201,15 @@ export function DataTable<T>({
             {sortedRows.map((r) => {
               const id = rowKey(r);
               const isSel = selected?.has(id);
+              const expanded = expandedKey != null && expandedKey === id;
+              const colSpan = visibleCols.length + (selectable ? 1 : 0);
               return (
+                <Fragment key={id}>
                 <tr
-                  key={id}
-                  className={`${rowClassName?.(r) ?? ""} ${isSel ? "row-sel" : ""}`}
+                  className={`${rowClassName?.(r) ?? ""} ${isSel ? "row-sel" : ""}${onRowClick ? " dt-clickable" : ""}`}
                   onContextMenu={onRowContextMenu ? (e) => onRowContextMenu(e, r) : undefined}
                   onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(r) : undefined}
+                  onClick={onRowClick ? () => onRowClick(r) : undefined}
                 >
                   {selectable && (
                     <td className="cell-check dt-sticky" style={{ left: 0 }} onClick={(e) => e.stopPropagation()}>
@@ -218,6 +225,12 @@ export function DataTable<T>({
                     );
                   })}
                 </tr>
+                {expanded && renderExpanded && (
+                  <tr className="dt-expandrow">
+                    <td colSpan={colSpan}>{renderExpanded(r)}</td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>

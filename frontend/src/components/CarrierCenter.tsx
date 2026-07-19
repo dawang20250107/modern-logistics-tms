@@ -3,6 +3,8 @@ import { useMemo, useState } from "react";
 
 import { apiGet } from "../api/client";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
+import { DataTable, type DataColumn } from "./DataTable";
+import { StateView } from "./StateView";
 
 function pct(n?: number): string {
   return n == null ? "—" : `${Math.round(n * 100)}%`;
@@ -152,6 +154,16 @@ export function CarrierCenter() {
     return k ? items.filter((c) => `${c.code} ${c.name} ${c.contact_phone ?? ""} ${c.city ?? ""}`.toLowerCase().includes(k)) : items;
   }, [q.data, kw]);
 
+  const carrierColumns: DataColumn<Carrier>[] = [
+    { key: "name", header: "承运商", width: 200, alwaysVisible: true, sortValue: (c) => c.name, exportValue: (c) => `${c.name} ${c.code}`, render: (c) => <><span className="link">{c.name}</span> <span className="muted small mono">{c.code}</span></> },
+    { key: "type", header: "类型", width: 100, sortValue: (c) => c.carrier_type_label || "", exportValue: (c) => c.carrier_type_label || "", render: (c) => <span className="small">{c.carrier_type_label || "—"}</span> },
+    { key: "city", header: "城市", width: 90, sortValue: (c) => c.city || "", exportValue: (c) => c.city || "", render: (c) => <span className="small">{c.city || "—"}</span> },
+    { key: "risk", header: "评级/风控", width: 110, sortValue: (c) => (c.blacklisted ? "0" : c.grade || "z"), exportValue: (c) => (c.blacklisted ? "黑名单" : c.grade_label || c.grade || ""), render: (c) => riskTag(c) },
+    { key: "credit", header: "账期", width: 80, align: "right", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => `${c.credit_days ?? ""}`, render: (c) => <>{c.credit_days ?? "—"}天</> },
+    { key: "alerts", header: "到期预警", width: 110, sortValue: (c) => c.expiry_alerts?.length ?? 0, exportValue: (c) => `${c.expiry_alerts?.length ?? 0}`, render: (c) => (c.expiry_alerts && c.expiry_alerts.length > 0 ? <span className={`tag tag-${c.expiry_alerts.some((a) => a.expired) ? "high" : "medium"}`}>{c.expiry_alerts.length} 项临期</span> : <span className="muted small">—</span>) },
+    { key: "active", header: "状态", width: 80, sortValue: (c) => (c.is_active ? "1" : "0"), exportValue: (c) => (c.is_active ? "启用" : "停用"), render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
+  ];
+
   return (
     <div className="panel">
       <div className="panel-head">
@@ -159,32 +171,22 @@ export function CarrierCenter() {
         <input className="search" style={{ width: 260 }} placeholder="搜索承运商 / 城市 / 电话" value={kw} onChange={(e) => setKw(e.target.value)} />
       </div>
       {q.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" onRetry={() => q.refetch()} />
       ) : rows.length === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无承运商，请先在承运商中心建档。</div>
+        <StateView kind="empty" scene="carrier-empty" />
       ) : (
-        <table className="table">
-          <thead><tr>
-            <th>承运商</th><th>类型</th><th>城市</th><th>评级/风控</th><th className="num">账期</th><th>到期预警</th><th>状态</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => setOpenId(c.id)}>
-                <td><span className="link">{c.name}</span> <span className="muted small mono">{c.code}</span></td>
-                <td className="small">{c.carrier_type_label || "—"}</td>
-                <td className="small">{c.city || "—"}</td>
-                <td>{riskTag(c)}</td>
-                <td className="num">{c.credit_days ?? "—"}天</td>
-                <td>
-                  {c.expiry_alerts && c.expiry_alerts.length > 0
-                    ? <span className={`tag tag-${c.expiry_alerts.some((a) => a.expired) ? "high" : "medium"}`}>{c.expiry_alerts.length} 项临期</span>
-                    : <span className="muted small">—</span>}
-                </td>
-                <td><span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable<Carrier>
+          columns={carrierColumns}
+          rows={rows}
+          rowKey={(c) => c.id}
+          viewKey="carriers"
+          exportName="承运商"
+          onRowClick={(c) => setOpenId(c.id)}
+          stickyFirst
+          toolbarLeft={<span className="muted small">共 {rows.length} 家 · 点行看档案 · 点击表头排序 · 「列」增减字段</span>}
+        />
       )}
       {openId && <CarrierDrawer carrierId={openId} onClose={() => setOpenId(null)} />}
     </div>

@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, Statement, StatementAuditResult } from "../api/types";
 import { STATEMENT_STATUS_LABEL } from "../api/types";
+import { DataTable, type DataColumn } from "../components/DataTable";
 import { StateView } from "../components/StateView";
 
 export function ReconciliationPage() {
@@ -82,6 +83,63 @@ export function ReconciliationPage() {
       invalidate();
     },
   });
+
+  const stmtColumns: DataColumn<Statement>[] = [
+    { key: "no", header: "系统结算单号", width: 190, alwaysVisible: true, sortValue: (s) => s.statement_no, exportValue: (s) => s.statement_no, render: (s) => <span className="mono" style={{ fontWeight: 700, color: "var(--accent)", fontSize: 13 }}>{expanded === s.id ? "▼" : "▶"} {s.statement_no}</span> },
+    { key: "dir", header: "方向", width: 90, sortValue: (s) => s.direction, exportValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), render: (s) => <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "AR 应收" : "AP 应付"}</span> },
+    { key: "cp", header: "对手方", width: 150, sortValue: (s) => s.counterparty_name, exportValue: (s) => s.counterparty_name, render: (s) => <span style={{ fontWeight: 600 }}>{s.counterparty_name}</span> },
+    { key: "period", header: "账期", width: 170, exportValue: (s) => `${s.period_start}~${s.period_end}`, render: (s) => <span className="small muted mono">{s.period_start} ~ {s.period_end}</span> },
+    { key: "amt", header: "应结金额", width: 120, align: "right", sortValue: (s) => Number(s.total_amount) || 0, exportValue: (s) => Number(s.total_amount) || 0, render: (s) => <span style={{ fontWeight: 700 }}>{fmtMoney(s.total_amount)}</span> },
+    { key: "cnt", header: "笔数", width: 70, align: "right", sortValue: (s) => s.item_count, exportValue: (s) => s.item_count, render: (s) => <>{s.item_count} 笔</> },
+    { key: "diff", header: "差异", width: 120, align: "right", sortValue: (s) => Math.abs(Number(s.diff) || 0), exportValue: (s) => Number(s.diff) || 0, render: (s) => <span className="mono" style={Number(s.diff) !== 0 ? { color: "var(--red)", fontWeight: 700 } : { color: "var(--muted)" }}>{Number(s.diff) !== 0 ? `差异 ${fmtMoney(s.diff)}` : "无差异"}</span> },
+    { key: "status", header: "状态", width: 100, sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => <span className={`tag tag-${s.status === "confirmed" || s.status === "settled" ? "low" : "medium"}`}>{STATEMENT_STATUS_LABEL[s.status] ?? s.status}</span> },
+    { key: "act", header: "财务操作", width: 90, alwaysVisible: true, render: (s) => s.status === "draft" ? <div className="row-actions" onClick={(e) => e.stopPropagation()}><button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button></div> : <span className="muted small">—</span> },
+  ];
+
+  const renderStmtDetail = () => (
+    <div style={{ padding: "16px 20px", background: "var(--panel)", border: "1px solid var(--line-2)", borderRadius: 12, margin: "10px 16px 16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "center" }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>账单明细审计</div>
+        <div className="cluster">
+          <span className="muted small">
+            {detail.data?.audited_at ? `已审计 · ${new Date(detail.data.audited_at).toLocaleString()}` : "尚未审计"}
+            {" · "}共 {detail.data?.lines?.length || 0} 笔明细
+          </span>
+          <button className="btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }} disabled={auditOne.isPending} onClick={(e) => { e.stopPropagation(); if (expanded) auditOne.mutate(expanded); }}>
+            {auditOne.isPending ? "审计中…" : "审计本单"}
+          </button>
+        </div>
+      </div>
+      {detail.isLoading ? (
+        <span className="muted small">加载明细…</span>
+      ) : (
+        <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
+          <table className="table" style={{ margin: 0, fontSize: 12 }}>
+            <thead>
+              <tr><th>运单号</th><th>费用科目</th><th>金额</th><th>发生时间</th><th>审计结论</th></tr>
+            </thead>
+            <tbody>
+              {(detail.data?.lines ?? []).map((l) => (
+                <tr key={l.id} style={l.is_anomaly ? { background: "var(--red-weak)" } : {}}>
+                  <td className="mono link">{l.waybill_no}</td>
+                  <td><span className="tag tag-none">{l.expense_item_code}</span></td>
+                  <td style={{ fontWeight: 700, color: l.is_anomaly ? "var(--red)" : "inherit" }}>{fmtMoney(l.amount)}</td>
+                  <td className="muted mono">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
+                  <td>
+                    {l.is_anomaly
+                      ? <span style={{ color: "var(--red)", fontWeight: 700 }}>超历史均值 ¥{fmtMoney(l.baseline_avg ?? "0")} {l.deviation_pct}%</span>
+                      : l.baseline_avg != null
+                        ? <span style={{ color: "var(--green)" }}>合规（基线 ¥{fmtMoney(l.baseline_avg)}）</span>
+                        : <span className="muted">{detail.data?.audited_at ? "样本不足，无基线" : "待审计"}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="stack" style={{ position: "relative" }}>
@@ -161,135 +219,22 @@ export function ReconciliationPage() {
         <div className="panel-head">对账单核销台账</div>
         {statements.isLoading ? (
           <StateView kind="loading" compact />
+        ) : statements.isError ? (
+          <StateView kind="error" onRetry={() => statements.refetch()} />
         ) : items.length === 0 ? (
           <StateView kind="empty" scene="recon-empty" />
         ) : (
-          <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "var(--line)" }}>
-                <th style={{ padding: "10px 12px" }}>系统结算单号</th>
-                <th>账单方向</th>
-                <th>对手方</th>
-                <th>账期</th>
-                <th>应结金额</th>
-                <th>交易笔数</th>
-                <th>差异</th>
-                <th>状态</th>
-                <th>财务操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((s) => (
-                <Fragment key={s.id}>
-                  <tr style={{ cursor: "pointer" }} onClick={() => setExpanded(expanded === s.id ? "" : s.id)}>
-                    <td className="mono" style={{ fontWeight: "bold", color: "var(--brand)", fontSize: 13 }}>
-                      {expanded === s.id ? "▼" : "▶"} {s.statement_no}
-                    </td>
-                    <td>
-                      <span className="tag" style={{ background: s.direction === "receivable" ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)", color: s.direction === "receivable" ? "var(--green)" : "var(--red)" }}>
-                        {s.direction === "receivable" ? "AR 应收" : "AP 应付"}
-                      </span>
-                    </td>
-                    <td style={{ fontWeight: 600, color: "var(--ink)" }}>{s.counterparty_name}</td>
-                    <td className="small muted mono">{s.period_start} ~ {s.period_end}</td>
-                    <td style={{ fontWeight: 800, fontSize: 14 }}>{fmtMoney(s.total_amount)}</td>
-                    <td>{s.item_count} 笔</td>
-                    <td className="mono" style={Number(s.diff) !== 0 ? { color: "var(--red)", fontWeight: "bold" } : { color: "var(--muted)" }}>
-                      {Number(s.diff) !== 0 ? `差异 ${fmtMoney(s.diff)}` : "无差异"}
-                    </td>
-                    <td>
-                      <span className={`tag tag-${s.status === "confirmed" || s.status === "settled" ? "low" : "medium"}`}>
-                        {STATEMENT_STATUS_LABEL[s.status] ?? s.status}
-                      </span>
-                    </td>
-                    <td>
-                      {s.status === "draft" && (
-                        <button className="btn-primary" style={{ padding: "4px 10px", fontSize: 11 }} disabled={confirm.isPending} onClick={(e) => { e.stopPropagation(); confirm.mutate(s.id); }}>
-                          确认
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  
-                  {/* 明细审计区 */}
-                  {expanded === s.id && (
-                    <tr style={{ background: "rgba(0,0,0,0.015)" }}>
-                      <td colSpan={9} style={{ padding: "0 24px 24px" }}>
-                        <div style={{ padding: "16px 20px", background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.05)", marginTop: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "center" }}>
-                            <div style={{ fontWeight: "bold", fontSize: 14 }}>
-                              账单明细审计
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <span className="muted small">
-                                {detail.data?.audited_at
-                                  ? `已审计 · ${new Date(detail.data.audited_at).toLocaleString()}`
-                                  : "尚未审计"}
-                                {" · "}共 {detail.data?.lines?.length || 0} 笔明细
-                              </span>
-                              <button
-                                className="btn-ghost"
-                                style={{ padding: "3px 10px", fontSize: 11 }}
-                                disabled={auditOne.isPending}
-                                onClick={(e) => { e.stopPropagation(); auditOne.mutate(s.id); }}
-                              >
-                                {auditOne.isPending ? "审计中…" : "审计本单"}
-                              </button>
-                            </div>
-                          </div>
-
-                          {detail.isLoading ? (
-                            <span className="muted small">加载明细…</span>
-                          ) : (
-                            <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
-                              <table className="table" style={{ margin: 0, fontSize: 12 }}>
-                                <thead>
-                                  <tr style={{ background: "var(--panel-2)" }}>
-                                    <th>运单号</th>
-                                    <th>费用科目</th>
-                                    <th>金额</th>
-                                    <th>发生时间</th>
-                                    <th>审计结论</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {(detail.data?.lines ?? []).map((l) => (
-                                    <tr key={l.id} style={l.is_anomaly ? { background: "var(--red-weak)" } : {}}>
-                                      <td className="mono link" style={{ cursor: "pointer" }}>{l.waybill_no}</td>
-                                      <td>
-                                        <span className="tag" style={{ background: "rgba(0,0,0,0.04)" }}>{l.expense_item_code}</span>
-                                      </td>
-                                      <td style={{ fontWeight: "bold", color: l.is_anomaly ? "var(--red)" : "inherit" }}>
-                                        {fmtMoney(l.amount)}
-                                      </td>
-                                      <td className="muted mono">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
-                                      <td>
-                                        {l.is_anomaly ? (
-                                          <span style={{ color: "var(--red)", fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}>
-                                            超历史均值 ¥{fmtMoney(l.baseline_avg ?? "0")} {l.deviation_pct}%
-                                          </span>
-                                        ) : l.baseline_avg != null ? (
-                                          <span style={{ color: "#27ae60", display: "flex", alignItems: "center", gap: 4 }}>
-                                            合规（基线 ¥{fmtMoney(l.baseline_avg)}）
-                                          </span>
-                                        ) : (
-                                          <span className="muted">{detail.data?.audited_at ? "样本不足，无基线" : "待审计"}</span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+          <DataTable<Statement>
+            columns={stmtColumns}
+            rows={items}
+            rowKey={(s) => s.id}
+            viewKey="statements"
+            exportName="对账单"
+            onRowClick={(s) => setExpanded(expanded === s.id ? "" : s.id)}
+            expandedKey={expanded}
+            renderExpanded={renderStmtDetail}
+            toolbarLeft={<span className="muted small">共 {items.length} 张 · 点行看明细 · 点击表头排序 · 「列」增减字段</span>}
+          />
         )}
       </div>
     </div>

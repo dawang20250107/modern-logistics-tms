@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { apiGet, apiPost } from "../api/client";
 import { toast } from "../api/toast";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
+import { DataTable, type DataColumn } from "./DataTable";
+import { StateView } from "./StateView";
 
 const BLANK = {
   carrier: "", origin_city: "", dest_city: "", vehicle_type: "", vehicle_length_m: "",
@@ -53,6 +55,17 @@ export function LanePriceLib() {
   const set = (k: keyof typeof BLANK, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
   const canSubmit = form.carrier && form.origin_city.trim() && form.dest_city.trim() && form.standard_price;
 
+  const laneColumns: DataColumn<CarrierLanePrice>[] = [
+    { key: "lane", header: "线路", width: 130, alwaysVisible: true, sortValue: (l) => `${l.origin_city}${l.dest_city}`, exportValue: (l) => `${l.origin_city}→${l.dest_city}`, render: (l) => <>{l.origin_city}→{l.dest_city}</> },
+    { key: "carrier", header: "承运商", width: 150, sortValue: (l) => l.carrier_name || "", exportValue: (l) => l.carrier_name || "", render: (l) => l.carrier_name },
+    { key: "vehicle", header: "车型/车长", width: 120, exportValue: (l) => `${l.vehicle_type || ""}${l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}`, render: (l) => <span className="small">{l.vehicle_type || "—"}{l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}</span> },
+    { key: "standard", header: "标准价", width: 100, align: "right", sortValue: (l) => Number(l.standard_price) || 0, exportValue: (l) => Number(l.standard_price) || 0, render: (l) => <>¥{Number(l.standard_price).toLocaleString()}</> },
+    { key: "band", header: "区间", width: 130, align: "right", exportValue: (l) => `${l.min_price}~${l.max_price}`, render: (l) => <span className="small">{Number(l.min_price) > 0 || Number(l.max_price) > 0 ? `¥${Number(l.min_price).toLocaleString()}~${Number(l.max_price).toLocaleString()}` : "—"}</span> },
+    { key: "last", header: "最近成交", width: 100, align: "right", sortValue: (l) => Number(l.last_deal_price) || 0, exportValue: (l) => Number(l.last_deal_price) || 0, render: (l) => <>{Number(l.last_deal_price) > 0 ? `¥${Number(l.last_deal_price).toLocaleString()}` : "—"}</> },
+    { key: "flag", header: "标记", width: 80, sortValue: (l) => (l.is_recommended ? "0" : l.is_preferred ? "1" : "2"), exportValue: (l) => (l.is_recommended ? "推荐" : l.is_preferred ? "常用" : ""), render: (l) => l.is_recommended ? <span className="tag tag-low">推荐</span> : l.is_preferred ? <span className="tag tag-info">常用</span> : <span className="muted">—</span> },
+    { key: "eff", header: "有效期", width: 100, exportValue: (l) => (l.effective_to ? `至 ${l.effective_to}` : "长期"), render: (l) => <span className="small">{l.effective_to ? `至 ${l.effective_to}` : "长期"}</span> },
+  ];
+
   return (
     <div className="panel">
       <div className="panel-head">
@@ -93,29 +106,21 @@ export function LanePriceLib() {
       )}
 
       {lanes.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
+      ) : lanes.isError ? (
+        <StateView kind="error" onRetry={() => lanes.refetch()} />
       ) : rows.length === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无价库条目。维护后，调度台可直接按线路比价选承运商。</div>
+        <StateView kind="empty" title="暂无价库条目" hint="维护后，调度台可直接按线路比价选承运商。" />
       ) : (
-        <table className="table">
-          <thead><tr>
-            <th>线路</th><th>承运商</th><th>车型/车长</th><th className="num">标准价</th><th className="num">区间</th><th className="num">最近成交</th><th>标记</th><th>有效期</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((l) => (
-              <tr key={l.id}>
-                <td>{l.origin_city}→{l.dest_city}</td>
-                <td>{l.carrier_name}</td>
-                <td className="small">{l.vehicle_type || "—"}{l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}</td>
-                <td className="num">¥{Number(l.standard_price).toLocaleString()}</td>
-                <td className="num small">{Number(l.min_price) > 0 || Number(l.max_price) > 0 ? `¥${Number(l.min_price).toLocaleString()}~${Number(l.max_price).toLocaleString()}` : "—"}</td>
-                <td className="num">{Number(l.last_deal_price) > 0 ? `¥${Number(l.last_deal_price).toLocaleString()}` : "—"}</td>
-                <td>{l.is_recommended ? <span className="tag tag-low">推荐</span> : l.is_preferred ? <span className="tag tag-info">常用</span> : "—"}</td>
-                <td className="small">{l.effective_to ? `至 ${l.effective_to}` : "长期"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable<CarrierLanePrice>
+          columns={laneColumns}
+          rows={rows}
+          rowKey={(l) => l.id}
+          viewKey="lane-prices"
+          exportName="线路价库"
+          stickyFirst
+          toolbarLeft={<span className="muted small">共 {rows.length} 条 · 点击表头排序 · 「列」增减字段</span>}
+        />
       )}
     </div>
   );

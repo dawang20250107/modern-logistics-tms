@@ -33,6 +33,24 @@ function OrdersTab() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  // 保存的筛选视图（localStorage 持久化，无需后端）
+  type Preset = { name: string; status: string; channel: string; bizType: string; priority: string; level: string; days: string; search: string };
+  const PRESET_KEY = "om-order-presets";
+  const [presets, setPresets] = useState<Preset[]>(() => {
+    try { return JSON.parse(localStorage.getItem(PRESET_KEY) || "[]"); } catch { return []; }
+  });
+  const persistPresets = (next: Preset[]) => { setPresets(next); localStorage.setItem(PRESET_KEY, JSON.stringify(next)); };
+  const applyPreset = (p: Preset) => { setStatus(p.status); setChannel(p.channel); setBizType(p.bizType); setPriority(p.priority); setLevel(p.level); setDays(p.days); setSearch(p.search); };
+  const savePreset = () => {
+    const name = window.prompt("为当前筛选视图命名：", "")?.trim();
+    if (!name) return;
+    const p: Preset = { name, status, channel, bizType, priority, level, days, search };
+    persistPresets([...presets.filter((x) => x.name !== name), p]);
+    toast.success(`已保存筛选视图「${name}」`);
+  };
+  const anyFilter = Boolean(status || channel || bizType || priority || level || search || days !== "30");
+  const resetFilters = () => { setStatus(""); setChannel(""); setBizType(""); setPriority(""); setLevel(""); setDays("30"); setSearch(""); };
+
   const filterQs = [
     status && `status=${status}`, channel && `channel=${channel}`,
     bizType && `business_type=${bizType}`, priority && `priority=${priority}`,
@@ -79,6 +97,17 @@ function OrdersTab() {
   const assign = useMutation({
     mutationFn: (v: { ids: string[]; dispatcher: string }) => apiPost<{ assigned: string[]; dispatcher: string }>("/orders/assign", v),
     onSuccess: (r) => { toast.success(`已分派 ${r.assigned.length} 单给 ${r.dispatcher}`); setSelected(new Set()); setAssignTo(""); invalidate(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  // 批量改字段（优先级 / 结算方式）
+  const batchUpdate = useMutation({
+    mutationFn: (v: { field: string; value: string; ids: string[] }) =>
+      apiPost<{ ok_count: number; failed: Array<{ order_no: string; error: string }> }>("/orders/batch-update", v),
+    onSuccess: (r, v) => {
+      const fl = v.field === "priority" ? PRIORITY_LABEL[v.value] : SETTLEMENT_LABEL[v.value];
+      toast.success(`批量改为「${fl}」：成功 ${r.ok_count}${r.failed?.length ? ` · 跳过 ${r.failed.length}` : ""}`);
+      setSelected(new Set()); invalidate();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -156,6 +185,14 @@ function OrdersTab() {
       <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>确认</button>
       <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>进池</button>
       <button className="btn-ghost" disabled={merge.isPending || selected.size < 2} onClick={async () => { if (await confirmAction({ message: `将 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]); }}>合单</button>
+      <select className="search" style={{ minWidth: 120, padding: "6px 10px" }} value="" disabled={batchUpdate.isPending} onChange={(e) => { if (e.target.value) batchUpdate.mutate({ field: "priority", value: e.target.value, ids: [...selected] }); e.target.value = ""; }}>
+        <option value="">改优先级…</option>
+        {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+      </select>
+      <select className="search" style={{ minWidth: 120, padding: "6px 10px" }} value="" disabled={batchUpdate.isPending} onChange={(e) => { if (e.target.value) batchUpdate.mutate({ field: "settlement_type", value: e.target.value, ids: [...selected] }); e.target.value = ""; }}>
+        <option value="">改结算…</option>
+        {Object.entries(SETTLEMENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+      </select>
       {dispatchers.data?.is_chief && (
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
           <select className="search" style={{ minWidth: 130, padding: "6px 10px" }} value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
@@ -212,6 +249,23 @@ function OrdersTab() {
           <option value="7">近 7 天</option><option value="30">近 30 天</option><option value="90">近 90 天</option><option value="">全部时间</option>
         </select>
         <input className="search" style={{ minWidth: 200, flex: 1 }} placeholder="搜索订单号 / 电话 / 始发 / 目的地" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+
+      {/* 保存的筛选视图 */}
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0, alignItems: "center" }}>
+        <span className="muted small" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2z" /></svg>筛选视图
+        </span>
+        {presets.length === 0 && <span className="muted small">保存常用筛选组合，一键切换</span>}
+        {presets.map((p) => (
+          <span key={p.name} className="preset-chip">
+            <button className="chip" onClick={() => applyPreset(p)}>{p.name}</button>
+            <button className="preset-x" title="删除视图" onClick={() => persistPresets(presets.filter((x) => x.name !== p.name))}>×</button>
+          </span>
+        ))}
+        <div style={{ flex: 1 }} />
+        {anyFilter && <button className="linkish small" onClick={resetFilters}>重置筛选</button>}
+        <button className="btn-ghost small" disabled={!anyFilter} onClick={savePreset}>+ 保存当前筛选</button>
       </div>
 
       {q.isLoading ? (

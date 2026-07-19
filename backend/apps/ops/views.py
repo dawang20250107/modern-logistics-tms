@@ -729,6 +729,18 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
             raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
         return Response(batch_orders(action_name, ids, operator=request.user))
 
+    @action(detail=False, methods=["post"], url_path="batch-update")
+    def batch_update(self, request):
+        """批量改字段：{field: priority|settlement_type, value, ids: [...]}。"""
+        from .intake import batch_update_orders
+
+        field = request.data.get("field")
+        value = request.data.get("value")
+        ids = request.data.get("ids") or []
+        if not ids:
+            raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
+        return Response(batch_update_orders(field, value, ids, operator=request.user))
+
     @action(detail=False, methods=["get"], url_path="pool")
     def pool_list(self, request):
         """订单池：在池待派(POOLED) + 调度中(DISPATCHING，已认领)订单，按优先级与进池时间排序。

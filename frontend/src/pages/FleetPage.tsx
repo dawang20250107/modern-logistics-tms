@@ -8,8 +8,9 @@ import { CarrierCenter } from "../components/CarrierCenter";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { LanePriceLib } from "../components/LanePriceLib";
 import { StateView } from "../components/StateView";
+import { IconGitBranch, IconMapPin, IconTruck, IconBox, IconDatabase, IconShield, IconWarning, IconArrowRight } from "../components/Icons";
 import type {
-  CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
+  Carrier, CarrierLanePrice, CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
   ExpiringCredentials, Paginated, Vehicle,
 } from "../api/types";
 import { CRED_SEVERITY_LABEL, CRED_TYPE_LABEL } from "../api/types";
@@ -281,8 +282,71 @@ function ComplianceTab() {
   );
 }
 
+// ── 资源库总览：一眼看清全部运力/客户/合规资产，点击直达对应清单 ──────
+function ResourceOverview({ onJump }: { onJump: (tab: string) => void }) {
+  const carriers = useQuery({ queryKey: ["rh-ov-carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=1") });
+  const vehicles = useQuery({ queryKey: ["rh-ov-vehicles"], queryFn: () => apiGet<Paginated<Vehicle>>("/vehicles?page_size=1") });
+  const drivers = useQuery({ queryKey: ["rh-ov-drivers"], queryFn: () => apiGet<Paginated<Driver>>("/drivers?page_size=1") });
+  const lanes = useQuery({ queryKey: ["rh-ov-lanes"], queryFn: () => apiGet<Paginated<CarrierLanePrice>>("/carrier-lane-prices?page_size=1") });
+  const customers = useQuery({ queryKey: ["rh-ov-customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=500") });
+  const cred = useQuery({ queryKey: ["rh-ov-cred"], queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30") });
+
+  // 客户等级分布（资源库同步客户等级 S/A/B/C/D）
+  const levelDist = useMemo(() => {
+    const dist: Record<string, number> = { S: 0, A: 0, B: 0, C: 0, D: 0 };
+    for (const c of customers.data?.items ?? []) dist[c.level || "B"] = (dist[c.level || "B"] || 0) + 1;
+    return dist;
+  }, [customers.data]);
+
+  const credSum = cred.data?.summary;
+  const credAlert = (credSum?.expired ?? 0) + (credSum?.critical ?? 0);
+
+  const cards = [
+    { key: "carriers", icon: <IconGitBranch size={20} />, tone: "accent", n: carriers.data?.total, label: "承运商", sub: "外协运力池", jump: "carriers" },
+    { key: "lanes", icon: <IconMapPin size={20} />, tone: "blue", n: lanes.data?.total, label: "线路价库", sub: "承运商×线路报价", jump: "lanes" },
+    { key: "vehicles", icon: <IconTruck size={20} />, tone: "violet", n: vehicles.data?.total, label: "车辆", sub: "自营 + 挂靠", jump: "vehicles" },
+    { key: "drivers", icon: <IconBox size={20} />, tone: "green", n: drivers.data?.total, label: "司机", sub: "在册驾驶员", jump: "drivers" },
+    { key: "customers", icon: <IconDatabase size={20} />, tone: "accent", n: customers.data?.total, label: "客户", sub: `S${levelDist.S} · A${levelDist.A} · B${levelDist.B} · C${levelDist.C} · D${levelDist.D}`, jump: "customers" },
+    { key: "compliance", icon: credAlert > 0 ? <IconWarning size={20} /> : <IconShield size={20} />, tone: credAlert > 0 ? "red" : "green", n: credAlert, label: "证件预警", sub: credAlert > 0 ? `${credSum?.expired ?? 0} 过期 · ${credSum?.critical ?? 0} 紧急` : "30 天内无临期", jump: "compliance" },
+  ];
+
+  return (
+    <div className="stack" style={{ gap: 16 }}>
+      <div className="rh-hero">
+        <div className="rh-hero-brand">
+          <div className="rh-hero-ic"><IconDatabase size={22} /></div>
+          <div>
+            <div className="rh-hero-title">资源库</div>
+            <div className="rh-hero-sub">承运商 · 运力 · 客户 · 合规 一体化主数据，派单与计价的统一底座</div>
+          </div>
+        </div>
+      </div>
+      <div className="rh-cards">
+        {cards.map((c) => (
+          <button key={c.key} className={`rh-card rh-${c.tone}`} onClick={() => onJump(c.jump)}>
+            <div className="rh-card-top">
+              <span className="rh-card-ic">{c.icon}</span>
+              <IconArrowRight size={15} className="rh-card-go" />
+            </div>
+            <div className="rh-card-n">{c.n ?? "—"}</div>
+            <div className="rh-card-l">{c.label}</div>
+            <div className="rh-card-s">{c.sub}</div>
+          </button>
+        ))}
+      </div>
+      {credAlert > 0 && (
+        <div className="rh-alert" onClick={() => onJump("compliance")}>
+          <IconWarning size={16} className="icon-offset" />
+          <span>有 <b>{credAlert}</b> 项车辆/司机证件已过期或临近到期（≤7天），点击进入「证件合规」处理 →</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 外协为主：承运商与线路价库置顶，自营车辆/司机档案退居其后
-const RESOURCE_TABS: { key: string; label: string; render: () => React.ReactNode }[] = [
+const RESOURCE_TABS: { key: string; label: string; render: (jump: (t: string) => void) => React.ReactNode }[] = [
+  { key: "overview", label: "总览", render: (jump) => <ResourceOverview onJump={jump} /> },
   { key: "carriers", label: "承运商中心", render: () => <CarrierCenter /> },
   { key: "lanes", label: "线路价库", render: () => <LanePriceLib /> },
   { key: "vehicles", label: "车辆档案", render: () => <VehiclesTab /> },
@@ -292,7 +356,7 @@ const RESOURCE_TABS: { key: string; label: string; render: () => React.ReactNode
 ];
 
 export function FleetPage() {
-  const [tab, setTab] = useState("carriers");
+  const [tab, setTab] = useState("overview");
   const current = RESOURCE_TABS.find((t) => t.key === tab) ?? RESOURCE_TABS[0];
   return (
     <div className="stack">
@@ -301,7 +365,7 @@ export function FleetPage() {
           <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>
         ))}
       </div>
-      {current.render()}
+      {current.render(setTab)}
     </div>
   );
 }

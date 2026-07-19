@@ -5,11 +5,11 @@ import { hasPerm, useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
-  IconTower, IconGrid, IconDatabase, IconTruck,
-  IconReceipt, IconCreditCard, IconShield, IconFileText,
+  IconTower, IconGrid, IconDatabase, IconTruck, IconMapPin, IconAlert,
+  IconGitBranch, IconReceipt, IconCreditCard, IconShield, IconFileText, IconMoney,
 } from "./Icons";
 
-type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; perm?: string };
+type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string };
 type NavGroup = { title: string; items: NavItem[] };
 
 // 工作流导向导航：驾驶舱纵览 → 客服接单 → 调度派单 → 订单流转，
@@ -25,6 +25,15 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    title: "运营与分析",
+    items: [
+      { to: "/dashboard", label: "经营看板", icon: <IconMoney size={18} />, perm: "analytics.view" },
+      { to: "/monitor", label: "在途监控", icon: <IconMapPin size={18} />, perm: "telematics.view" },
+      { to: "/exceptions", label: "异常处置", icon: <IconGitBranch size={18} /> },
+      { to: "/alerts", label: "安全预警", icon: <IconAlert size={18} />, perm: "telematics.view" },
+    ],
+  },
+  {
     title: "资源与结算",
     items: [
       { to: "/fleet", label: "资源库", icon: <IconTruck size={18} /> },
@@ -33,20 +42,18 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // 组织 / 用户 / 权限 / 审计——仅超级管理员可见可进
     title: "系统",
     items: [
-      { to: "/admin", label: "管理后台", icon: <IconShield size={18} /> },
+      { to: "/admin", label: "管理后台", icon: <IconShield size={18} />, superOnly: true },
     ],
   },
 ];
 
 
-// 管理后台聚合的次级页面标题（不在侧栏，但需要正确的顶栏标题）
+// 管理后台内的页面 + 个人中心：不在侧栏，但需要正确的顶栏标题
 const SUB_TITLES: Record<string, string> = {
-  "/dashboard": "经营看板", "/monitor": "在途监控", "/alerts": "安全预警",
-  "/exceptions": "异常处置", "/ai": "AI 工作台", "/command": "命令中心",
-  "/catalog": "数据目录", "/org": "组织与权限", "/audit": "审计日志",
-  "/profile": "个人中心",
+  "/org": "组织与权限", "/audit": "审计日志", "/profile": "个人中心",
 };
 
 function currentPageTitle(pathname: string) {
@@ -74,6 +81,7 @@ export function AppLayout() {
   };
 
   const canSee = (item: NavItem) => {
+    if (item.superOnly && !user?.is_superuser) return false;
     if (item.adminOnly && !(user?.is_staff || user?.is_superuser)) return false;
     if (item.perm && !hasPerm(user, item.perm)) return false;
     return true;

@@ -20,8 +20,13 @@ const STATUS_LABEL: Record<string, string> = {
 };
 const EXC_TYPE_LABEL: Record<string, string> = {
   transit_delay: "在途超时", route_deviation: "偏航/路线异常", cargo_damage: "货损货差",
-  vehicle_breakdown: "车辆故障", detained: "扣车扣货", customer_complaint: "客户投诉", 
-  temperature: "冷链温度异常", fuel: "油耗/漏油异常", overspeed: "超速驾驶", other: "其他",
+  vehicle_breakdown: "车辆故障", detained: "扣车扣货", customer_complaint: "客户投诉",
+  temperature: "冷链温度异常", fuel: "油耗/漏油异常", overspeed: "超速驾驶",
+  receipt_pending: "回单待回收", receipt_exception: "回单异常", other: "其他",
+};
+// 触发来源：车联网设备 / 人工提报 / 系统规则 / AI 识别
+const SOURCE_LABEL: Record<string, string> = {
+  track: "车联网设备", manual: "人工提报", system: "系统规则", ai: "AI 识别",
 };
 
 export function ExceptionsPage() {
@@ -172,7 +177,7 @@ export function ExceptionsPage() {
                         </span>
                       </td>
                       <td>
-                        <span className="tag tag-none">{e.source === "track" ? "车联网设备" : e.source}</span>
+                        <span className="tag tag-none">{SOURCE_LABEL[e.source] ?? e.source}</span>
                       </td>
                       <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{e.waybill_no || "全局"}</td>
                       <td style={{ color: e.assignee_name ? "var(--ink)" : "var(--muted)" }}>{e.assignee_name || "待认领"}</td>

@@ -635,6 +635,32 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .cs-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
 @media (max-width: 1100px) { .cs-workbench { grid-template-columns: 1fr; } }
 
+/* ── DataTable（列显隐/排序/列宽/固定列/保存视图） ──── */
+.dt-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.dt-colmenu {
+  position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 60; min-width: 190px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+}
+.dt-colitem { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-xs); font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.dt-colitem:hover { background: var(--accent-weak); }
+.dt-colitem input { accent-color: var(--accent); }
+.dt-colreset { width: 100%; padding: 7px 8px; border: 0; background: transparent; color: var(--accent); font-size: 13px; cursor: pointer; text-align: left; border-radius: var(--radius-xs); }
+.dt-colreset:hover { background: var(--accent-weak); }
+.dt-scroll { overflow-x: auto; }
+.dt-table { table-layout: fixed; }
+.dt-table th { position: relative; user-select: none; }
+.dt-sortable { cursor: pointer; }
+.dt-sortable:hover { color: var(--accent); }
+.dt-th { display: inline-flex; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-sortic { font-size: 9px; color: var(--accent); }
+.dt-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }
+.dt-resizer:hover { background: linear-gradient(90deg, transparent, var(--accent-weak-2)); }
+.dt-table td { overflow: hidden; text-overflow: ellipsis; }
+.dt-sticky { position: sticky; z-index: 1; background: var(--panel); }
+.dt-table thead .dt-sticky { z-index: 3; background: var(--panel-2); }
+.dt-table tbody tr:hover .dt-sticky { background: var(--panel-2); }
+.dt-table tbody tr.row-sel .dt-sticky { background: var(--accent-weak); }
+
 /* ── Mini stat tile (customer context etc.) ─────────── */
 .stat-mini { text-align: center; padding: 8px 6px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .stat-mini-n { font-size: 20px; font-weight: 680; letter-spacing: -0.02em; font-variant-numeric: tabular-nums slashed-zero; color: var(--ink); line-height: 1.1; }

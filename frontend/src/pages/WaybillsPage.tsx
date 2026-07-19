@@ -7,6 +7,7 @@ import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
+import { DataTable, type DataColumn } from "../components/DataTable";
 import { ReplyCard } from "../components/ReplyCard";
 
 const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
@@ -112,9 +113,7 @@ export function WaybillsPage() {
   }, [items, filter, statusFilter, searchNo, searchCustomer, searchVehicle, searchRoute, searchReceipt]);
 
   // 选择集随过滤结果自动收敛（过滤掉已不在列表中的选中项）
-  const visibleIds = useMemo(() => new Set(filteredRows.map((w) => w.id)), [filteredRows]);
   const selectedRows = useMemo(() => filteredRows.filter((w) => selected.has(w.id)), [filteredRows, selected]);
-  const allChecked = filteredRows.length > 0 && selectedRows.length === filteredRows.length;
 
   const toggleOne = (id: string) => {
     setSelected((prev) => {
@@ -271,6 +270,59 @@ export function WaybillsPage() {
     setStatusFilter("");
   };
 
+  const columns: DataColumn<Waybill>[] = [
+    {
+      key: "waybill_no", header: "运单号", width: 150, alwaysVisible: true,
+      sortValue: (w) => w.waybill_no, exportValue: (w) => w.waybill_no,
+      render: (w) => <Link className="link mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>,
+    },
+    { key: "customer", header: "客户", width: 130, sortValue: (w) => w.customer_name || "散客", exportValue: (w) => w.customer_name || "散客", render: (w) => <span title={w.customer_name}>{w.customer_name || "散客"}</span> },
+    { key: "route", header: "线路", width: 150, sortValue: (w) => `${w.origin}${w.destination}`, exportValue: (w) => `${w.origin || "?"}→${w.destination || "?"}`, render: (w) => <>{w.origin || "?"} → {w.destination || "?"}</> },
+    {
+      key: "cargo", header: "货物", width: 130, exportValue: (w) => `${w.cargo.weight_ton || 0}吨`,
+      render: (w) => <span className="small">{w.cargo.quantity ? `${w.cargo.quantity}件 ` : ""}{w.cargo.weight_ton || 0}吨{w.cargo.volume_cbm ? ` / ${w.cargo.volume_cbm}方` : ""}</span>,
+    },
+    {
+      key: "vehicle", header: "车辆 / 司机", width: 150, exportValue: (w) => w.vehicle_plate || w.carrier_name || w.platform_name || "",
+      render: (w) => (
+        <span className="small">
+          {w.vehicle_plate ? <span className="mono">{w.vehicle_plate}</span> : w.carrier_name || (w.channel === "网货" ? (w.platform_name || "平台") : "—")}
+          {w.driver_name && <div className="muted" style={{ fontSize: 11 }}>{w.driver_name} {w.driver_phone}</div>}
+        </span>
+      ),
+    },
+    {
+      key: "channel", header: "通道", width: 100, sortValue: (w) => w.channel || "", exportValue: (w) => w.channel || "",
+      render: (w) => w.channel ? <span className={`tag ${CHANNEL_TAG[w.channel] ?? "tag-none"}`} title={w.dispatch_type_label}>{w.channel}{w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""}</span> : <span className="muted">—</span>,
+    },
+    { key: "receivable", header: "应收", width: 100, align: "right", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{w.receivable_amount ? `¥${w.receivable_amount.toLocaleString()}` : "—"}</> },
+    { key: "payable", header: "应付/成本", width: 110, align: "right", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{w.payable_amount ? `¥${w.payable_amount.toLocaleString()}` : "—"}</> },
+    { key: "cod", header: "代收货款", width: 110, align: "right", sortValue: (w) => Number(w.cod_amount) || 0, exportValue: (w) => Number(w.cod_amount) || 0, render: (w) => { const cod = Number(w.cod_amount) || 0; return cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>¥{cod.toLocaleString()}</span> : <>—</>; } },
+    { key: "receipt", header: "回单", width: 90, sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <span className={`tag tag-${w.receipt_status === "returned" || w.receipt_status === "audited" ? "low" : "none"}`}>{RECEIPT_LABEL[w.receipt_status] ?? "待追回"}</span> },
+    { key: "status", header: "状态", width: 100, sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <span className="tag tag-info">{STATUS_LABEL[w.status] ?? w.status}</span> },
+    {
+      key: "actions", header: "操作", width: 170, alwaysVisible: true,
+      render: (w) => (
+        <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>详情</button>
+          <button onClick={() => navigate(`/monitor?waybill=${w.waybill_no}`)}>追踪</button>
+          <button onClick={(e) => handleRowContextMenu(e, w)} aria-label="更多操作">⋯</button>
+        </div>
+      ),
+    },
+  ];
+
+  const batchBar = selectedRows.length > 0 ? (
+    <div className="batch-bar">
+      <span>已选 <b style={{ color: "var(--accent)" }}>{selectedRows.length}</b> 条</span>
+      <div style={{ flex: 1 }} />
+      <button className="btn-ghost" disabled={batchBusy} onClick={exportCsv}>导出选中</button>
+      <button className="btn-ghost" disabled={batchBusy} onClick={batchMarkReceipt}>标记回单已回收</button>
+      <button className="btn-ghost" disabled={batchBusy} style={{ color: "var(--red)" }} onClick={batchVoid}>批量作废</button>
+      <button className="btn-ghost" disabled={batchBusy} onClick={clearSelection}>取消选择</button>
+    </div>
+  ) : null;
+
   return (
     <div className="stack" style={{ position: "relative" }}>
       <div className="panel" style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)", overflow: "visible" }}>
@@ -347,18 +399,6 @@ export function WaybillsPage() {
           })}
         </div>
 
-        {/* 批量操作条（选中后浮现） */}
-        {selectedRows.length > 0 && (
-          <div className="batch-bar">
-            <span>已选 <b style={{ color: "var(--accent)" }}>{selectedRows.length}</b> 条</span>
-            <div style={{ flex: 1 }} />
-            <button className="btn-ghost" disabled={batchBusy} onClick={exportCsv}>导出 CSV</button>
-            <button className="btn-ghost" disabled={batchBusy} onClick={batchMarkReceipt}>标记回单已回收</button>
-            <button className="btn-ghost" disabled={batchBusy} style={{ color: "var(--red)" }} onClick={batchVoid}>批量作废</button>
-            <button className="btn-ghost" disabled={batchBusy} onClick={clearSelection}>取消选择</button>
-          </div>
-        )}
-
         {query.isLoading ? (
           <div style={{ padding: "24px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
             {[1, 0.8, 0.6, 0.4, 0.2].map((o, i) => (
@@ -372,80 +412,24 @@ export function WaybillsPage() {
             <div className="empty-hint muted small">未查找到符合当前多维筛选组合的运单。您可以尝试清空筛选维度。</div>
           </div>
         ) : (
-          <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th className="cell-check">
-                  <input type="checkbox" checked={allChecked} onChange={toggleAll} aria-label="全选" />
-                </th>
-                <th>运单号</th>
-                <th>客户</th>
-                <th>线路</th>
-                <th>货物</th>
-                <th>车辆 / 司机</th>
-                <th>通道</th>
-                <th className="num">应收</th>
-                <th className="num">应付/成本</th>
-                <th className="num">代收货款</th>
-                <th>回单</th>
-                <th>状态</th>
-                <th style={{ width: 168 }}>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((w) => {
-                const isSel = selected.has(w.id);
-                const cod = Number(w.cod_amount) || 0;
-                return (
-                  <tr
-                    key={w.id}
-                    onContextMenu={(e) => handleRowContextMenu(e, w)}
-                    onDoubleClick={() => setDrawerWaybill(w)}
-                    className={`waybill-tr${isSel ? " row-sel" : ""}`}
-                    style={{ cursor: "context-menu" }}
-                  >
-                    <td className="cell-check" onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={isSel} onChange={() => toggleOne(w.id)} aria-label={`选择 ${w.waybill_no}`} />
-                    </td>
-                    <td><Link className="link mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link></td>
-                    <td title={w.customer_name}>{w.customer_name || "散客"}</td>
-                    <td>{w.origin || "?"} → {w.destination || "?"}</td>
-                    <td className="small">{w.cargo.quantity ? `${w.cargo.quantity}件 ` : ""}{w.cargo.weight_ton || 0}吨{w.cargo.volume_cbm ? ` / ${w.cargo.volume_cbm}方` : ""}</td>
-                    <td className="small">
-                      {w.vehicle_plate ? <span className="mono">{w.vehicle_plate}</span> : w.carrier_name || (w.channel === "网货" ? (w.platform_name || "平台") : "—")}
-                      {w.driver_name && <div className="muted" style={{ fontSize: 11 }}>{w.driver_name} {w.driver_phone}</div>}
-                    </td>
-                    <td>
-                      {w.channel
-                        ? <span className={`tag ${CHANNEL_TAG[w.channel] ?? "tag-none"}`} title={w.dispatch_type_label}>{w.channel}{w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""}</span>
-                        : <span className="muted">—</span>}
-                    </td>
-                    <td className="num">{w.receivable_amount ? `¥${w.receivable_amount.toLocaleString()}` : "—"}</td>
-                    <td className="num">{w.payable_amount ? `¥${w.payable_amount.toLocaleString()}` : "—"}</td>
-                    <td className="num">{cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>¥{cod.toLocaleString()}</span> : "—"}</td>
-                    <td>
-                      <span className={`tag tag-${w.receipt_status === "returned" || w.receipt_status === "audited" ? "low" : "none"}`}>
-                        {RECEIPT_LABEL[w.receipt_status] ?? "待追回"}
-                      </span>
-                    </td>
-                    <td><span className="tag tag-info">{STATUS_LABEL[w.status] ?? w.status}</span></td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="row-actions">
-                        <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>详情</button>
-                        <button onClick={() => navigate(`/monitor?waybill=${w.waybill_no}`)}>追踪</button>
-                        <button onClick={(e) => handleRowContextMenu(e, w)} aria-label="更多操作">⋯</button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable<Waybill>
+            columns={columns}
+            rows={filteredRows}
+            rowKey={(w) => w.id}
+            viewKey="waybills"
+            exportName="运单"
+            selectable
+            selected={selected}
+            onToggle={toggleOne}
+            onToggleAll={toggleAll}
+            onRowContextMenu={handleRowContextMenu}
+            onRowDoubleClick={setDrawerWaybill}
+            rowClassName={() => "waybill-tr"}
+            stickyFirst
+            batchBar={batchBar}
+            toolbarLeft={<span className="muted small">共 {filteredRows.length} 条{selectedRows.length ? ` · 已选 ${selectedRows.length}` : ""} · 点击表头排序 · 拖拽列边调宽 · 「列」可增减字段</span>}
+          />
         )}
-
-        <div className="muted small" style={{ padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
-          共 {filteredRows.length} 条运单{selectedRows.length ? ` · 已选 ${selectedRows.length} 条` : ""}
-        </div>
       </div>
 
       {/* 右键快捷菜单 */}

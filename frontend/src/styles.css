@@ -619,6 +619,20 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 @media (max-width: 980px) { .profile-grid { grid-template-columns: 1fr; } }
 
+/* ── 省市区三级级联选址 ───────────────────────────────── */
+.region-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.region-trigger:hover { border-color: var(--accent); }
+.region-pop { position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; width: 420px; max-width: 88vw; background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow-lg); overflow: hidden; }
+.region-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; height: 240px; }
+.region-col { list-style: none; margin: 0; padding: 4px; overflow-y: auto; border-right: 1px solid var(--line); }
+.region-col:last-child { border-right: none; }
+.region-col li { padding: 6px 10px; border-radius: var(--radius-xs); font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.region-col li:hover { background: var(--panel-2); }
+.region-col li.on { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.region-col li.muted { cursor: default; }
+.region-col li.muted:hover { background: transparent; }
+.region-foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-top: 1px solid var(--line); }
+
 /* ── 订单管理台账概览 ─────────────────────────────────── */
 .om-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
 @media (max-width: 980px) { .om-stats { grid-template-columns: repeat(3, 1fr); } }

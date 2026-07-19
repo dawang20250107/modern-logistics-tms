@@ -14,6 +14,7 @@ import {
 } from "../api/types";
 import { IconSparkles, IconSave, IconPlus, IconX, IconCheck, IconZap } from "./Icons";
 import { CityCombobox } from "./CityCombobox";
+import { RegionCascader } from "./RegionCascader";
 import { DateTimeField } from "./DateTimeField";
 
 interface FormState {
@@ -69,13 +70,15 @@ const CHANNEL_META: Record<string, { icon: string; hint: string; sourcePlacehold
 };
 
 const emptyCargo = (): OrderCargoItem => ({ name: "", quantity: "", weight_ton: "", volume_cbm: "", package_type: "", temperature_range: "", remark: "" });
-const emptyStop = (t: "pickup" | "delivery"): OrderStop => ({ stop_type: t, city: "", address: "", contact_name: "", contact_phone: "", expected_start: "", expected_end: "", cargo_note: "" });
+// 本地站点表单：在 OrderStop 基础上带省/区，供三级级联选址（提交时合并进 city/address）
+type StopForm = OrderStop & { province?: string; district?: string };
+const emptyStop = (t: "pickup" | "delivery"): StopForm => ({ stop_type: t, city: "", address: "", contact_name: "", contact_phone: "", expected_start: "", expected_end: "", cargo_note: "", province: "", district: "" });
 
 export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated: () => void; onCustomerChange?: (id: string) => void }) {
   const [activeMode, setActiveMode] = useState<"standard" | "ai" | "batch">("standard");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [cargo, setCargo] = useState<OrderCargoItem[]>([emptyCargo()]);
-  const [stops, setStops] = useState<OrderStop[]>([emptyStop("pickup"), emptyStop("delivery")]);
+  const [stops, setStops] = useState<StopForm[]>([emptyStop("pickup"), emptyStop("delivery")]);
   const [paste, setPaste] = useState("");
   const [tplName, setTplName] = useState("");
   const [bulkText, setBulkText] = useState("");
@@ -149,7 +152,13 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
   };
 
   const cleanCargo = () => cargo.filter((c) => c.name.trim());
-  const cleanStops = () => stops.filter((s) => s.address.trim() || s.city.trim());
+  const cleanStops = () => stops
+    .filter((s) => s.address.trim() || s.city.trim())
+    .map((s) => {
+      const region = [s.province, s.district].filter((x) => x && x !== "市辖区").join(" ");
+      const address = region && !s.address.startsWith(region) ? `${region} ${s.address}`.trim() : s.address;
+      return { stop_type: s.stop_type, city: s.city, address, contact_name: s.contact_name, contact_phone: s.contact_phone, expected_start: s.expected_start, expected_end: s.expected_end, cargo_note: s.cargo_note };
+    });
 
   const payload = (status: string) => ({
     channel: form.channel,
@@ -552,8 +561,12 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   <option value="pickup">提货网点</option>
                   <option value="delivery">送货网点</option>
                 </select>
-                <CityCombobox value={s.city} onChange={(v) => setStops((p) => p.map((x, j) => j === i ? { ...x, city: v } : x))} style={{ width: 110 }} />
-                <input placeholder="详细提/送货物理地址" style={{ flex: 2 }} value={s.address} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} />
+                <RegionCascader
+                  style={{ width: 190 }}
+                  value={{ province: s.province ?? "", city: s.city, district: s.district ?? "" }}
+                  onChange={(v) => setStops((p) => p.map((x, j) => j === i ? { ...x, province: v.province, city: v.city.replace(/(市|地区|自治州|盟)$/, "") || v.city, district: v.district } : x))}
+                />
+                <input placeholder="详细提/送货物理地址（街道门牌）" style={{ flex: 2 }} value={s.address} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} />
                 <input placeholder="联系人" style={{ width: 90 }} value={s.contact_name} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_name: e.target.value } : x))} />
                 <input placeholder="电话" style={{ width: 130 }} value={s.contact_phone} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_phone: e.target.value } : x))} />
                 <button className="btn-ghost" onClick={() => setStops((p) => p.filter((_, j) => j !== i))} disabled={stops.length <= 1}>×</button>

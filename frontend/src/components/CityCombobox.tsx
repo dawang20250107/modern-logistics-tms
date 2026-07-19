@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { CITIES } from "../data/cities";
+import { ALL_CITIES } from "../data/regions";
+
+// 城市库以全国行政区（省/市/区）派生的完整市级列表为准，补全此前"城市库不全"。
+const CITIES = ALL_CITIES;
 
 /**
  * 城市组合框：可下拉、可模糊检索、可自由录入（表中未含的城市直接输入即可）。

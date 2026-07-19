@@ -372,11 +372,13 @@ function BatchesTab() {
     queryFn: () => apiGet<DispatchBatchDetail>(`/dispatch-batches/${drawer}`),
     enabled: Boolean(drawer),
   });
-  // 一键生成承运商应付对账单
+  // 一键生成承运商应付对账单（可带承运商回单金额做差异稽核）
+  const [externalTotal, setExternalTotal] = useState("");
   const genStatement = useMutation({
-    mutationFn: (id: string) => apiPost<{ statement_no: string; reused: boolean }>(`/dispatch-batches/${id}/statement`, {}),
+    mutationFn: (id: string) => apiPost<{ statement_no: string; reused: boolean }>(`/dispatch-batches/${id}/statement`, { external_total: Number(externalTotal) || 0 }),
     onSuccess: (r) => {
       toast.success(r.reused ? `该批次已对账：${r.statement_no}` : `已生成承运商应付对账单：${r.statement_no}`);
+      setExternalTotal("");
       queryClient.invalidateQueries({ queryKey: ["dispatch-batch"] });
       queryClient.invalidateQueries({ queryKey: ["dispatch-batches"] });
     },
@@ -483,8 +485,10 @@ function BatchesTab() {
                   </>
                 ) : (
                   <>
-                    <span className="muted small">批次内 {detail.data.order_count} 单应付将归集为一张承运商对账单</span>
+                    <span className="muted small">批次内 {detail.data.order_count} 单应付归集为一张对账单</span>
                     <div style={{ flex: 1 }} />
+                    <input className="search" style={{ width: 150, padding: "6px 10px" }} value={externalTotal}
+                      onChange={(e) => setExternalTotal(e.target.value)} placeholder="承运商回单金额（选填）" title="填写承运商侧金额，生成对账单时自动做差异稽核" />
                     <button className="btn-primary" disabled={genStatement.isPending} onClick={() => genStatement.mutate(detail.data!.id)}>
                       {genStatement.isPending ? "生成中…" : "生成承运商对账单"}
                     </button>

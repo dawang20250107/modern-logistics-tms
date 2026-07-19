@@ -9,6 +9,7 @@ import type { Order, OrderChannel, Paginated } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL } from "../api/types";
 import { CustomerContextPanel } from "../components/CustomerContextPanel";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { ExceptionReport } from "../components/ExceptionReport";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import { OrderLifecycle } from "../components/OrderLifecycle";
@@ -175,6 +176,9 @@ export function OrderIntakePage() {
           />
         )}
       </div>
+
+      {/* 客服受理客户诉求/回单异常，一键立案交调度处置 */}
+      <ExceptionReport />
     </div>
   );
 }

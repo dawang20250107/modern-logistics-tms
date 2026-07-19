@@ -167,7 +167,7 @@ export function WaybillsPage() {
   const handleAction = async (action: string, w: Waybill) => {
     setContextMenu(null);
     if (action === "view") navigate(`/waybills/${w.waybill_no}`);
-    else if (action === "track") navigate(`/monitor?waybill=${w.waybill_no}`);
+    else if (action === "track") navigate(`/waybills/${w.waybill_no}`);
     else if (action === "print") openContract.mutate(w.waybill_no);
     else if (action === "cancel") {
       const ok = await confirmAction({
@@ -308,7 +308,7 @@ export function WaybillsPage() {
       render: (w) => (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>详情</button>
-          <button onClick={() => navigate(`/monitor?waybill=${w.waybill_no}`)}>追踪</button>
+          <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>追踪</button>
           <button onClick={(e) => handleRowContextMenu(e, w)} aria-label="更多操作">⋯</button>
         </div>
       ),
@@ -507,7 +507,7 @@ export function WaybillsPage() {
               <button className="btn-primary" style={{ flex: 1 }} onClick={() => { setDrawerWaybill(null); navigate(`/waybills/${drawerWaybill.waybill_no}`); }}>
                 查看完整详情
               </button>
-              <button className="btn-ghost" style={{ flex: 1 }} onClick={() => { setDrawerWaybill(null); navigate(`/monitor?waybill=${drawerWaybill.waybill_no}`); }}>
+              <button className="btn-ghost" style={{ flex: 1 }} onClick={() => { setDrawerWaybill(null); navigate(`/waybills/${drawerWaybill.waybill_no}`); }}>
                 在途追踪
               </button>
             </div>

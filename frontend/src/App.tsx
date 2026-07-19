@@ -4,18 +4,14 @@ import { AppLayout } from "./components/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./auth/auth";
 import { AdminHubPage } from "./pages/AdminHubPage";
-import { AlertsPage } from "./pages/AlertsPage";
 import { AuditPage } from "./pages/AuditPage";
 import { CustomerOrderPage } from "./pages/CustomerOrderPage";
 import { DriverPortalPage } from "./pages/DriverPortalPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
-import { DashboardPage } from "./pages/DashboardPage";
 import { DispatchBoardPage } from "./pages/DispatchBoardPage";
-import { ExceptionsPage } from "./pages/ExceptionsPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { FleetPage } from "./pages/FleetPage";
 import { LoginPage } from "./pages/LoginPage";
-import { MonitorPage } from "./pages/MonitorPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderIntakePage } from "./pages/OrderIntakePage";
 import { PricingPage } from "./pages/PricingPage";
@@ -46,13 +42,9 @@ export function App() {
               <Route path="dispatch-board" element={<DispatchBoardPage />} />
               <Route path="waybills" element={<WaybillsPage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
-              <Route path="monitor" element={<MonitorPage />} />
               <Route path="fleet" element={<FleetPage />} />
-              <Route path="alerts" element={<AlertsPage />} />
-              <Route path="exceptions" element={<ExceptionsPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />
               <Route path="pricing" element={<PricingPage />} />
-              <Route path="dashboard" element={<DashboardPage />} />
               <Route path="admin" element={<AdminHubPage />} />
               <Route path="org" element={<OrgCenterPage />} />
               <Route path="profile" element={<ProfilePage />} />

@@ -5,6 +5,8 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import type { ExpiringCredentials, Paginated, QueryWaybillResult, Waybill } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
+import { hasPerm, useAuth } from "../auth/auth";
+import { BusinessMetrics } from "../components/BusinessMetrics";
 import { IconSparkles, IconTerminal, IconSearch } from "../components/Icons";
 import { StateView } from "../components/StateView";
 
@@ -33,6 +35,7 @@ function Kpi({ label, value, tone }: { label: string; value: number; tone?: stri
 
 export function ControlTowerPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
 
@@ -76,7 +79,7 @@ export function ControlTowerPage() {
     { label: "订单池待派", value: w.dispatch.pool_count, to: "/dispatch-board", tone: "blue" },
     { label: "我认领的", value: w.dispatch.my_claimed, to: "/dispatch-board", tone: "" },
     { label: "待对账", value: w.finance.draft_statements, to: "/reconciliation", tone: "" },
-    { label: "我的异常", value: w.common.my_open_exceptions, to: "/exceptions", tone: "red" },
+    { label: "我的异常", value: w.common.my_open_exceptions, to: "/dispatch-board", tone: "red" },
     { label: "证件预警", value: (compliance.data?.summary.expired ?? 0) + (compliance.data?.summary.critical ?? 0), to: "/fleet", tone: "red" },
   ].filter((t) => t.value > 0) : [];
 
@@ -106,7 +109,7 @@ export function ControlTowerPage() {
         <div className="panel">
           <div className="panel-head">
             在途运单
-            <Link to="/monitor" className="link small">在途监控 →</Link>
+            <Link to="/waybills" className="link small">全部运单 →</Link>
           </div>
           {inTransit.length === 0 ? (
             <StateView kind="empty" title="暂无在途运单" />
@@ -220,6 +223,14 @@ export function ControlTowerPage() {
           </div>
         )}
       </div>
+
+      {/* 经营指标（原「经营看板」并入）：管理者纵览经营视角 */}
+      {hasPerm(user, "analytics.view") && (
+        <>
+          <div className="section-label" style={{ marginTop: 4 }}>经营指标</div>
+          <BusinessMetrics />
+        </>
+      )}
     </div>
   );
 }

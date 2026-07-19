@@ -37,18 +37,16 @@ interface Command {
 // 全局命令目录：快捷动作 + 全站导航（keywords 支持中文/拼音/英文模糊命中）
 const COMMANDS: Command[] = [
   { id: "new-order", label: "新建订单", hint: "建单录入", path: "/intake", kind: "action", section: "快捷动作", keywords: "new order intake jiandan xindan luru 建单 录入 下单 开单" },
-  { id: "report-exception", label: "提报异常", hint: "手动立案", path: "/exceptions", kind: "action", section: "快捷动作", keywords: "exception yichang tibao 异常 提报 立案 报障" },
+  { id: "report-exception", label: "提报异常", hint: "客服立案", path: "/intake", kind: "action", section: "快捷动作", keywords: "exception yichang tibao 异常 提报 立案 报障 客服" },
   { id: "nav-overview", label: "运输驾驶舱", path: "/", kind: "nav", section: "导航", keywords: "overview cockpit jiashicang zonglan shouye 驾驶舱 总览 首页 概览" },
   { id: "nav-cs", label: "客服工作台", path: "/intake", kind: "nav", section: "导航", keywords: "customer service kefu jiedan jiandan 客服 接单 建单 工作台" },
   { id: "nav-dispatch", label: "调度工作台", path: "/dispatch-board", kind: "nav", section: "导航", keywords: "dispatch diaodu paidan 调度 派单 工作台" },
   { id: "nav-waybills", label: "订单管理", path: "/waybills", kind: "nav", section: "导航", keywords: "waybill order dingdan yundan chadan 订单 运单 查单 台账" },
   { id: "nav-admin", label: "管理后台", path: "/admin", kind: "nav", section: "导航", keywords: "admin guanli houtai 管理 后台 设置" },
-  { id: "nav-board", label: "经营看板", path: "/dashboard", kind: "nav", section: "导航", keywords: "board kanban jingying 看板 经营 报表 数据" },
+  { id: "nav-board", label: "经营指标", path: "/", kind: "nav", section: "导航", keywords: "board kanban jingying 看板 经营 报表 数据 驾驶舱 指标" },
   { id: "nav-fleet", label: "资源库", path: "/fleet", kind: "nav", section: "导航", keywords: "fleet resource ziyuan cheliang kehu 资源 车队 客户 司机 承运商" },
   { id: "nav-pricing", label: "计价规则", path: "/pricing", kind: "nav", section: "导航", keywords: "pricing jijia baojia 计价 报价 价格 规则" },
-  { id: "nav-monitor", label: "在途监控", path: "/monitor", kind: "nav", section: "导航", keywords: "monitor zaitu gps 在途 监控 追踪 地图" },
-  { id: "nav-alerts", label: "安全预警", path: "/alerts", kind: "nav", section: "导航", keywords: "alert anquan yujing 安全 预警 报警" },
-  { id: "nav-exceptions", label: "异常处置", path: "/exceptions", kind: "nav", section: "导航", keywords: "exception yichang chuzhi 异常 处置 工单" },
+  { id: "nav-exceptions", label: "异常处置", path: "/dispatch-board", kind: "nav", section: "导航", keywords: "exception yichang chuzhi 异常 处置 工单 调度" },
   { id: "nav-recon", label: "对账中心", path: "/reconciliation", kind: "nav", section: "导航", keywords: "reconciliation duizhang caiwu 对账 财务 结算 账单" },
   { id: "nav-org", label: "组织与权限", path: "/org", kind: "nav", section: "导航", keywords: "org zuzhi quanxian 组织 权限 员工 角色" },
   { id: "nav-audit", label: "审计日志", path: "/audit", kind: "nav", section: "导航", keywords: "audit shenji rizhi 审计 日志" },
@@ -69,8 +67,7 @@ export function SpotlightCommandBar() {
     "/dispatch-board": ["nav-dispatch", "new-order", "report-exception"],
     "/reconciliation": ["nav-recon", "nav-waybills"],
     "/waybills": ["nav-waybills", "report-exception"],
-    "/intake": ["new-order", "nav-waybills"],
-    "/exceptions": ["report-exception", "nav-dispatch"],
+    "/intake": ["new-order", "report-exception", "nav-waybills"],
   };
   const boost = contextKeys[pathname] ?? [];
 

@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import { fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
+import { ExceptionQueue } from "../components/ExceptionQueue";
 import { StateView } from "../components/StateView";
 import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconWarning, IconMoney, IconDragHandle, IconCheckCircle, IconMapPin, IconGitBranch, IconX } from "../components/Icons";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
@@ -882,6 +883,9 @@ export function DispatchBoardPage() {
           </aside>
         </div>
       )}
+
+      {/* 异常处置（原独立页并入）：调度对在途异常认领·AI诊断·强制闭环 */}
+      <ExceptionQueue />
     </div>
   );
 }

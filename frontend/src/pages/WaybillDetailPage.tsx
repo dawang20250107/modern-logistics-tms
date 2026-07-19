@@ -365,7 +365,7 @@ export function WaybillDetailPage() {
                       <td>{EXC_TYPE_LABEL[ex.exception_type] ?? ex.exception_type}</td>
                       <td><span className={`tag tag-${ex.level === "high" ? "high" : ex.level === "low" ? "low" : "medium"}`}>{RISK_LABEL[ex.level] ?? ex.level}</span></td>
                       <td className="small">{ex.description || "-"}</td>
-                      <td><Link className="link" to="/exceptions">{EXC_STATUS_LABEL[ex.status] ?? ex.status}</Link></td>
+                      <td><Link className="link" to="/dispatch-board">{EXC_STATUS_LABEL[ex.status] ?? ex.status}</Link></td>
                     </tr>
                   ))}
                 </tbody>

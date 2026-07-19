@@ -5,8 +5,8 @@ import { hasPerm, useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
-  IconTower, IconGrid, IconDatabase, IconTruck, IconMapPin, IconAlert,
-  IconGitBranch, IconReceipt, IconCreditCard, IconShield, IconFileText, IconMoney,
+  IconTower, IconGrid, IconDatabase, IconTruck,
+  IconReceipt, IconCreditCard, IconShield, IconFileText,
 } from "./Icons";
 
 type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string };
@@ -22,15 +22,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} /> },
       { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} /> },
       { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} /> },
-    ],
-  },
-  {
-    title: "运营与分析",
-    items: [
-      { to: "/dashboard", label: "经营看板", icon: <IconMoney size={18} />, perm: "analytics.view" },
-      { to: "/monitor", label: "在途监控", icon: <IconMapPin size={18} />, perm: "telematics.view" },
-      { to: "/exceptions", label: "异常处置", icon: <IconGitBranch size={18} /> },
-      { to: "/alerts", label: "安全预警", icon: <IconAlert size={18} />, perm: "telematics.view" },
     ],
   },
   {

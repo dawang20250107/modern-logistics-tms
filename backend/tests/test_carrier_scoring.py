@@ -154,7 +154,7 @@ def test_carrier_endpoints_expose_new_profile_and_performance():
 
     from apps.masterdata.models import Carrier
 
-    admin = get_user_model().objects.create_superuser(username="cadmin", password="pw-strong-123")
+    get_user_model().objects.create_superuser(username="cadmin", password="pw-strong-123")
     client = APIClient()
     tok = client.post("/api/v1/auth/token", {"username": "cadmin", "password": "pw-strong-123"}, format="json")
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {tok.json()['data']['access']}")

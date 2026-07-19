@@ -152,7 +152,7 @@ function OrdersTab() {
 
   const columns: DataColumn<Order>[] = [
     { key: "order_no", header: "订单号", width: 165, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono" to={`/orders/${o.id}`}>{o.order_no}</Link> },
-    { key: "customer", header: "客户", width: 150, sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}</span> },
+    { key: "customer", header: "客户", width: 160, sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠{(o.exception_count ?? 0) > 1 ? o.exception_count : ""}</span>}</span> },
     { key: "channel", header: "渠道", width: 90, sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
     { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <><b>{o.origin || "?"}</b> → <b>{o.destination || "?"}</b></> },
     { key: "biz", header: "业务", width: 90, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
@@ -217,7 +217,7 @@ function OrdersTab() {
       <button className={`om-stat om-clickable${status === "pooled" ? " on" : ""}`} onClick={() => setStatus(status === "pooled" ? "" : "pooled")}><div className="om-stat-n" style={{ color: stats.pooled ? "var(--blue)" : undefined }}>{stats.pooled}</div><div className="om-stat-l">池中待派 →</div></button>
       <div className="om-stat"><div className="om-stat-n" style={{ color: stats.dispatched ? "var(--green)" : undefined }}>{stats.dispatched}</div><div className="om-stat-l">已派/完成</div></div>
       <div className="om-stat"><div className="om-stat-n">{stats.today}</div><div className="om-stat-l">今日新建</div></div>
-      <div className="om-stat"><div className="om-stat-n" style={{ fontSize: 20 }}>{fmtMoney(stats.amount)}</div><div className="om-stat-l">报价合计</div></div>
+      <div className="om-stat"><div className="om-stat-n" style={{ fontSize: 14 }}>{fmtMoney(stats.amount)}</div><div className="om-stat-l">报价合计</div></div>
     </div>
 
     <div className="panel">

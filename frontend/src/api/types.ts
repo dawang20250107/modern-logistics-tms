@@ -431,6 +431,8 @@ export interface Order {
   claimed_at?: string | null;
   assigned_at?: string | null;
   dispatched_at?: string | null;
+  exception_count?: number;
+  exception_level?: string;
   delivered_at: string | null;
   raw_text: string;
   ai_conversation_id: string;

@@ -637,11 +637,15 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .region-foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-top: 1px solid var(--line); }
 
 /* ── 订单管理台账概览 ─────────────────────────────────── */
-.om-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+/* KPI 瘦身：订单管理等非驾驶舱页面，卡片紧凑，空间让位表格/表单 */
+.om-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
 @media (max-width: 980px) { .om-stats { grid-template-columns: repeat(3, 1fr); } }
-.om-stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; text-align: left; }
-.om-stat-n { font-size: 24px; font-weight: 720; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.om-stat-l { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.om-stat {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 7px 12px; text-align: left; display: flex; flex-direction: column; justify-content: center;
+}
+.om-stat-n { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.om-stat-l { font-size: 11px; color: var(--muted); margin-top: 1px; }
 .om-clickable { cursor: pointer; font: inherit; transition: border-color var(--speed), box-shadow var(--speed); }
 .om-clickable:hover { border-color: var(--accent-weak-2); box-shadow: var(--shadow-xs); }
 .om-clickable.on { border-color: var(--accent); box-shadow: var(--ring); }

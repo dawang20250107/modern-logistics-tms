@@ -6,7 +6,7 @@ import { apiGet, apiPost } from "../api/client";
 import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { BatchDispatchModal } from "../components/BatchDispatchModal";
-import { ExceptionQueue } from "../components/ExceptionQueue";
+import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
 import { StateView } from "../components/StateView";
 import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconWarning, IconMoney, IconDragHandle, IconCheckCircle, IconMapPin, IconGitBranch, IconX } from "../components/Icons";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
@@ -42,16 +42,9 @@ interface PlanResult {
   estimated_total_saving?: number;
 }
 
-// 手工提报异常类型（与后端 exception_type 选项一致）
-const MANUAL_EXC_TYPES: [string, string][] = [
-  ["transit_delay", "在途超时"], ["route_deviation", "偏航/路线异常"], ["cargo_damage", "货损货差"],
-  ["vehicle_breakdown", "车辆故障"], ["detained", "扣车扣货"], ["customer_complaint", "客户投诉"],
-  ["temperature", "冷链温度异常"], ["abnormal_stop", "异常停车"], ["other", "其他"],
-];
-const EXC_LEVELS: [string, string][] = [["high", "高"], ["medium", "中"], ["low", "低"]];
 const RISK_TAG: Record<string, string> = { high: "high", medium: "medium", low: "low" };
 
-type DrawerTab = "dispatch" | "track" | "exception";
+type DrawerTab = "dispatch" | "track";
 type MenuState = { x: number; y: number; order: Order } | null;
 
 const CUST_LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
@@ -100,27 +93,31 @@ export function DispatchBoardPage() {
   const [platformName, setPlatformName] = useState("");
   const [platformOrderNo, setPlatformOrderNo] = useState("");
   const [agreedPayable, setAgreedPayable] = useState("");
-  const [mineOnly, setMineOnly] = useState(false);
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [batchDispatch, setBatchDispatch] = useState(false);
-  // 三池：待分配（未锁定/未分派）· 可调派（已锁定/已分派）· 已调派（已转运单）
+  // 三池：待分配（未锁定/未分派）· 可调派（本人锁定/分派）· 已调派（本人已转运单）
   const [poolTab, setPoolTab] = useState<"unassigned" | "dispatchable" | "dispatched">("unassigned");
-  // 手工提报异常表单
-  const [excType, setExcType] = useState("transit_delay");
-  const [excLevel, setExcLevel] = useState("medium");
-  const [excDesc, setExcDesc] = useState("");
+  // 登记异常（订单池右键/双击 → 挂到订单，同步调度与订单管理）
+  const [excOrder, setExcOrder] = useState<Order | null>(null);
 
-  const pool = useQuery({
-    queryKey: ["pool", mineOnly],
-    queryFn: () => apiGet<Paginated<Order>>(`/orders/pool${mineOnly ? "?mine=1" : ""}`),
+  // 待分配池：未锁定/未分派（所有调度可见，供分派/锁定）
+  const poolFree = useQuery({
+    queryKey: ["pool", "free"],
+    queryFn: () => apiGet<Paginated<Order>>("/orders/pool?scope=free"),
     refetchInterval: 15000,
   });
-  // 已调派池：已转运单的订单（只读审计视图）
+  // 可调派池：仅本人锁定/被分派（调度台只看本人权限内数据）
+  const poolMine = useQuery({
+    queryKey: ["pool", "mine"],
+    queryFn: () => apiGet<Paginated<Order>>("/orders/pool?scope=mine"),
+    refetchInterval: 15000,
+  });
+  // 已调派池：本人已转运单的订单（只读审计视图）
   const dispatchedQ = useQuery({
     queryKey: ["dispatched-orders"],
-    queryFn: () => apiGet<Paginated<Order>>("/orders?status=converted&ordering=-created_at&page_size=80"),
+    queryFn: () => apiGet<Paginated<Order>>("/orders/dispatched?scope=mine&page_size=80"),
     refetchInterval: 30000,
   });
   const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=200") });
@@ -129,6 +126,7 @@ export function DispatchBoardPage() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["pool"] });
     queryClient.invalidateQueries({ queryKey: ["dispatched-orders"] });
+    queryClient.invalidateQueries({ queryKey: ["orders-manage"] });
   };
 
   // 订单池实时变化即刷新（多客服建单 / 多调度抢单）
@@ -353,13 +351,6 @@ export function DispatchBoardPage() {
           : Boolean(recCarrierId))
     : false;
 
-  // 手工提报异常
-  const reportException = useMutation({
-    mutationFn: () => apiPost("/exceptions", {
-      exception_type: excType, level: excLevel, description: excDesc, source: "manual",
-    }),
-    onSuccess: () => { toast.success("异常已提报"); setExcDesc(""); },
-  });
 
   // 抽屉开合
   function openWb(o: Order, initialTab: DrawerTab = "dispatch") {
@@ -368,7 +359,6 @@ export function DispatchBoardPage() {
     setSuggestion(null);
     setVehicleId(""); setCarrierId(""); setDriverId(""); setTrailerId(""); setCoDriverIds([]);
     setPlatformName(""); setPlatformOrderNo(""); setAgreedPayable("");
-    setExcDesc("");
     if (initialTab === "dispatch") suggest.mutate(o.id);
   }
   function closeWb() {
@@ -376,30 +366,33 @@ export function DispatchBoardPage() {
     setSuggestion(null);
   }
 
-  const orders = pool.data?.items ?? [];
+  const freeOrders = poolFree.data?.items ?? [];
+  const mineOrders = poolMine.data?.items ?? [];
   const dispatchedOrders = dispatchedQ.data?.items ?? [];
+  const orders = [...freeOrders, ...mineOrders]; // 供拖拽/并发校验查找
   const isUrgent = (o: Order) => o.sla_status === "breached" || o.sla_status === "at_risk" || o.priority === "vip";
   const sortUrgent = (list: Order[]) => [...list]
     .filter((o) => !urgentOnly || isUrgent(o))
     .sort((a, b) => Number(isUrgent(b)) - Number(isUrgent(a)));
 
-  // 三池切分：待分配（free）· 可调派（已锁定/已分派）· 已调派（converted）
-  const unassignedRows = sortUrgent(orders.filter((o) => o.lock_state === "free"));
-  const dispatchableRows = sortUrgent(orders.filter((o) => o.lock_state && o.lock_state !== "free"));
+  // 三池切分：待分配（scope=free）· 可调派（scope=mine）· 已调派（本人 converted）
+  const unassignedRows = sortUrgent(freeOrders);
+  const dispatchableRows = sortUrgent(mineOrders);
   const dispatchedRows = sortUrgent(dispatchedOrders);
   const poolCounts = {
-    unassigned: orders.filter((o) => o.lock_state === "free").length,
-    dispatchable: orders.filter((o) => o.lock_state && o.lock_state !== "free").length,
+    unassigned: freeOrders.length,
+    dispatchable: mineOrders.length,
     dispatched: dispatchedOrders.length,
   };
   const rows = poolTab === "unassigned" ? unassignedRows : poolTab === "dispatchable" ? dispatchableRows : dispatchedRows;
+  const poolLoading = poolTab === "unassigned" ? poolFree.isLoading : poolTab === "dispatchable" ? poolMine.isLoading : dispatchedQ.isLoading;
   // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
-  const activeGone = Boolean(active) && !pool.isLoading && !orders.some((o) => o.id === active?.id);
+  const activeGone = Boolean(active) && !poolMine.isLoading && !orders.some((o) => o.id === active?.id);
   const trackNo = active?.waybill_nos?.[0];
 
   // 调度工作流概览：一眼看清 待派 / 紧急 / 临期超时 / 已选
   const wf = {
-    pending: orders.length,
+    pending: freeOrders.length + mineOrders.length,
     urgent: orders.filter((o) => o.priority === "urgent" || o.priority === "vip").length,
     atRisk: orders.filter((o) => o.sla_status === "at_risk" || o.sla_status === "breached").length,
     picked: picked.size,
@@ -434,7 +427,7 @@ export function DispatchBoardPage() {
           <div className="deck-brand-ic"><IconTruck size={22} /></div>
           <div>
             <div className="deck-title">调度指挥台</div>
-            <div className="deck-sub">{mineOnly ? "我认领的订单" : "全部待派订单"} · 实时刷新 · ↑↓/Enter 键盘直达</div>
+            <div className="deck-sub">待分配全量可见 · 可调派/已调派仅本人权限 · 实时刷新</div>
           </div>
         </div>
         <div className="deck-metrics">
@@ -471,16 +464,11 @@ export function DispatchBoardPage() {
           </button>
           <div style={{ flex: 1 }} />
           <button className={`chip${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)}>仅看紧急</button>
-          {poolTab !== "dispatched" && (
-            <label className="switch-mini" style={{ fontWeight: 400 }}>
-              <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> 仅看我认领
-            </label>
-          )}
         </div>
         <div className="pool-hint">
-          {poolTab === "unassigned" && "待分配：尚未锁定/分派的订单。总调度可分派给调度，调度可自行锁定——锁定或分派后进入「可调派」才能派单。"}
-          {poolTab === "dispatchable" && "可调派：已锁定或已分派的订单，可执行派单。派单前请核对承运方案。"}
-          {poolTab === "dispatched" && "已调派：已生成运单的订单（只读）。点击查看运单与在途轨迹。"}
+          {poolTab === "unassigned" && "待分配：尚未锁定/分派的订单。总调度可分派给调度，调度可自行锁定——锁定或分派后进入「可调派」才能派单。右键/双击订单可登记异常。"}
+          {poolTab === "dispatchable" && "可调派：仅本人锁定/被分派的订单，可执行派单。查看他人或全量订单请去「订单管理」。"}
+          {poolTab === "dispatched" && "已调派：本人已生成运单的订单（只读）。查看全量已派请去「订单管理」。"}
         </div>
 
         {picked.size > 0 && poolTab !== "dispatched" && (
@@ -502,7 +490,7 @@ export function DispatchBoardPage() {
             <button className="btn-ghost" onClick={() => { setPicked(new Set()); setPlan(null); }}>清除</button>
           </div>
         )}
-        {(poolTab === "dispatched" ? dispatchedQ.isLoading : pool.isLoading) ? (
+        {poolLoading ? (
           <StateView kind="loading" compact />
         ) : rows.length === 0 ? (
           <StateView
@@ -530,7 +518,7 @@ export function DispatchBoardPage() {
                     key={o.id}
                     className={`pool-row${active?.id === o.id ? " row-active" : ""}${idx === focusIdx ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
                     onMouseEnter={() => setFocusIdx(idx)}
-                    onDoubleClick={() => { if (poolTab === "dispatchable" && canDispatch) openWb(o); }}
+                    onDoubleClick={() => { if (poolTab === "dispatchable" && canDispatch) openWb(o); else if (poolTab === "unassigned") setExcOrder(o); }}
                     onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, order: o }); }}
                   >
                     {poolTab !== "dispatched" && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(o.id)} onChange={() => togglePick(o.id)} /></td>}
@@ -538,6 +526,7 @@ export function DispatchBoardPage() {
                     <td className="small">
                       {o.customer_name || "散客"}
                       {o.customer_level && <span className={`tag ${CUST_LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }} title="客户等级">{o.customer_level}</span>}
+                      {(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="该订单有未闭环异常">⚠ 异常{(o.exception_count ?? 0) > 1 ? `×${o.exception_count}` : ""}</span>}
                     </td>
                     <td><b>{o.origin}</b> → <b>{o.destination}</b></td>
                     <td className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</td>
@@ -561,12 +550,13 @@ export function DispatchBoardPage() {
                       {poolTab === "unassigned" && (
                         <>
                           <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
-                          <span className="muted small" title="锁定或由总调度分派后才能派单">需先锁定</span>
+                          <button onClick={() => setExcOrder(o)}>登记异常</button>
                         </>
                       )}
                       {poolTab === "dispatchable" && (
                         <>
                           {o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
+                          <button onClick={() => setExcOrder(o)}>登记异常</button>
                           <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
                         </>
                       )}
@@ -583,7 +573,7 @@ export function DispatchBoardPage() {
         )}
         {rows.length > 0 && poolTab === "dispatchable" && (
           <div className="muted small" style={{ padding: "8px 17px", borderTop: "1px solid var(--line)" }}>
-            提示：↑↓ 选单 · Enter 或双击拉出派单工作台 · 右键可查看轨迹 / 提报异常。
+            提示：↑↓ 选单 · Enter 或双击拉出派单工作台 · 右键可查看轨迹 / 登记异常。
           </div>
         )}
       </div>
@@ -747,7 +737,7 @@ export function DispatchBoardPage() {
             ? <li onClick={() => { claim.mutate(menu.order.id); setMenu(null); }}>认领订单</li>
             : <li onClick={() => { release.mutate(menu.order.id); setMenu(null); }}>退回订单池</li>}
           <li onClick={() => { openWb(menu.order, "track"); setMenu(null); }}><IconMapPin size={14} className="icon-offset" /> 查看轨迹</li>
-          <li onClick={() => { openWb(menu.order, "exception"); setMenu(null); }}><IconGitBranch size={14} className="icon-offset" /> 提报异常</li>
+          <li onClick={() => { setExcOrder(menu.order); setMenu(null); }}><IconGitBranch size={14} className="icon-offset" /> 登记异常</li>
         </ul>
       )}
 
@@ -766,7 +756,6 @@ export function DispatchBoardPage() {
             <div className="wb-tabs">
               <button className={tab === "dispatch" ? "active" : ""} onClick={() => { setTab("dispatch"); if (!suggestion && !suggest.isPending) suggest.mutate(active.id); }}>派单</button>
               <button className={tab === "track" ? "active" : ""} onClick={() => setTab("track")}>轨迹</button>
-              <button className={tab === "exception" ? "active" : ""} onClick={() => setTab("exception")}>提报异常</button>
             </div>
 
             <div className="wb-drawer-body">
@@ -1002,37 +991,6 @@ export function DispatchBoardPage() {
                 )
               )}
 
-              {/* ── 提报异常 tab ── */}
-              {tab === "exception" && (
-                <div className="grid-form" style={{ gridTemplateColumns: "1fr", gap: 12 }}>
-                  <label>
-                    异常类型
-                    <select value={excType} onChange={(e) => setExcType(e.target.value)}>
-                      {MANUAL_EXC_TYPES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    紧急程度
-                    <select value={excLevel} onChange={(e) => setExcLevel(e.target.value)}>
-                      {EXC_LEVELS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    情况描述
-                    <textarea
-                      value={excDesc}
-                      onChange={(e) => setExcDesc(e.target.value)}
-                      rows={4}
-                      placeholder="请描述异常情况（时间、地点、货物、责任方等）"
-                      style={{ padding: "8px 10px", border: "1px solid var(--line-2)", borderRadius: "var(--radius-sm)", fontSize: 13, resize: "vertical" }}
-                    />
-                  </label>
-                  <button className="btn-primary" disabled={!excDesc.trim() || reportException.isPending} onClick={() => reportException.mutate()}>
-                    {reportException.isPending ? "提报中…" : "提报异常"}
-                  </button>
-                  <div className="muted small">提报后进入异常处置流程，可在「异常处置」中跟进指派与关闭。</div>
-                </div>
-              )}
             </div>
           </aside>
         </div>
@@ -1048,8 +1006,14 @@ export function DispatchBoardPage() {
         />
       )}
 
-      {/* 异常处置（原独立页并入）：调度对在途异常认领·AI诊断·强制闭环 */}
-      <ExceptionQueue />
+      {/* 登记异常（订单池右键/双击）：挂到订单，同步调度与订单管理 */}
+      {excOrder && (
+        <ExceptionRegisterModal
+          order={excOrder}
+          onClose={() => setExcOrder(null)}
+          onDone={() => { setExcOrder(null); invalidate(); }}
+        />
+      )}
     </div>
   );
 }

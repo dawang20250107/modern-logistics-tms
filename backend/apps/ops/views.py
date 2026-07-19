@@ -493,7 +493,7 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     org_field = "created_by__organization"
     queryset = (
         Order.objects.select_related("customer", "created_by", "claimed_by", "assigned_to", "assigned_by")
-        .prefetch_related("waybills", "cargo_items", "stops", "attachments")
+        .prefetch_related("waybills", "cargo_items", "stops", "attachments", "exceptions")
         .all()
     )
     serializer_class = OrderSerializer
@@ -745,13 +745,35 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     def pool_list(self, request):
         """订单池：在池待派(POOLED) + 调度中(DISPATCHING，已认领)订单，按优先级与进池时间排序。
 
-        包含已认领订单，避免认领后从看板消失；?mine=1 仅看自己认领的。
+        scope=free  待分配（未锁定/未分派，所有调度可见，供分派/锁定）
+        scope=mine  可调派（本人锁定或被分派给本人）——调度台仅看本人权限内数据
+        默认（无 scope）：全部在池+调度中（兼容旧行为）。?mine=1 等价于 scope=mine。
         """
+        from django.db.models import Q
+
         qs = self.get_queryset().filter(
             status__in=[Order.STATUS_POOLED, Order.STATUS_DISPATCHING]
         ).order_by("-priority", "pooled_at")
-        if request.query_params.get("mine") in ("1", "true"):
-            qs = qs.filter(claimed_by=_current_user_or_none(request))
+        scope = request.query_params.get("scope")
+        if scope == "free":
+            qs = qs.filter(claimed_by__isnull=True, assigned_to__isnull=True)
+        elif scope == "mine" or request.query_params.get("mine") in ("1", "true"):
+            me = _current_user_or_none(request)
+            qs = qs.filter(Q(claimed_by=me) | Q(assigned_to=me))
+        page = self.paginate_queryset(qs)
+        ctx = {"request": request}
+        ser = OrderSerializer(page if page is not None else qs, many=True, context=ctx)
+        return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
+
+    @action(detail=False, methods=["get"], url_path="dispatched")
+    def dispatched_list(self, request):
+        """已调派池：已转运单(CONVERTED)的订单。scope=mine 仅本人锁定/分派过的（调度台默认）。"""
+        from django.db.models import Q
+
+        qs = self.get_queryset().filter(status=Order.STATUS_CONVERTED).order_by("-created_at")
+        if request.query_params.get("scope") == "mine" or request.query_params.get("mine") in ("1", "true"):
+            me = _current_user_or_none(request)
+            qs = qs.filter(Q(claimed_by=me) | Q(assigned_to=me))
         page = self.paginate_queryset(qs)
         ctx = {"request": request}
         ser = OrderSerializer(page if page is not None else qs, many=True, context=ctx)
@@ -785,6 +807,27 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         from .order_dispatch import unassign_order
 
         return Response(OrderSerializer(unassign_order(self.get_object(), request.user)).data)
+
+    @action(detail=True, methods=["post"], url_path="report-exception")
+    def report_exception(self, request, pk=None):
+        """在订单池对某订单登记异常：挂到订单，同步调度与订单管理（并给订单打标记）。"""
+        order = self.get_object()
+        exc_type = request.data.get("exception_type") or "other"
+        level = request.data.get("level") or "medium"
+        desc = (request.data.get("description") or "").strip()
+        if exc_type not in dict(ExceptionRecord.EXCEPTION_TYPE_CHOICES):
+            raise AppError("INVALID_EXCEPTION_TYPE", "异常类型非法。", status=400)
+        rec = ExceptionRecord.objects.create(
+            order=order,
+            waybill=order.waybills.first(),
+            exception_type=exc_type, level=level, description=desc,
+            source="manual", reported_by=request.user if request.user.is_authenticated else None,
+        )
+        from .intake import record_order_event
+
+        record_order_event(order, "exception_reported", actor=request.user, source="exception",
+                           note=f"登记异常：{dict(ExceptionRecord.EXCEPTION_TYPE_CHOICES).get(exc_type, exc_type)}")
+        return Response({"id": str(rec.id), "order_no": order.order_no, "exception_type": exc_type, "level": level}, status=201)
 
     @action(detail=False, methods=["post"], url_path="batch-dispatch")
     def batch_dispatch(self, request):

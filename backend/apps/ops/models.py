@@ -768,6 +768,13 @@ class ExceptionRecord(BaseModel):
     waybill = models.ForeignKey(
         Waybill, null=True, blank=True, on_delete=models.SET_NULL, related_name="exceptions"
     )
+    # 订单级异常：客服/调度在订单池对某订单登记异常（同步调度与订单管理）
+    order = models.ForeignKey(
+        Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="exceptions"
+    )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="reported_exceptions"
+    )
     exception_type = models.CharField(max_length=64, choices=EXCEPTION_TYPE_CHOICES)
     level = models.CharField(max_length=16, choices=LEVEL_CHOICES, default="medium")
     source = models.CharField(max_length=32, default="manual", help_text="manual/track/ocr/customer")

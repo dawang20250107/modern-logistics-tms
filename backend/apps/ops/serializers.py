@@ -270,11 +270,28 @@ class OrderSerializer(serializers.ModelSerializer):
     lock_state = serializers.SerializerMethodField()
     waybill_nos = serializers.SerializerMethodField()
     dispatched_at = serializers.SerializerMethodField()
+    exception_count = serializers.SerializerMethodField()
+    exception_level = serializers.SerializerMethodField()
 
     def get_dispatched_at(self, obj):
         # 已调派时间：取关联运单最早创建时间（依赖视图 prefetch_related("waybills")）
         times = [w.created_at for w in obj.waybills.all() if w.created_at]
         return min(times).isoformat() if times else None
+
+    def _open_exceptions(self, obj):
+        # 未闭环异常（依赖视图 prefetch_related("exceptions")）
+        return [e for e in obj.exceptions.all() if e.status not in ("closed", "rejected")]
+
+    def get_exception_count(self, obj) -> int:
+        return len(self._open_exceptions(obj))
+
+    def get_exception_level(self, obj) -> str:
+        # 取最高等级作为标记颜色依据
+        levels = {e.level for e in self._open_exceptions(obj)}
+        for lv in ("high", "medium", "low"):
+            if lv in levels:
+                return lv
+        return ""
 
     @staticmethod
     def _uname(u):
@@ -335,7 +352,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
             "assigned_to", "assigned_to_name", "assigned_by_name", "assigned_at",
-            "dispatchable", "lock_state", "dispatched_at",
+            "dispatchable", "lock_state", "dispatched_at", "exception_count", "exception_level",
             "created_by", "created_by_name", "raw_text", "ai_conversation_id", "parse_meta", "remark", "created_at",
             "waybill_nos", "cargo_items", "stops", "attachments",
             "approval_status", "approval_remark", "approved_at",

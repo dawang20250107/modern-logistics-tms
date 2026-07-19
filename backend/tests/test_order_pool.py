@@ -194,6 +194,9 @@ def test_signing_completes_order():
 def test_dispatch_endpoint(admin_client):
     carrier = Carrier.objects.create(code="C8", name="承运乙")
     order = _pooled_order(cargo_weight_ton=5)
+    # 流程门禁：需先锁定（进入可调派池）才能派单
+    claim = admin_client.post(f"/api/v1/orders/{order.id}/claim", {}, format="json")
+    assert claim.status_code == 200, claim.content
     resp = admin_client.post(
         f"/api/v1/orders/{order.id}/dispatch",
         {"dispatch_type": "third_party", "carrier": str(carrier.id)},
@@ -201,3 +204,17 @@ def test_dispatch_endpoint(admin_client):
     )
     assert resp.status_code == 201, resp.content
     assert resp.json()["data"]["status"] == Waybill.STATUS_PENDING_DISPATCH
+
+
+@pytest.mark.django_db
+def test_dispatch_requires_lock(admin_client):
+    """未锁定/未分派的订单不可直接派单（三池流程门禁）。"""
+    carrier = Carrier.objects.create(code="C9", name="承运丙")
+    order = _pooled_order(cargo_weight_ton=5)
+    resp = admin_client.post(
+        f"/api/v1/orders/{order.id}/dispatch",
+        {"dispatch_type": "third_party", "carrier": str(carrier.id)},
+        format="json",
+    )
+    assert resp.status_code == 409, resp.content
+    assert resp.json()["error"]["code"] == "ORDER_NOT_LOCKED"

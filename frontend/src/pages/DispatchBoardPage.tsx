@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
-import { fmtMoney, fmtRelative } from "../api/format";
+import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { BatchDispatchModal } from "../components/BatchDispatchModal";
 import { ExceptionQueue } from "../components/ExceptionQueue";
@@ -56,6 +56,23 @@ type MenuState = { x: number; y: number; order: Order } | null;
 
 const CUST_LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
 
+// 时间审计渲染：三池各自的关键时间戳 + 操作人，全链路可追溯
+function renderAudit(o: Order, tab: "unassigned" | "dispatchable" | "dispatched") {
+  if (tab === "unassigned") {
+    return o.pooled_at
+      ? <span title={fmtDateTime(o.pooled_at)}>进池 {fmtRelative(o.pooled_at)}</span>
+      : <span className="muted small">—</span>;
+  }
+  if (tab === "dispatchable") {
+    if (o.claimed_at) return <span title={fmtDateTime(o.claimed_at)}>锁定 {fmtRelative(o.claimed_at)}{o.claimed_by_name ? ` · ${o.claimed_by_name}` : ""}</span>;
+    if (o.assigned_at) return <span title={fmtDateTime(o.assigned_at)}>分派 {fmtRelative(o.assigned_at)}{o.assigned_to_name ? ` · ${o.assigned_by_name || "调度"}→${o.assigned_to_name}` : ""}</span>;
+    return <span className="muted small">—</span>;
+  }
+  return o.dispatched_at
+    ? <span title={fmtDateTime(o.dispatched_at)}>调派 {fmtRelative(o.dispatched_at)}</span>
+    : <span className="muted small">—</span>;
+}
+
 // 锁定/分派状态渲染：让调度一眼看清这单归谁、能不能派
 function renderLock(o: Order) {
   switch (o.lock_state) {
@@ -88,6 +105,8 @@ export function DispatchBoardPage() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [batchDispatch, setBatchDispatch] = useState(false);
+  // 三池：待分配（未锁定/未分派）· 可调派（已锁定/已分派）· 已调派（已转运单）
+  const [poolTab, setPoolTab] = useState<"unassigned" | "dispatchable" | "dispatched">("unassigned");
   // 手工提报异常表单
   const [excType, setExcType] = useState("transit_delay");
   const [excLevel, setExcLevel] = useState("medium");
@@ -98,10 +117,19 @@ export function DispatchBoardPage() {
     queryFn: () => apiGet<Paginated<Order>>(`/orders/pool${mineOnly ? "?mine=1" : ""}`),
     refetchInterval: 15000,
   });
+  // 已调派池：已转运单的订单（只读审计视图）
+  const dispatchedQ = useQuery({
+    queryKey: ["dispatched-orders"],
+    queryFn: () => apiGet<Paginated<Order>>("/orders?status=converted&ordering=-created_at&page_size=80"),
+    refetchInterval: 30000,
+  });
   const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=200") });
   const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: () => apiGet<Paginated<Vehicle>>("/vehicles?page_size=200") });
   const drivers = useQuery({ queryKey: ["drivers"], queryFn: () => apiGet<Paginated<Driver>>("/drivers?page_size=200") });
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["pool"] });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["pool"] });
+    queryClient.invalidateQueries({ queryKey: ["dispatched-orders"] });
+  };
 
   // 订单池实时变化即刷新（多客服建单 / 多调度抢单）
   useEventStream((e) => {
@@ -349,11 +377,22 @@ export function DispatchBoardPage() {
   }
 
   const orders = pool.data?.items ?? [];
+  const dispatchedOrders = dispatchedQ.data?.items ?? [];
   const isUrgent = (o: Order) => o.sla_status === "breached" || o.sla_status === "at_risk" || o.priority === "vip";
-  // 紧急优先排序 + 可选仅看紧急
-  const rows = [...orders]
+  const sortUrgent = (list: Order[]) => [...list]
     .filter((o) => !urgentOnly || isUrgent(o))
     .sort((a, b) => Number(isUrgent(b)) - Number(isUrgent(a)));
+
+  // 三池切分：待分配（free）· 可调派（已锁定/已分派）· 已调派（converted）
+  const unassignedRows = sortUrgent(orders.filter((o) => o.lock_state === "free"));
+  const dispatchableRows = sortUrgent(orders.filter((o) => o.lock_state && o.lock_state !== "free"));
+  const dispatchedRows = sortUrgent(dispatchedOrders);
+  const poolCounts = {
+    unassigned: orders.filter((o) => o.lock_state === "free").length,
+    dispatchable: orders.filter((o) => o.lock_state && o.lock_state !== "free").length,
+    dispatched: dispatchedOrders.length,
+  };
+  const rows = poolTab === "unassigned" ? unassignedRows : poolTab === "dispatchable" ? dispatchableRows : dispatchedRows;
   // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
   const activeGone = Boolean(active) && !pool.isLoading && !orders.some((o) => o.id === active?.id);
   const trackNo = active?.waybill_nos?.[0];
@@ -374,7 +413,7 @@ export function DispatchBoardPage() {
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
       if (e.key === "ArrowDown") { e.preventDefault(); setFocusIdx((i) => Math.min(i + 1, rows.length - 1)); }
       else if (e.key === "ArrowUp") { e.preventDefault(); setFocusIdx((i) => Math.max(i <= 0 ? 0 : i - 1, 0)); }
-      else if (e.key === "Enter" && focusIdx >= 0 && focusIdx < rows.length) { e.preventDefault(); openWb(rows[focusIdx]); }
+      else if (e.key === "Enter" && poolTab === "dispatchable" && focusIdx >= 0 && focusIdx < rows.length) { e.preventDefault(); openWb(rows[focusIdx]); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -419,24 +458,37 @@ export function DispatchBoardPage() {
         </div>
       </div>
       <div className="panel dispatch-board-panel">
-        <div className="panel-head">
-          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            订单池
-            <span className="ai-pill">{mineOnly ? "我认领的" : "全部"} {rows.length}</span>
-          </span>
-          <div className="panel-actions">
-            <button className={`chip${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)}>仅看紧急</button>
+        {/* 三池分区：待分配 → 可调派 → 已调派，全链路带时间审计 */}
+        <div className="pool-tabs">
+          <button className={`pool-tab${poolTab === "unassigned" ? " on" : ""}`} onClick={() => { setPoolTab("unassigned"); setPicked(new Set()); }}>
+            <span className="pool-tab-dot dot-amber" />待分配<span className="pool-tab-n">{poolCounts.unassigned}</span>
+          </button>
+          <button className={`pool-tab${poolTab === "dispatchable" ? " on" : ""}`} onClick={() => { setPoolTab("dispatchable"); setPicked(new Set()); }}>
+            <span className="pool-tab-dot dot-blue" />可调派<span className="pool-tab-n">{poolCounts.dispatchable}</span>
+          </button>
+          <button className={`pool-tab${poolTab === "dispatched" ? " on" : ""}`} onClick={() => { setPoolTab("dispatched"); setPicked(new Set()); }}>
+            <span className="pool-tab-dot dot-green" />已调派<span className="pool-tab-n">{poolCounts.dispatched}</span>
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className={`chip${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)}>仅看紧急</button>
+          {poolTab !== "dispatched" && (
             <label className="switch-mini" style={{ fontWeight: 400 }}>
               <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> 仅看我认领
             </label>
-          </div>
+          )}
         </div>
-        {picked.size > 0 && (
+        <div className="pool-hint">
+          {poolTab === "unassigned" && "待分配：尚未锁定/分派的订单。总调度可分派给调度，调度可自行锁定——锁定或分派后进入「可调派」才能派单。"}
+          {poolTab === "dispatchable" && "可调派：已锁定或已分派的订单，可执行派单。派单前请核对承运方案。"}
+          {poolTab === "dispatched" && "已调派：已生成运单的订单（只读）。点击查看运单与在途轨迹。"}
+        </div>
+
+        {picked.size > 0 && poolTab !== "dispatched" && (
           <div className="batch-bar">
             <span>已选 <b style={{ color: "var(--accent)" }}>{picked.size}</b> 单</span>
             <div style={{ flex: 1 }} />
-            <button className="btn-ghost" disabled={lockMany.isPending} onClick={() => lockMany.mutate([...picked])}>锁定所选</button>
-            {isChief && (
+            {poolTab === "unassigned" && <button className="btn-ghost" disabled={lockMany.isPending} onClick={() => lockMany.mutate([...picked])}>锁定所选</button>}
+            {isChief && poolTab === "unassigned" && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <select className="search" style={{ minWidth: 150, padding: "6px 10px" }} value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
                   <option value="">分派给…</option>
@@ -445,28 +497,29 @@ export function DispatchBoardPage() {
                 <button className="btn-ghost" disabled={!assignTo || assignMany.isPending} onClick={() => assignMany.mutate({ ids: [...picked], dispatcher: assignTo })}>分单</button>
               </span>
             )}
-            <button className="btn-ghost" onClick={() => setBatchDispatch(true)} title="多单一次委托同一承运商，生成派车批次">批量派承运商</button>
+            <button className="btn-ghost" onClick={() => setBatchDispatch(true)} title="多单一次委托同一承运商，生成派车批次（待分配单将自动锁定给你）">批量派承运商</button>
             <button className="btn-primary" disabled={makePlan.isPending} onClick={() => makePlan.mutate()}>智能排线拼单</button>
             <button className="btn-ghost" onClick={() => { setPicked(new Set()); setPlan(null); }}>清除</button>
           </div>
         )}
-        {pool.isLoading ? (
+        {(poolTab === "dispatched" ? dispatchedQ.isLoading : pool.isLoading) ? (
           <StateView kind="loading" compact />
         ) : rows.length === 0 ? (
           <StateView
             kind="empty"
             scene="pool-empty"
-            title={urgentOnly ? "暂无紧急订单" : mineOnly ? "暂无我认领的订单" : "订单池为空"}
-            hint="已确认订单进池后将在此等待派单 · 双击或右键订单可打开派单工作台"
-            action={<Link className="btn-primary" to="/intake" style={{ textDecoration: "none" }}>去建单</Link>}
+            title={urgentOnly ? "暂无紧急订单" : poolTab === "unassigned" ? "待分配池为空" : poolTab === "dispatchable" ? "可调派池为空" : "暂无已调派订单"}
+            hint={poolTab === "unassigned" ? "已确认订单进池后在此等待分派/锁定" : poolTab === "dispatchable" ? "在「待分配」锁定或由总调度分派后，订单进入此池可派单" : "派单后订单在此留痕，可追溯调派时间"}
+            action={poolTab === "unassigned" ? <Link className="btn-primary" to="/intake" style={{ textDecoration: "none" }}>去建单</Link> : undefined}
           />
         ) : (
           <div className="table-wrap">
           <table className="table dispatch-pool" aria-label="订单池">
             <thead>
               <tr>
-                <th style={{ width: 32 }}></th>
-                <th>订单号</th><th>客户</th><th>线路</th><th>类型</th><th>优先级</th><th className="num">货量</th><th className="num">应收</th><th>等待/时效</th><th>锁定 / 分派</th><th style={{ width: 150 }}>操作</th>
+                {poolTab !== "dispatched" && <th style={{ width: 32 }}></th>}
+                <th>订单号</th><th>客户</th><th>线路</th><th>类型</th><th>优先级</th><th className="num">货量</th><th className="num">应收</th>
+                <th>状态 / 时间审计</th><th style={{ width: 160 }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -477,10 +530,10 @@ export function DispatchBoardPage() {
                     key={o.id}
                     className={`pool-row${active?.id === o.id ? " row-active" : ""}${idx === focusIdx ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
                     onMouseEnter={() => setFocusIdx(idx)}
-                    onDoubleClick={() => canDispatch && openWb(o)}
+                    onDoubleClick={() => { if (poolTab === "dispatchable" && canDispatch) openWb(o); }}
                     onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, order: o }); }}
                   >
-                    <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(o.id)} onChange={() => togglePick(o.id)} /></td>
+                    {poolTab !== "dispatched" && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(o.id)} onChange={() => togglePick(o.id)} /></td>}
                     <td className="mono">{o.order_no}</td>
                     <td className="small">
                       {o.customer_name || "散客"}
@@ -492,20 +545,34 @@ export function DispatchBoardPage() {
                     <td className="num">{o.cargo_weight_ton}吨/{o.cargo_volume_cbm}方</td>
                     <td className="num">{o.quoted_amount ? fmtMoney(o.quoted_amount) : "—"}</td>
                     <td className="small">
-                      {o.pooled_at && <span title="进池等待时长">{fmtRelative(o.pooled_at)}</span>}
-                      {o.sla_status && o.sla_status !== "pending" && o.sla_status !== "on_time" && (
-                        <span className={`tag tag-sla_${o.sla_status}`} style={{ marginLeft: 4 }}>{SLA_STATUS_LABEL[o.sla_status]}</span>
-                      )}
+                      <div className="audit-cell">
+                        <span className="audit-lock">{renderLock(o)}</span>
+                        <span className="audit-time">
+                          {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0 ? (
+                            <>{renderAudit(o, poolTab)} · <Link className="link mono" to={`/waybills/${o.waybill_nos[0]}`}>{o.waybill_nos[0]}</Link></>
+                          ) : renderAudit(o, poolTab)}
+                          {poolTab === "unassigned" && o.sla_status && o.sla_status !== "pending" && o.sla_status !== "on_time" && (
+                            <span className={`tag tag-sla_${o.sla_status}`} style={{ marginLeft: 4 }}>{SLA_STATUS_LABEL[o.sla_status]}</span>
+                          )}
+                        </span>
+                      </div>
                     </td>
-                    <td className="small">{renderLock(o)}</td>
                     <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-                      {(o.lock_state === "free" || o.lock_state === "assigned_mine") && (
-                        <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
+                      {poolTab === "unassigned" && (
+                        <>
+                          <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
+                          <span className="muted small" title="锁定或由总调度分派后才能派单">需先锁定</span>
+                        </>
                       )}
-                      {o.lock_state === "mine" && (
-                        <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>
+                      {poolTab === "dispatchable" && (
+                        <>
+                          {o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
+                          <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
+                        </>
                       )}
-                      <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
+                      {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0 && (
+                        <Link className="link small" to={`/waybills/${o.waybill_nos[0]}`}>查看运单</Link>
+                      )}
                     </td>
                   </tr>
                 );
@@ -514,9 +581,9 @@ export function DispatchBoardPage() {
           </table>
           </div>
         )}
-        {rows.length > 0 && (
+        {rows.length > 0 && poolTab === "dispatchable" && (
           <div className="muted small" style={{ padding: "8px 17px", borderTop: "1px solid var(--line)" }}>
-            提示：↑↓ 选单 · Enter 或双击拉出派单工作台 · 右键可认领 / 查看轨迹 / 提报异常。
+            提示：↑↓ 选单 · Enter 或双击拉出派单工作台 · 右键可查看轨迹 / 提报异常。
           </div>
         )}
       </div>

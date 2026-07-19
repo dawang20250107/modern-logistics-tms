@@ -248,6 +248,14 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
         raise AppError("INVALID_DISPATCH_TYPE", "派单类型非法。", status=400)
     if order.status not in (Order.STATUS_POOLED, Order.STATUS_DISPATCHING, Order.STATUS_CONFIRMED):
         raise AppError("ORDER_NOT_DISPATCHABLE", "订单当前状态不可派单。", status=409)
+    # 流程门禁：必须先锁定或被分派（可调派池）才能派单——杜绝"未锁定直接派单"。
+    # 仅约束有操作人的调用（UI 派单）；operator=None 的系统/服务级调用放行。
+    if operator is not None and order.claimed_by_id is None and order.assigned_to_id is None:
+        raise AppError(
+            "ORDER_NOT_LOCKED",
+            "该订单尚在待分配池：请先锁定，或由总调度分派后再派单。",
+            status=409,
+        )
     # 权限门禁：非总调度只能调派"分派给自己"或"自己锁定"的订单
     if operator is not None and not is_chief_dispatcher(operator):
         owner_ids = {order.claimed_by_id, order.assigned_to_id}
@@ -474,6 +482,19 @@ def batch_dispatch_orders(order_ids, *, carrier_id=None, dispatch_type="third_pa
     total_weight = Decimal("0")
     for o in dispatchable:
         try:
+            # 批次隐含锁定：待分配订单先锁给操作人（形成审计 + 满足派单门禁），再委托承运商
+            if getattr(operator, "id", None) and o.claimed_by_id is None and o.assigned_to_id is None:
+                with transaction.atomic():
+                    locked = Order.objects.select_for_update().get(id=o.id)
+                    if locked.claimed_by_id is None and locked.assigned_to_id is None:
+                        locked.claimed_by = operator
+                        locked.claimed_at = timezone.now()
+                        if locked.status == Order.STATUS_POOLED:
+                            locked.status = Order.STATUS_DISPATCHING
+                        locked.save(update_fields=["claimed_by", "claimed_at", "status", "updated_at"])
+                        record_order_event(locked, "claimed", actor=operator, source="batch",
+                                           note=f"批次 {batch.batch_no} 锁定")
+                        o = locked
             waybill = dispatch_order(
                 o, dispatch_type=dispatch_type, carrier=carrier,
                 platform_name=platform_name,

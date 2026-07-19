@@ -428,6 +428,9 @@ export interface Order {
   created_by_name: string;
   sla_status: string;
   pooled_at: string | null;
+  claimed_at?: string | null;
+  assigned_at?: string | null;
+  dispatched_at?: string | null;
   delivered_at: string | null;
   raw_text: string;
   ai_conversation_id: string;

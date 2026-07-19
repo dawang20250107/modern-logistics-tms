@@ -269,6 +269,12 @@ class OrderSerializer(serializers.ModelSerializer):
     dispatchable = serializers.SerializerMethodField()
     lock_state = serializers.SerializerMethodField()
     waybill_nos = serializers.SerializerMethodField()
+    dispatched_at = serializers.SerializerMethodField()
+
+    def get_dispatched_at(self, obj):
+        # 已调派时间：取关联运单最早创建时间（依赖视图 prefetch_related("waybills")）
+        times = [w.created_at for w in obj.waybills.all() if w.created_at]
+        return min(times).isoformat() if times else None
 
     @staticmethod
     def _uname(u):
@@ -329,7 +335,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
             "assigned_to", "assigned_to_name", "assigned_by_name", "assigned_at",
-            "dispatchable", "lock_state",
+            "dispatchable", "lock_state", "dispatched_at",
             "created_by", "created_by_name", "raw_text", "ai_conversation_id", "parse_meta", "remark", "created_at",
             "waybill_nos", "cargo_items", "stops", "attachments",
             "approval_status", "approval_remark", "approved_at",

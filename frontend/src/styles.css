@@ -445,6 +445,9 @@ select {
 
 /* ── Table — dense, sticky, ledger-grade ── */
 .table { width: 100%; border-collapse: collapse; }
+/* 宽表在窄视口内横向滚动，避免撑破页面布局 */
+.table-wrap { overflow-x: auto; }
+.table-wrap > .table { min-width: 640px; }
 .table th, .table td { text-align: left; padding: 10px 17px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: middle; }
 .table td { font-variant-numeric: tabular-nums slashed-zero; color: var(--ink-2); letter-spacing: -0.004em; }
 /* first column carries identity */

@@ -155,6 +155,7 @@ export function MonitorPage() {
         ) : vehicles.length === 0 ? (
           <StateView kind="empty" title="暂无车辆实时状态" />
         ) : (
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr><th>车牌</th><th>状态</th><th>运单</th><th>速度(km/h)</th><th>温度(℃)</th><th>油量(%)</th><th>位置</th><th>更新时间</th></tr>
@@ -174,6 +175,7 @@ export function MonitorPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

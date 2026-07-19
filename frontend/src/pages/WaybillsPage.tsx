@@ -39,7 +39,7 @@ function loadFilters(): PersistedFilters {
 
 const RECEIPT_LABEL: Record<string, string> = { returned: "已回收", audited: "已核销", pending: "待追回" };
 
-export function WaybillsPage() {
+export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -331,7 +331,7 @@ export function WaybillsPage() {
       <div className="panel" style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)", overflow: "visible" }}>
         <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>订单管理</span>
+            <span style={{ fontSize: 18 }}>运单</span>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn-primary" onClick={() => navigate("/intake")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>

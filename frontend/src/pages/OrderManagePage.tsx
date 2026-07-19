@@ -1,0 +1,206 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+
+import { apiDownload, apiGet, apiPost } from "../api/client";
+import { confirmAction } from "../api/confirm";
+import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
+import { toast } from "../api/toast";
+import type { Order, Paginated } from "../api/types";
+import {
+  BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SOURCE_TYPE_LABEL,
+} from "../api/types";
+import { DataTable, type DataColumn } from "../components/DataTable";
+import { StateView } from "../components/StateView";
+import { StatusTag } from "../components/StatusTag";
+import { WaybillsPage } from "./WaybillsPage";
+
+const LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
+const LOCK_LABEL: Record<string, string> = { mine: "我锁定", locked: "他人锁定", assigned_mine: "分派给我", assigned_other: "已分派", free: "" };
+const LOCK_TONE: Record<string, string> = { mine: "tag-low", locked: "tag-medium", assigned_mine: "tag-info", assigned_other: "tag-none", free: "" };
+// 订单生命周期状态过滤链
+const STATUS_CHAIN = ["draft", "pending_confirm", "confirmed", "pooled", "dispatching", "converted", "completed", "cancelled"];
+
+// ── 订单视图（护城河主视图）──────────────────────────────
+function OrdersTab() {
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState("");
+  const [channel, setChannel] = useState("");
+  const [bizType, setBizType] = useState("");
+  const [priority, setPriority] = useState("");
+  const [level, setLevel] = useState("");
+  const [days, setDays] = useState("30");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const filterQs = [
+    status && `status=${status}`, channel && `channel=${channel}`,
+    bizType && `business_type=${bizType}`, priority && `priority=${priority}`,
+    search && `search=${encodeURIComponent(search)}`,
+  ].filter(Boolean).join("&");
+
+  const q = useQuery({
+    queryKey: ["orders-manage", status, channel, bizType, priority, search],
+    queryFn: () => apiGet<Paginated<Order>>(`/orders?page_size=300&ordering=-created_at${filterQs ? `&${filterQs}` : ""}`),
+  });
+  const dispatchers = useQuery({
+    queryKey: ["dispatchers"],
+    queryFn: () => apiGet<{ is_chief: boolean; dispatchers: Array<{ id: string; name: string }> }>("/orders/dispatchers"),
+  });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orders-manage"] });
+
+  // 客户等级 + 日期范围在已加载集上二次过滤（服务端未建索引字段）
+  const rows = useMemo(() => {
+    let items = q.data?.items ?? [];
+    if (level) items = items.filter((o) => (o.customer_level || "") === level);
+    if (days) {
+      const cut = Date.now() - Number(days) * 86400000;
+      items = items.filter((o) => new Date(o.created_at).getTime() >= cut);
+    }
+    return items;
+  }, [q.data, level, days]);
+  const total = rows.length;
+
+  const BATCH_LABEL: Record<string, string> = { confirm: "确认", pool: "进池", cancel: "取消", delete: "删除" };
+  const batch = useMutation({
+    mutationFn: (v: { action: string; ids: string[] }) =>
+      apiPost<{ ok_count: number; failed: Array<{ order_no: string; error: string }> }>("/orders/batch", v),
+    onSuccess: (r, v) => {
+      toast.success(`批量${BATCH_LABEL[v.action]}完成：成功 ${r.ok_count}${r.failed?.length ? ` · 失败 ${r.failed.length}` : ""}`);
+      setSelected(new Set()); invalidate();
+    },
+  });
+  const merge = useMutation({
+    mutationFn: (ids: string[]) => apiPost<Order>("/orders/merge", { ids }),
+    onSuccess: (o) => { toast.success(`已合单：${o.order_no}`); setSelected(new Set()); invalidate(); },
+  });
+  const [assignTo, setAssignTo] = useState("");
+  const assign = useMutation({
+    mutationFn: (v: { ids: string[]; dispatcher: string }) => apiPost<{ assigned: string[]; dispatcher: string }>("/orders/assign", v),
+    onSuccess: (r) => { toast.success(`已分派 ${r.assigned.length} 单给 ${r.dispatcher}`); setSelected(new Set()); setAssignTo(""); invalidate(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const runBatch = async (action: string) => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (action === "cancel" || action === "delete") {
+      if (!(await confirmAction({ message: `确定批量${BATCH_LABEL[action]} ${ids.length} 个订单？不可恢复。`, tone: "danger", confirmText: `批量${BATCH_LABEL[action]}` }))) return;
+    }
+    batch.mutate({ action, ids });
+  };
+
+  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => setSelected((prev) => (rows.length > 0 && rows.every((o) => prev.has(o.id)) ? new Set() : new Set(rows.map((o) => o.id))));
+
+  const columns: DataColumn<Order>[] = [
+    { key: "order_no", header: "订单号", width: 165, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono" to={`/orders/${o.id}`}>{o.order_no}</Link> },
+    { key: "customer", header: "客户", width: 150, sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}</span> },
+    { key: "channel", header: "渠道", width: 90, sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
+    { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <><b>{o.origin || "?"}</b> → <b>{o.destination || "?"}</b></> },
+    { key: "biz", header: "业务", width: 90, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
+    { key: "cargo", header: "货量", width: 110, align: "right", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}吨/{o.cargo_quantity}件</span> },
+    { key: "amount", header: "报价", width: 110, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
+    { key: "priority", header: "优先级", width: 80, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
+    { key: "status", header: "状态", width: 100, sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
+    { key: "sla", header: "SLA", width: 84, sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
+    { key: "lock", header: "锁定/分派", width: 110, sortValue: (o) => o.lock_state ?? "", exportValue: (o) => LOCK_LABEL[o.lock_state ?? "free"] ?? "", render: (o) => o.lock_state && o.lock_state !== "free" ? <span className={`tag ${LOCK_TONE[o.lock_state]}`} title={o.claimed_by_name || o.assigned_to_name}>{LOCK_LABEL[o.lock_state]}{(o.claimed_by_name || o.assigned_to_name) ? ` · ${o.claimed_by_name || o.assigned_to_name}` : ""}</span> : <span className="muted small">—</span> },
+    { key: "creator", header: "建单人", width: 100, sortValue: (o) => o.created_by_name || "", exportValue: (o) => o.created_by_name || "", render: (o) => <span className="small muted">{o.created_by_name || "-"}</span> },
+    { key: "created", header: "建单时间", width: 130, sortValue: (o) => o.created_at, exportValue: (o) => fmtDateTime(o.created_at), render: (o) => <span className="small" title={fmtDateTime(o.created_at)}>{fmtRelative(o.created_at)}</span> },
+    {
+      key: "actions", header: "操作", width: 180, alwaysVisible: true,
+      render: (o) => (
+        <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+          {(o.status === "draft" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "confirm", ids: [o.id] })}>确认</button>}
+          {(o.status === "confirmed" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "pool", ids: [o.id] })}>进池</button>}
+          {o.status === "pooled" && <Link className="link small" to="/dispatch-board">去派单</Link>}
+          <Link className="link small" to={`/orders/${o.id}`}>详情</Link>
+          {(o.waybill_nos ?? []).map((no) => <Link key={no} className="link mono small" to={`/waybills/${no}`}>{no}</Link>)}
+        </div>
+      ),
+    },
+  ];
+
+  const batchBar = selected.size > 0 ? (
+    <div className="batch-bar">
+      <span>已选 <b style={{ color: "var(--accent)" }}>{selected.size}</b> 单</span>
+      <div style={{ flex: 1 }} />
+      <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>确认</button>
+      <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>进池</button>
+      <button className="btn-ghost" disabled={merge.isPending || selected.size < 2} onClick={async () => { if (await confirmAction({ message: `将 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]); }}>合单</button>
+      {dispatchers.data?.is_chief && (
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <select className="search" style={{ minWidth: 130, padding: "6px 10px" }} value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
+            <option value="">分派给…</option>
+            {(dispatchers.data?.dispatchers ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <button className="btn-ghost" disabled={!assignTo || assign.isPending} onClick={() => assign.mutate({ ids: [...selected], dispatcher: assignTo })}>分单</button>
+        </span>
+      )}
+      <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>取消</button>
+      <button className="btn-danger-ghost" disabled={batch.isPending} onClick={() => runBatch("delete")}>删除</button>
+      <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除</button>
+    </div>
+  ) : null;
+
+  return (
+    <div className="panel">
+      <div className="panel-head" style={{ flexWrap: "wrap", gap: 10 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>订单台账<span className="ai-pill">{total}</span></span>
+        <button className="btn-ghost" onClick={() => apiDownload(`/orders/export?page_size=5000${filterQs ? `&${filterQs}` : ""}`, "orders.csv")}>导出 CSV</button>
+      </div>
+
+      {/* 状态链筛选 */}
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <button className={`chip${status === "" ? " chip-on" : ""}`} onClick={() => setStatus("")}>全部状态</button>
+        {STATUS_CHAIN.map((s) => <button key={s} className={`chip${status === s ? " chip-on" : ""}`} onClick={() => setStatus(s)}>{ORDER_STATUS_LABEL[s] ?? s}</button>)}
+      </div>
+      {/* 维度筛选 */}
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0 }}>
+        <select className="search" style={{ minWidth: 110, padding: "7px 10px" }} value={channel} onChange={(e) => setChannel(e.target.value)}>
+          <option value="">全部渠道</option>{Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={bizType} onChange={(e) => setBizType(e.target.value)}>
+          <option value="">全部业务</option>{Object.entries(BUSINESS_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={priority} onChange={(e) => setPriority(e.target.value)}>
+          <option value="">全部优先级</option>{Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={level} onChange={(e) => setLevel(e.target.value)}>
+          <option value="">全部等级</option>{["S", "A", "B", "C", "D"].map((l) => <option key={l} value={l}>{l} 级客户</option>)}
+        </select>
+        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={days} onChange={(e) => setDays(e.target.value)}>
+          <option value="7">近 7 天</option><option value="30">近 30 天</option><option value="90">近 90 天</option><option value="">全部时间</option>
+        </select>
+        <input className="search" style={{ minWidth: 200, flex: 1 }} placeholder="搜索订单号 / 电话 / 始发 / 目的地" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+
+      {q.isLoading ? (
+        <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" onRetry={() => q.refetch()} />
+      ) : rows.length === 0 ? (
+        (status || channel || bizType || priority || level || search) ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" /> : <StateView kind="empty" scene="cs-empty" />
+      ) : (
+        <DataTable<Order>
+          columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage" exportName="订单台账"
+          selectable selected={selected} onToggle={toggle} onToggleAll={toggleAll} stickyFirst batchBar={batchBar}
+          toolbarLeft={<span className="muted small">共 {total} 单{selected.size ? ` · 已选 ${selected.size}` : ""} · 点击表头排序 · 「列」增减字段</span>}
+        />
+      )}
+    </div>
+  );
+}
+
+export function OrderManagePage() {
+  const [tab, setTab] = useState<"order" | "waybill">("order");
+  return (
+    <div className="stack">
+      <div className="seg-toggle" style={{ alignSelf: "flex-start" }}>
+        <button className={`seg-btn${tab === "order" ? " on" : ""}`} onClick={() => setTab("order")}>订单</button>
+        <button className={`seg-btn${tab === "waybill" ? " on" : ""}`} onClick={() => setTab("waybill")}>运单</button>
+      </div>
+      {tab === "order" ? <OrdersTab /> : <WaybillsPage embedded />}
+    </div>
+  );
+}

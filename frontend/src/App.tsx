@@ -14,6 +14,7 @@ import { FleetPage } from "./pages/FleetPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderIntakePage } from "./pages/OrderIntakePage";
+import { OrderManagePage } from "./pages/OrderManagePage";
 import { PricingPage } from "./pages/PricingPage";
 import { OrgCenterPage } from "./pages/OrgCenterPage";
 import { ProfilePage } from "./pages/ProfilePage";
@@ -21,7 +22,6 @@ import { ReconciliationPage } from "./pages/ReconciliationPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { TrackingPage } from "./pages/TrackingPage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
-import { WaybillsPage } from "./pages/WaybillsPage";
 
 export function App() {
   return (
@@ -40,7 +40,7 @@ export function App() {
               <Route path="intake" element={<OrderIntakePage />} />
               <Route path="orders/:id" element={<OrderDetailPage />} />
               <Route path="dispatch-board" element={<DispatchBoardPage />} />
-              <Route path="waybills" element={<WaybillsPage />} />
+              <Route path="waybills" element={<OrderManagePage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
               <Route path="fleet" element={<FleetPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />

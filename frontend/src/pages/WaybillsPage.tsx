@@ -9,12 +9,29 @@ import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { FinanceCard } from "../components/FinanceCard";
 import { ReplyCard } from "../components/ReplyCard";
 import { StatusTag } from "../components/StatusTag";
 
 const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
 const FILTER_KEY = "waybills.filters.v1";
+
+const RECEIPT_OPTS = [{ value: "pending", label: "待追回" }, { value: "returned", label: "已回收" }, { value: "audited", label: "已核销" }];
+const CHANNEL_OPTS = [{ value: "自营", label: "自营" }, { value: "外包", label: "外包" }, { value: "网货", label: "网货" }];
+// 运单高级筛选字段
+const WAYBILL_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "waybill_no", label: "运单号", type: "text", accessor: (w) => (w as Waybill).waybill_no },
+  { key: "customer", label: "客户", type: "text", accessor: (w) => (w as Waybill).customer_name || "" },
+  { key: "route", label: "线路", type: "text", accessor: (w) => `${(w as Waybill).origin || ""}→${(w as Waybill).destination || ""}` },
+  { key: "vehicle", label: "车牌", type: "text", accessor: (w) => (w as Waybill).vehicle_plate || "" },
+  { key: "status", label: "运单状态", type: "enum", options: Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label })), accessor: (w) => (w as Waybill).status },
+  { key: "channel", label: "承运通道", type: "enum", options: CHANNEL_OPTS, accessor: (w) => (w as Waybill).channel || "" },
+  { key: "receipt", label: "回单状态", type: "enum", options: RECEIPT_OPTS, accessor: (w) => (w as Waybill).receipt_status },
+  { key: "receivable", label: "应收(元)", type: "number", accessor: (w) => Number((w as Waybill).receivable_amount) || 0 },
+  { key: "payable", label: "应付(元)", type: "number", accessor: (w) => Number((w as Waybill).payable_amount) || 0 },
+  { key: "cod", label: "代收货款(元)", type: "number", accessor: (w) => Number((w as Waybill).cod_amount) || 0 },
+];
 
 interface ContextMenuState {
   x: number;
@@ -48,12 +65,9 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
   // === 多维度查询状态（记忆上次筛选） ===
   const [filter, setFilter] = useState(persisted.filter);
   const [statusFilter, setStatusFilter] = useState(persisted.statusFilter);
-  const [searchNo, setSearchNo] = useState("");
-  const [searchCustomer, setSearchCustomer] = useState("");
-  const [searchVehicle, setSearchVehicle] = useState("");
-  const [searchRoute, setSearchRoute] = useState("");
-  const [searchReceipt, setSearchReceipt] = useState("");
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const wbActiveCount = activeConditionCount(model, WAYBILL_FILTER_FIELDS);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [drawerWaybill, setDrawerWaybill] = useState<Waybill | null>(null);
@@ -95,7 +109,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
   const items = query.data?.items ?? [];
 
   const filteredRows = useMemo(() => {
-    return items.filter((w) => {
+    let rows = items.filter((w) => {
       if (statusFilter && w.status !== statusFilter) return false;
       if (filter) {
         const q = filter.toLowerCase();
@@ -106,14 +120,11 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
           (w.vehicle_plate ?? "").toLowerCase().includes(q);
         if (!hit) return false;
       }
-      if (searchNo && !w.waybill_no.toLowerCase().includes(searchNo.toLowerCase().trim())) return false;
-      if (searchCustomer && !(w.customer_name ?? "").toLowerCase().includes(searchCustomer.toLowerCase().trim())) return false;
-      if (searchVehicle && !(w.vehicle_plate ?? "").toLowerCase().includes(searchVehicle.toLowerCase().trim())) return false;
-      if (searchRoute && !(w.route_name ?? "").toLowerCase().includes(searchRoute.toLowerCase().trim())) return false;
-      if (searchReceipt && w.receipt_status !== searchReceipt) return false;
       return true;
     });
-  }, [items, filter, statusFilter, searchNo, searchCustomer, searchVehicle, searchRoute, searchReceipt]);
+    rows = applyFilterModel(rows, model, WAYBILL_FILTER_FIELDS);
+    return rows;
+  }, [items, filter, statusFilter, model]);
 
   // 选择集随过滤结果自动收敛（过滤掉已不在列表中的选中项）
   const selectedRows = useMemo(() => filteredRows.filter((w) => selected.has(w.id)), [filteredRows, selected]);
@@ -264,13 +275,9 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
   };
 
   const handleClearFilters = () => {
-    setSearchNo("");
-    setSearchCustomer("");
-    setSearchVehicle("");
-    setSearchRoute("");
-    setSearchReceipt("");
     setFilter("");
     setStatusFilter("");
+    setModel(EMPTY_MODEL);
   };
 
   const columns: DataColumn<Waybill>[] = [
@@ -279,7 +286,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
       sortValue: (w) => w.waybill_no, exportValue: (w) => w.waybill_no,
       render: (w) => <Link className="link mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>,
     },
-    { key: "customer", header: "客户", width: 130, sortValue: (w) => w.customer_name || "散客", exportValue: (w) => w.customer_name || "散客", render: (w) => <span title={w.customer_name}>{w.customer_name || "散客"}</span> },
+    { key: "customer", header: "客户", width: 130, filterable: true, filterValue: (w) => w.customer_name || "散客", sortValue: (w) => w.customer_name || "散客", exportValue: (w) => w.customer_name || "散客", render: (w) => <span title={w.customer_name}>{w.customer_name || "散客"}</span> },
     { key: "route", header: "线路", width: 150, sortValue: (w) => `${w.origin}${w.destination}`, exportValue: (w) => `${w.origin || "?"}→${w.destination || "?"}`, render: (w) => <>{w.origin || "?"} → {w.destination || "?"}</> },
     {
       key: "cargo", header: "货物", width: 130, exportValue: (w) => `${w.cargo.weight_ton || 0}吨`,
@@ -295,14 +302,14 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
       ),
     },
     {
-      key: "channel", header: "通道", width: 100, sortValue: (w) => w.channel || "", exportValue: (w) => w.channel || "",
+      key: "channel", header: "通道", width: 100, filterable: true, filterValue: (w) => w.channel || "", sortValue: (w) => w.channel || "", exportValue: (w) => w.channel || "",
       render: (w) => w.channel ? <StatusTag kind="channel" value={w.channel} title={w.dispatch_type_label} suffix={w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""} /> : <span className="muted">—</span>,
     },
     { key: "receivable", header: "应收", width: 100, align: "right", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{w.receivable_amount ? fmtMoney(w.receivable_amount) : "—"}</> },
     { key: "payable", header: "应付/成本", width: 110, align: "right", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{w.payable_amount ? fmtMoney(w.payable_amount) : "—"}</> },
     { key: "cod", header: "代收货款", width: 110, align: "right", sortValue: (w) => Number(w.cod_amount) || 0, exportValue: (w) => Number(w.cod_amount) || 0, render: (w) => { const cod = Number(w.cod_amount) || 0; return cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>{fmtMoney(cod)}</span> : <>—</>; } },
-    { key: "receipt", header: "回单", width: 90, sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <StatusTag kind="receipt" value={w.receipt_status} /> },
-    { key: "status", header: "状态", width: 100, sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <StatusTag kind="waybill" value={w.status} /> },
+    { key: "receipt", header: "回单", width: 90, filterable: true, filterValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <StatusTag kind="receipt" value={w.receipt_status} /> },
+    { key: "status", header: "运单状态", width: 100, filterable: true, filterValue: (w) => STATUS_LABEL[w.status] ?? w.status, sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <StatusTag kind="waybill" value={w.status} /> },
     {
       key: "actions", header: "操作", width: 170, alwaysVisible: true,
       render: (w) => (
@@ -345,47 +352,32 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
-            <button
-              className="btn-ghost"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              style={{ padding: "8px 12px", background: showAdvanced ? "var(--line)" : "transparent" }}
-            >
-              {showAdvanced ? "收起筛选" : "高级筛选"}
-            </button>
+            <div style={{ position: "relative" }}>
+              <button
+                className={`btn-ghost${wbActiveCount > 0 || showAdvanced ? " on-accent" : ""}`}
+                onClick={(e) => { e.stopPropagation(); setShowAdvanced((v) => !v); }}
+                style={{ padding: "8px 12px" }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                  高级筛选{wbActiveCount > 0 ? ` · ${wbActiveCount}` : ""}
+                </span>
+              </button>
+              {showAdvanced && <FilterBuilder fields={WAYBILL_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowAdvanced(false)} />}
+            </div>
             <button className="btn-ghost" onClick={handleClearFilters}>重置</button>
           </div>
         </div>
 
-        {showAdvanced && (
-          <div style={{
-            padding: "14px 18px", background: "var(--panel-2)", borderBottom: "1px solid var(--line)",
-            display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12,
-          }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600 }}>
-              运单单号
-              <input value={searchNo} onChange={(e) => setSearchNo(e.target.value)} placeholder="例: AG2026..." style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600 }}>
-              签约客户
-              <input value={searchCustomer} onChange={(e) => setSearchCustomer(e.target.value)} placeholder="如 阿斯利康" style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600 }}>
-              车牌号码
-              <input value={searchVehicle} onChange={(e) => setSearchVehicle(e.target.value)} placeholder="如 苏B" style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600 }}>
-              线路/城市
-              <input value={searchRoute} onChange={(e) => setSearchRoute(e.target.value)} placeholder="如 无锡" style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 600 }}>
-              回单状态
-              <select value={searchReceipt} onChange={(e) => setSearchReceipt(e.target.value)} style={{ padding: "6px 8px" }}>
-                <option value="">全部状态</option>
-                <option value="pending">待追回</option>
-                <option value="returned">已回收</option>
-                <option value="audited">已核销</option>
-              </select>
-            </label>
+        {wbActiveCount > 0 && (
+          <div className="om-chips">
+            <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+            {model.conditions.map((c) => {
+              const label = describeCondition(c, WAYBILL_FILTER_FIELDS);
+              if (!label) return null;
+              return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+            })}
+            <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
           </div>
         )}
 

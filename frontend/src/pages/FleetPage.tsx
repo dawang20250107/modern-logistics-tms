@@ -6,6 +6,7 @@ import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { CarrierCenter } from "../components/CarrierCenter";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { LanePriceLib } from "../components/LanePriceLib";
 import { StateView } from "../components/StateView";
 import { IconGitBranch, IconMapPin, IconTruck, IconBox, IconDatabase, IconShield, IconWarning, IconArrowRight } from "../components/Icons";
@@ -25,9 +26,9 @@ function daysText(d: number): string {
   return `剩 ${d} 天`;
 }
 
-// ── 主数据列表通用外壳（搜索 + DataTable 顶尖表格能力） ─────────
+// ── 主数据列表通用外壳（搜索 + 高级多条件筛选 + DataTable 顶尖表格能力） ──
 function ResourceTable<T>({
-  queryKey, url, columns, rowKey, viewKey, exportName, searchKeys, placeholder,
+  queryKey, url, columns, rowKey, viewKey, exportName, searchKeys, placeholder, filterFields,
 }: {
   queryKey: string;
   url: string;
@@ -37,27 +38,56 @@ function ResourceTable<T>({
   exportName: string;
   searchKeys: (row: T) => string;
   placeholder: string;
+  filterFields?: FilterFieldDef[];
 }) {
   const [kw, setKw] = useState("");
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
+  const [showFilter, setShowFilter] = useState(false);
   const q = useQuery({ queryKey: [queryKey], queryFn: () => apiGet<Paginated<T>>(url) });
+  const activeCount = filterFields ? activeConditionCount(model, filterFields) : 0;
   const rows = useMemo(() => {
-    const items = q.data?.items ?? [];
+    let items = q.data?.items ?? [];
     const k = kw.trim().toLowerCase();
-    return k ? items.filter((r) => searchKeys(r).toLowerCase().includes(k)) : items;
-  }, [q.data, kw, searchKeys]);
+    if (k) items = items.filter((r) => searchKeys(r).toLowerCase().includes(k));
+    if (filterFields) items = applyFilterModel(items, model, filterFields);
+    return items;
+  }, [q.data, kw, searchKeys, model, filterFields]);
 
   return (
     <div className="panel">
-      <div className="panel-head">
+      <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>清单<span className="ai-pill">{rows.length}</span></span>
+        <div style={{ flex: 1 }} />
         <input className="search" style={{ width: 240 }} placeholder={placeholder} value={kw} onChange={(e) => setKw(e.target.value)} />
+        {filterFields && (
+          <div style={{ position: "relative" }}>
+            <button className={`btn-ghost${activeCount > 0 || showFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowFilter((v) => !v); }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                高级筛选{activeCount > 0 ? ` · ${activeCount}` : ""}
+              </span>
+            </button>
+            {showFilter && <FilterBuilder fields={filterFields} model={model} onChange={setModel} onClose={() => setShowFilter(false)} />}
+          </div>
+        )}
       </div>
+      {filterFields && activeCount > 0 && (
+        <div className="om-chips">
+          <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+          {model.conditions.map((c) => {
+            const label = describeCondition(c, filterFields);
+            if (!label) return null;
+            return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+          })}
+          <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
+        </div>
+      )}
       {q.isLoading ? (
         <StateView kind="loading" compact />
       ) : q.isError ? (
         <StateView kind="error" onRetry={() => q.refetch()} />
       ) : rows.length === 0 ? (
-        <StateView kind="empty" title={kw ? "没有匹配的记录" : "暂无数据"} hint={kw ? "调整搜索关键词再试。" : undefined} />
+        <StateView kind="empty" title={kw || activeCount ? "没有匹配的记录" : "暂无数据"} hint={kw || activeCount ? "调整搜索/筛选条件再试。" : undefined} />
       ) : (
         <DataTable<T>
           columns={columns}
@@ -66,7 +96,7 @@ function ResourceTable<T>({
           viewKey={viewKey}
           exportName={exportName}
           stickyFirst
-          toolbarLeft={<span className="muted small">共 {rows.length} 条 · 点击表头排序 · 「列」增减字段</span>}
+          toolbarLeft={<span className="muted small">共 {rows.length} 条 · 表头 ⚟ 筛选/排序 · 「列」增减字段</span>}
         />
       )}
     </div>
@@ -82,11 +112,19 @@ const vehicleColumns: DataColumn<Vehicle>[] = [
   { key: "owner", header: "归属", width: 120, sortValue: (v) => v.carrier_name || v.dispatch_source_label || "", exportValue: (v) => v.carrier_name || v.dispatch_source_label || "自有", render: (v) => v.carrier_name || (v.dispatch_source_label ?? "自有") },
   { key: "active", header: "状态", width: 80, sortValue: (v) => (v.is_active ? "1" : "0"), exportValue: (v) => (v.is_active ? "启用" : "停用"), render: (v) => <span className={`tag ${v.is_active ? "tag-low" : "tag-none"}`}>{v.is_active ? "启用" : "停用"}</span> },
 ];
+const vehicleFilterFields: FilterFieldDef[] = [
+  { key: "plate", label: "车牌", type: "text", accessor: (v) => (v as Vehicle).plate_no },
+  { key: "type", label: "车型", type: "text", accessor: (v) => (v as Vehicle).vehicle_class_label || (v as Vehicle).vehicle_type || "" },
+  { key: "owner", label: "归属", type: "text", accessor: (v) => (v as Vehicle).carrier_name || "自有" },
+  { key: "ton", label: "核载(吨)", type: "number", accessor: (v) => Number((v as Vehicle).load_capacity_ton) || 0 },
+  { key: "cbm", label: "容积(方)", type: "number", accessor: (v) => Number((v as Vehicle).volume_capacity_cbm) || 0 },
+  { key: "active", label: "状态", type: "enum", options: [{ value: "1", label: "启用" }, { value: "0", label: "停用" }], accessor: (v) => ((v as Vehicle).is_active ? "1" : "0") },
+];
 function VehiclesTab() {
   return (
     <ResourceTable<Vehicle>
       queryKey="rh-vehicles" url="/vehicles?page_size=300" placeholder="搜索车牌 / 车型" viewKey="fleet-vehicles" exportName="车辆档案"
-      rowKey={(v) => v.id} searchKeys={(v) => `${v.plate_no} ${v.vehicle_type ?? ""} ${v.carrier_name ?? ""}`} columns={vehicleColumns}
+      rowKey={(v) => v.id} searchKeys={(v) => `${v.plate_no} ${v.vehicle_type ?? ""} ${v.carrier_name ?? ""}`} columns={vehicleColumns} filterFields={vehicleFilterFields}
     />
   );
 }
@@ -100,11 +138,19 @@ const driverColumns: DataColumn<Driver>[] = [
   { key: "owner", header: "归属", width: 120, sortValue: (d) => d.carrier_name || "", exportValue: (d) => d.carrier_name || "自有", render: (d) => d.carrier_name || "自有" },
   { key: "active", header: "状态", width: 80, sortValue: (d) => (d.is_active ? "1" : "0"), exportValue: (d) => (d.is_active ? "在职" : "停用"), render: (d) => <span className={`tag ${d.is_active ? "tag-low" : "tag-none"}`}>{d.is_active ? "在职" : "停用"}</span> },
 ];
+const driverFilterFields: FilterFieldDef[] = [
+  { key: "name", label: "姓名", type: "text", accessor: (d) => (d as Driver).name },
+  { key: "phone", label: "电话", type: "text", accessor: (d) => (d as Driver).phone || "" },
+  { key: "emp", label: "用工", type: "text", accessor: (d) => (d as Driver).employment_label || "" },
+  { key: "lic", label: "准驾", type: "text", accessor: (d) => (d as Driver).license_type || "" },
+  { key: "owner", label: "归属", type: "text", accessor: (d) => (d as Driver).carrier_name || "自有" },
+  { key: "active", label: "状态", type: "enum", options: [{ value: "1", label: "在职" }, { value: "0", label: "停用" }], accessor: (d) => ((d as Driver).is_active ? "1" : "0") },
+];
 function DriversTab() {
   return (
     <ResourceTable<Driver>
       queryKey="rh-drivers" url="/drivers?page_size=300" placeholder="搜索姓名 / 电话" viewKey="fleet-drivers" exportName="司机档案"
-      rowKey={(d) => d.id} searchKeys={(d) => `${d.name} ${d.phone ?? ""} ${d.carrier_name ?? ""}`} columns={driverColumns}
+      rowKey={(d) => d.id} searchKeys={(d) => `${d.name} ${d.phone ?? ""} ${d.carrier_name ?? ""}`} columns={driverColumns} filterFields={driverFilterFields}
     />
   );
 }
@@ -123,11 +169,21 @@ const customerColumns: DataColumn<Customer>[] = [
   { key: "days", header: "账期(天)", width: 90, align: "right", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => c.credit_days ?? "", render: (c) => c.credit_days },
   { key: "active", header: "状态", width: 80, sortValue: (c) => (c.is_active ? "1" : "0"), exportValue: (c) => (c.is_active ? "启用" : "停用"), render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
 ];
+const customerFilterFields: FilterFieldDef[] = [
+  { key: "name", label: "客户名称", type: "text", accessor: (c) => (c as Customer).name },
+  { key: "code", label: "编码", type: "text", accessor: (c) => (c as Customer).code },
+  { key: "contact", label: "联系人", type: "text", accessor: (c) => (c as Customer).contact_name || "" },
+  { key: "level", label: "等级", type: "enum", options: ["S", "A", "B", "C", "D"].map((v) => ({ value: v, label: `${v} 级` })), accessor: (c) => (c as Customer).level || "B" },
+  { key: "category", label: "分类", type: "enum", options: Object.entries(CUST_CATEGORY_LABEL).map(([value, label]) => ({ value, label })), accessor: (c) => (c as Customer).category || "enterprise" },
+  { key: "credit", label: "授信额度", type: "number", accessor: (c) => Number((c as Customer).credit_limit) || 0 },
+  { key: "days", label: "账期(天)", type: "number", accessor: (c) => Number((c as Customer).credit_days) || 0 },
+  { key: "active", label: "状态", type: "enum", options: [{ value: "1", label: "启用" }, { value: "0", label: "停用" }], accessor: (c) => ((c as Customer).is_active ? "1" : "0") },
+];
 function CustomersTab() {
   return (
     <ResourceTable<Customer>
       queryKey="rh-customers" url="/customers?page_size=300" placeholder="搜索编码 / 名称 / 电话" viewKey="fleet-customers" exportName="客户"
-      rowKey={(c) => c.id} searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`} columns={customerColumns}
+      rowKey={(c) => c.id} searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`} columns={customerColumns} filterFields={customerFilterFields}
     />
   );
 }

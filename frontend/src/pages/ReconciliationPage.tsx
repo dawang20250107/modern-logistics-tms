@@ -7,7 +7,17 @@ import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, Statement, StatementAuditResult } from "../api/types";
 import { STATEMENT_STATUS_LABEL } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { StateView } from "../components/StateView";
+
+const STMT_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "no", label: "结算单号", type: "text", accessor: (s) => (s as Statement).statement_no },
+  { key: "cp", label: "对手方", type: "text", accessor: (s) => (s as Statement).counterparty_name },
+  { key: "dir", label: "方向", type: "enum", options: [{ value: "receivable", label: "应收 AR" }, { value: "payable", label: "应付 AP" }], accessor: (s) => (s as Statement).direction },
+  { key: "status", label: "状态", type: "enum", options: Object.entries(STATEMENT_STATUS_LABEL).map(([value, label]) => ({ value, label })), accessor: (s) => (s as Statement).status },
+  { key: "amt", label: "应结金额", type: "number", accessor: (s) => Number((s as Statement).total_amount) || 0 },
+  { key: "diff", label: "差异额", type: "number", accessor: (s) => Math.abs(Number((s as Statement).diff) || 0) },
+];
 
 export function ReconciliationPage() {
   const queryClient = useQueryClient();
@@ -17,6 +27,8 @@ export function ReconciliationPage() {
   const [end, setEnd] = useState("2026-06-30");
   const [externalTotal, setExternalTotal] = useState("");
   const [expanded, setExpanded] = useState<string>("");
+  const [stmtModel, setStmtModel] = useState<FilterModel>(EMPTY_MODEL);
+  const [showStmtFilter, setShowStmtFilter] = useState(false);
 
   const cpType = direction === "receivable" ? "customer" : "carrier";
   const counterparties = useQuery({
@@ -49,6 +61,8 @@ export function ReconciliationPage() {
 
   const cps = counterparties.data?.items ?? [];
   const items = statements.data?.items ?? [];
+  const stmtActiveCount = activeConditionCount(stmtModel, STMT_FILTER_FIELDS);
+  const filteredStmts = applyFilterModel(items, stmtModel, STMT_FILTER_FIELDS);
 
   // 对账一体化摘要：应收/应付金额、单据状态、差异张数（由台账实时汇总）
   const num = (v: unknown) => Number(v) || 0;
@@ -86,13 +100,13 @@ export function ReconciliationPage() {
 
   const stmtColumns: DataColumn<Statement>[] = [
     { key: "no", header: "系统结算单号", width: 190, alwaysVisible: true, sortValue: (s) => s.statement_no, exportValue: (s) => s.statement_no, render: (s) => <span className="mono" style={{ fontWeight: 700, color: "var(--accent)", fontSize: 13 }}>{expanded === s.id ? "▼" : "▶"} {s.statement_no}</span> },
-    { key: "dir", header: "方向", width: 90, sortValue: (s) => s.direction, exportValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), render: (s) => <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "AR 应收" : "AP 应付"}</span> },
-    { key: "cp", header: "对手方", width: 150, sortValue: (s) => s.counterparty_name, exportValue: (s) => s.counterparty_name, render: (s) => <span style={{ fontWeight: 600 }}>{s.counterparty_name}</span> },
+    { key: "dir", header: "方向", width: 90, filterable: true, filterValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), sortValue: (s) => s.direction, exportValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), render: (s) => <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "AR 应收" : "AP 应付"}</span> },
+    { key: "cp", header: "对手方", width: 150, filterable: true, filterValue: (s) => s.counterparty_name, sortValue: (s) => s.counterparty_name, exportValue: (s) => s.counterparty_name, render: (s) => <span style={{ fontWeight: 600 }}>{s.counterparty_name}</span> },
     { key: "period", header: "账期", width: 170, exportValue: (s) => `${s.period_start}~${s.period_end}`, render: (s) => <span className="small muted mono">{s.period_start} ~ {s.period_end}</span> },
     { key: "amt", header: "应结金额", width: 120, align: "right", sortValue: (s) => Number(s.total_amount) || 0, exportValue: (s) => Number(s.total_amount) || 0, render: (s) => <span style={{ fontWeight: 700 }}>{fmtMoney(s.total_amount)}</span> },
     { key: "cnt", header: "笔数", width: 70, align: "right", sortValue: (s) => s.item_count, exportValue: (s) => s.item_count, render: (s) => <>{s.item_count} 笔</> },
     { key: "diff", header: "差异", width: 120, align: "right", sortValue: (s) => Math.abs(Number(s.diff) || 0), exportValue: (s) => Number(s.diff) || 0, render: (s) => <span className="mono" style={Number(s.diff) !== 0 ? { color: "var(--red)", fontWeight: 700 } : { color: "var(--muted)" }}>{Number(s.diff) !== 0 ? `差异 ${fmtMoney(s.diff)}` : "无差异"}</span> },
-    { key: "status", header: "状态", width: 100, sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => <span className={`tag tag-${s.status === "confirmed" || s.status === "settled" ? "low" : "medium"}`}>{STATEMENT_STATUS_LABEL[s.status] ?? s.status}</span> },
+    { key: "status", header: "状态", width: 100, filterable: true, filterValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => <span className={`tag tag-${s.status === "confirmed" || s.status === "settled" ? "low" : "medium"}`}>{STATEMENT_STATUS_LABEL[s.status] ?? s.status}</span> },
     { key: "act", header: "财务操作", width: 90, alwaysVisible: true, render: (s) => s.status === "draft" ? <div className="row-actions" onClick={(e) => e.stopPropagation()}><button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button></div> : <span className="muted small">—</span> },
   ];
 
@@ -218,24 +232,47 @@ export function ReconciliationPage() {
       </div>
 
       <div className="panel" style={{ flex: 1 }}>
-        <div className="panel-head">对账单核销台账</div>
+        <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
+          <span>对账单核销台账</span>
+          <div style={{ flex: 1 }} />
+          <div style={{ position: "relative" }}>
+            <button className={`btn-ghost${stmtActiveCount > 0 || showStmtFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowStmtFilter((v) => !v); }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                高级筛选{stmtActiveCount > 0 ? ` · ${stmtActiveCount}` : ""}
+              </span>
+            </button>
+            {showStmtFilter && <FilterBuilder fields={STMT_FILTER_FIELDS} model={stmtModel} onChange={setStmtModel} onClose={() => setShowStmtFilter(false)} />}
+          </div>
+        </div>
+        {stmtActiveCount > 0 && (
+          <div className="om-chips">
+            <span className="muted small">条件（{stmtModel.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+            {stmtModel.conditions.map((c) => {
+              const label = describeCondition(c, STMT_FILTER_FIELDS);
+              if (!label) return null;
+              return <span key={c.id} className="filter-chip">{label}<button onClick={() => setStmtModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+            })}
+            <button className="linkish small" onClick={() => setStmtModel(EMPTY_MODEL)}>清空条件</button>
+          </div>
+        )}
         {statements.isLoading ? (
           <StateView kind="loading" compact />
         ) : statements.isError ? (
           <StateView kind="error" onRetry={() => statements.refetch()} />
-        ) : items.length === 0 ? (
+        ) : filteredStmts.length === 0 ? (
           <StateView kind="empty" scene="recon-empty" />
         ) : (
           <DataTable<Statement>
             columns={stmtColumns}
-            rows={items}
+            rows={filteredStmts}
             rowKey={(s) => s.id}
             viewKey="statements"
             exportName="对账单"
             onRowClick={(s) => setExpanded(expanded === s.id ? "" : s.id)}
             expandedKey={expanded}
             renderExpanded={renderStmtDetail}
-            toolbarLeft={<span className="muted small">共 {items.length} 张 · 点行看明细 · 点击表头排序 · 「列」增减字段</span>}
+            toolbarLeft={<span className="muted small">共 {filteredStmts.length} 张 · 点行看明细 · 表头 ⚟ 筛选/排序 · 「列」增减字段</span>}
           />
         )}
       </div>

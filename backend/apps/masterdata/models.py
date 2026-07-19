@@ -7,8 +7,20 @@ from apps.core.models import BaseModel, SoftDeleteModel
 
 
 class Customer(BaseModel, SoftDeleteModel):
+    # 客户等级：S 战略 / A 重点 / B 常规 / C 一般 / D 观察，驱动优先级与授信策略
+    LEVEL_CHOICES = [
+        ("S", "S · 战略"),
+        ("A", "A · 重点"),
+        ("B", "B · 常规"),
+        ("C", "C · 一般"),
+        ("D", "D · 观察"),
+    ]
+
     code = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=120)
+    # 客户分类：个体 / 企业 / 政府（与订单 source_type 口径一致）
+    category = models.CharField(max_length=16, default="enterprise", help_text="个体/企业/政府")
+    level = models.CharField(max_length=1, choices=LEVEL_CHOICES, default="B", db_index=True)
     contact_name = models.CharField(max_length=64, blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
     wechat_group = models.CharField(max_length=120, blank=True, help_text="所属微信群聊（需求入口）")

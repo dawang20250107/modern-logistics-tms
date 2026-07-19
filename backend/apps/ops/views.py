@@ -533,11 +533,15 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
             from apps.masterdata.models import Customer
 
             customer = Customer.objects.filter(id=fields.get("customer")).first()
+        # 来源标识由系统账号确立（组织·姓名），不接受前端手工填写，杜绝伪造/口径不一
+        op = request.user
+        op_org = getattr(op.organization, "name", "") if getattr(op, "organization_id", None) else ""
+        auto_source = "·".join(x for x in [op_org, (op.nickname or op.username)] if x)
         order = create_order_from_intake(
             text=text,
             fields=fields,
             channel=request.data.get("channel", Order.CHANNEL_CS),
-            source=request.data.get("source", ""),
+            source=auto_source,
             customer=customer,
             operator=request.user,
             cargo_items=cargo_items,

@@ -619,6 +619,30 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 @media (max-width: 980px) { .profile-grid { grid-template-columns: 1fr; } }
 
+/* ── 订单流转四段（客服工作台） ───────────────────────── */
+.lc4 { display: flex; align-items: stretch; gap: 0; padding: 16px 18px; }
+.lc4-item { display: flex; align-items: center; flex: 1; }
+.lc4-card { flex: 1; border: 1px solid var(--line-2); border-radius: var(--radius); padding: 14px 16px; background: var(--panel-2); transition: border-color var(--speed), box-shadow var(--speed); }
+.lc4-card.on { background: var(--panel); box-shadow: var(--shadow-xs); }
+.lc4-count { font-size: 26px; font-weight: 720; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+.lc4-label { font-size: 13.5px; font-weight: 600; margin-top: 6px; }
+.lc4-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.lc4-blue.on { border-top: 2px solid var(--blue); } .lc4-blue .lc4-count { color: var(--blue); }
+.lc4-green.on { border-top: 2px solid var(--green); } .lc4-green .lc4-count { color: var(--green); }
+.lc4-amber.on { border-top: 2px solid var(--amber); } .lc4-amber .lc4-count { color: var(--amber); }
+.lc4-arrow { color: var(--line-2); font-size: 18px; padding: 0 12px; flex: none; }
+@media (max-width: 860px) { .lc4 { flex-direction: column; gap: 10px; } .lc4-item { flex-direction: column; } .lc4-arrow { transform: rotate(90deg); padding: 6px 0; } }
+
+/* 唤起客户上下文的轻按钮 */
+.ctx-reopen { align-self: flex-start; background: var(--accent-weak); color: var(--accent); border: 1px solid var(--accent-weak-2); border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; transition: background var(--speed); }
+.ctx-reopen:hover { background: var(--accent-weak-2); }
+
+/* ── 通用弹窗（客户上下文等） ──────────────────────────── */
+.modal-overlay { position: fixed; inset: 0; z-index: 1100; background: rgba(18,20,26,0.42); backdrop-filter: blur(2px); display: grid; place-items: center; padding: 24px; animation: wb-fade 140ms ease; }
+.modal-card { width: min(460px, 96vw); max-height: 86vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-lg); overflow: hidden; animation: cmdk-pop 160ms cubic-bezier(0.32,0.72,0,1); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--line); font-weight: 650; }
+.modal-body { padding: 16px 18px; overflow-y: auto; }
+
 /* ── 管理后台 hub ───────────────────────────────────── */
 .hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; padding: 14px 18px 18px; }
 .hub-card {
@@ -631,6 +655,12 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .hub-text { display: flex; flex-direction: column; min-width: 0; }
 .hub-title { font-weight: 600; font-size: 14px; }
 .hub-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* 分段切换（日/月/年 等） */
+.seg-toggle { display: inline-flex; gap: 2px; padding: 2px; background: var(--panel-3); border-radius: var(--radius-sm); }
+.seg-btn { border: none; background: transparent; border-radius: var(--radius-xs); font: inherit; font-size: 12.5px; font-weight: 550; color: var(--muted); padding: 4px 12px; cursor: pointer; transition: background var(--speed), color var(--speed); }
+.seg-btn.on { background: var(--panel); color: var(--ink); box-shadow: var(--shadow-xs); }
+.seg-btn:hover:not(.on) { color: var(--ink-2); }
 
 /* 登录方式切换 tabs */
 .auth-tabs { display: flex; gap: 4px; padding: 3px; background: var(--panel-3); border-radius: var(--radius-sm); margin-bottom: 2px; }

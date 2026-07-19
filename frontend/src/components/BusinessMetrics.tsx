@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart, Legend, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -38,15 +39,24 @@ const DOMAIN_ORDER = ["ops", "fleet", "order", "finance"];
 const TONE: Record<string, string> = { ops: "blue", fleet: "blue", order: "amber", finance: "" };
 const COLORS = ["#2563eb", "#0ea5e9", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
 
+const PERIODS: { key: string; label: string; days: number }[] = [
+  { key: "day", label: "日", days: 7 },
+  { key: "month", label: "月", days: 30 },
+  { key: "year", label: "年", days: 365 },
+];
+
 export function BusinessMetrics() {
+  const [period, setPeriod] = useState("month");
+  const days = PERIODS.find((p) => p.key === period)?.days ?? 30;
+
   const dash = useQuery({
     queryKey: ["analytics", "dashboard"],
     queryFn: () => apiGet<{ metrics: MetricCard[]; trends?: Trends }>("/analytics/dashboard?trends=true"),
     refetchInterval: 30000,
   });
   const financeMetrics = useQuery({
-    queryKey: ["finance", "dashboard-metrics"],
-    queryFn: () => apiGet<any>("/finance/dashboard-metrics?days=14"),
+    queryKey: ["finance", "dashboard-metrics", days],
+    queryFn: () => apiGet<any>(`/finance/dashboard-metrics?days=${days}`),
   });
 
   const metrics = dash.data?.metrics ?? [];
@@ -62,8 +72,13 @@ export function BusinessMetrics() {
       {financeMetrics.data && (
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }} className="bm-charts">
           <div className="panel" style={{ padding: 18, height: 380, display: "flex", flexDirection: "column" }}>
-            <div className="section-label" style={{ marginBottom: 16 }}>
-              营业额与利润趋势 ({financeMetrics.data.period})
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div className="section-label" style={{ margin: 0 }}>营业额与利润趋势 ({financeMetrics.data.period})</div>
+              <div className="seg-toggle">
+                {PERIODS.map((p) => (
+                  <button key={p.key} className={`seg-btn${period === p.key ? " on" : ""}`} onClick={() => setPeriod(p.key)}>{p.label}</button>
+                ))}
+              </div>
             </div>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={financeMetrics.data.trend} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>

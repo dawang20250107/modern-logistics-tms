@@ -469,9 +469,9 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </label>
-              <label>签约客户
+              <label>合同客户
                 <select value={form.customer} onChange={(e) => { set("customer", e.target.value); onCustomerChange?.(e.target.value); }}>
-                  <option value="">选择签约客户（可选）</option>
+                  <option value="">选择合同客户（可选）</option>
                   {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </label>
@@ -494,9 +494,6 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                 <select value={form.settlement_type} onChange={(e) => set("settlement_type", e.target.value)}>
                   {Object.entries(SETTLEMENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
-              </label>
-              <label>来源标识/坐席
-                <input value={form.source} onChange={(e) => set("source", e.target.value)} placeholder={CHANNEL_META[form.channel]?.sourcePlaceholder ?? "来源"} />
               </label>
             </div>
           </div>

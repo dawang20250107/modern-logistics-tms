@@ -486,7 +486,8 @@ export const ATTACHMENT_KIND_LABEL: Record<string, string> = {
   contract: "合同", authorization: "委托书", photo: "货物照片", other: "其他",
 };
 export const SETTLEMENT_LABEL: Record<string, string> = { monthly: "月结", cash: "现结", prepaid: "预付" };
-export const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个人", enterprise: "企业", government: "政府" };
+export const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个体", enterprise: "企业", government: "政府" };
+export const CUSTOMER_LEVEL_LABEL: Record<string, string> = { S: "S · 战略", A: "A · 重点", B: "B · 常规", C: "C · 一般", D: "D · 观察" };
 
 export const SLA_STATUS_LABEL: Record<string, string> = {
   pending: "进行中", at_risk: "临期", on_time: "准时", breached: "超时",
@@ -551,7 +552,7 @@ export interface YmmQuote {
 }
 
 export const BUSINESS_TYPE_LABEL: Record<string, string> = {
-  ftl: "整车", ltl: "零担", express: "快递", coldchain: "冷链",
+  ftl: "整车", ltl: "零担", express: "快递", coldchain: "冷链", hazmat: "危化",
 };
 export const PRIORITY_LABEL: Record<string, string> = {
   normal: "普通", urgent: "加急", vip: "VIP",
@@ -688,6 +689,7 @@ export const PRICE_TYPE_LABEL: Record<string, string> = { income: "收入价（�
 // ── 主数据(精简) ───────────────────────────────────────
 export interface Customer {
   id: string; code: string; name: string;
+  category?: string; level?: string; level_label?: string;
   contact_name?: string; contact_phone?: string; wechat_group?: string; settlement_type?: string;
   credit_limit?: number | string; credit_days?: number; billing_day?: number; is_active?: boolean;
 }

@@ -14,11 +14,13 @@ def _is_list(serializer) -> bool:
 
 class CustomerSerializer(serializers.ModelSerializer):
     history = serializers.SerializerMethodField()
+    level_label = serializers.CharField(source="get_level_display", read_only=True, default="")
 
     class Meta:
         model = Customer
         fields = [
-            "id", "code", "name", "contact_name", "contact_phone", "wechat_group",
+            "id", "code", "name", "category", "level", "level_label",
+            "contact_name", "contact_phone", "wechat_group",
             "settlement_type", "credit_limit", "credit_days", "billing_day", "is_active", "history",
         ]
 

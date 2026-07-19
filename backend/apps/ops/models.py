@@ -44,7 +44,7 @@ class Order(BaseModel, SoftDeleteModel):
     SOURCE_ENTERPRISE = "enterprise"
     SOURCE_GOVERNMENT = "government"
     SOURCE_TYPE_CHOICES = [
-        (SOURCE_INDIVIDUAL, "个人"),
+        (SOURCE_INDIVIDUAL, "个体"),
         (SOURCE_ENTERPRISE, "企业"),
         (SOURCE_GOVERNMENT, "政府"),
     ]
@@ -54,11 +54,13 @@ class Order(BaseModel, SoftDeleteModel):
     BIZ_LTL = "ltl"
     BIZ_EXPRESS = "express"
     BIZ_COLDCHAIN = "coldchain"
+    BIZ_HAZMAT = "hazmat"
     BUSINESS_TYPE_CHOICES = [
         (BIZ_FTL, "整车"),
         (BIZ_LTL, "零担"),
         (BIZ_EXPRESS, "快递"),
         (BIZ_COLDCHAIN, "冷链"),
+        (BIZ_HAZMAT, "危化"),
     ]
 
     PRIORITY_CHOICES = [("normal", "普通"), ("urgent", "加急"), ("vip", "VIP")]

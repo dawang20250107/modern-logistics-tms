@@ -108,9 +108,14 @@ function DriversTab() {
   );
 }
 
+const CUST_LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
+const CUST_CATEGORY_LABEL: Record<string, string> = { individual: "个体", enterprise: "企业", government: "政府" };
+
 const customerColumns: DataColumn<Customer>[] = [
   { key: "code", header: "编码", width: 110, alwaysVisible: true, sortValue: (c) => c.code, exportValue: (c) => c.code, render: (c) => <span className="mono">{c.code}</span> },
   { key: "name", header: "客户名称", width: 160, sortValue: (c) => c.name, exportValue: (c) => c.name, render: (c) => c.name },
+  { key: "level", header: "等级", width: 70, sortValue: (c) => c.level || "B", exportValue: (c) => c.level || "B", render: (c) => <span className={`tag ${CUST_LEVEL_TONE[c.level || "B"] ?? "tag-none"}`} title={c.level_label}>{c.level || "B"}</span> },
+  { key: "category", header: "分类", width: 80, sortValue: (c) => c.category || "", exportValue: (c) => CUST_CATEGORY_LABEL[c.category || ""] ?? c.category ?? "", render: (c) => CUST_CATEGORY_LABEL[c.category || "enterprise"] ?? "企业" },
   { key: "contact", header: "联系人", width: 100, sortValue: (c) => c.contact_name || "", exportValue: (c) => c.contact_name || "", render: (c) => c.contact_name || "-" },
   { key: "phone", header: "电话", width: 130, sortValue: (c) => c.contact_phone || "", exportValue: (c) => c.contact_phone || "", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
   { key: "credit", header: "授信额度", width: 120, align: "right", sortValue: (c) => Number(c.credit_limit) || 0, exportValue: (c) => Number(c.credit_limit) || 0, render: (c) => Number(c.credit_limit) > 0 ? fmtMoney(c.credit_limit) : "不限" },

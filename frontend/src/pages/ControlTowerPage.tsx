@@ -105,51 +105,6 @@ export function ControlTowerPage() {
         <Kpi label="待回单" value={pendingReceipt.length} tone="amber" />
       </div>
 
-      <div className="ct-grid">
-        <div className="panel">
-          <div className="panel-head">
-            在途运单
-            <Link to="/waybills" className="link small">全部运单 →</Link>
-          </div>
-          {inTransit.length === 0 ? (
-            <StateView kind="empty" title="暂无在途运单" />
-          ) : (
-            <table className="table">
-              <thead><tr><th>运单号</th><th>线路</th><th>风险</th><th className="num">ETA 偏移</th></tr></thead>
-              <tbody>
-                {inTransit.slice(0, 10).map((wb2) => (
-                  <tr key={wb2.id}>
-                    <td><Link className="link mono" to={`/waybills/${wb2.waybill_no}`}>{wb2.waybill_no}</Link></td>
-                    <td>{wb2.origin} → {wb2.destination}</td>
-                    <td><span className={`tag tag-${wb2.risk_level}`}>{RISK_LABEL[wb2.risk_level]}</span></td>
-                    <td className="num" style={{ color: wb2.eta_drift_minutes > 0 ? "var(--red)" : "var(--muted)" }}>
-                      {wb2.eta_drift_minutes > 0 ? `+${wb2.eta_drift_minutes}` : wb2.eta_drift_minutes} 分
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div className="panel">
-          <div className="panel-head">最近动态</div>
-          {events.length === 0 ? (
-            <div className="muted small" style={{ padding: 16 }}>已连接，暂无新动态。</div>
-          ) : (
-            <ul className="event-feed">
-              {events.slice(0, 12).map((e, i) => (
-                <li key={`${e.t}-${i}`}>
-                  <span className={`evt evt-${e.type}`}>{EVT_LABEL[e.type] ?? "动态"}</span>
-                  <span className="small">{evtText(e)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-
-      
       <button
         type="button"
         className="panel"

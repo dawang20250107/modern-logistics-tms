@@ -431,6 +431,10 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .tag-low, .tag-sla_on_time { background: var(--green-weak); color: var(--green); border-color: var(--green-line); }
 .tag-info { background: var(--blue-weak); color: var(--blue); border-color: var(--blue-line); }
 .tag-none, .tag-sla_pending { background: var(--panel-3); color: var(--muted); border-color: var(--line-2); }
+/* 需要动作的状态：前导脉冲点，表示"这条待你处理" */
+.tag-act { display: inline-flex; align-items: center; gap: 5px; }
+.tag-act::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; box-shadow: 0 0 0 0 currentColor; animation: tag-pulse 1.8s ease-out infinite; }
+@keyframes tag-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 4px transparent; } }
 
 /* ── AI box / search ────────────────────────────────── */
 .ai-box { display: flex; gap: 10px; padding: 16px 18px; }

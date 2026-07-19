@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { apiGet } from "../api/client";
 import type { CustomerContext } from "../api/types";
+import { StatusTag } from "./StatusTag";
 
 function money(n: number): string {
   return `¥${Math.round(n).toLocaleString()}`;
@@ -90,7 +91,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
                 <tr key={o.order_no}>
                   <td><Link className="link mono" to={`/orders/${o.order_no}`}>{o.order_no}</Link></td>
                   <td className="small">{o.route}</td>
-                  <td><span className="tag tag-info">{o.status_label}</span></td>
+                  <td><StatusTag kind="order" value={o.status} /></td>
                 </tr>
               ))}
             </tbody>

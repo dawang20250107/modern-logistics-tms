@@ -6,9 +6,10 @@ import { apiDownload, apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type { Order, OrderChannel, Paginated } from "../api/types";
-import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
+import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL } from "../api/types";
 import { CustomerContextPanel } from "../components/CustomerContextPanel";
 import { EmptyState } from "../components/EmptyState";
+import { StatusTag } from "../components/StatusTag";
 import { OrderLifecycle } from "../components/OrderLifecycle";
 import { StructuredOrderForm } from "../components/StructuredOrderForm";
 
@@ -152,8 +153,8 @@ export function OrderIntakePage() {
                   <td>{ORDER_CHANNEL_LABEL[o.channel]}</td>
                   <td>{o.origin} → {o.destination}</td>
                   <td>{o.cargo_weight_ton}吨 / {o.cargo_quantity}件</td>
-                  <td><span className={`tag tag-${o.status === "converted" || o.status === "completed" ? "low" : o.status === "cancelled" ? "none" : "medium"}`}>{ORDER_STATUS_LABEL[o.status] ?? o.status}</span></td>
-                  <td><span className={`tag tag-sla_${o.sla_status}`}>{SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status}</span></td>
+                  <td><StatusTag kind="order" value={o.status} /></td>
+                  <td><StatusTag kind="sla" value={o.sla_status} /></td>
                   <td className="row-actions">
                     {(o.status === "draft" || o.status === "pending_confirm") && (
                       <button className="btn-ghost" disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "confirm" })}>确认</button>

@@ -128,7 +128,7 @@ class DriverTasksView(_DriverPublic):
             "driver": {"name": driver.name, "phone": driver.phone},
             "waybills": [_waybill_brief(w) for w in waybills],
             "pending_reminders": [
-                {"id": str(r.id), "title": r.title, "content": r.content,
+                {"id": str(r.id), "title": r.title, "content": r.content, "level": r.level,
                  "ack_required": r.ack_required, "waybill_no": r.waybill.waybill_no if r.waybill_id else ""}
                 for r in reminders
             ],

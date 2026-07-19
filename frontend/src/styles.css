@@ -665,6 +665,11 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
   border-radius: 10px; font-size: 13.5px; font-weight: 550; color: var(--ink-2); text-decoration: none;
 }
 .drv-quick-btn:active { background: var(--panel-3); }
+.drv-feedback { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 13.5px; font-weight: 550; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.drv-fb-locating, .drv-fb-uploading { background: var(--blue-weak); color: var(--blue); }
+.drv-fb-done { background: var(--green-weak); color: var(--green); }
+.drv-fb-error { background: var(--red-weak); color: var(--red); }
+.drv-retry { padding: 6px 14px; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; }
 
 /* ── 客服工作台：左建单 · 右客户上下文 ─────────────── */
 .cs-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }

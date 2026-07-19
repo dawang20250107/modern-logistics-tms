@@ -4,7 +4,14 @@ import { API_BASE_URL } from "../api/client";
 import { toast } from "../api/toast";
 import { StateView } from "../components/StateView";
 
-interface Reminder { id: string; title: string; content: string; ack_required: boolean; waybill_no: string }
+interface Reminder { id: string; title: string; content: string; level?: string; ack_required: boolean; waybill_no: string }
+
+// 调度指令分级：普通蓝(信息) / 重要琥珀(注意) / 紧急红(必须确认)
+const CMD_LEVEL: Record<string, { grad: string; solid: string; tag: string; label: string }> = {
+  normal: { grad: "linear-gradient(135deg,#2563eb,#1e50c0)", solid: "#2563eb", tag: "普通指令", label: "确认" },
+  important: { grad: "linear-gradient(135deg,#b8860b,#8a6508)", solid: "#92610a", tag: "重要指令", label: "我已知悉" },
+  urgent: { grad: "linear-gradient(135deg,#d0242c,#a81d24)", solid: "#d0242c", tag: "紧急指令", label: "我已阅读并严格执行" },
+};
 interface NextStep { node: string; label: string; kind: string }
 interface WaybillBrief {
   waybill_no: string; route_name: string; origin: string; destination: string; status: string;
@@ -160,56 +167,73 @@ export function DriverPortalPage() {
         </div>
       </div>
 
-      {/* AI 与调度 主动下发的任务强提醒 Modal */}
-      {active && (
-        <div className="driver-modal-mask" style={{ backdropFilter: "blur(4px)" }}>
-          <div className="driver-modal" style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{ background: "linear-gradient(135deg, #d0242c 0%, #a81d24 100%)", color: "#fff", padding: "20px 24px" }}>
-              <div className="driver-modal-title" style={{ color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 22 }}></span> 调度中心指令 (必读)
+      {/* 调度指令 Modal（按分级着色：普通蓝/重要琥珀/紧急红） */}
+      {active && (() => {
+        const lv = CMD_LEVEL[active.level ?? "important"] ?? CMD_LEVEL.important;
+        return (
+          <div className="driver-modal-mask" style={{ backdropFilter: "blur(4px)" }}>
+            <div className="driver-modal" style={{ padding: 0, overflow: "hidden" }}>
+              <div style={{ background: lv.grad, color: "#fff", padding: "20px 24px" }}>
+                <div className="driver-modal-title" style={{ color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
+                  调度中心 · {lv.tag}
+                </div>
+                <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>{active.title}{active.waybill_no ? ` · ${active.waybill_no}` : ""}</div>
               </div>
-              <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>{active.title}{active.waybill_no ? ` · ${active.waybill_no}` : ""}</div>
-            </div>
-            
-            <div style={{ padding: 24 }}>
-              <div style={{ background: "var(--red-weak)", color: "#a81d24", padding: 16, borderRadius: 12, fontSize: 14, lineHeight: 1.6, fontWeight: "bold", borderLeft: "4px solid #d0242c" }}>
-                {active.content}
+              <div style={{ padding: 24 }}>
+                <div style={{ background: "var(--panel-2)", color: "var(--ink)", padding: 16, borderRadius: 12, fontSize: 14, lineHeight: 1.6, fontWeight: 600, borderLeft: `4px solid ${lv.solid}` }}>
+                  {active.content}
+                </div>
+                <button
+                  className="btn-primary"
+                  style={{ width: "100%", marginTop: 24, padding: 14, fontSize: 15, background: lv.solid, boxShadow: `0 4px 12px ${lv.solid}44` }}
+                  onClick={() => ackReminder(active)}
+                >
+                  ✓ {active.ack_required ? lv.label : "确认"}
+                </button>
               </div>
-              <button 
-                className="btn-primary" 
-                style={{ width: "100%", marginTop: 24, padding: 14, fontSize: 15, background: "#d0242c", boxShadow: "0 4px 12px rgba(208,36,44,0.3)" }} 
-                onClick={() => ackReminder(active)}
-              >
-                {active.ack_required ? "✓ 我已阅读并严格执行" : "✓ 确认"}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
 
+type Phase = "idle" | "locating" | "uploading" | "done" | "error";
+
 function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [feedback, setFeedback] = useState("");
+  const [lastFile, setLastFile] = useState<File | undefined>(undefined);
   const step = wb.next_step;
+  const busy = phase === "locating" || phase === "uploading";
 
   async function checkin(file?: File) {
     if (!step) return;
-    setBusy(true);
+    setLastFile(file);
+    // 弱网友好：定位失败也可继续提交，每一步都有明确反馈
+    setPhase("locating");
+    setFeedback("正在定位…");
+    const pos = await new Promise<GeolocationPosition | null>((res) =>
+      navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res(p), () => res(null), { timeout: 5000 }) : res(null));
+    if (!pos) setFeedback("定位失败，仍可继续提交");
+    setPhase("uploading");
+    setFeedback(file ? "照片上传中…" : "提交中…");
     try {
-      const pos = await new Promise<GeolocationPosition | null>((res) =>
-        navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res(p), () => res(null), { timeout: 5000 }) : res(null));
       const fd = new FormData();
       fd.append("waybill_no", wb.waybill_no);
       fd.append("node", step.node);
       if (pos) { fd.append("lat", String(pos.coords.latitude)); fd.append("lng", String(pos.coords.longitude)); }
       if (file) fd.append("photo", file);
       await dFetch("/driver/checkin", token, { method: "POST", body: fd });
+      setPhase("done");
+      setFeedback(`${step.label} · 已完成，已通知调度`);
       toast.success(`${step.label} · 已完成`);
-      setTimeout(() => window.location.reload(), 600);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "操作失败，请重试或检查网络"); }
-    finally { setBusy(false); }
+      setTimeout(() => window.location.reload(), 900);
+    } catch (e) {
+      setPhase("error");
+      setFeedback(e instanceof Error ? e.message : "网络异常，提交失败");
+    }
   }
 
   const navTo = wb.delivery_address || wb.destination;
@@ -244,8 +268,15 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
                      onChange={(e) => { const f = e.target.files?.[0]; if (f) checkin(f); e.target.value = ""; }} />
             </label>
             <button className="drv-sub-btn" disabled={busy} onClick={() => checkin()}>
-              {busy ? "定位中…" : `无需拍照，直接${step.label}`}
+              {busy ? "处理中…" : `无需拍照，直接${step.label}`}
             </button>
+            {/* 弱网反馈：每一步都有明确状态 + 失败可重试 */}
+            {phase !== "idle" && (
+              <div className={`drv-feedback drv-fb-${phase}`}>
+                <span>{phase === "done" ? "✓ " : phase === "error" ? "✗ " : ""}{feedback}</span>
+                {phase === "error" && <button className="drv-retry" onClick={() => checkin(lastFile)}>重试</button>}
+              </div>
+            )}
           </>
         ) : (
           <div className="muted small" style={{ textAlign: "center", padding: 8 }}>本单已完成，无需进一步操作。</div>

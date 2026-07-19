@@ -806,6 +806,15 @@ class DriverReminder(BaseModel):
     STATUS_PENDING = "pending"
     STATUS_ACKNOWLEDGED = "acknowledged"
 
+    LEVEL_NORMAL = "normal"
+    LEVEL_IMPORTANT = "important"
+    LEVEL_URGENT = "urgent"
+    LEVEL_CHOICES = [
+        (LEVEL_NORMAL, "普通"),
+        (LEVEL_IMPORTANT, "重要"),
+        (LEVEL_URGENT, "紧急"),
+    ]
+
     waybill = models.ForeignKey(Waybill, null=True, blank=True, on_delete=models.CASCADE, related_name="reminders")
     driver = models.ForeignKey(
         "masterdata.Driver", null=True, blank=True, on_delete=models.SET_NULL, related_name="reminders"
@@ -815,6 +824,7 @@ class DriverReminder(BaseModel):
     )
     title = models.CharField(max_length=120, default="作业提醒")
     content = models.TextField()
+    level = models.CharField(max_length=16, choices=LEVEL_CHOICES, default=LEVEL_IMPORTANT, help_text="普通/重要/紧急")
     ack_required = models.BooleanField(default=True, help_text="是否强制确认")
     status = models.CharField(max_length=16, default=STATUS_PENDING, db_index=True)
     sent_at = models.DateTimeField(default=timezone.now)

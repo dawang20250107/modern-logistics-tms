@@ -467,8 +467,39 @@ export const BODY_TYPE_LABEL: Record<string, string> = {
   hazmat: "危运", fence: "仓栅", wing: "飞翼", tank: "罐式",
 };
 
+export interface CarrierScoreRow {
+  carrier_id: string;
+  carrier: string;
+  carrier_grade: string;
+  quote: number | null;
+  recent_deal_price: number | null;
+  suggested_price_band: [number, number] | null;
+  deals: number;
+  route_hits: number;
+  on_time_rate: number;
+  exception_rate: number;
+  receipt_timely_rate: number;
+  score: number;
+  risk_level: string;
+  label: string;
+  risk_notes: string[];
+}
+
+export interface CarrierRecommendation {
+  carrier_id: string;
+  carrier: string;
+  suggested_price_band: [number, number] | null;
+  risk_level: string;
+  label: string;
+  reasons: string[];
+  risk_notes: string[];
+  needs_approval: boolean;
+}
+
 export interface DispatchSuggestion {
   order_no: string;
+  carrier_recommendations: CarrierScoreRow[];
+  recommendation: CarrierRecommendation | null;
   vehicle_candidates: Array<{ vehicle_id?: string; plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean; body_type?: string; vehicle_length_m?: number }>;
   carrier_quotes: Array<{ carrier_id?: string; carrier: string; quote: number }>;
   ymm_quote?: YmmQuote;

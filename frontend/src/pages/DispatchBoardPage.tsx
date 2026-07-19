@@ -46,6 +46,7 @@ const MANUAL_EXC_TYPES: [string, string][] = [
   ["temperature", "冷链温度异常"], ["abnormal_stop", "异常停车"], ["other", "其他"],
 ];
 const EXC_LEVELS: [string, string][] = [["high", "高"], ["medium", "中"], ["low", "低"]];
+const RISK_TAG: Record<string, string> = { high: "high", medium: "medium", low: "low" };
 
 type DrawerTab = "dispatch" | "track" | "exception";
 type MenuState = { x: number; y: number; order: Order } | null;
@@ -211,15 +212,15 @@ export function DispatchBoardPage() {
       if (data.best_vehicle) setVehicleId("");
     },
   });
+  const recCarrierId = suggestion?.recommendation?.carrier_id ?? suggestion?.best_carrier?.carrier_id ?? "";
+  const pickCarrier = (id: string) => { setDispatchType("third_party"); setCarrierId(id); };
   const adopt = () => {
     if (!suggestion) return;
     const type = suggestion.suggested_dispatch_type;
     setDispatchType(type);
-    if (type === "third_party") {
-      setCarrierId(suggestion.best_carrier?.carrier_id ?? "");
-    } else {
-      setVehicleId(suggestion.best_vehicle?.vehicle_id ?? "");
-    }
+    if (type === "third_party") setCarrierId(recCarrierId);
+    else if (type === "own_vehicle") setVehicleId(suggestion.best_vehicle?.vehicle_id ?? "");
+    // platform：由调度员手填平台名/单号
   };
 
   const dispatch = useMutation({
@@ -249,13 +250,18 @@ export function DispatchBoardPage() {
   const oneClickDispatch = () => {
     if (!active || !suggestion) return;
     const type = suggestion.suggested_dispatch_type;
-    const body = type === "third_party"
-      ? { dispatch_type: "third_party", carrier: suggestion.best_carrier?.carrier_id }
-      : { dispatch_type: "own_vehicle", vehicle: suggestion.best_vehicle?.vehicle_id };
+    const body = type === "own_vehicle"
+      ? { dispatch_type: "own_vehicle", vehicle: suggestion.best_vehicle?.vehicle_id }
+      : { dispatch_type: "third_party", carrier: recCarrierId };
     quickDispatch.mutate(body);
   };
+  // 网货平台需手填平台名，不走一键；外包需已有推荐承运商，自营需有可用车
   const canOneClick = suggestion
-    ? (suggestion.suggested_dispatch_type === "third_party" ? Boolean(suggestion.best_carrier) : Boolean(suggestion.best_vehicle))
+    ? (suggestion.suggested_dispatch_type === "platform"
+        ? false
+        : suggestion.suggested_dispatch_type === "own_vehicle"
+          ? Boolean(suggestion.best_vehicle)
+          : Boolean(recCarrierId))
     : false;
 
   // 手工提报异常
@@ -593,33 +599,73 @@ export function DispatchBoardPage() {
                     )}
 
                     <div style={{ background: "var(--accent-weak)", border: "1px solid var(--accent-weak-2)", borderRadius: 10, padding: 16 }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 20px", fontSize: 13 }}>
-                        <div>
-                          <span className="muted" style={{ display: "block", marginBottom: 2, fontSize: 11 }}>推荐自营卡车</span>
-                          <strong style={{ fontSize: 14, color: "var(--ink)" }}>
-                            {suggestion.best_vehicle?.plate_no ?? "无可用自营车"}
-                            {suggestion.best_vehicle && suggestion.best_vehicle.compliance_ok === false && (
-                              <span className="tag tag-high" style={{ marginLeft: 6 }}>{suggestion.best_vehicle.compliance?.join("/")} 过期</span>
-                            )}
-                          </strong>
-                        </div>
-                        <div>
-                          <span className="muted" style={{ display: "block", marginBottom: 2, fontSize: 11 }}>推荐三方承运商</span>
-                          <strong style={{ fontSize: 14, color: "var(--ink)" }}>{suggestion.best_carrier ? `${suggestion.best_carrier.carrier} (¥${suggestion.best_carrier.quote})` : "—"}</strong>
-                        </div>
-                        {suggestion.ymm_quote && (
-                          <div style={{ gridColumn: "1 / -1", borderTop: "1px dashed var(--line-2)", paddingTop: 10, marginTop: 4 }}>
-                            <span className="muted" style={{ display: "block", marginBottom: 2, fontSize: 11 }}>市场运价参比</span>
-                            <strong style={{ fontSize: 14, color: "var(--accent)" }}>
-                              {suggestion.ymm_quote.avg != null ? `¥${suggestion.ymm_quote.low} ~ ¥${suggestion.ymm_quote.high}（中枢均价 ¥${suggestion.ymm_quote.avg}）` : "—"}
-                            </strong>
-                            <span className="muted small" style={{ marginLeft: 8 }}>{suggestion.ymm_quote.note}</span>
+                      {/* 承运商推荐结论：可执行建议 + 风险说明 + 人工确认 */}
+                      {suggestion.recommendation ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span className="muted" style={{ fontSize: 11 }}>首选承运商</span>
+                            <strong style={{ fontSize: 15, color: "var(--ink)" }}>{suggestion.recommendation.carrier}</strong>
+                            <span className={`tag tag-${RISK_TAG[suggestion.recommendation.risk_level] ?? "none"}`}>{suggestion.recommendation.label}</span>
+                            {suggestion.recommendation.needs_approval && <span className="tag tag-high">需主管确认</span>}
                           </div>
-                        )}
-                        <div style={{ gridColumn: "1 / -1", background: "var(--panel)", padding: "8px 12px", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid var(--line)" }}>
-                          <span>建议委派方式：</span>
-                          <strong style={{ color: "var(--accent)" }}>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</strong>
+                          {suggestion.recommendation.suggested_price_band && (
+                            <div style={{ fontSize: 13 }}>建议成交价：
+                              <strong style={{ color: "var(--accent)" }}>¥{suggestion.recommendation.suggested_price_band[0].toLocaleString()} ~ ¥{suggestion.recommendation.suggested_price_band[1].toLocaleString()}</strong>
+                            </div>
+                          )}
+                          {suggestion.recommendation.reasons.length > 0 && (
+                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.7 }}>
+                              {suggestion.recommendation.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                            </ul>
+                          )}
+                          {suggestion.recommendation.risk_notes.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {suggestion.recommendation.risk_notes.map((n, i) => <span key={i} className="tag tag-medium">{n}</span>)}
+                            </div>
+                          )}
                         </div>
+                      ) : (
+                        <div className="muted" style={{ fontSize: 13 }}>暂无合适承运商，可走网货平台兜底或手动指派自营车。</div>
+                      )}
+
+                      {/* 承运商比选（找合适的，不是找最便宜的） */}
+                      {suggestion.carrier_recommendations.length > 0 && (
+                        <div style={{ marginTop: 14, overflowX: "auto" }}>
+                          <table className="table" style={{ width: "100%", fontSize: 12.5 }}>
+                            <thead><tr>
+                              <th>承运商</th><th className="num">最近成交</th><th className="num">本次报价</th>
+                              <th className="num">准班</th><th className="num">异常</th><th className="num">回单及时</th><th>评价</th><th></th>
+                            </tr></thead>
+                            <tbody>
+                              {suggestion.carrier_recommendations.map((r) => (
+                                <tr key={r.carrier_id} className={carrierId === r.carrier_id ? "row-sel" : ""}>
+                                  <td>{r.carrier} <span className="muted small">{r.carrier_grade}</span></td>
+                                  <td className="num">{r.recent_deal_price ? `¥${r.recent_deal_price.toLocaleString()}` : "—"}</td>
+                                  <td className="num">{r.quote != null ? `¥${r.quote.toLocaleString()}` : "—"}</td>
+                                  <td className="num">{r.deals ? `${Math.round(r.on_time_rate * 100)}%` : "—"}</td>
+                                  <td className="num">{r.deals ? `${Math.round(r.exception_rate * 100)}%` : "—"}</td>
+                                  <td className="num">{r.deals ? `${Math.round(r.receipt_timely_rate * 100)}%` : "—"}</td>
+                                  <td><span className={`tag tag-${RISK_TAG[r.risk_level] ?? "none"}`}>{r.label}</span></td>
+                                  <td><button className="btn-ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => pickCarrier(r.carrier_id)}>选</button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {suggestion.ymm_quote && (
+                        <div style={{ borderTop: "1px dashed var(--line-2)", paddingTop: 10, marginTop: 12, fontSize: 13 }}>
+                          <span className="muted" style={{ fontSize: 11, marginRight: 8 }}>市场运价参比</span>
+                          <strong style={{ color: "var(--accent)" }}>
+                            {suggestion.ymm_quote.avg != null ? `¥${suggestion.ymm_quote.low} ~ ¥${suggestion.ymm_quote.high}（中枢 ¥${suggestion.ymm_quote.avg}）` : "—"}
+                          </strong>
+                          <span className="muted small" style={{ marginLeft: 8 }}>{suggestion.ymm_quote.note}</span>
+                        </div>
+                      )}
+                      <div style={{ background: "var(--panel)", padding: "8px 12px", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid var(--line)", marginTop: 12, fontSize: 13 }}>
+                        <span>建议委派方式：</span>
+                        <strong style={{ color: "var(--accent)" }}>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</strong>
                       </div>
                       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                         <button
@@ -644,7 +690,7 @@ export function DispatchBoardPage() {
 
                     {suggestion.vehicle_candidates.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        <span className="muted small" style={{ width: "100%", fontWeight: 700 }}>其他备选闲置运力：</span>
+                        <span className="muted small" style={{ width: "100%", fontWeight: 700 }}>自营车兜底运力（仅特殊场景使用）：</span>
                         {suggestion.vehicle_candidates.map((v) => (
                           <span key={v.plate_no} className={`tag tag-${v.compliance_ok === false ? "high" : "low"}`} style={{ cursor: "pointer" }} onClick={() => { setDispatchType("own_vehicle"); setVehicleId(v.vehicle_id || ""); }}>
                             {v.plate_no}

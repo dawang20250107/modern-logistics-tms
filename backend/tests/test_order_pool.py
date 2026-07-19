@@ -61,13 +61,25 @@ def test_external_signals_from_order_attrs():
 
 @pytest.mark.django_db
 def test_recommend_dispatch_for_order():
+    """承运商优先：存在可派承运商时默认建议外包承运商，自营车仅作兜底候选。"""
     Vehicle.objects.create(plate_no="沪AP001", load_capacity_ton=20)
     Carrier.objects.create(code="CC", name="承运甲")
     order = _pooled_order(cargo_weight_ton=10)
     rec = recommend_dispatch_for_order(order)
     assert "vehicle_candidates" in rec
-    assert rec["best_vehicle"]["plate_no"] == "沪AP001"
-    assert rec["suggested_dispatch_type"] == "own_vehicle"
+    assert "carrier_recommendations" in rec
+    assert rec["best_vehicle"]["plate_no"] == "沪AP001"  # 自营车仍作为兜底候选保留
+    assert rec["suggested_dispatch_type"] == "third_party"  # 默认外包承运商优先
+
+
+@pytest.mark.django_db
+def test_recommend_falls_back_to_platform_without_carrier():
+    """无可派承运商时，回退网货平台兜底（而非自营车）。"""
+    Vehicle.objects.create(plate_no="沪AP002", load_capacity_ton=20)
+    order = _pooled_order(cargo_weight_ton=10)
+    rec = recommend_dispatch_for_order(order)
+    assert rec["suggested_dispatch_type"] in ("platform", "own_vehicle")
+    assert rec["carrier_recommendations"] == []
 
 
 @pytest.mark.django_db

@@ -123,7 +123,8 @@ export function AppLayout() {
               </svg>
             </button>
             <div className="topbar-title">
-              <span className="topbar-title-text">{pageTitle}</span>
+              {/* 导航展开时侧栏已高亮当前页，此处不再重复页名（避免"重复词语"）；折叠态才显示页名 */}
+              {collapsed && <span className="topbar-title-text">{pageTitle}</span>}
               <span className="sub">B2B 外协承运协同</span>
             </div>
             <span className="topbar-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd>查单 / 派单</span>

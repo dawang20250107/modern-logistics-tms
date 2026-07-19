@@ -7,7 +7,6 @@ import { fmtMoney, fmtNum } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
 import { PRICE_TYPE_LABEL } from "../api/types";
-import { EmptyState } from "../components/EmptyState";
 import { StateView } from "../components/StateView";
 
 const CHARGE_METHOD_LABEL: Record<string, string> = {
@@ -167,7 +166,7 @@ export function PricingPage() {
         {rules.isLoading ? (
           <StateView kind="loading" compact />
         ) : items.length === 0 ? (
-          <EmptyState title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
+          <StateView kind="empty" title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
         ) : (
           <table className="table">
             <thead>

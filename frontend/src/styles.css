@@ -480,6 +480,31 @@ select {
 .tag-act::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; box-shadow: 0 0 0 0 currentColor; animation: tag-pulse 1.8s ease-out infinite; }
 @keyframes tag-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 4px transparent; } }
 
+/* ── Skeleton — the loading state's texture: a slow light sweep over
+   cool graphite surfaces, so "加载中" reads as calm progress, not a blank. ── */
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(100deg, var(--panel-3) 26%, var(--panel-2) 46%, var(--panel-3) 66%);
+  background-size: 220% 100%;
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep { from { background-position: 220% 0; } to { background-position: -120% 0; } }
+
+/* ── Focus ring fallback — every keyboard-reachable control gets the same
+   accent ring, including plain <button>/role=button (context menus, cards,
+   notification rows). Class-scoped rings above win by specificity. ── */
+button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, summary:focus-visible {
+  outline: none; box-shadow: var(--ring);
+}
+
+/* ── Respect reduced-motion: keep meaning, drop the movement. ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+  }
+}
+
 /* ── AI box / search ────────────────────────────────── */
 .ai-box { display: flex; gap: 10px; padding: 16px 18px; }
 .ai-box input { flex: 1; padding: 9px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--panel); transition: border-color var(--speed), box-shadow var(--speed); }
@@ -509,6 +534,7 @@ select {
   transition: border-color var(--speed), background var(--speed), color var(--speed);
 }
 .btn-ghost:hover { border-color: var(--accent); color: var(--ink); background: var(--panel-2); }
+.btn-ghost:active:not(:disabled) { background: var(--panel-3); }
 .btn-ghost:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 
 /* ── Login (split screen) ───────────────────────────── */
@@ -812,12 +838,6 @@ select {
 .state-error .state-icon { background: var(--red-weak); color: var(--red); }
 .state-offline .state-icon { background: var(--amber-weak); color: var(--amber); }
 .state-forbidden .state-icon { background: var(--panel-3); color: var(--ink-2); }
-
-/* ── Empty state ────────────────────────────────────── */
-.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 44px 20px; text-align: center; }
-.empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.6; }
-.empty-title { font-weight: 600; font-size: 15px; color: var(--ink-2); }
-.empty-hint { margin-top: 6px; max-width: 360px; color: var(--muted); }
 
 /* ── Structured order form ──────────────────────────── */
 .form-section { padding: 14px 18px; border-bottom: 1px solid var(--line); }

@@ -659,6 +659,14 @@ select {
 .btn-danger:hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); }
 .btn-danger:active:not(:disabled) { transform: translateY(0); }
 .btn-danger:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+/* 弱化的危险按钮：次要/批量场景用，避免与主操作抢视线 */
+.btn-danger-ghost {
+  min-height: 34px; background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+  padding: 7px 13px; cursor: pointer; color: var(--red); font-weight: 500; font-size: 13.5px; line-height: 1.2;
+  transition: border-color var(--speed), background var(--speed);
+}
+.btn-danger-ghost:hover:not(:disabled) { border-color: var(--red-line); background: var(--red-weak); }
+.btn-danger-ghost:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Filter chip — precise tint active, not a heavy fill ── */
 .chip {
@@ -722,6 +730,21 @@ select {
 .drv-fb-done { background: var(--green-weak); color: var(--green); }
 .drv-fb-error { background: var(--red-weak); color: var(--red); }
 .drv-retry { padding: 6px 14px; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; }
+
+/* ── 调度工作流概览条（待派/紧急/临期/已选） ─────────── */
+.wf-strip { display: flex; gap: 10px; flex-wrap: wrap; }
+.wf-seg {
+  display: flex; align-items: baseline; gap: 8px; padding: 10px 16px; min-width: 130px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-xs); font-size: 12.5px; color: var(--muted);
+}
+.wf-seg b { font-size: 20px; font-weight: 680; letter-spacing: -0.02em; font-variant-numeric: tabular-nums slashed-zero; color: var(--ink); line-height: 1; }
+.wf-clickable { cursor: pointer; transition: border-color var(--speed), background var(--speed); }
+.wf-clickable:hover { border-color: var(--accent); }
+.wf-clickable.on { border-color: var(--accent); background: var(--accent-weak); }
+.wf-hot { color: var(--red) !important; }
+.wf-warn { color: var(--amber) !important; }
+.wf-accent { color: var(--accent) !important; }
 
 /* ── 客服工作台：左建单 · 右客户上下文 ─────────────── */
 .cs-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }

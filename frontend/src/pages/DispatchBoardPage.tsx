@@ -315,6 +315,14 @@ export function DispatchBoardPage() {
   const activeGone = Boolean(active) && !pool.isLoading && !orders.some((o) => o.id === active?.id);
   const trackNo = active?.waybill_nos?.[0];
 
+  // 调度工作流概览：一眼看清 待派 / 紧急 / 临期超时 / 已选
+  const wf = {
+    pending: orders.length,
+    urgent: orders.filter((o) => o.priority === "urgent" || o.priority === "vip").length,
+    atRisk: orders.filter((o) => o.sla_status === "at_risk" || o.sla_status === "breached").length,
+    picked: picked.size,
+  };
+
   // 键盘选单：抽屉未开时，↑↓ 选单、Enter 拉出派单抽屉（输入框内不接管）
   useEffect(() => {
     if (active || rows.length === 0) return;
@@ -338,6 +346,15 @@ export function DispatchBoardPage() {
 
   return (
     <div className="stack dispatch-page">
+      {/* 调度工作流概览条：待派→紧急→临期→执行，一眼定位当前该处理什么 */}
+      <div className="wf-strip">
+        <div className="wf-seg"><span>待派订单</span><b>{wf.pending}</b></div>
+        <button className={`wf-seg wf-clickable${urgentOnly ? " on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} title="仅看紧急">
+          <span>紧急</span><b className={wf.urgent ? "wf-hot" : ""}>{wf.urgent}</b>
+        </button>
+        <div className="wf-seg"><span>临期 / 超时</span><b className={wf.atRisk ? "wf-warn" : ""}>{wf.atRisk}</b></div>
+        <div className="wf-seg"><span>已选待排线</span><b className={wf.picked ? "wf-accent" : ""}>{wf.picked}</b></div>
+      </div>
       <div className="panel dispatch-board-panel">
         <div className="panel-head">
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>

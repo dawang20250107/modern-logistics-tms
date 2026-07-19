@@ -149,14 +149,27 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
 
 export function CarrierCenter() {
   const [kw, setKw] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [riskFilter, setRiskFilter] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const q = useQuery({ queryKey: ["cc-carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=300") });
 
+  const allItems = q.data?.items ?? [];
+  const types = useMemo(() => Array.from(new Set(allItems.map((c) => c.carrier_type_label).filter(Boolean))) as string[], [allItems]);
+  const riskCount = useMemo(() => allItems.filter((c) => c.blacklisted || c.dispatch_blocked).length, [allItems]);
+  const expiringCount = useMemo(() => allItems.filter((c) => (c.expiry_alerts?.length ?? 0) > 0).length, [allItems]);
+
   const rows = useMemo(() => {
-    const items = q.data?.items ?? [];
     const k = kw.trim().toLowerCase();
-    return k ? items.filter((c) => `${c.code} ${c.name} ${c.contact_phone ?? ""} ${c.city ?? ""}`.toLowerCase().includes(k)) : items;
-  }, [q.data, kw]);
+    return allItems.filter((c) => {
+      if (k && !`${c.code} ${c.name} ${c.contact_phone ?? ""} ${c.city ?? ""}`.toLowerCase().includes(k)) return false;
+      if (typeFilter && c.carrier_type_label !== typeFilter) return false;
+      if (riskFilter === "blocked" && !(c.blacklisted || c.dispatch_blocked)) return false;
+      if (riskFilter === "expiring" && !(c.expiry_alerts?.length ?? 0)) return false;
+      if (riskFilter === "grade_a" && c.grade !== "A") return false;
+      return true;
+    });
+  }, [allItems, kw, typeFilter, riskFilter]);
 
   const carrierColumns: DataColumn<Carrier>[] = [
     { key: "name", header: "承运商", width: 200, alwaysVisible: true, sortValue: (c) => c.name, exportValue: (c) => `${c.name} ${c.code}`, render: (c) => <><span className="link">{c.name}</span> <span className="muted small mono">{c.code}</span></> },
@@ -171,8 +184,19 @@ export function CarrierCenter() {
   return (
     <div className="panel">
       <div className="panel-head">
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>承运商清单<span className="ai-pill">{rows.length}</span></span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>承运资源池<span className="ai-pill">{rows.length}</span></span>
         <input className="search" style={{ width: 260 }} placeholder="搜索承运商 / 城市 / 电话" value={kw} onChange={(e) => setKw(e.target.value)} />
+      </div>
+      {/* 资源池快筛：按类型与风控快速定位可派/优质/需关注承运商 */}
+      <div className="form-row" style={{ gap: 8, flexWrap: "wrap", borderBottom: "1px solid var(--line)" }}>
+        <button className={`chip${typeFilter === "" ? " chip-on" : ""}`} onClick={() => setTypeFilter("")}>全部类型 ({allItems.length})</button>
+        {types.map((t) => (
+          <button key={t} className={`chip${typeFilter === t ? " chip-on" : ""}`} onClick={() => setTypeFilter(typeFilter === t ? "" : t)}>{t}</button>
+        ))}
+        <span style={{ width: 1, alignSelf: "stretch", background: "var(--line)", margin: "0 4px" }} />
+        <button className={`chip${riskFilter === "grade_a" ? " chip-on" : ""}`} onClick={() => setRiskFilter(riskFilter === "grade_a" ? "" : "grade_a")}>优质 A</button>
+        <button className={`chip${riskFilter === "expiring" ? " chip-on" : ""}`} onClick={() => setRiskFilter(riskFilter === "expiring" ? "" : "expiring")}>证照临期 ({expiringCount})</button>
+        <button className={`chip${riskFilter === "blocked" ? " chip-on" : ""}`} onClick={() => setRiskFilter(riskFilter === "blocked" ? "" : "blocked")}>停派/黑名单 ({riskCount})</button>
       </div>
       {q.isLoading ? (
         <StateView kind="loading" compact />

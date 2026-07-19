@@ -110,7 +110,7 @@ export function OrderIntakePage() {
         if (await confirmAction({ message: `将选中的 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]);
       }}>合单</button>
       <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>批量取消</button>
-      <button className="btn-ghost" disabled={batch.isPending} style={{ color: "var(--red)" }} onClick={() => runBatch("delete")}>批量删除</button>
+      <button className="btn-danger-ghost" disabled={batch.isPending} onClick={() => runBatch("delete")}>批量删除</button>
       <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除</button>
     </div>
   ) : null;

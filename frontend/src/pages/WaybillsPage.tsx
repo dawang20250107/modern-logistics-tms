@@ -320,7 +320,7 @@ export function WaybillsPage() {
       <div style={{ flex: 1 }} />
       <button className="btn-ghost" disabled={batchBusy} onClick={exportCsv}>导出选中</button>
       <button className="btn-ghost" disabled={batchBusy} onClick={batchMarkReceipt}>标记回单已回收</button>
-      <button className="btn-ghost" disabled={batchBusy} style={{ color: "var(--red)" }} onClick={batchVoid}>批量作废</button>
+      <button className="btn-danger-ghost" disabled={batchBusy} onClick={batchVoid}>批量作废</button>
       <button className="btn-ghost" disabled={batchBusy} onClick={clearSelection}>取消选择</button>
     </div>
   ) : null;

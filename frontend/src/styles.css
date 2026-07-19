@@ -631,6 +631,31 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
   background: var(--accent-weak); border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 550; color: var(--ink-2);
 }
 
+/* ── 司机端极简（大按钮/下一步） ────────────────────── */
+.drv-card { background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+.drv-card-head { padding: 14px 16px; border-bottom: 1px dashed var(--line); display: flex; justify-content: space-between; align-items: center; }
+.drv-addr { padding: 12px 16px; border-bottom: 1px dashed var(--line); display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+.drv-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+.drv-dot-o { background: var(--accent); }
+.drv-dot-d { background: var(--green); }
+.drv-cod { color: var(--amber); font-weight: 600; font-size: 13px; }
+.drv-main-btn {
+  width: 100%; padding: 18px; background: var(--accent); color: #fff; border-radius: 12px;
+  font-weight: 700; font-size: 17px; text-align: center; cursor: pointer;
+  box-shadow: 0 8px 20px rgba(75,88,240,0.28); letter-spacing: 0.02em;
+}
+.drv-main-btn:active { transform: translateY(1px); }
+.drv-sub-btn {
+  width: 100%; margin-top: 10px; padding: 12px; background: var(--panel-2); color: var(--ink-2);
+  border: 1px solid var(--line-2); border-radius: 10px; font-size: 14px; cursor: pointer;
+}
+.drv-quick { display: flex; gap: 8px; margin-top: 14px; }
+.drv-quick-btn {
+  flex: 1; padding: 11px; text-align: center; background: var(--panel-2); border: 1px solid var(--line-2);
+  border-radius: 10px; font-size: 13.5px; font-weight: 550; color: var(--ink-2); text-decoration: none;
+}
+.drv-quick-btn:active { background: var(--panel-3); }
+
 /* ── 客服工作台：左建单 · 右客户上下文 ─────────────── */
 .cs-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
 @media (max-width: 1100px) { .cs-workbench { grid-template-columns: 1fr; } }

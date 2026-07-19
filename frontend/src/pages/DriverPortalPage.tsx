@@ -4,14 +4,15 @@ import { API_BASE_URL } from "../api/client";
 import { toast } from "../api/toast";
 
 interface Reminder { id: string; title: string; content: string; ack_required: boolean; waybill_no: string }
-interface WaybillBrief { waybill_no: string; route_name: string; origin: string; destination: string; status: string }
+interface NextStep { node: string; label: string; kind: string }
+interface WaybillBrief {
+  waybill_no: string; route_name: string; origin: string; destination: string; status: string;
+  status_label: string; next_step: NextStep | null;
+  pickup_address: string; delivery_address: string; pickup_contact_phone: string; delivery_contact_phone: string;
+  cod_amount: number;
+}
 interface Tasks { driver: { name: string; phone: string }; waybills: WaybillBrief[]; pending_reminders: Reminder[] }
 
-const NODES: [string, string][] = [
-  ["depart", "出发"], ["arrive_pickup", "到达装货地"], ["queuing", "排队"], ["loading", "装货"],
-  ["depart_loaded", "满载发车"], ["in_transit", "在途打卡"], ["arrive_delivery", "到达卸货地"],
-  ["unloading", "卸货"], ["receipt", "回单签收"], ["finish", "订单结束"],
-];
 const CRED_TYPES: [string, string][] = [
   ["vehicle_license", "车头行驶证"], ["trailer_license", "车挂行驶证"], ["driving_license", "驾驶证"],
   ["transport_cert", "道路运输证"], ["id_card", "身份证"],
@@ -190,72 +191,71 @@ export function DriverPortalPage() {
 }
 
 function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
-  const [node, setNode] = useState("depart");
   const [busy, setBusy] = useState(false);
+  const step = wb.next_step;
 
   async function checkin(file?: File) {
+    if (!step) return;
     setBusy(true);
     try {
       const pos = await new Promise<GeolocationPosition | null>((res) =>
         navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res(p), () => res(null), { timeout: 5000 }) : res(null));
       const fd = new FormData();
       fd.append("waybill_no", wb.waybill_no);
-      fd.append("node", node);
+      fd.append("node", step.node);
       if (pos) { fd.append("lat", String(pos.coords.latitude)); fd.append("lng", String(pos.coords.longitude)); }
       if (file) fd.append("photo", file);
       await dFetch("/driver/checkin", token, { method: "POST", body: fd });
-      toast.success(`打卡成功：${NODES.find((n) => n[0] === node)?.[1]}`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "打卡失败，请重试或检查网络"); }
+      toast.success(`${step.label} · 已完成`);
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "操作失败，请重试或检查网络"); }
     finally { setBusy(false); }
   }
 
+  const navTo = wb.delivery_address || wb.destination;
+
   return (
-    <div style={{ background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 14, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
+    <div className="drv-card">
       {/* 运单状态头 */}
-      <div style={{ padding: "16px 18px", borderBottom: "1px dashed var(--line)", background: "rgba(0,0,0,0.01)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="drv-card-head">
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <b style={{ fontSize: 16, letterSpacing: -0.5 }}>{wb.waybill_no}</b>
-          <span className="muted" style={{ fontSize: 12 }}>{wb.route_name}</span>
+          <b style={{ fontSize: 16 }}>{wb.origin || "?"} → {wb.destination || "?"}</b>
+          <span className="muted mono" style={{ fontSize: 12 }}>{wb.waybill_no}</span>
         </div>
-        <span className="tag" style={{ background: "rgba(39,174,96,0.1)", color: "#27ae60", padding: "4px 8px" }}>运输中</span>
+        <span className="tag tag-info">{wb.status_label}</span>
       </div>
 
-      {/* 轨迹上报控制台 */}
-      <div style={{ padding: 18 }}>
-        <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 12 }}>运输节点打卡</div>
-        
-        <select 
-          value={node} 
-          onChange={(e) => setNode(e.target.value)}
-          style={{ width: "100%", padding: "12px 14px", fontSize: 15, borderRadius: 10, border: "2px solid var(--line-strong)", background: "#f8fafc", outline: "none", marginBottom: 14 }}
-        >
-          {NODES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+      {/* 地址区 */}
+      <div className="drv-addr">
+        {wb.pickup_address && <div><span className="drv-dot drv-dot-o" />装：{wb.pickup_address}</div>}
+        {wb.delivery_address && <div><span className="drv-dot drv-dot-d" />卸：{wb.delivery_address}</div>}
+        {wb.cod_amount > 0 && <div className="drv-cod">⚠ 需代收货款 ¥{wb.cod_amount.toLocaleString()}，请向收货人收齐后确认</div>}
+      </div>
 
-        <div style={{ display: "flex", gap: 12 }}>
-          <button 
-            style={{ 
-              flex: 1, padding: 14, background: "rgba(75,88,240,0.05)", border: "1px solid rgba(75,88,240,0.2)", 
-              color: "var(--brand)", borderRadius: 10, fontWeight: "bold", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 
-            }} 
-            disabled={busy} 
-            onClick={() => checkin()}
-          >
-            <span style={{ fontSize: 16, animation: busy ? "pulse 1s infinite" : "none" }}>📡</span> 
-            {busy ? "定位中…" : "静默定位"}
-          </button>
-          
-          <label style={{ flex: 1.5 }}>
-            <div style={{ 
-              width: "100%", padding: 14, background: "var(--grad)", color: "#fff", 
-              borderRadius: 10, fontWeight: "bold", fontSize: 14, textAlign: "center", 
-              boxShadow: "0 6px 16px rgba(75,88,240,0.3)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 
-            }}>
-              <span style={{ fontSize: 16 }}></span> {busy ? "上传中…" : "现场拍照打卡"}
-            </div>
-            <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-                   onChange={(e) => { const f = e.target.files?.[0]; if (f) checkin(f); e.target.value = ""; }} />
-          </label>
+      {/* 下一步：单主按钮（拍照打卡） */}
+      <div style={{ padding: 16 }}>
+        {step ? (
+          <>
+            <label style={{ display: "block" }}>
+              <div className="drv-main-btn">
+                {busy ? "上传中…" : `${step.label} · 拍照打卡`}
+              </div>
+              <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+                     onChange={(e) => { const f = e.target.files?.[0]; if (f) checkin(f); e.target.value = ""; }} />
+            </label>
+            <button className="drv-sub-btn" disabled={busy} onClick={() => checkin()}>
+              {busy ? "定位中…" : `无需拍照，直接${step.label}`}
+            </button>
+          </>
+        ) : (
+          <div className="muted small" style={{ textAlign: "center", padding: 8 }}>本单已完成，无需进一步操作。</div>
+        )}
+
+        {/* 快捷：导航 / 联系 */}
+        <div className="drv-quick">
+          {navTo && <a className="drv-quick-btn" href={`https://uri.amap.com/search?keyword=${encodeURIComponent(navTo)}`} target="_blank" rel="noreferrer">导航</a>}
+          {wb.delivery_contact_phone && <a className="drv-quick-btn" href={`tel:${wb.delivery_contact_phone}`}>联系收货人</a>}
+          {wb.pickup_contact_phone && <a className="drv-quick-btn" href={`tel:${wb.pickup_contact_phone}`}>联系发货人</a>}
         </div>
       </div>
     </div>

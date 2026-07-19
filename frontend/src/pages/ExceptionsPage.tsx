@@ -93,7 +93,7 @@ export function ExceptionsPage() {
       <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
         <div style={{ padding: "20px 24px" }}>
           <div style={{ fontSize: 22, fontWeight: "bold" }}>异常处置</div>
-          <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>
             管理设备报警生成的在途异常，或手动提报异常。
           </div>
         </div>
@@ -170,7 +170,7 @@ export function ExceptionsPage() {
                         </span>
                       </td>
                       <td>
-                        <span className="tag" style={{ background: "rgba(0,0,0,0.04)" }}>{e.source === "track" ? "车联网设备" : e.source}</span>
+                        <span className="tag tag-none">{e.source === "track" ? "车联网设备" : e.source}</span>
                       </td>
                       <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{e.waybill_no || "全局"}</td>
                       <td style={{ color: e.assignee_name ? "var(--ink)" : "var(--muted)" }}>{e.assignee_name || "待认领"}</td>
@@ -215,7 +215,7 @@ export function ExceptionsPage() {
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 10 }}>
                             
                             {/* 左侧：传感器描述记录 */}
-                            <div style={{ padding: "16px 20px", background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.02)" }}>
+                            <div style={{ padding: "16px 20px", background: "var(--panel)", border: "1px solid var(--line-strong)", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.02)" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--red)", fontWeight: "bold" }}>
                                 异常描述
                               </div>
@@ -228,7 +228,7 @@ export function ExceptionsPage() {
                             </div>
 
                             {/* 右侧：AI 预案与执行流水 */}
-                            <div style={{ padding: "16px 20px", background: "#fff", border: "1px solid var(--violet)", borderRadius: 12, boxShadow: "0 4px 12px rgba(139,92,246,0.05)" }}>
+                            <div style={{ padding: "16px 20px", background: "var(--panel)", border: "1px solid var(--violet)", borderRadius: 12, boxShadow: "0 4px 12px rgba(139,92,246,0.05)" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--violet)", fontWeight: "bold" }}>
                                 智能预案
                               </div>
@@ -255,7 +255,7 @@ export function ExceptionsPage() {
                           </div>
 
                           {/* 处置流水 */}
-                          <div style={{ marginTop: 16, padding: "16px 20px", background: "#fff", border: "1px solid var(--line-strong)", borderRadius: 12 }}>
+                          <div style={{ marginTop: 16, padding: "16px 20px", background: "var(--panel)", border: "1px solid var(--line-strong)", borderRadius: 12 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: "var(--ink-2)", fontWeight: "bold" }}>
                               处置流水
                             </div>
@@ -267,7 +267,7 @@ export function ExceptionsPage() {
                               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                                 {(timeline.data ?? []).map((ev) => (
                                   <div key={ev.id} style={{ display: "flex", gap: 10, fontSize: 12, alignItems: "baseline" }}>
-                                    <span className="tag" style={{ background: "rgba(0,0,0,0.04)", flexShrink: 0 }}>{EXC_EVENT_LABEL[ev.event_type] ?? ev.event_type}</span>
+                                    <span className="tag tag-none" style={{ flexShrink: 0 }}>{EXC_EVENT_LABEL[ev.event_type] ?? ev.event_type}</span>
                                     <span className="muted mono small" style={{ flexShrink: 0 }}>{new Date(ev.event_time).toLocaleString()}</span>
                                     <span className="muted small">{ev.actor_name || "系统"}</span>
                                     {ev.note && <span className="small" style={{ color: "var(--ink-2)", flex: 1 }}>{ev.note.length > 60 ? `${ev.note.slice(0, 60)}…` : ev.note}</span>}

@@ -79,7 +79,7 @@ export function DashboardPage() {
             <div style={{ fontSize: 22, fontWeight: "bold", display: "flex", alignItems: "center", gap: 10 }}>
               经营看板
             </div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>
               基于实收实付台账自动生成。
             </div>
           </div>

@@ -86,7 +86,7 @@ export function NotificationBell() {
                   }}
                   style={{
                     padding: "10px 16px", borderBottom: "1px solid var(--line)", cursor: "pointer",
-                    background: n.is_read ? "transparent" : "#f4f8ff",
+                    background: n.is_read ? "transparent" : "var(--accent-weak)",
                   }}
                 >
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

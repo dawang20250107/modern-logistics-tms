@@ -362,7 +362,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
               </div>
             ) : (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", fontSize: 13, background: "#fff", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", fontSize: 13, background: "var(--panel)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
                   <div><span className="muted">始发城市：</span><strong style={{ fontSize: 15, color: "var(--brand)" }}>{form.origin || "—"}</strong></div>
                   <div><span className="muted">目的城市：</span><strong style={{ fontSize: 15, color: "var(--brand)" }}>{form.destination || "—"}</strong></div>
                   <div style={{ gridColumn: "1 / -1", height: 1, background: "var(--line)", margin: "4px 0" }}></div>
@@ -437,9 +437,9 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                         <td>{r.phone}</td>
                         <td>
                           {r.valid ? (
-                            <span style={{ color: "#27ae60", fontWeight: "bold" }}>✓ 正常</span>
+                            <span style={{ color: "var(--green)", fontWeight: 600 }}>✓ 正常</span>
                           ) : (
-                            <span style={{ color: "#e74c3c", fontWeight: "bold" }}>✗ 缺失路线</span>
+                            <span style={{ color: "var(--red)", fontWeight: 600 }}>✗ 缺失路线</span>
                           )}
                         </td>
                       </tr>
@@ -606,7 +606,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             </div>
 
             {/* 4.2 财务核价 (Financial) */}
-            <div style={{ background: "#fff", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
+            <div style={{ background: "var(--panel)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>运费与货值</div>
               <div className="grid-form" style={{ gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
                 <label>
@@ -654,7 +654,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             </div>
 
             {/* 4.3 特种保障 (Special Care) */}
-            <div style={{ background: "#fff", padding: "14px 16px", borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
+            <div style={{ background: "var(--panel)", padding: "14px 16px", borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>特种运输要求</div>
               <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr auto", gap: 16, alignItems: "end" }}>
                 <label>

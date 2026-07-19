@@ -151,7 +151,7 @@ export function ReconciliationPage() {
               对账管理
               
             </div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>
               管理客户应收与承运商应付对账单，自动排查异常费用。
             </div>
           </div>

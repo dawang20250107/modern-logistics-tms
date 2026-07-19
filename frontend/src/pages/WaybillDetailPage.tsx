@@ -226,33 +226,35 @@ export function WaybillDetailPage() {
     <div className="stack" style={{ gap: 16 }}>
       {/* 运单头部 */}
       <div className="panel" style={{ overflow: "visible" }}>
-        <div style={{ background: "#09090b", color: "#f4f4f5", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
+        <div style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
           <div className="stack" style={{ gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>{w.waybill_no}</span>
-              <span className="tag" style={{ background: "rgba(255,255,255,0.1)", color: "#e4e4e7", border: "1px solid rgba(255,255,255,0.2)", fontWeight: "500" }}>
+              <span className="tag" style={{ background: "rgba(255,255,255,0.12)", color: "#e4e4e7", border: "1px solid rgba(255,255,255,0.2)", fontWeight: 500 }}>
+                {STATUS_LABEL[w.status] ?? w.status}
               </span>
               {w.receipt_status === "returned" && <span className="tag tag-low">回单已核验</span>}
             </div>
-            <div style={{ color: "#a1a1aa", fontSize: 13, display: "flex", gap: 16, fontWeight: "400" }}>
+            <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 13, display: "flex", gap: 16, fontWeight: 400 }}>
               <span>{w.route_name} ({w.origin} → {w.destination})</span>
-              <span>{w.customer_name || "Unknown"}</span>
-              <span>{w.vehicle_plate || "Self-Fleet"}</span>
+              <span>{w.customer_name || "散客"}</span>
+              <span>{w.vehicle_plate || "自营/待指派"}</span>
             </div>
           </div>
-          
+
           <div className="stack" style={{ alignItems: "flex-end", gap: 8 }}>
             <span className={`tag tag-${w.risk_level === 'high' ? 'high' : w.risk_level === 'medium' ? 'medium' : 'low'}`} style={{ fontSize: 12, padding: "4px 10px" }}>
-              Risk: {RISK_LABEL[w.risk_level]}
+              风险 {RISK_LABEL[w.risk_level]}
             </span>
             <div className="row-actions">
               <button className="btn-ghost" style={{ color: "#fff", border: "1px solid rgba(255,255,255,0.2)", background: "transparent" }} disabled={analyze.isPending} onClick={() => analyze.mutate()}>
-风险分析              </button>
+                风险分析
+              </button>
               {w.next_statuses.map((s) => (
                 <button
                   key={s}
                   className="btn-primary"
-                  style={{ background: "#fff", color: "#09090b", borderColor: "#fff" }}
+                  style={{ background: "var(--panel)", color: "var(--ink)", borderColor: "var(--panel)" }}
                   disabled={transition.isPending}
                   onClick={() => transition.mutate(s)}
                 >
@@ -351,7 +353,7 @@ export function WaybillDetailPage() {
               <select value={excLevel} onChange={(e) => setExcLevel(e.target.value)}>
                 <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
               </select>
-              <input className="search" style={{ flex: 1, minWidth: 200, background: "#fff" }} placeholder="异常描述（如：高速拥堵预计延误2小时）" value={excDesc} onChange={(e) => setExcDesc(e.target.value)} />
+              <input className="search" style={{ flex: 1, minWidth: 200, background: "var(--panel)" }} placeholder="异常描述（如：高速拥堵预计延误2小时）" value={excDesc} onChange={(e) => setExcDesc(e.target.value)} />
               <button className="btn-danger" disabled={reportExc.isPending || !excDesc.trim()} onClick={() => reportExc.mutate()}>紧急上报</button>
             </div>
             {(exceptions.data?.items?.length ?? 0) > 0 && (
@@ -417,7 +419,7 @@ export function WaybillDetailPage() {
             ) : (
               <ul className="suggestions" style={{ padding: "12px 18px" }}>
                 {w.agent_suggestions.map((s) => (
-                  <li key={s.id} style={{ background: "#fff", borderColor: "rgba(139,92,246,0.2)" }}>
+                  <li key={s.id} style={{ background: "var(--panel)", borderColor: "rgba(139,92,246,0.2)" }}>
                     <div className="sg-title" style={{ color: "var(--ink)" }}>{s.title}</div>
                     <div className="muted small">{s.body}</div>
                     <div className="sg-actions">
@@ -558,7 +560,7 @@ export function WaybillDetailPage() {
               ) : (
                 <div className="stack" style={{ gap: 8 }}>
                   {(receipts.data?.items ?? []).map((r) => (
-                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 12, background: "#fff", border: "1px solid var(--line)", borderRadius: 8 }}>
+                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 12, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8 }}>
                       <div className="stack" style={{ gap: 4 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontWeight: "bold", fontSize: 13 }}>回单</span>
@@ -582,7 +584,7 @@ export function WaybillDetailPage() {
               <div style={{ borderTop: "1px solid var(--line)", padding: "16px 20px", background: "rgba(0,0,0,0.01)" }}>
                 <div className="muted small" style={{ marginBottom: 8, fontWeight: "bold" }}>现场签收</div>
                 <input className="search" style={{ width: "100%", marginBottom: 10 }} placeholder="输入实际提货/签收人姓名" value={signatory} onChange={(e) => setSignatory(e.target.value)} />
-                <div style={{ background: "#fff", borderRadius: 8, border: "1px dashed var(--line)", overflow: "hidden" }}>
+                <div style={{ background: "var(--panel)", borderRadius: 8, border: "1px dashed var(--line)", overflow: "hidden" }}>
                   <SignaturePad onChange={setSignature} />
                 </div>
                 <button className="btn-primary" style={{ width: "100%", marginTop: 12 }} disabled={!signatory || sign.isPending} onClick={() => sign.mutate()}>

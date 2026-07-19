@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiDownload, apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
-import type { Order, Paginated } from "../api/types";
+import type { Order, OrderEvent, Paginated } from "../api/types";
 import {
-  BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SOURCE_TYPE_LABEL,
+  BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_EVENT_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SETTLEMENT_LABEL, SOURCE_TYPE_LABEL,
 } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { StateView } from "../components/StateView";
@@ -75,11 +75,39 @@ function OrdersTab() {
     onSuccess: (o) => { toast.success(`已合单：${o.order_no}`); setSelected(new Set()); invalidate(); },
   });
   const [assignTo, setAssignTo] = useState("");
+  const [drawer, setDrawer] = useState<Order | null>(null);
   const assign = useMutation({
     mutationFn: (v: { ids: string[]; dispatcher: string }) => apiPost<{ assigned: string[]; dispatcher: string }>("/orders/assign", v),
     onSuccess: (r) => { toast.success(`已分派 ${r.assigned.length} 单给 ${r.dispatcher}`); setSelected(new Set()); setAssignTo(""); invalidate(); },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const timeline = useQuery({
+    queryKey: ["order-timeline", drawer?.id],
+    queryFn: () => apiGet<OrderEvent[]>(`/orders/${drawer!.id}/timeline`),
+    enabled: Boolean(drawer),
+  });
+
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawer]);
+
+  // 台账概览（基于已加载集）
+  const stats = useMemo(() => {
+    const all = q.data?.items ?? [];
+    const today = new Date().toDateString();
+    return {
+      total: all.length,
+      pending: all.filter((o) => o.status === "draft" || o.status === "pending_confirm").length,
+      pooled: all.filter((o) => o.status === "pooled" || o.status === "dispatching").length,
+      dispatched: all.filter((o) => o.status === "converted" || o.status === "completed").length,
+      today: all.filter((o) => new Date(o.created_at).toDateString() === today).length,
+      amount: all.reduce((s, o) => s + (Number(o.quoted_amount) || 0), 0),
+    };
+  }, [q.data]);
 
   const runBatch = async (action: string) => {
     const ids = [...selected];
@@ -144,6 +172,17 @@ function OrdersTab() {
   ) : null;
 
   return (
+    <>
+    {/* 台账概览 */}
+    <div className="om-stats">
+      <div className="om-stat"><div className="om-stat-n">{stats.total}</div><div className="om-stat-l">订单总数</div></div>
+      <button className={`om-stat om-clickable${status === "pending_confirm" ? " on" : ""}`} onClick={() => setStatus(status === "pending_confirm" ? "" : "pending_confirm")}><div className="om-stat-n" style={{ color: stats.pending ? "var(--amber)" : undefined }}>{stats.pending}</div><div className="om-stat-l">待确认 →</div></button>
+      <button className={`om-stat om-clickable${status === "pooled" ? " on" : ""}`} onClick={() => setStatus(status === "pooled" ? "" : "pooled")}><div className="om-stat-n" style={{ color: stats.pooled ? "var(--blue)" : undefined }}>{stats.pooled}</div><div className="om-stat-l">池中待派 →</div></button>
+      <div className="om-stat"><div className="om-stat-n" style={{ color: stats.dispatched ? "var(--green)" : undefined }}>{stats.dispatched}</div><div className="om-stat-l">已派/完成</div></div>
+      <div className="om-stat"><div className="om-stat-n">{stats.today}</div><div className="om-stat-l">今日新建</div></div>
+      <div className="om-stat"><div className="om-stat-n" style={{ fontSize: 20 }}>{fmtMoney(stats.amount)}</div><div className="om-stat-l">报价合计</div></div>
+    </div>
+
     <div className="panel">
       <div className="panel-head" style={{ flexWrap: "wrap", gap: 10 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>订单台账<span className="ai-pill">{total}</span></span>
@@ -185,10 +224,83 @@ function OrdersTab() {
         <DataTable<Order>
           columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage" exportName="订单台账"
           selectable selected={selected} onToggle={toggle} onToggleAll={toggleAll} stickyFirst batchBar={batchBar}
-          toolbarLeft={<span className="muted small">共 {total} 单{selected.size ? ` · 已选 ${selected.size}` : ""} · 点击表头排序 · 「列」增减字段</span>}
+          onRowClick={(o) => setDrawer(o)}
+          toolbarLeft={<span className="muted small">共 {total} 单{selected.size ? ` · 已选 ${selected.size}` : ""} · 点击行看详情 · 表头排序 · 「列」增减</span>}
         />
       )}
     </div>
+
+    {/* 订单详情抽屉 */}
+    {drawer && (
+      <div className="wb-overlay" onClick={() => setDrawer(null)}>
+        <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="wb-drawer-head">
+            <div>
+              <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}>{drawer.order_no}</div>
+              <div className="muted small" style={{ marginTop: 2 }}>{drawer.origin || "?"} → {drawer.destination || "?"}</div>
+            </div>
+            <button className="btn-ghost" onClick={() => setDrawer(null)}>关闭 [Esc]</button>
+          </div>
+          <div className="wb-drawer-body">
+            <div className="stack" style={{ gap: 14 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <StatusTag kind="order" value={drawer.status} />
+                {drawer.sla_status && drawer.sla_status !== "pending" && <StatusTag kind="sla" value={drawer.sla_status} />}
+                <span>{drawer.customer_name || "散客"}</span>
+                {drawer.customer_level && <span className={`tag ${LEVEL_TONE[drawer.customer_level] ?? "tag-none"}`}>{drawer.customer_level} 级</span>}
+                {drawer.lock_state && drawer.lock_state !== "free" && <span className={`tag ${LOCK_TONE[drawer.lock_state]}`}>{LOCK_LABEL[drawer.lock_state]}{(drawer.claimed_by_name || drawer.assigned_to_name) ? ` · ${drawer.claimed_by_name || drawer.assigned_to_name}` : ""}</span>}
+              </div>
+
+              <div className="section-label">契约信息</div>
+              <div className="kv">
+                <div><span>渠道</span><b>{ORDER_CHANNEL_LABEL[drawer.channel] ?? drawer.channel}</b></div>
+                <div><span>客户分类</span><b>{SOURCE_TYPE_LABEL[drawer.source_type] ?? drawer.source_type}</b></div>
+                <div><span>业务类型</span><b>{BUSINESS_TYPE_LABEL[drawer.business_type] ?? drawer.business_type}</b></div>
+                <div><span>优先级</span><b>{PRIORITY_LABEL[drawer.priority] ?? drawer.priority}</b></div>
+                <div><span>结算方式</span><b>{SETTLEMENT_LABEL[drawer.settlement_type] ?? drawer.settlement_type ?? "—"}</b></div>
+                <div><span>报价</span><b>{Number(drawer.quoted_amount) > 0 ? fmtMoney(drawer.quoted_amount) : "—"}</b></div>
+                <div><span>建单人</span><b>{drawer.created_by_name || "—"}</b></div>
+                <div><span>来源</span><b className="small">{drawer.source || "—"}</b></div>
+                <div><span>建单时间</span><b className="small">{fmtDateTime(drawer.created_at)}</b></div>
+              </div>
+
+              <div className="section-label">货物明细</div>
+              {(drawer.cargo_items ?? []).length > 0 ? (
+                <table className="table" style={{ fontSize: 12.5 }}>
+                  <thead><tr><th>品名</th><th className="num">件数</th><th className="num">重量(吨)</th><th className="num">体积(方)</th><th>包装</th></tr></thead>
+                  <tbody>{drawer.cargo_items.map((c, i) => <tr key={i}><td>{c.name || "—"}</td><td className="num">{c.quantity}</td><td className="num">{c.weight_ton}</td><td className="num">{c.volume_cbm}</td><td className="small">{c.package_type || "—"}</td></tr>)}</tbody>
+                </table>
+              ) : <div className="muted small">合计 {drawer.cargo_weight_ton}吨 / {drawer.cargo_quantity}件 / {drawer.cargo_volume_cbm}方 · {drawer.cargo_desc || "无明细"}</div>}
+
+              {(drawer.waybill_nos ?? []).length > 0 && (
+                <>
+                  <div className="section-label">关联运单</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {drawer.waybill_nos.map((no) => <Link key={no} className="tag tag-info mono" to={`/waybills/${no}`}>{no}</Link>)}
+                  </div>
+                </>
+              )}
+
+              <div className="section-label">时间线</div>
+              {timeline.isLoading ? <span className="muted small">加载中…</span> : (timeline.data ?? []).length === 0 ? <span className="muted small">暂无事件</span> : (
+                <ul className="timeline">
+                  {(timeline.data ?? []).map((ev) => (
+                    <li key={ev.id}><span className="dot" /><div><span className="tl-type">{ORDER_EVENT_LABEL[ev.event_type] ?? ev.event_type}</span> <span className="muted small">{fmtDateTime(ev.event_time)} · {ev.actor_name || "系统"}</span>{ev.to_status && <span className="muted small"> · → {ORDER_STATUS_LABEL[ev.to_status] ?? ev.to_status}</span>}</div></li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+          <div className="wb-actions" style={{ borderTop: "1px solid var(--line)" }}>
+            {(drawer.status === "draft" || drawer.status === "pending_confirm") && <button className="btn-ghost" onClick={() => { batch.mutate({ action: "confirm", ids: [drawer.id] }); setDrawer(null); }}>确认</button>}
+            {(drawer.status === "confirmed" || drawer.status === "pending_confirm") && <button className="btn-ghost" onClick={() => { batch.mutate({ action: "pool", ids: [drawer.id] }); setDrawer(null); }}>进池</button>}
+            {drawer.status === "pooled" && <Link className="btn-primary" to="/dispatch-board" style={{ textDecoration: "none" }}>去派单</Link>}
+            <Link className="btn-ghost" to={`/orders/${drawer.id}`} style={{ textDecoration: "none" }}>完整详情页</Link>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

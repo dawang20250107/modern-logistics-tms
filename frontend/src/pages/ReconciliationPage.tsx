@@ -6,6 +6,7 @@ import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, Statement, StatementAuditResult } from "../api/types";
 import { STATEMENT_STATUS_LABEL } from "../api/types";
+import { StateView } from "../components/StateView";
 
 export function ReconciliationPage() {
   const queryClient = useQueryClient();
@@ -159,9 +160,9 @@ export function ReconciliationPage() {
       <div className="panel" style={{ flex: 1 }}>
         <div className="panel-head">对账单核销台账</div>
         {statements.isLoading ? (
-          <div className="muted" style={{ padding: 24, textAlign: "center" }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : items.length === 0 ? (
-          <div className="muted" style={{ padding: 24, textAlign: "center" }}>暂无对账单</div>
+          <StateView kind="empty" scene="recon-empty" />
         ) : (
           <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>

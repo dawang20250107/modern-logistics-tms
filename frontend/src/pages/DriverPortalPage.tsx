@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { API_BASE_URL } from "../api/client";
 import { toast } from "../api/toast";
+import { StateView } from "../components/StateView";
 
 interface Reminder { id: string; title: string; content: string; ack_required: boolean; waybill_no: string }
 interface NextStep { node: string; label: string; kind: string }
@@ -142,9 +143,8 @@ export function DriverPortalPage() {
           </div>
 
           {(tasks?.waybills.length ?? 0) === 0 ? (
-            <div style={{ background: "#fff", padding: 30, borderRadius: 12, textAlign: "center", border: "1px dashed var(--line-strong)" }}>
-              <div style={{ fontSize: 32, opacity: 0.5, marginBottom: 10 }}></div>
-              <div className="muted" style={{ fontSize: 14 }}>当前暂无在途任务，请等待调度派单。</div>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px dashed var(--line-strong)" }}>
+              <StateView kind="empty" scene="driver-empty" />
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

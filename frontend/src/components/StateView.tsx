@@ -9,17 +9,30 @@ const PRESET: Record<StateKind, { icon: string; title: string; hint: string }> =
   forbidden: { icon: "🔒", title: "无访问权限", hint: "你的角色暂无权限查看此内容，请联系管理员。" },
 };
 
+// 角色化场景文案：五态组件统一，但文案贴合岗位场景（让人知道"现在该做什么"）
+const SCENE: Record<string, { icon?: string; title: string; hint: string }> = {
+  "cs-empty": { icon: "✓", title: "暂无待跟进订单", hint: "今天的客户订单都已处理完成。" },
+  "pool-empty": { icon: "◷", title: "订单池为空", hint: "已确认订单进入调度池后，将在这里等待派单。" },
+  "driver-empty": { icon: "🚚", title: "当前暂无运输任务", hint: "请等待调度派单，有新任务会自动提醒。" },
+  "exception-empty": { icon: "✓", title: "暂无异常工单", hint: "有新异常提报或系统预警时会出现在这里。" },
+  "recon-empty": { icon: "∅", title: "暂无对账数据", hint: "生成账期账单后将在这里按客户/承运商归集。" },
+  "waybill-empty": { icon: "∅", title: "未找到运单", hint: "调整筛选维度或清空条件再试。" },
+  "carrier-empty": { icon: "∅", title: "暂无承运商", hint: "先在承运商中心建档，调度即可按线路比价派单。" },
+};
+
 export function StateView({
-  kind, title, hint, action, onRetry, compact,
+  kind, scene, title, hint, action, onRetry, compact,
 }: {
   kind: StateKind;
+  scene?: keyof typeof SCENE;
   title?: string;
   hint?: string;
   action?: React.ReactNode;
   onRetry?: () => void;
   compact?: boolean;
 }) {
-  const p = PRESET[kind];
+  const s = scene ? SCENE[scene] : undefined;
+  const p = { ...PRESET[kind], ...(s ?? {}) };
   if (kind === "loading") {
     return (
       <div style={{ padding: compact ? "16px" : "28px 18px", display: "flex", flexDirection: "column", gap: 10 }}>

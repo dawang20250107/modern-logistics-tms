@@ -7,6 +7,7 @@ import type { ExceptionEvent, ExceptionRecord, Paginated } from "../api/types";
 import { EXC_EVENT_LABEL } from "../api/types";
 import { useAuth } from "../auth/auth";
 import { IconSparkles, IconAlert } from "../components/Icons";
+import { StateView } from "../components/StateView";
 
 const LEVEL_LABEL: Record<string, string> = { low: "低风险", medium: "中风险", high: "高风险" };
 const STATUS_LABEL: Record<string, string> = {
@@ -135,11 +136,7 @@ export function ExceptionsPage() {
             <div className="skeleton" style={{ width: "100%", height: 32, opacity: 0.6 }}></div>
           </div>
         ) : items.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">✓</div>
-            <div className="empty-title">无活动异常</div>
-            <div className="empty-hint muted small">暂无在途异常。</div>
-          </div>
+          <StateView kind="empty" scene="exception-empty" />
         ) : (
           <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>

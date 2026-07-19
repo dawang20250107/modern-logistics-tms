@@ -8,7 +8,7 @@ import { toast } from "../api/toast";
 import type { Order, OrderChannel, Paginated } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL } from "../api/types";
 import { CustomerContextPanel } from "../components/CustomerContextPanel";
-import { EmptyState } from "../components/EmptyState";
+import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import { OrderLifecycle } from "../components/OrderLifecycle";
 import { StructuredOrderForm } from "../components/StructuredOrderForm";
@@ -125,12 +125,13 @@ export function OrderIntakePage() {
           </div>
         )}
         {orders.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
+        ) : orders.isError ? (
+          <StateView kind="error" onRetry={() => orders.refetch()} />
         ) : items.length === 0 ? (
-          <EmptyState
-            title={statusFilter || search ? "没有匹配的订单" : "暂无订单"}
-            hint={statusFilter || search ? "试试调整状态过滤或搜索条件" : "使用上方表单创建订单"}
-          />
+          statusFilter || channelFilter || search
+            ? <StateView kind="empty" title="没有匹配的订单" hint="试试调整状态/来源过滤或搜索条件。" />
+            : <StateView kind="empty" scene="cs-empty" />
         ) : (
           <table className="table">
             <thead>

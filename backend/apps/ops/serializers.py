@@ -259,9 +259,49 @@ class ReceiptSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
+    customer_level = serializers.CharField(source="customer.level", read_only=True, default="")
     created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
-    claimed_by_name = serializers.CharField(source="claimed_by.username", read_only=True, default="")
+    claimed_by_name = serializers.SerializerMethodField()
+    assigned_to_name = serializers.SerializerMethodField()
+    assigned_by_name = serializers.CharField(source="assigned_by.username", read_only=True, default="")
+    dispatchable = serializers.SerializerMethodField()
+    lock_state = serializers.SerializerMethodField()
     waybill_nos = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _uname(u):
+        return (getattr(u, "nickname", "") or getattr(u, "username", "")) if u else ""
+
+    def get_claimed_by_name(self, obj):
+        return self._uname(obj.claimed_by)
+
+    def get_assigned_to_name(self, obj):
+        return self._uname(obj.assigned_to)
+
+    def _current_user(self):
+        req = self.context.get("request")
+        u = getattr(req, "user", None)
+        return u if u and getattr(u, "is_authenticated", False) else None
+
+    def get_dispatchable(self, obj) -> bool:
+        user = self._current_user()
+        if user is None:
+            return False
+        from .order_dispatch import is_chief_dispatcher
+
+        if is_chief_dispatcher(user):
+            return True
+        return user.id in {obj.claimed_by_id, obj.assigned_to_id}
+
+    def get_lock_state(self, obj) -> str:
+        """未锁定 free / 我锁定 mine / 他人锁定 locked / 分派给我 assigned_mine / 分派他人 assigned_other。"""
+        user = self._current_user()
+        uid = getattr(user, "id", None)
+        if obj.claimed_by_id:
+            return "mine" if obj.claimed_by_id == uid else "locked"
+        if obj.assigned_to_id:
+            return "assigned_mine" if obj.assigned_to_id == uid else "assigned_other"
+        return "free"
     cargo_items = OrderCargoItemSerializer(many=True, read_only=True)
     stops = OrderStopSerializer(many=True, read_only=True)
     attachments = OrderAttachmentSerializer(many=True, read_only=True)
@@ -275,7 +315,7 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            "id", "order_no", "customer", "customer_name", "channel", "source",
+            "id", "order_no", "customer", "customer_name", "customer_level", "channel", "source",
             "source_type", "business_type", "priority", "settlement_type", "status",
             "freight_term", "freight_term_label", "freight_payer", "freight_payer_label",
             "cod_amount", "cod_status",
@@ -286,6 +326,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "cargo_value", "package_type", "is_hazardous", "temperature_range", "quoted_amount",
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
+            "assigned_to", "assigned_to_name", "assigned_by_name", "assigned_at",
+            "dispatchable", "lock_state",
             "created_by", "created_by_name", "raw_text", "ai_conversation_id", "parse_meta", "remark", "created_at",
             "waybill_nos", "cargo_items", "stops", "attachments",
             "approval_status", "approval_remark", "approved_at",

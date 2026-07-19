@@ -20,14 +20,29 @@ _BUSY_STATUSES = [
 ]
 
 
+def is_chief_dispatcher(user) -> bool:
+    """总调度：可分单、可调派任意池中订单。以 dispatch.assign 权限点或超管判定。"""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if user.is_superuser:
+        return True
+    from apps.iam.services import effective_permissions
+
+    perms = effective_permissions(user)
+    return "*" in perms or "dispatch.assign" in perms
+
+
 def claim_order(order_id, dispatcher) -> Order:
-    """调度认领订单（行锁防并发抢单）。"""
+    """调度锁定订单（行锁防并发抢单）。分派给他人的订单，非总调度不可锁定。"""
     with transaction.atomic():
         order = Order.objects.select_for_update().filter(id=order_id).first()
         if order is None:
             raise AppError("ORDER_NOT_FOUND", "订单不存在。", status=404)
         if order.status != Order.STATUS_POOLED or order.claimed_by_id:
-            raise AppError("ORDER_NOT_CLAIMABLE", "订单已被认领或不在池中。", status=409)
+            raise AppError("ORDER_NOT_CLAIMABLE", "订单已被锁定或不在池中。", status=409)
+        did = getattr(dispatcher, "id", None)
+        if order.assigned_to_id and order.assigned_to_id != did and not is_chief_dispatcher(dispatcher):
+            raise AppError("ORDER_ASSIGNED_OTHER", "该订单已由总调度分派给其他调度，不可锁定。", status=409)
         order.claimed_by = dispatcher if dispatcher and dispatcher.is_authenticated else None
         order.claimed_at = timezone.now()
         order.status = Order.STATUS_DISPATCHING
@@ -35,6 +50,39 @@ def claim_order(order_id, dispatcher) -> Order:
         record_order_event(order, "claimed", actor=dispatcher, to_status=order.status, source="dispatch")
     publish_event("order_claimed", {"order_no": order.order_no, "dispatcher": getattr(dispatcher, "username", "")})
     return order
+
+
+def assign_orders(order_ids, dispatcher_id, operator) -> dict:
+    """总调度分单：把池中订单指派给某个调度（行锁；跳过已被他人锁定的单）。"""
+    if not is_chief_dispatcher(operator):
+        raise AppError("NOT_CHIEF", "仅总调度可分单。", status=403)
+    from django.contrib.auth import get_user_model
+
+    target = get_user_model().objects.filter(id=dispatcher_id).first()
+    if target is None:
+        raise AppError("DISPATCHER_NOT_FOUND", "目标调度不存在。", status=404)
+    assigned, skipped = [], []
+    with transaction.atomic():
+        orders = list(Order.objects.select_for_update().filter(id__in=list(order_ids or [])))
+        for order in orders:
+            if order.status not in (Order.STATUS_POOLED, Order.STATUS_DISPATCHING):
+                skipped.append(order.order_no)
+                continue
+            if order.claimed_by_id and order.claimed_by_id != target.id:
+                skipped.append(order.order_no)  # 已被他人锁定，分单跳过
+                continue
+            order.assigned_to = target
+            order.assigned_by = operator
+            order.assigned_at = timezone.now()
+            order.save(update_fields=["assigned_to", "assigned_by", "assigned_at", "updated_at"])
+            record_order_event(
+                order, "assigned", actor=operator, source="dispatch",
+                note=f"分派给 {target.nickname or target.username}",
+            )
+            assigned.append(order.order_no)
+    for no in assigned:
+        publish_event("order_assigned", {"order_no": no, "dispatcher": target.username})
+    return {"assigned": assigned, "skipped": skipped, "dispatcher": target.nickname or target.username}
 
 
 def release_order(order, dispatcher=None) -> Order:
@@ -46,6 +94,18 @@ def release_order(order, dispatcher=None) -> Order:
     order.claimed_at = None
     order.save(update_fields=["status", "claimed_by", "claimed_at", "updated_at"])
     publish_event("order_pooled", {"order_no": order.order_no, "released": True})
+    return order
+
+
+def unassign_order(order, operator) -> Order:
+    """总调度撤销分单。"""
+    if not is_chief_dispatcher(operator):
+        raise AppError("NOT_CHIEF", "仅总调度可撤销分单。", status=403)
+    order.assigned_to = None
+    order.assigned_by = None
+    order.assigned_at = None
+    order.save(update_fields=["assigned_to", "assigned_by", "assigned_at", "updated_at"])
+    publish_event("order_pooled", {"order_no": order.order_no, "unassigned": True})
     return order
 
 
@@ -187,6 +247,15 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
         raise AppError("INVALID_DISPATCH_TYPE", "派单类型非法。", status=400)
     if order.status not in (Order.STATUS_POOLED, Order.STATUS_DISPATCHING, Order.STATUS_CONFIRMED):
         raise AppError("ORDER_NOT_DISPATCHABLE", "订单当前状态不可派单。", status=409)
+    # 权限门禁：非总调度只能调派"分派给自己"或"自己锁定"的订单
+    if operator is not None and not is_chief_dispatcher(operator):
+        owner_ids = {order.claimed_by_id, order.assigned_to_id}
+        if getattr(operator, "id", None) not in owner_ids:
+            raise AppError(
+                "ORDER_NOT_YOURS",
+                "该订单未分派/锁定给你：请由总调度分单，或先自行锁定后再调派。",
+                status=403,
+            )
     _assert_dispatch_requirements(dispatch_type, carrier, vehicle, platform_name)
 
     with transaction.atomic():

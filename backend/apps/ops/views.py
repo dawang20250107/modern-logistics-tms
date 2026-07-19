@@ -492,7 +492,7 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     # 订单本身无组织外键，按建单人所属组织归属其数据范围（组织子树可见）
     org_field = "created_by__organization"
     queryset = (
-        Order.objects.select_related("customer", "created_by", "claimed_by")
+        Order.objects.select_related("customer", "created_by", "claimed_by", "assigned_to", "assigned_by")
         .prefetch_related("waybills", "cargo_items", "stops", "attachments")
         .all()
     )
@@ -741,7 +741,8 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         if request.query_params.get("mine") in ("1", "true"):
             qs = qs.filter(claimed_by=_current_user_or_none(request))
         page = self.paginate_queryset(qs)
-        ser = OrderSerializer(page if page is not None else qs, many=True)
+        ctx = {"request": request}
+        ser = OrderSerializer(page if page is not None else qs, many=True, context=ctx)
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
 
     @action(detail=True, methods=["post"], url_path="claim")
@@ -757,6 +758,40 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         from .order_dispatch import release_order
 
         return Response(OrderSerializer(release_order(self.get_object(), request.user)).data)
+
+    @action(detail=False, methods=["post"], url_path="assign")
+    def assign_pool(self, request):
+        """总调度分单：{ids:[...], dispatcher:<user_id>} → 把订单指派给某调度。"""
+        from .order_dispatch import assign_orders
+
+        result = assign_orders(request.data.get("ids") or [], request.data.get("dispatcher"), request.user)
+        return Response(result)
+
+    @action(detail=True, methods=["post"], url_path="unassign")
+    def unassign(self, request, pk=None):
+        """总调度撤销分单。"""
+        from .order_dispatch import unassign_order
+
+        return Response(OrderSerializer(unassign_order(self.get_object(), request.user)).data)
+
+    @action(detail=False, methods=["get"], url_path="dispatchers")
+    def dispatchers(self, request):
+        """可分派的调度成员（供总调度分单选择）+ 当前用户是否总调度。"""
+        from django.contrib.auth import get_user_model
+
+        from .order_dispatch import is_chief_dispatcher
+
+        User = get_user_model()
+        members = User.objects.filter(is_active=True).order_by("nickname", "username")
+        me = request.user
+        return Response({
+            "is_chief": is_chief_dispatcher(me),
+            "me": {"id": str(me.id), "name": me.nickname or me.username},
+            "dispatchers": [
+                {"id": str(u.id), "name": u.nickname or u.username, "username": u.username}
+                for u in members[:200]
+            ],
+        })
 
     @action(detail=True, methods=["get"], url_path="dispatch-suggestion")
     def dispatch_suggestion(self, request, pk=None):

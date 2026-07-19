@@ -202,12 +202,20 @@ class Order(BaseModel, SoftDeleteModel):
     )
     approved_at = models.DateTimeField(null=True, blank=True)
 
-    # 调度池认领（多调度并发，乐观+悲观锁保护）
+    # 调度池认领/锁定（多调度并发，行锁防抢；claimed_by 即锁定人）
     claimed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="claimed_orders"
     )
     claimed_at = models.DateTimeField(null=True, blank=True)
     pooled_at = models.DateTimeField(null=True, blank=True)
+    # 总调度分单：把池中订单指派给某个调度，仅被指派人（或总调度）可锁定/调派
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_orders"
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_out_orders"
+    )
+    assigned_at = models.DateTimeField(null=True, blank=True)
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_orders"

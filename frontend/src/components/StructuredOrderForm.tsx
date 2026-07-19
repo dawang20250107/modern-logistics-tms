@@ -79,6 +79,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   const [paste, setPaste] = useState("");
   const [tplName, setTplName] = useState("");
   const [bulkText, setBulkText] = useState("");
+  const [continuous, setContinuous] = useState(false);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -134,6 +135,19 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
     setBulkText("");
   };
 
+  // 连续建单：保留客户/来源/业务类型/结算等"抬头"，仅清空货物/线路/时间，快速录下一单
+  const resetKeep = () => {
+    setForm((f) => ({
+      ...EMPTY_FORM,
+      channel: f.channel, source: f.source, source_type: f.source_type,
+      business_type: f.business_type, priority: f.priority, settlement_type: f.settlement_type,
+      freight_term: f.freight_term, freight_payer: f.freight_payer, customer: f.customer,
+    }));
+    setCargo([emptyCargo()]);
+    setStops([emptyStop("pickup"), emptyStop("delivery")]);
+    setPaste("");
+  };
+
   const cleanCargo = () => cargo.filter((c) => c.name.trim());
   const cleanStops = () => stops.filter((s) => s.address.trim() || s.city.trim());
 
@@ -162,8 +176,9 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   const submit = useMutation({
     mutationFn: (status: string) => apiPost("/orders/intake", payload(status)),
     onSuccess: (_d, status) => {
-      toast.success(status === "draft" ? "已存草稿" : "建单成功");
-      reset();
+      toast.success(status === "draft" ? "已存草稿" : continuous ? "建单成功，可继续录入" : "建单成功");
+      if (continuous && status !== "draft") resetKeep();
+      else reset();
       onCreated();
     },
   });
@@ -265,7 +280,16 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
   const valid = form.origin.trim() && form.destination.trim();
 
   return (
-    <div className="panel" style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)" }}>
+    <div
+      className="panel"
+      style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)" }}
+      onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && activeMode === "standard" && valid && !submit.isPending) {
+          e.preventDefault();
+          submit.mutate("pending_confirm");
+        }
+      }}
+    >
       {/* 标题 & 药丸标签 */}
       <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -655,11 +679,15 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
             <button className="btn-primary" style={{ padding: "10px 24px" }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>确认提交</button>
             <button className="btn-ghost" disabled={submit.isPending} onClick={() => submit.mutate("draft")}>暂存草稿</button>
             <button className="btn-ghost" onClick={reset}>清空</button>
+            <label className="switch-mini" title="提交后保留客户/来源等抬头，仅清空货物与线路，便于连续录单">
+              <input type="checkbox" checked={continuous} onChange={(e) => setContinuous(e.target.checked)} /> 连续建单
+            </label>
+            <span className="muted small" style={{ marginLeft: 4 }}>Ctrl+Enter 提交</span>
             <span style={{ flex: 1 }} />
             <input placeholder="另存为新订单模板名" style={{ width: 160 }} value={tplName} onChange={(e) => setTplName(e.target.value)} />
             <button className="btn-ghost" disabled={!tplName.trim() || saveTpl.isPending} onClick={() => saveTpl.mutate()}>存为模板</button>
           </div>
-          {!valid && <div className="muted small" style={{ padding: "0 18px 14px", color: "#e74c3c" }}>请至少填写始发城市与目的城市</div>}
+          {!valid && <div className="muted small" style={{ padding: "0 18px 14px", color: "var(--red)" }}>请至少填写始发城市与目的城市</div>}
         </div>
       )}
     </div>

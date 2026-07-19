@@ -55,6 +55,7 @@ export function DispatchBoardPage() {
   const [active, setActive] = useState<Order | null>(null);
   const [tab, setTab] = useState<DrawerTab>("dispatch");
   const [menu, setMenu] = useState<MenuState>(null);
+  const [focusIdx, setFocusIdx] = useState(-1);
   const [suggestion, setSuggestion] = useState<DispatchSuggestion | null>(null);
   const [dispatchType, setDispatchType] = useState("third_party");
   const [carrierId, setCarrierId] = useState("");
@@ -240,6 +241,23 @@ export function DispatchBoardPage() {
     },
   });
 
+  // 一键派单：直接按 AI 建议的运力落单（省去"采纳→确认"两步）
+  const quickDispatch = useMutation({
+    mutationFn: (body: Record<string, unknown>) => apiPost(`/orders/${active!.id}/dispatch`, body),
+    onSuccess: () => { closeWb(); toast.success("已一键派单，生成运单"); invalidate(); },
+  });
+  const oneClickDispatch = () => {
+    if (!active || !suggestion) return;
+    const type = suggestion.suggested_dispatch_type;
+    const body = type === "third_party"
+      ? { dispatch_type: "third_party", carrier: suggestion.best_carrier?.carrier_id }
+      : { dispatch_type: "own_vehicle", vehicle: suggestion.best_vehicle?.vehicle_id };
+    quickDispatch.mutate(body);
+  };
+  const canOneClick = suggestion
+    ? (suggestion.suggested_dispatch_type === "third_party" ? Boolean(suggestion.best_carrier) : Boolean(suggestion.best_vehicle))
+    : false;
+
   // 手工提报异常
   const reportException = useMutation({
     mutationFn: () => apiPost("/exceptions", {
@@ -272,6 +290,20 @@ export function DispatchBoardPage() {
   // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
   const activeGone = Boolean(active) && !pool.isLoading && !orders.some((o) => o.id === active?.id);
   const trackNo = active?.waybill_nos?.[0];
+
+  // 键盘选单：抽屉未开时，↑↓ 选单、Enter 拉出派单抽屉（输入框内不接管）
+  useEffect(() => {
+    if (active || rows.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (e.key === "ArrowDown") { e.preventDefault(); setFocusIdx((i) => Math.min(i + 1, rows.length - 1)); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setFocusIdx((i) => Math.max(i <= 0 ? 0 : i - 1, 0)); }
+      else if (e.key === "Enter" && focusIdx >= 0 && focusIdx < rows.length) { e.preventDefault(); openWb(rows[focusIdx]); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, rows, focusIdx]);
 
   // 抽屉「轨迹」tab 的轨迹数据（已派单订单才有运单轨迹）
   const traj = useQuery<Trajectory>({
@@ -315,12 +347,13 @@ export function DispatchBoardPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((o) => {
+              {rows.map((o, idx) => {
                 const claimed = o.status === "dispatching";
                 return (
                   <tr
                     key={o.id}
-                    className={`pool-row${active?.id === o.id ? " row-active" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
+                    className={`pool-row${active?.id === o.id ? " row-active" : ""}${idx === focusIdx ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
+                    onMouseEnter={() => setFocusIdx(idx)}
                     onDoubleClick={() => openWb(o)}
                     onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, order: o }); }}
                   >
@@ -348,7 +381,7 @@ export function DispatchBoardPage() {
         )}
         {rows.length > 0 && (
           <div className="muted small" style={{ padding: "8px 17px", borderTop: "1px solid var(--line)" }}>
-            提示：双击订单打开派单工作台，右键订单可认领 / 查看轨迹 / 提报异常。
+            提示：↑↓ 选单 · Enter 或双击拉出派单工作台 · 右键可认领 / 查看轨迹 / 提报异常。
           </div>
         )}
       </div>
@@ -588,14 +621,25 @@ export function DispatchBoardPage() {
                           <strong style={{ color: "var(--accent)" }}>{DISPATCH_TYPE_LABEL[suggestion.suggested_dispatch_type]}</strong>
                         </div>
                       </div>
-                      <button
-                        className="btn-primary"
-                        style={{ width: "100%", marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                        disabled={suggestion.suggested_dispatch_type === "third_party" ? !suggestion.best_carrier : !suggestion.best_vehicle}
-                        onClick={adopt}
-                      >
-                        <IconZap size={14} className="icon-offset"/> 采纳建议
-                      </button>
+                      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                        <button
+                          className="btn-primary"
+                          style={{ flex: 1.6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                          disabled={!canOneClick || quickDispatch.isPending || activeGone}
+                          onClick={oneClickDispatch}
+                        >
+                          <IconZap size={14} className="icon-offset"/> {quickDispatch.isPending ? "派单中…" : "一键派单"}
+                        </button>
+                        <button
+                          className="btn-ghost"
+                          style={{ flex: 1 }}
+                          disabled={!canOneClick}
+                          onClick={adopt}
+                          title="仅填入下方指派表单，便于手工微调"
+                        >
+                          采纳并微调
+                        </button>
+                      </div>
                     </div>
 
                     {suggestion.vehicle_candidates.length > 0 && (

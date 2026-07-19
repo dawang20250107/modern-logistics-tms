@@ -168,6 +168,7 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .pool-row.row-urgent td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 .pool-row.row-urgent { background: rgba(208,36,44,0.03); }
 .pool-row.row-active { background: var(--accent-weak) !important; }
+.pool-row.row-focus { box-shadow: inset 0 0 0 2px var(--accent-weak-2); }
 .pool-row:hover { background: var(--panel-2); }
 
 /* ── Right-click context menu ───────────────────────── */

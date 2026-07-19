@@ -386,7 +386,7 @@ def _allocate_payable(total, orders, allocation, manual_map=None):
 
     末单兜底：把四舍五入误差补到最后一单，保证分摊之和 == 批次总额。
     """
-    from decimal import Decimal, ROUND_HALF_UP
+    from decimal import ROUND_HALF_UP, Decimal
 
     ids = [o.id for o in orders]
     if allocation == DispatchBatch.ALLOC_MANUAL and manual_map:

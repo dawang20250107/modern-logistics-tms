@@ -44,7 +44,9 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
         </div>
         <div className="wb-drawer-body">
           {detail.isLoading ? (
-            <div className="muted" style={{ padding: 16 }}>加载中…</div>
+            <StateView kind="loading" compact />
+          ) : detail.isError ? (
+            <StateView kind="error" onRetry={() => detail.refetch()} />
           ) : c ? (
             <div className="stack" style={{ gap: 16 }}>
               {c.dispatch_blocked && (
@@ -113,9 +115,11 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
               <div>
                 <div className="section-label">线路价库</div>
                 {lanes.isLoading ? (
-                  <div className="muted small">加载中…</div>
+                  <StateView kind="loading" compact />
+                ) : lanes.isError ? (
+                  <StateView kind="error" onRetry={() => lanes.refetch()} compact />
                 ) : (lanes.data?.items ?? []).length === 0 ? (
-                  <div className="muted small">尚未维护该承运商的线路价库。</div>
+                  <StateView kind="empty" title="尚未维护线路价" hint="补充常跑线路价格后，调度推荐会优先引用价库。" compact />
                 ) : (
                   <table className="table" style={{ fontSize: 12.5 }}>
                     <thead><tr><th>线路</th><th>车型</th><th className="num">标准价</th><th className="num">最近成交</th><th>标记</th></tr></thead>

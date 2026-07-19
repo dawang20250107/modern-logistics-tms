@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { hasPerm, useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
@@ -47,8 +47,20 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+
+function currentPageTitle(pathname: string) {
+  const flat = NAV_GROUPS.flatMap((group) => group.items);
+  const exact = flat.find((item) => item.to === pathname || (item.end && pathname === "/"));
+  if (exact) return exact.label;
+  if (pathname.startsWith("/orders/")) return "订单详情";
+  if (pathname.startsWith("/waybills/")) return "运单详情";
+  return "运营总览";
+}
+
 export function AppLayout() {
   const { user, logout } = useAuth();
+  const { pathname } = useLocation();
+  const pageTitle = currentPageTitle(pathname);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("nav_collapsed") === "1");
 
   const toggleCollapsed = () => {
@@ -104,11 +116,18 @@ export function AppLayout() {
       </aside>
       <main className="main">
         <header className="topbar">
-          <button className="topbar-toggle" onClick={toggleCollapsed} aria-label="切换导航" title="切换导航">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
+          <div className="topbar-main">
+            <button className="topbar-toggle" onClick={toggleCollapsed} aria-label="切换导航" title="切换导航">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+            <div className="topbar-title">
+              <span className="topbar-title-text">{pageTitle}</span>
+              <span className="sub">B2B 外协承运协同</span>
+            </div>
+            <span className="topbar-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd>查单 / 派单</span>
+          </div>
           <div className="topbar-user">
             <NotificationBell />
             <span>{user?.nickname || user?.username}</span>

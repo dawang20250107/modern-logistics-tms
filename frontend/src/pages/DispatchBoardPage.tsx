@@ -5,6 +5,7 @@ import { apiGet, apiPost } from "../api/client";
 import { fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { EmptyState } from "../components/EmptyState";
+import { StateView } from "../components/StateView";
 import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconWarning, IconMoney, IconDragHandle, IconCheckCircle, IconMapPin, IconGitBranch, IconX } from "../components/Icons";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 import type { Carrier, DispatchSuggestion, Driver, Order, Paginated, Vehicle } from "../api/types";
@@ -336,8 +337,8 @@ export function DispatchBoardPage() {
   });
 
   return (
-    <div className="stack">
-      <div className="panel">
+    <div className="stack dispatch-page">
+      <div className="panel dispatch-board-panel">
         <div className="panel-head">
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             订单池
@@ -358,11 +359,11 @@ export function DispatchBoardPage() {
           </div>
         )}
         {pool.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : rows.length === 0 ? (
           <EmptyState icon="📥" title={urgentOnly ? "暂无紧急订单" : mineOnly ? "暂无我认领的订单" : "订单池为空"} hint="已确认订单进池后将在此等待派单 · 双击或右键订单可打开派单工作台" actionLabel="去建单" actionTo="/intake" />
         ) : (
-          <table className="table dispatch-pool">
+          <table className="table dispatch-pool" aria-label="订单池">
             <thead>
               <tr>
                 <th style={{ width: 32 }}></th>

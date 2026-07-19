@@ -35,6 +35,22 @@ class CustomerViewSet(viewsets.ModelViewSet):
     filterset_fields = ["is_active"]
     ordering_fields = ["code", "name", "created_at"]
 
+    @action(detail=True, methods=["get"], url_path="context")
+    def context(self, request, pk=None):
+        """客服工作台：客户上下文（账期/授信/常用线路地址/最近·未完成·异常·回单未返订单）。"""
+        from apps.ops.customer_ctx import customer_context
+
+        return Response(customer_context(self.get_object()))
+
+    @action(detail=True, methods=["get"], url_path="lane-suggest")
+    def lane_suggest(self, request, pk=None):
+        """建单补全：该客户在指定线路的常见货物 + 参考价区间 + 历史收货方。"""
+        from apps.ops.customer_ctx import lane_suggest
+
+        origin = request.query_params.get("origin", "")
+        destination = request.query_params.get("destination", "")
+        return Response(lane_suggest(self.get_object(), origin, destination))
+
 
 class CarrierViewSet(viewsets.ModelViewSet):
     """承运商主数据 + 风控：分级 / 黑名单 / 账期。写操作受 carrier.manage 权限约束。"""

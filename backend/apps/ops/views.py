@@ -451,6 +451,13 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         waybill = self.get_object()
         return Response(recommend_dispatch(waybill))
 
+    @action(detail=True, methods=["get"], url_path="reply-card")
+    def reply_card(self, request, waybill_no=None):
+        """客服回复卡：状态/司机/车牌/最近节点/ETA/异常/回单 + 可复制文案。"""
+        from .customer_ctx import reply_card
+
+        return Response(reply_card(self.get_object()))
+
     @action(detail=False, methods=["post"], url_path="dispatch-plan")
     def dispatch_plan(self, request):
         from .dispatch import plan_dispatch

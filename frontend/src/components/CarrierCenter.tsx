@@ -5,7 +5,20 @@ import { apiGet } from "../api/client";
 import { fmtMoney } from "../api/format";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
 import { DataTable, type DataColumn } from "./DataTable";
+import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "./FilterBuilder";
 import { StateView } from "./StateView";
+
+const CARRIER_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "name", label: "承运商", type: "text", accessor: (c) => (c as Carrier).name },
+  { key: "code", label: "编码", type: "text", accessor: (c) => (c as Carrier).code },
+  { key: "city", label: "城市", type: "text", accessor: (c) => (c as Carrier).city || "" },
+  { key: "type", label: "类型", type: "text", accessor: (c) => (c as Carrier).carrier_type_label || "" },
+  { key: "grade", label: "评级", type: "enum", options: ["A", "B", "C", "D"].map((v) => ({ value: v, label: `${v} 级` })), accessor: (c) => (c as Carrier).grade || "" },
+  { key: "credit_days", label: "账期(天)", type: "number", accessor: (c) => Number((c as Carrier).credit_days) || 0 },
+  { key: "alerts", label: "临期证照数", type: "number", accessor: (c) => (c as Carrier).expiry_alerts?.length ?? 0 },
+  { key: "blocked", label: "风控", type: "enum", options: [{ value: "1", label: "停派/黑名单" }, { value: "0", label: "正常" }], accessor: (c) => ((c as Carrier).blacklisted || (c as Carrier).dispatch_blocked ? "1" : "0") },
+  { key: "active", label: "状态", type: "enum", options: [{ value: "1", label: "启用" }, { value: "0", label: "停用" }], accessor: (c) => ((c as Carrier).is_active ? "1" : "0") },
+];
 
 function pct(n?: number): string {
   return n == null ? "—" : `${Math.round(n * 100)}%`;
@@ -153,6 +166,9 @@ export function CarrierCenter() {
   const [typeFilter, setTypeFilter] = useState("");
   const [riskFilter, setRiskFilter] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
+  const [showFilter, setShowFilter] = useState(false);
+  const ccActiveCount = activeConditionCount(model, CARRIER_FILTER_FIELDS);
   const q = useQuery({ queryKey: ["cc-carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=300") });
 
   const allItems = q.data?.items ?? [];
@@ -162,7 +178,7 @@ export function CarrierCenter() {
 
   const rows = useMemo(() => {
     const k = kw.trim().toLowerCase();
-    return allItems.filter((c) => {
+    const base = allItems.filter((c) => {
       if (k && !`${c.code} ${c.name} ${c.contact_phone ?? ""} ${c.city ?? ""}`.toLowerCase().includes(k)) return false;
       if (typeFilter && c.carrier_type_label !== typeFilter) return false;
       if (riskFilter === "blocked" && !(c.blacklisted || c.dispatch_blocked)) return false;
@@ -170,12 +186,13 @@ export function CarrierCenter() {
       if (riskFilter === "grade_a" && c.grade !== "A") return false;
       return true;
     });
-  }, [allItems, kw, typeFilter, riskFilter]);
+    return applyFilterModel(base, model, CARRIER_FILTER_FIELDS);
+  }, [allItems, kw, typeFilter, riskFilter, model]);
 
   const carrierColumns: DataColumn<Carrier>[] = [
     { key: "name", header: "承运商", width: 200, alwaysVisible: true, sortValue: (c) => c.name, exportValue: (c) => `${c.name} ${c.code}`, render: (c) => <><span className="link">{c.name}</span> <span className="muted small mono">{c.code}</span></> },
-    { key: "type", header: "类型", width: 100, sortValue: (c) => c.carrier_type_label || "", exportValue: (c) => c.carrier_type_label || "", render: (c) => <span className="small">{c.carrier_type_label || "—"}</span> },
-    { key: "city", header: "城市", width: 90, sortValue: (c) => c.city || "", exportValue: (c) => c.city || "", render: (c) => <span className="small">{c.city || "—"}</span> },
+    { key: "type", header: "类型", width: 100, filterable: true, filterValue: (c) => c.carrier_type_label || "", sortValue: (c) => c.carrier_type_label || "", exportValue: (c) => c.carrier_type_label || "", render: (c) => <span className="small">{c.carrier_type_label || "—"}</span> },
+    { key: "city", header: "城市", width: 90, filterable: true, filterValue: (c) => c.city || "", sortValue: (c) => c.city || "", exportValue: (c) => c.city || "", render: (c) => <span className="small">{c.city || "—"}</span> },
     { key: "risk", header: "评级/风控", width: 110, sortValue: (c) => (c.blacklisted ? "0" : c.grade || "z"), exportValue: (c) => (c.blacklisted ? "黑名单" : c.grade_label || c.grade || ""), render: (c) => riskTag(c) },
     { key: "credit", header: "账期", width: 80, align: "right", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => `${c.credit_days ?? ""}`, render: (c) => <>{c.credit_days ?? "—"}天</> },
     { key: "alerts", header: "到期预警", width: 110, sortValue: (c) => c.expiry_alerts?.length ?? 0, exportValue: (c) => `${c.expiry_alerts?.length ?? 0}`, render: (c) => (c.expiry_alerts && c.expiry_alerts.length > 0 ? <span className={`tag tag-${c.expiry_alerts.some((a) => a.expired) ? "high" : "medium"}`}>{c.expiry_alerts.length} 项临期</span> : <span className="muted small">—</span>) },
@@ -184,10 +201,31 @@ export function CarrierCenter() {
 
   return (
     <div className="panel">
-      <div className="panel-head">
+      <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>承运资源池<span className="ai-pill">{rows.length}</span></span>
-        <input className="search" style={{ width: 260 }} placeholder="搜索承运商 / 城市 / 电话" value={kw} onChange={(e) => setKw(e.target.value)} />
+        <div style={{ flex: 1 }} />
+        <input className="search" style={{ width: 240 }} placeholder="搜索承运商 / 城市 / 电话" value={kw} onChange={(e) => setKw(e.target.value)} />
+        <div style={{ position: "relative" }}>
+          <button className={`btn-ghost${ccActiveCount > 0 || showFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowFilter((v) => !v); }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+              高级筛选{ccActiveCount > 0 ? ` · ${ccActiveCount}` : ""}
+            </span>
+          </button>
+          {showFilter && <FilterBuilder fields={CARRIER_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowFilter(false)} />}
+        </div>
       </div>
+      {ccActiveCount > 0 && (
+        <div className="om-chips">
+          <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+          {model.conditions.map((c) => {
+            const label = describeCondition(c, CARRIER_FILTER_FIELDS);
+            if (!label) return null;
+            return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+          })}
+          <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
+        </div>
+      )}
       {/* 资源池快筛：按类型与风控快速定位可派/优质/需关注承运商 */}
       <div className="form-row" style={{ gap: 8, flexWrap: "wrap", borderBottom: "1px solid var(--line)" }}>
         <button className={`chip${typeFilter === "" ? " chip-on" : ""}`} onClick={() => setTypeFilter("")}>全部类型 ({allItems.length})</button>

@@ -106,6 +106,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True, default="")
     account_active = serializers.BooleanField(read_only=True)
     group_names = serializers.SerializerMethodField()
+    role_names = serializers.SerializerMethodField()
 
     class Meta:
         model = Employee
@@ -114,7 +115,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "organization", "organization_name", "department", "department_name",
             "supervisor", "supervisor_name", "groups", "group_names", "position",
             "status", "status_label", "hire_date", "leave_date",
-            "user", "username", "account_active",
+            "user", "username", "account_active", "role_names",
         ]
 
     def get_group_names(self, obj):
@@ -122,6 +123,12 @@ class EmployeeSerializer(serializers.ModelSerializer):
         if getattr(view, "action", None) == "list":
             return None
         return list(obj.groups.values_list("name", flat=True))
+
+    def get_role_names(self, obj):
+        # 该员工登录账号所授角色名（用于权限管理列表直观展示）
+        if not obj.user_id:
+            return []
+        return list(obj.user.role_assignments.select_related("role").values_list("role__name", flat=True).distinct())
 
 
 class ServiceAreaSerializer(serializers.ModelSerializer):

@@ -968,6 +968,7 @@ export interface Employee {
   user: string | null;
   username: string;
   account_active: boolean;
+  role_names?: string[];
 }
 
 export interface ServiceArea {
@@ -1014,6 +1015,26 @@ export interface RbacMatrix {
   modules: Array<{ module: string; permissions: Array<{ id: string; code: string; name: string }> }>;
   roles: Array<{ id: string; code: string; name: string; data_scope: string; is_active: boolean; permission_codes: string[] }>;
   permission_total: number;
+}
+
+export interface Role {
+  id: string;
+  code: string;
+  name: string;
+  data_scope: string;
+  data_scope_label: string;
+  is_active: boolean;
+  permission_codes: string[];
+  permission_count: number;
+}
+
+export interface RoleAssignment {
+  id: string;
+  role: string;
+  role_code: string;
+  role_name: string;
+  username: string;
+  organization_name: string;
 }
 
 export interface OrgOption {

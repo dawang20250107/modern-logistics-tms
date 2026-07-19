@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
@@ -14,6 +14,8 @@ import type {
   OrgTreeNode,
   Paginated,
   RbacMatrix,
+  Role,
+  RoleAssignment,
   ServiceArea,
 } from "../api/types";
 import { AREA_TYPE_LABEL, ORG_PROPERTY_LABEL } from "../api/types";
@@ -231,10 +233,76 @@ function EmployeeCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () =>
   );
 }
 
+// 给员工分配角色（落到其登录账号的 RoleAssignment）——权限管理闭环的用户侧。
+function RoleAssignModal({ emp, onClose }: { emp: Employee; onClose: () => void }) {
+  const qc = useQueryClient();
+  const roles = useQuery({ queryKey: ["roles-all"], queryFn: () => apiGet<Paginated<Role>>("/org/roles?page_size=100") });
+  const current = useQuery({ queryKey: ["emp-roles", emp.id], queryFn: () => apiGet<RoleAssignment[]>(`/org/employees/${emp.id}/roles`) });
+  const [sel, setSel] = useState<Set<string> | null>(null);
+  const state = sel ?? new Set((current.data ?? []).map((a) => a.role));
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const toggle = (id: string) => setSel(() => { const n = new Set(state); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const save = useMutation({
+    mutationFn: () => apiPost(`/org/employees/${emp.id}/roles`, { roles: [...state] }),
+    onSuccess: () => {
+      toast.success(`已更新 ${emp.name} 的角色`);
+      qc.invalidateQueries({ queryKey: ["org-employees"] });
+      qc.invalidateQueries({ queryKey: ["emp-roles", emp.id] });
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="bd-head">
+          <div>
+            <div className="bd-title">分配角色</div>
+            <div className="muted small" style={{ marginTop: 3 }}>{emp.name}（{emp.employee_no}）· {emp.username || "未绑定账号"}</div>
+          </div>
+          <button className="btn-ghost" onClick={onClose}>关闭 [Esc]</button>
+        </div>
+        <div className="bd-body">
+          {!emp.user ? (
+            <StateView kind="empty" title="该员工尚未绑定登录账号" hint="绑定账号后方可分配角色。" />
+          ) : roles.isLoading ? <StateView kind="loading" compact /> : (
+            <div className="stack" style={{ gap: 8 }}>
+              {(roles.data?.items ?? []).map((r) => (
+                <label key={r.id} className="role-pick">
+                  <input type="checkbox" checked={state.has(r.id)} onChange={() => toggle(r.id)} />
+                  <span className="role-pick-body">
+                    <b>{r.name}</b> <span className="muted small mono">{r.code}</span>
+                    <span className="muted small"> · 数据范围 {r.data_scope_label} · {r.permission_count} 权限点</span>
+                  </span>
+                </label>
+              ))}
+              {(roles.data?.items ?? []).length === 0 && <StateView kind="empty" title="暂无角色" hint="先在「权限授权」建立角色并授予权限点。" />}
+            </div>
+          )}
+        </div>
+        <div className="bd-foot">
+          <span className="muted small">角色决定该账号可用功能与数据范围</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-ghost" onClick={onClose}>取消</button>
+          <button className="btn-primary" disabled={!emp.user || save.isPending} onClick={() => save.mutate()}>{save.isPending ? "保存中…" : "保存角色"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EmployeesTab() {
   const qc = useQueryClient();
   const orgs = useOrgOptions();
   const [search, setSearch] = useState("");
+  const [roleEmp, setRoleEmp] = useState<Employee | null>(null);
   const q = useQuery({
     queryKey: ["org-employees", search],
     queryFn: () => apiGet<Paginated<Employee>>(`/org/employees?page_size=100&search=${encodeURIComponent(search)}`),
@@ -319,7 +387,7 @@ function EmployeesTab() {
         <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>工号</th><th>姓名</th><th>组织</th><th>职位</th><th>直接上级</th><th>账号</th><th>状态</th><th>操作</th></tr>
+            <tr><th>工号</th><th>姓名</th><th>组织</th><th>职位</th><th>角色</th><th>账号</th><th>状态</th><th>操作</th></tr>
           </thead>
           <tbody>
             {employees.length === 0 && <tr><td colSpan={8} className="muted small">暂无员工。</td></tr>}
@@ -329,11 +397,12 @@ function EmployeesTab() {
                 <td><b>{e.name}</b><div className="muted small">{e.phone}</div></td>
                 <td className="small">{e.organization_name || "-"}</td>
                 <td className="small">{e.position || "-"}</td>
-                <td className="small">{e.supervisor_name || "-"}</td>
+                <td className="small">{(e.role_names ?? []).length > 0 ? (e.role_names ?? []).map((r) => <span key={r} className="tag tag-info" style={{ marginRight: 3 }}>{r}</span>) : <span className="muted">未分配</span>}</td>
                 <td className="small">{e.username ? (e.account_active ? <span className="tag tag-low">{e.username}</span> : <span className="tag tag-medium">{e.username}·禁</span>) : <span className="muted">未绑定</span>}</td>
                 <td><span className={`tag tag-${STATUS_TAG[e.status] ?? "low"}`}>{e.status_label}</span></td>
                 <td>
                   <div className="form-row" style={{ gap: 4 }}>
+                    <button className="btn-ghost small" disabled={!e.user} onClick={() => setRoleEmp(e)}>分配角色</button>
                     {e.status === "active" ? (
                       <button className="btn-ghost small" onClick={() => doDisable(e)}>停用</button>
                     ) : (
@@ -371,6 +440,8 @@ function EmployeesTab() {
           </div>
         </div>
       )}
+
+      {roleEmp && <RoleAssignModal emp={roleEmp} onClose={() => setRoleEmp(null)} />}
     </div>
   );
 }

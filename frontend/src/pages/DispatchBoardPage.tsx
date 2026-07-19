@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import { fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
+import { BatchDispatchModal } from "../components/BatchDispatchModal";
 import { ExceptionQueue } from "../components/ExceptionQueue";
 import { StateView } from "../components/StateView";
 import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconWarning, IconMoney, IconDragHandle, IconCheckCircle, IconMapPin, IconGitBranch, IconX } from "../components/Icons";
@@ -86,6 +87,7 @@ export function DispatchBoardPage() {
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [batchDispatch, setBatchDispatch] = useState(false);
   // 手工提报异常表单
   const [excType, setExcType] = useState("transit_delay");
   const [excLevel, setExcLevel] = useState("medium");
@@ -443,6 +445,7 @@ export function DispatchBoardPage() {
                 <button className="btn-ghost" disabled={!assignTo || assignMany.isPending} onClick={() => assignMany.mutate({ ids: [...picked], dispatcher: assignTo })}>分单</button>
               </span>
             )}
+            <button className="btn-ghost" onClick={() => setBatchDispatch(true)} title="多单一次委托同一承运商，生成派车批次">批量派承运商</button>
             <button className="btn-primary" disabled={makePlan.isPending} onClick={() => makePlan.mutate()}>智能排线拼单</button>
             <button className="btn-ghost" onClick={() => { setPicked(new Set()); setPlan(null); }}>清除</button>
           </div>
@@ -966,6 +969,16 @@ export function DispatchBoardPage() {
             </div>
           </aside>
         </div>
+      )}
+
+      {/* 批量派承运商：多单一次委托同一承运商，生成派车批次 */}
+      {batchDispatch && (
+        <BatchDispatchModal
+          orders={orders.filter((o) => picked.has(o.id))}
+          carriers={carriers.data?.items ?? []}
+          onClose={() => setBatchDispatch(false)}
+          onDone={() => { setBatchDispatch(false); setPicked(new Set()); invalidate(); }}
+        />
       )}
 
       {/* 异常处置（原独立页并入）：调度对在途异常认领·AI诊断·强制闭环 */}

@@ -971,6 +971,21 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 }
 @media (prefers-reduced-motion: reduce) { .deck-pulse { animation: none; } }
 
+/* ── 批量派承运商弹窗 + 批次台账 ─────────────────────── */
+.bd-modal { width: min(720px, 94vw); max-height: 90vh; display: flex; flex-direction: column; padding: 0; }
+.bd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.bd-title { font-size: 16px; font-weight: 680; letter-spacing: -0.01em; }
+.bd-body { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.bd-field { display: flex; flex-direction: column; gap: 6px; }
+.bd-field > label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.bd-field .search, .bd-field select { width: 100%; }
+.bd-row2 { display: grid; grid-template-columns: 1fr 180px; gap: 12px; }
+.bd-preview { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.bd-preview .table { margin: 0; }
+.bd-preview tfoot td { border-top: 1px solid var(--line); background: var(--panel-2); }
+.bd-foot { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line); }
+@media (max-width: 620px) { .bd-row2 { grid-template-columns: 1fr; } }
+
 /* ── 资源库总览（#12b 资源库深度设计）───────────────── */
 .rh-hero {
   padding: 16px 20px; border-radius: 14px; border: 1px solid var(--line);

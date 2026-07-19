@@ -6,9 +6,9 @@ import { apiDownload, apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
-import type { Order, OrderEvent, Paginated } from "../api/types";
+import type { DispatchBatch, DispatchBatchDetail, Order, OrderEvent, Paginated } from "../api/types";
 import {
-  BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_EVENT_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SETTLEMENT_LABEL, SOURCE_TYPE_LABEL,
+  BATCH_STATUS_LABEL, BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_EVENT_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SETTLEMENT_LABEL, SOURCE_TYPE_LABEL,
 } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { StateView } from "../components/StateView";
@@ -358,15 +358,125 @@ function OrdersTab() {
   );
 }
 
+// ── 批次视图（派车批次台账：多单一次委托同一承运商）──────────────
+function BatchesTab() {
+  const [status, setStatus] = useState("");
+  const [drawer, setDrawer] = useState<string | null>(null);
+  const q = useQuery({
+    queryKey: ["dispatch-batches", status],
+    queryFn: () => apiGet<Paginated<DispatchBatch>>(`/dispatch-batches?page_size=200${status ? `&status=${status}` : ""}`),
+  });
+  const detail = useQuery({
+    queryKey: ["dispatch-batch", drawer],
+    queryFn: () => apiGet<DispatchBatchDetail>(`/dispatch-batches/${drawer}`),
+    enabled: Boolean(drawer),
+  });
+
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawer]);
+
+  const rows = q.data?.items ?? [];
+  const columns: DataColumn<DispatchBatch>[] = [
+    { key: "batch_no", header: "批次号", width: 165, alwaysVisible: true, sortValue: (b) => b.batch_no, exportValue: (b) => b.batch_no, render: (b) => <span className="mono">{b.batch_no}</span> },
+    { key: "carrier", header: "承运商 / 平台", width: 150, sortValue: (b) => b.carrier_name || b.platform_name, exportValue: (b) => b.carrier_name || b.platform_name, render: (b) => <span>{b.carrier_name || b.platform_name || "—"}<span className="tag tag-info small" style={{ marginLeft: 6 }}>{b.dispatch_type_label}</span></span> },
+    { key: "customers", header: "涉及客户", width: 200, sortValue: (b) => b.customer_summary.join(","), exportValue: (b) => b.customer_summary.join("、"), render: (b) => <span className="small">{b.customer_summary.length > 1 ? <span className="tag tag-medium" style={{ marginRight: 4 }}>跨客户</span> : null}{b.customer_summary.slice(0, 2).join("、")}{b.customer_summary.length > 2 ? ` +${b.customer_summary.length - 2}` : ""}</span> },
+    { key: "count", header: "运单数", width: 80, align: "right", sortValue: (b) => b.order_count, exportValue: (b) => b.order_count, render: (b) => <b>{b.order_count}</b> },
+    { key: "weight", header: "总货量", width: 100, align: "right", sortValue: (b) => Number(b.total_weight_ton), exportValue: (b) => b.total_weight_ton, render: (b) => <span className="num">{Number(b.total_weight_ton).toFixed(1)}吨</span> },
+    { key: "payable", header: "总应付", width: 120, align: "right", sortValue: (b) => Number(b.total_payable), exportValue: (b) => Number(b.total_payable), render: (b) => <span className="num">{fmtMoney(b.total_payable)}</span> },
+    { key: "alloc", header: "分摊", width: 90, sortValue: (b) => b.allocation, exportValue: (b) => b.allocation_label, render: (b) => <span className="small muted">{b.allocation_label}</span> },
+    { key: "status", header: "状态", width: 90, sortValue: (b) => b.status, exportValue: (b) => b.status_label, render: (b) => <span className={`tag ${b.status === "cancelled" ? "tag-none" : b.status === "completed" ? "tag-low" : "tag-info"}`}>{b.status_label}</span> },
+    { key: "creator", header: "建批人", width: 100, sortValue: (b) => b.created_by_name, exportValue: (b) => b.created_by_name, render: (b) => <span className="small muted">{b.created_by_name || "—"}</span> },
+    { key: "created", header: "建批时间", width: 130, sortValue: (b) => b.created_at, exportValue: (b) => fmtDateTime(b.created_at), render: (b) => <span className="small" title={fmtDateTime(b.created_at)}>{fmtRelative(b.created_at)}</span> },
+  ];
+
+  return (
+    <div className="panel">
+      <div className="panel-head" style={{ flexWrap: "wrap", gap: 10 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>派车批次<span className="ai-pill">{rows.length}</span></span>
+      </div>
+      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <button className={`chip${status === "" ? " chip-on" : ""}`} onClick={() => setStatus("")}>全部</button>
+        {Object.entries(BATCH_STATUS_LABEL).map(([k, v]) => <button key={k} className={`chip${status === k ? " chip-on" : ""}`} onClick={() => setStatus(k)}>{v}</button>)}
+      </div>
+      {q.isLoading ? (
+        <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" onRetry={() => q.refetch()} />
+      ) : rows.length === 0 ? (
+        <StateView kind="empty" title="暂无派车批次" hint="在调度工作台选中多单 →「批量派承运商」即可生成批次。" />
+      ) : (
+        <DataTable<DispatchBatch>
+          columns={columns} rows={rows} rowKey={(b) => b.id} viewKey="dispatch-batches" exportName="派车批次"
+          stickyFirst onRowClick={(b) => setDrawer(b.id)}
+          toolbarLeft={<span className="muted small">共 {rows.length} 批 · 点击行看批次内运单 · 批次 = 承运商应付统一对账分组</span>}
+        />
+      )}
+
+      {drawer && (
+        <div className="wb-overlay" onClick={() => setDrawer(null)}>
+          <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="wb-drawer-head">
+              <div>
+                <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}>{detail.data?.batch_no ?? "批次"}</div>
+                <div className="muted small" style={{ marginTop: 2 }}>{detail.data?.carrier_name || detail.data?.platform_name} · {detail.data?.order_count} 单 · {detail.data?.allocation_label}</div>
+              </div>
+              <button className="btn-ghost" onClick={() => setDrawer(null)}>关闭 [Esc]</button>
+            </div>
+            <div className="wb-drawer-body">
+              {detail.isLoading ? <StateView kind="loading" compact /> : detail.data && (
+                <div className="stack" style={{ gap: 14 }}>
+                  <div className="kv">
+                    <div><span>承运通道</span><b>{detail.data.dispatch_type_label}</b></div>
+                    <div><span>承运商/平台</span><b>{detail.data.carrier_name || detail.data.platform_name || "—"}</b></div>
+                    <div><span>总应付</span><b>{fmtMoney(detail.data.total_payable)}</b></div>
+                    <div><span>分摊方式</span><b>{detail.data.allocation_label}</b></div>
+                    <div><span>总货量</span><b>{Number(detail.data.total_weight_ton).toFixed(2)} 吨</b></div>
+                    <div><span>状态</span><b>{detail.data.status_label}</b></div>
+                    <div><span>建批人</span><b>{detail.data.created_by_name || "—"}</b></div>
+                    <div><span>建批时间</span><b className="small">{fmtDateTime(detail.data.created_at)}</b></div>
+                  </div>
+                  {detail.data.note && <div className="muted small">备注：{detail.data.note}</div>}
+                  <div className="section-label">批次内运单（各自独立回单/签收/对账）</div>
+                  <table className="table" style={{ fontSize: 12.5 }}>
+                    <thead><tr><th>运单号</th><th>订单号</th><th>客户</th><th>线路</th><th className="num">货量</th><th className="num">分摊应付</th><th>状态</th></tr></thead>
+                    <tbody>
+                      {detail.data.waybills.map((w) => (
+                        <tr key={w.id}>
+                          <td><Link className="link mono small" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link></td>
+                          <td className="mono small">{w.order_no}</td>
+                          <td className="small">{w.customer_name || "散客"}</td>
+                          <td className="small">{w.origin} → {w.destination}</td>
+                          <td className="num small">{w.cargo_weight_ton}吨</td>
+                          <td className="num">{w.payable != null ? fmtMoney(w.payable) : "—"}</td>
+                          <td><span className="tag tag-info small">{w.status_label}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function OrderManagePage() {
-  const [tab, setTab] = useState<"order" | "waybill">("order");
+  const [tab, setTab] = useState<"order" | "waybill" | "batch">("order");
   return (
     <div className="stack">
       <div className="seg-toggle" style={{ alignSelf: "flex-start" }}>
         <button className={`seg-btn${tab === "order" ? " on" : ""}`} onClick={() => setTab("order")}>订单</button>
         <button className={`seg-btn${tab === "waybill" ? " on" : ""}`} onClick={() => setTab("waybill")}>运单</button>
+        <button className={`seg-btn${tab === "batch" ? " on" : ""}`} onClick={() => setTab("batch")}>批次</button>
       </div>
-      {tab === "order" ? <OrdersTab /> : <WaybillsPage embedded />}
+      {tab === "order" ? <OrdersTab /> : tab === "waybill" ? <WaybillsPage embedded /> : <BatchesTab />}
     </div>
   );
 }

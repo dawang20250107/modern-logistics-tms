@@ -570,6 +570,60 @@ export const DISPATCH_TYPE_LABEL: Record<string, string> = {
 export const CHANNEL_TAG: Record<string, string> = {
   自营: "tag-low", 外包: "tag-info", 网货: "tag-medium",
 };
+
+// ── 派车批次（批量派承运商）─────────────────────────────
+export const ALLOCATION_LABEL: Record<string, string> = {
+  by_weight: "按吨占比", even: "均摊", manual: "逐单指定",
+};
+export const BATCH_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿", dispatched: "已派车", partial: "部分完成", completed: "已完成", cancelled: "已取消",
+};
+export interface DispatchBatch {
+  id: string;
+  batch_no: string;
+  dispatch_type: string;
+  dispatch_type_label: string;
+  carrier: string | null;
+  carrier_name: string;
+  platform_name: string;
+  status: string;
+  status_label: string;
+  allocation: string;
+  allocation_label: string;
+  total_payable: string;
+  order_count: number;
+  total_weight_ton: string;
+  note: string;
+  created_by_name: string;
+  customer_summary: string[];
+  created_at: string;
+}
+export interface BatchWaybill {
+  id: string;
+  waybill_no: string;
+  order_no: string;
+  customer_name: string;
+  origin: string;
+  destination: string;
+  cargo_weight_ton: string;
+  cargo_quantity: number;
+  status: string;
+  status_label: string;
+  payable: number | null;
+}
+export interface DispatchBatchDetail extends DispatchBatch {
+  waybills: BatchWaybill[];
+}
+export interface BatchDispatchResult {
+  batch_no: string;
+  batch_id: string;
+  carrier: string;
+  order_count: number;
+  total_payable: number;
+  ok: Array<{ order_no: string; waybill_no: string; payable: number; customer: string }>;
+  failed: Array<{ order_no: string; reason: string }>;
+  skipped: Array<{ order_no: string; reason: string }>;
+}
 export interface DuplicateOrder {
   id: string;
   order_no: string;

@@ -182,6 +182,20 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 }
 .ctx-menu li:hover { background: var(--accent-weak); color: var(--accent); }
 
+/* button-based context menu (WaybillsPage) */
+.context-menu-wrapper {
+  position: fixed; z-index: 1200; padding: 5px; min-width: 190px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+}
+.context-menu-wrapper > button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-xs);
+  background: transparent; font-size: 13px; color: var(--ink-2); cursor: pointer; text-align: left;
+}
+.context-menu-wrapper > button:hover:not(:disabled) { background: var(--accent-weak); color: var(--accent); }
+.context-menu-wrapper > button:disabled { opacity: 0.5; cursor: default; }
+.context-menu-wrapper .hotkey { margin-left: auto; font-size: 11px; color: var(--faint); font-family: var(--font-mono); }
+.context-divider { height: 1px; background: var(--line); margin: 4px 2px; }
+
 /* ── Dispatch workbench drawer ──────────────────────── */
 .wb-overlay {
   position: fixed; inset: 0; z-index: 1100; background: rgba(18,20,26,0.32);
@@ -506,6 +520,17 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .form-row input, .form-row select { padding: 8px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--panel); transition: border-color var(--speed), box-shadow var(--speed); }
 .form-row input:focus, .form-row select:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 .row-actions { display: flex; gap: 6px; }
+.table tbody tr .row-actions { opacity: 0; transition: opacity var(--speed); }
+.table tbody tr:hover .row-actions, .table tbody tr.row-sel .row-actions { opacity: 1; }
+.row-actions button {
+  padding: 3px 8px; font-size: 12px; border-radius: var(--radius-xs); border: 1px solid var(--line-2);
+  background: var(--panel); color: var(--ink-2); cursor: pointer; white-space: nowrap;
+  transition: border-color var(--speed), color var(--speed), background var(--speed);
+}
+.row-actions button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
+.table tbody tr.row-sel { background: var(--accent-weak); }
+.cell-check { width: 34px; text-align: center; }
+.cell-check input { accent-color: var(--accent); cursor: pointer; }
 
 /* ── AI result (code/JSON) ──────────────────────────── */
 .result-box { margin: 0 18px 16px; padding: 14px; background: #14161c; color: #cbd0da; border-radius: 8px; font-size: 12px; overflow: auto; max-height: 320px; border: 1px solid #272b34; font-family: var(--font-mono); }

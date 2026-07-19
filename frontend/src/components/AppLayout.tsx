@@ -5,56 +5,58 @@ import { hasPerm, useAuth } from "../auth/auth";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
-  IconTower, IconGrid, IconDatabase, IconMapPin, IconTruck, IconAlert,
-  IconGitBranch, IconReceipt, IconCreditCard, IconShield, IconBox, IconMoney,
+  IconTower, IconGrid, IconDatabase, IconTruck,
+  IconReceipt, IconCreditCard, IconShield, IconFileText,
 } from "./Icons";
 
 type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; perm?: string };
 type NavGroup = { title: string; items: NavItem[] };
 
+// 工作流导向导航：驾驶舱纵览 → 客服接单 → 调度派单 → 订单流转，
+// 资源/计价/对账为支撑，管理后台聚合运营分析与系统管理等次级入口。
 const NAV_GROUPS: NavGroup[] = [
   {
-    title: "运营",
+    title: "工作台",
     items: [
-      { to: "/", label: "运营总览", icon: <IconTower size={18} />, end: true },
-      { to: "/dispatch-board", label: "调度台", icon: <IconGrid size={18} /> },
-      { to: "/waybills", label: "运单管理", icon: <IconDatabase size={18} /> },
-      { to: "/dashboard", label: "经营看板", icon: <IconMoney size={18} />, perm: "analytics.view" },
+      { to: "/", label: "运输驾驶舱", icon: <IconTower size={18} />, end: true },
+      { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} /> },
+      { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} /> },
+      { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} /> },
     ],
   },
   {
-    title: "资源与合规",
+    title: "资源与结算",
     items: [
       { to: "/fleet", label: "资源库", icon: <IconTruck size={18} /> },
       { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} /> },
-      { to: "/monitor", label: "在途监控", icon: <IconMapPin size={18} />, perm: "telematics.view" },
-      { to: "/alerts", label: "安全预警", icon: <IconAlert size={18} />, perm: "telematics.view" },
-      { to: "/exceptions", label: "异常处置", icon: <IconGitBranch size={18} /> },
-    ],
-  },
-  {
-    title: "结算",
-    items: [
       { to: "/reconciliation", label: "对账中心", icon: <IconReceipt size={18} /> },
     ],
   },
   {
     title: "系统",
     items: [
-      { to: "/org", label: "组织与权限", icon: <IconBox size={18} />, perm: "org.view" },
-      { to: "/audit", label: "审计日志", icon: <IconShield size={18} />, adminOnly: true },
+      { to: "/admin", label: "管理后台", icon: <IconShield size={18} /> },
     ],
   },
 ];
 
 
+// 管理后台聚合的次级页面标题（不在侧栏，但需要正确的顶栏标题）
+const SUB_TITLES: Record<string, string> = {
+  "/dashboard": "经营看板", "/monitor": "在途监控", "/alerts": "安全预警",
+  "/exceptions": "异常处置", "/ai": "AI 工作台", "/command": "命令中心",
+  "/catalog": "数据目录", "/org": "组织与权限", "/audit": "审计日志",
+  "/profile": "个人中心",
+};
+
 function currentPageTitle(pathname: string) {
   const flat = NAV_GROUPS.flatMap((group) => group.items);
   const exact = flat.find((item) => item.to === pathname || (item.end && pathname === "/"));
   if (exact) return exact.label;
+  if (SUB_TITLES[pathname]) return SUB_TITLES[pathname];
   if (pathname.startsWith("/orders/")) return "订单详情";
   if (pathname.startsWith("/waybills/")) return "运单详情";
-  return "运营总览";
+  return "运输驾驶舱";
 }
 
 export function AppLayout() {

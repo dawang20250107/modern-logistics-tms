@@ -23,12 +23,12 @@ function initialOf(name: string): string {
 }
 
 const ROUTE_OPTIONS: { value: string; label: string }[] = [
-  { value: "/", label: "运营总览（默认）" },
-  { value: "/intake", label: "客服接单" },
-  { value: "/dispatch-board", label: "调度台" },
-  { value: "/waybills", label: "运单管理" },
+  { value: "/", label: "运输驾驶舱（默认）" },
+  { value: "/intake", label: "客服工作台" },
+  { value: "/dispatch-board", label: "调度工作台" },
+  { value: "/waybills", label: "订单管理" },
   { value: "/reconciliation", label: "对账中心" },
-  { value: "/dashboard", label: "经营看板" },
+  { value: "/admin", label: "管理后台" },
 ];
 
 export function ProfilePage() {

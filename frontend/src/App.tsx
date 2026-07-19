@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./auth/auth";
+import { AdminHubPage } from "./pages/AdminHubPage";
 import { AiWorkbenchPage } from "./pages/AiWorkbenchPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AuditPage } from "./pages/AuditPage";
@@ -57,6 +58,7 @@ export function App() {
               <Route path="pricing" element={<PricingPage />} />
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="catalog" element={<DataCatalogPage />} />
+              <Route path="admin" element={<AdminHubPage />} />
               <Route path="org" element={<OrgCenterPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="audit" element={<AuditPage />} />

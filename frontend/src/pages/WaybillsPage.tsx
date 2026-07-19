@@ -331,7 +331,7 @@ export function WaybillsPage() {
       <div className="panel" style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)", overflow: "visible" }}>
         <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>运单管理</span>
+            <span style={{ fontSize: 18 }}>订单管理</span>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn-primary" onClick={() => navigate("/intake")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>

@@ -5,6 +5,16 @@ from decimal import Decimal
 from .models import ExpenseRecord, PricingRule, Webhook, WebhookDelivery
 
 
+def gen_statement_no() -> str:
+    """对账单号 ST + 日期 + 原子日序号，保证并发/同秒唯一（复用 ops 单号计数器）。"""
+    from django.utils import timezone
+
+    from apps.ops.numbering import next_sequence
+
+    day = timezone.now().strftime("%Y%m%d")
+    return f"ST{day}{next_sequence(f'statement:{day}'):06d}"
+
+
 def _match_rules(waybill, price_type) -> list[PricingRule]:
     vehicle_type = waybill.vehicle.vehicle_type if waybill.vehicle else ""
     matched = []
@@ -248,9 +258,7 @@ def emit_event(event_type: str, payload: dict) -> int:
 
 def generate_statement(*, direction, counterparty_type, counterparty_id, start, end, external_total=0):
     """按客户(应收)/承运商(应付)在账期内归集费用，生成对账单与明细。"""
-    import random
 
-    from django.utils import timezone
 
     from .models import ExpenseRecord, Statement, StatementLine
 
@@ -266,7 +274,7 @@ def generate_statement(*, direction, counterparty_type, counterparty_id, start, 
 
     name = _counterparty_name(counterparty_type, counterparty_id)
     statement = Statement.objects.create(
-        statement_no=f"ST{timezone.now():%Y%m%d%H%M%S}{random.randint(100, 999)}",
+        statement_no=gen_statement_no(),
         direction=direction,
         counterparty_type=counterparty_type,
         counterparty_id=str(counterparty_id),
@@ -298,9 +306,7 @@ def generate_statement_for_batch(batch, *, external_total=0):
     对账口径直接取派单时落下的议定应付快照（price_source=batch），可解释、可追溯。
     幂等：批次已生成对账单则直接返回原单，避免重复归集。
     """
-    import random
 
-    from django.utils import timezone
 
     from apps.core.exceptions import AppError
 
@@ -322,7 +328,7 @@ def generate_statement_for_batch(batch, *, external_total=0):
     dates = [r.occurred_at.date() for r in records if r.occurred_at] or [batch.created_at.date()]
 
     statement = Statement.objects.create(
-        statement_no=f"ST{timezone.now():%Y%m%d%H%M%S}{random.randint(100, 999)}",
+        statement_no=gen_statement_no(),
         direction=Statement.DIRECTION_PAYABLE,
         counterparty_type=Statement.CP_CARRIER,
         counterparty_id=str(batch.carrier_id),

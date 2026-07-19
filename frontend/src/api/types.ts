@@ -661,13 +661,32 @@ export interface Customer {
   contact_name?: string; contact_phone?: string; wechat_group?: string; settlement_type?: string;
   credit_limit?: number | string; credit_days?: number; billing_day?: number; is_active?: boolean;
 }
+export interface CarrierExpiryAlert { field: string; label: string; date: string; expired: boolean }
+export interface CarrierPerformance {
+  deals: number; route_hits: number; on_time_rate: number; exception_rate: number;
+  receipt_timely_rate: number; recent_deal_price: number | null; has_history: boolean;
+  frequent_routes?: Array<{ origin: string; destination: string; deals: number }>;
+}
 export interface Carrier {
   id: string; code: string; name: string;
-  contact_name?: string; contact_phone?: string; settlement_type?: string; is_active?: boolean;
+  carrier_type?: string; carrier_type_label?: string;
+  contact_name?: string; contact_phone?: string; city?: string; service_area?: string;
+  settlement_type?: string; is_active?: boolean;
   grade?: string; grade_label?: string; blacklisted?: boolean; blacklist_reason?: string;
-  business_license_no?: string; qualification_expiry?: string | null;
+  business_license_no?: string; transport_license_no?: string; qualification_expiry?: string | null;
+  contract_expiry?: string | null; insurance_expiry?: string | null; tax_no?: string;
   credit_limit?: number | string; credit_days?: number; billing_day?: number;
   dispatch_blocked?: string;
+  expiry_alerts?: CarrierExpiryAlert[];
+  performance?: CarrierPerformance | null;
+}
+export interface CarrierLanePrice {
+  id: string; carrier: string; carrier_name?: string;
+  origin_city: string; dest_city: string; vehicle_type?: string; vehicle_length_m?: number | string;
+  standard_price: number | string; min_price?: number | string; max_price?: number | string;
+  last_deal_price?: number | string;
+  effective_from?: string | null; effective_to?: string | null;
+  is_preferred?: boolean; is_recommended?: boolean; note?: string; is_active?: boolean;
 }
 
 // ── 指标与经营看板 ────────────────────────────────────────────

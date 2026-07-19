@@ -3,8 +3,10 @@ import { useMemo, useState } from "react";
 
 import { apiGet, apiUpload } from "../api/client";
 import { toast } from "../api/toast";
+import { CarrierCenter } from "../components/CarrierCenter";
+import { LanePriceLib } from "../components/LanePriceLib";
 import type {
-  Carrier, CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
+  CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
   ExpiringCredentials, Paginated, Vehicle,
 } from "../api/types";
 import { CRED_SEVERITY_LABEL, CRED_TYPE_LABEL } from "../api/types";
@@ -109,24 +111,6 @@ function CustomersTab() {
         { header: "电话", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
         { header: "授信额度", num: true, render: (c) => Number(c.credit_limit) > 0 ? `¥${Number(c.credit_limit).toLocaleString()}` : "不限" },
         { header: "账期(天)", num: true, render: (c) => c.credit_days },
-        { header: "状态", render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
-      ]}
-    />
-  );
-}
-
-function CarriersTab() {
-  return (
-    <ListPanel<Carrier>
-      queryKey="rh-carriers" url="/carriers?page_size=300" placeholder="搜索编码 / 名称 / 电话"
-      searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`}
-      columns={[
-        { header: "编码", render: (c) => <span className="mono">{c.code}</span> },
-        { header: "承运商", render: (c) => c.name },
-        { header: "评级", render: (c) => <span className={`tag ${c.grade === "A" ? "tag-low" : c.grade === "D" ? "tag-high" : "tag-none"}`}>{c.grade_label || c.grade || "-"}</span> },
-        { header: "联系电话", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
-        { header: "账期(天)", num: true, render: (c) => c.credit_days ?? "-" },
-        { header: "风控", render: (c) => c.blacklisted ? <span className="tag tag-high">黑名单</span> : <span className="tag tag-low">正常</span> },
         { header: "状态", render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
       ]}
     />
@@ -279,16 +263,18 @@ function ComplianceTab() {
   );
 }
 
+// 外协为主：承运商与线路价库置顶，自营车辆/司机档案退居其后
 const RESOURCE_TABS: { key: string; label: string; render: () => React.ReactNode }[] = [
-  { key: "vehicles", label: "车辆", render: () => <VehiclesTab /> },
-  { key: "drivers", label: "司机", render: () => <DriversTab /> },
+  { key: "carriers", label: "承运商中心", render: () => <CarrierCenter /> },
+  { key: "lanes", label: "线路价库", render: () => <LanePriceLib /> },
+  { key: "vehicles", label: "车辆档案", render: () => <VehiclesTab /> },
+  { key: "drivers", label: "司机档案", render: () => <DriversTab /> },
   { key: "customers", label: "客户", render: () => <CustomersTab /> },
-  { key: "carriers", label: "承运商", render: () => <CarriersTab /> },
   { key: "compliance", label: "证件合规", render: () => <ComplianceTab /> },
 ];
 
 export function FleetPage() {
-  const [tab, setTab] = useState("vehicles");
+  const [tab, setTab] = useState("carriers");
   const current = RESOURCE_TABS.find((t) => t.key === tab) ?? RESOURCE_TABS[0];
   return (
     <div className="stack">

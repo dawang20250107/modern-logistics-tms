@@ -144,8 +144,8 @@ export function DataTable<T>({
   return (
     <div className="dt">
       <div className="dt-toolbar">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, flexWrap: "wrap" }}>{toolbarLeft}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, position: "relative" }}>
+        <div className="dt-toolbar-main">{toolbarLeft}</div>
+        <div className="dt-toolbar-actions">
           <button className="btn-ghost" onClick={exportCsv}>导出</button>
           <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setColMenu((v) => !v); }}>列</button>
           {colMenu && (
@@ -198,6 +198,11 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
+            {sortedRows.length === 0 && (
+              <tr>
+                <td className="dt-empty" colSpan={visibleCols.length + (selectable ? 1 : 0)}>暂无匹配记录</td>
+              </tr>
+            )}
             {sortedRows.map((r) => {
               const id = rowKey(r);
               const isSel = selected?.has(id);

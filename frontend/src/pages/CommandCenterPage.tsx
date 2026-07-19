@@ -6,6 +6,7 @@ import { apiGet, apiPost } from "../api/client";
 import type { Paginated, VehicleState, Waybill } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 import { LiveMap } from "../components/LiveMap";
+import { StateView } from "../components/StateView";
 
 interface Summary {
   online_vehicles: number;
@@ -120,9 +121,9 @@ export function CommandCenterPage() {
           </div>
         )}
         {pending.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : pendings.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无待调度运单</div>
+          <StateView kind="empty" scene="pool-empty" />
         ) : (
           <table className="table">
             <thead>

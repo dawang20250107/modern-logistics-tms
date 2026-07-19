@@ -6,6 +6,7 @@ import { apiGet, apiPost } from "../api/client";
 import type { Alert, Paginated } from "../api/types";
 import { ALERT_TYPE_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
+import { StateView } from "../components/StateView";
 
 const LEVEL_LABEL: Record<string, string> = { info: "提示", medium: "中", high: "高" };
 const STATUS_LABEL: Record<string, string> = { open: "待处理", acknowledged: "已确认", closed: "已关闭" };
@@ -68,9 +69,9 @@ export function AlertsPage() {
       <div className="panel">
         <div className="panel-head">报警列表</div>
         {list.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : items.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无报警</div>
+          <StateView kind="empty" title="暂无报警" hint="有新设备报警或系统预警时会出现在这里。" />
         ) : (
           <table className="table">
             <thead>

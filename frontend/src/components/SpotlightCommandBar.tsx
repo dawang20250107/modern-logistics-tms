@@ -231,6 +231,7 @@ export function SpotlightCommandBar() {
             ref={inputRef}
             type="text"
             className="cmdk-input"
+            aria-label="全局搜索与命令：搜索页面、执行动作，或向 AI 提问"
             placeholder="搜索页面、执行动作，或输入问题让 AI 分析 —— ↑↓ 选择，Enter 确认"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

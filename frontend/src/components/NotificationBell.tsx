@@ -78,13 +78,15 @@ export function NotificationBell() {
               <div className="muted small" style={{ padding: 16 }}>暂无通知</div>
             ) : (
               items.map((n) => (
-                <div
+                <button
                   key={n.id}
+                  type="button"
                   onClick={() => {
                     if (!n.is_read) readOne.mutate(n.id);
                     if (n.link_type === "order" && n.link_id) { setOpen(false); navigate(`/orders/${n.link_id}`); }
                   }}
                   style={{
+                    display: "block", width: "100%", textAlign: "left", border: "none", font: "inherit", color: "inherit",
                     padding: "10px 16px", borderBottom: "1px solid var(--line)", cursor: "pointer",
                     background: n.is_read ? "transparent" : "var(--accent-weak)",
                   }}
@@ -97,7 +99,7 @@ export function NotificationBell() {
                     <span className="small muted" style={{ marginLeft: "auto" }}>{fmtRelative(n.created_at)}</span>
                   </div>
                   {n.body && <div className="small muted" style={{ marginTop: 4 }}>{n.body}</div>}
-                </div>
+                </button>
               ))
             )}
           </div>

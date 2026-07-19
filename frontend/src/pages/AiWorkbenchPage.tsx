@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { ApiError, apiGet, apiPost } from "../api/client";
 import type { AgentSuggestion, Paginated } from "../api/types";
+import { StateView } from "../components/StateView";
 
 interface ToolDef {
   name: string;
@@ -150,7 +151,9 @@ export function AiWorkbenchPage() {
       <div className="panel">
         <div className="panel-head">建议中心（人工确认）</div>
         {suggestions.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
+        ) : sugg.length === 0 ? (
+          <StateView kind="empty" title="暂无 AI 建议" hint="AI 分析运单后生成的调度/风控建议会出现在这里。" />
         ) : (
           <table className="table">
             <thead>

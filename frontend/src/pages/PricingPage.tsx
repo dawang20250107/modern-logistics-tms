@@ -8,6 +8,7 @@ import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
 import { PRICE_TYPE_LABEL } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
+import { StateView } from "../components/StateView";
 
 const CHARGE_METHOD_LABEL: Record<string, string> = {
   tiered_weight: "按重量阶梯", flat: "整车一口价", per_volume: "按方计费",
@@ -164,7 +165,7 @@ export function PricingPage() {
           <button className={`chip${typeFilter === "cost" ? " chip-on" : ""}`} onClick={() => setTypeFilter("cost")}>支出价</button>
         </div>
         {rules.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : items.length === 0 ? (
           <EmptyState title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
         ) : (

@@ -6,6 +6,7 @@ import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
+import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import type { Order, OrderEvent, OrderWorkflow } from "../api/types";
 import {
@@ -83,7 +84,7 @@ export function OrderDetailPage() {
   const o = order.data;
   const events = timeline.data ?? [];
 
-  if (order.isLoading || !o) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
+  if (order.isLoading || !o) return <StateView kind="loading" />;
 
   const startEdit = () => {
     setEdit({
@@ -342,7 +343,7 @@ export function OrderDetailPage() {
         <div className="panel">
           <div className="panel-head">全生命周期</div>
           {timeline.isLoading ? (
-            <div className="muted" style={{ padding: 16 }}>加载中…</div>
+            <StateView kind="loading" compact />
           ) : (
             <ul className="timeline">
               {events.map((e) => (

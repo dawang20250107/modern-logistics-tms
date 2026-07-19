@@ -17,6 +17,7 @@ import type {
   ServiceArea,
 } from "../api/types";
 import { AREA_TYPE_LABEL, ORG_PROPERTY_LABEL } from "../api/types";
+import { StateView } from "../components/StateView";
 
 function useOrgOptions() {
   return useQuery({
@@ -36,7 +37,7 @@ const PROPERTY_TAG: Record<string, string> = {
 function OverviewTab() {
   const q = useQuery({ queryKey: ["org-overview"], queryFn: () => apiGet<OrgOverview>("/org/overview") });
   const d = q.data;
-  if (!d) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
+  if (!d) return <StateView kind="loading" />;
   return (
     <div className="stack">
       <div className="kv">
@@ -180,9 +181,9 @@ function OrgTab() {
         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => apiDownload("/org/organizations/export", "organizations.csv")}>导出 CSV</button>
       </div>
       {q.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
       ) : (q.data?.tree.length ?? 0) === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无组织。</div>
+        <StateView kind="empty" title="暂无组织" />
       ) : (
         <table className="table">
           <thead>
@@ -495,7 +496,7 @@ function AreasTab() {
           </div>
         ))}
         {(q.data?.items.length ?? 0) === 0 && (
-          <div className="muted" style={{ padding: 16 }}>暂无服务区划。</div>
+          <StateView kind="empty" title="暂无服务区划" />
         )}
       </div>
     </div>
@@ -546,9 +547,9 @@ function RbacTab() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (!matrix) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
+  if (!matrix) return <StateView kind="loading" />;
   if (matrix.roles.length === 0)
-    return <div className="muted" style={{ padding: 16 }}>暂无角色。</div>;
+    return <StateView kind="empty" title="暂无角色" />;
 
   return (
     <div className="panel">
@@ -629,9 +630,9 @@ function LoginAuditTab() {
         </div>
       </div>
       {q.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
       ) : rows.length === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无登录记录。</div>
+        <StateView kind="empty" title="暂无登录记录" />
       ) : (
         <table className="table">
           <thead><tr><th>时间</th><th>用户名</th><th>结果</th><th>IP</th><th>客户端</th></tr></thead>

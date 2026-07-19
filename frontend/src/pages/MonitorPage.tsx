@@ -7,6 +7,7 @@ import { toast } from "../api/toast";
 import type { VehicleState } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 import { LiveMap } from "../components/LiveMap";
+import { StateView } from "../components/StateView";
 
 export function MonitorPage() {
   const queryClient = useQueryClient();
@@ -150,9 +151,9 @@ export function MonitorPage() {
       <div className="panel">
         <div className="panel-head">车辆列表</div>
         {live.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : vehicles.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无车辆实时状态</div>
+          <StateView kind="empty" title="暂无车辆实时状态" />
         ) : (
           <table className="table">
             <thead>

@@ -19,6 +19,7 @@ import { apiGet } from "../api/client";
 import type { MetricCard } from "../api/types";
 import { METRIC_DOMAIN_LABEL } from "../api/types";
 import { Sparkline } from "../components/Sparkline";
+import { StateView } from "../components/StateView";
 
 type Trends = Record<string, Array<{ date: string; value: number }>>;
 
@@ -157,7 +158,7 @@ export function DashboardPage() {
 
       {/* 原有 KPI 核心看板 */}
       {dash.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
       ) : (
         grouped.map((g) => (
           <div key={g.domain} className="panel">

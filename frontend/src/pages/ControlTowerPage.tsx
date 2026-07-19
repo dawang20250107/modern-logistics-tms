@@ -6,6 +6,7 @@ import { apiGet, apiPost } from "../api/client";
 import type { ExpiringCredentials, Paginated, QueryWaybillResult, Waybill } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 import { IconSparkles, IconTerminal, IconSearch } from "../components/Icons";
+import { StateView } from "../components/StateView";
 
 const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
 
@@ -108,7 +109,7 @@ export function ControlTowerPage() {
             <Link to="/monitor" className="link small">在途监控 →</Link>
           </div>
           {inTransit.length === 0 ? (
-            <div className="muted small" style={{ padding: 16 }}>暂无在途运单。</div>
+            <StateView kind="empty" title="暂无在途运单" />
           ) : (
             <table className="table">
               <thead><tr><th>运单号</th><th>线路</th><th>风险</th><th className="num">ETA 偏移</th></tr></thead>
@@ -182,9 +183,9 @@ export function ControlTowerPage() {
       <div className="panel">
         <div className="panel-head">风险与异常</div>
         {waybills.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : risky.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无风险运单。</div>
+          <StateView kind="empty" title="暂无风险运单" hint="有高/中风险运单时会在这里预警。" />
         ) : (
           <table className="table">
             <thead>

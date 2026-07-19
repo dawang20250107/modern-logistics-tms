@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { apiGet } from "../api/client";
 import type { AuditLog, Paginated } from "../api/types";
+import { StateView } from "../components/StateView";
 
 export function AuditPage() {
   const [resource, setResource] = useState("");
@@ -36,11 +37,11 @@ export function AuditPage() {
       <div className="panel">
         <div className="panel-head">记录（{logs.data?.total ?? 0}）</div>
         {logs.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
         ) : logs.isError ? (
-          <div className="muted" style={{ padding: 16 }}>无权限或加载失败（仅管理员可查）。</div>
+          <StateView kind="error" hint="无权限或加载失败（仅管理员可查）。" onRetry={() => logs.refetch()} />
         ) : items.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无日志</div>
+          <StateView kind="empty" title="暂无日志" />
         ) : (
           <table className="table">
             <thead>

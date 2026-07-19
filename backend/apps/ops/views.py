@@ -800,11 +800,16 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         trailer = Vehicle.objects.filter(id=data["trailer"]).first() if data.get("trailer") else None
         co_ids = data.get("co_drivers") or []
         co_drivers = list(Driver.objects.filter(id__in=co_ids)) if co_ids else []
+        agreed = data.get("agreed_payable_amount")
         waybill = dispatch_order(
             order, dispatch_type=data.get("dispatch_type", ""), carrier=carrier,
             vehicle=vehicle, driver=driver, trailer=trailer, co_drivers=co_drivers,
             platform_name=(data.get("platform_name") or "").strip(),
             platform_order_no=(data.get("platform_order_no") or "").strip(),
+            agreed_payable_amount=agreed if agreed not in (None, "") else None,
+            price_source=(data.get("price_source") or "").strip(),
+            quote_id=(data.get("quote_id") or "").strip(),
+            price_remark=(data.get("price_remark") or "").strip(),
             operator=request.user,
         )
         return Response(WaybillSerializer(waybill).data, status=201)

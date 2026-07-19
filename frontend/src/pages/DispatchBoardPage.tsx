@@ -66,6 +66,7 @@ export function DispatchBoardPage() {
   const [coDriverIds, setCoDriverIds] = useState<string[]>([]);
   const [platformName, setPlatformName] = useState("");
   const [platformOrderNo, setPlatformOrderNo] = useState("");
+  const [agreedPayable, setAgreedPayable] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -220,6 +221,9 @@ export function DispatchBoardPage() {
     setDispatchType(type);
     if (type === "third_party") setCarrierId(recCarrierId);
     else if (type === "own_vehicle") setVehicleId(suggestion.best_vehicle?.vehicle_id ?? "");
+    // 采纳时带出建议成交价中值，作为议定应付默认值
+    const band = suggestion.recommendation?.suggested_price_band;
+    if (band) setAgreedPayable(String(Math.round((band[0] + band[1]) / 2)));
     // platform：由调度员手填平台名/单号
   };
 
@@ -234,6 +238,8 @@ export function DispatchBoardPage() {
         co_drivers: coDriverIds.filter((x) => x && x !== driverId),
         platform_name: platformName || undefined,
         platform_order_no: platformOrderNo || undefined,
+        agreed_payable_amount: agreedPayable ? Number(agreedPayable) : undefined,
+        price_source: agreedPayable ? "manual" : undefined,
       }),
     onSuccess: () => {
       closeWb();
@@ -242,7 +248,7 @@ export function DispatchBoardPage() {
     },
   });
 
-  // 一键派单：直接按 AI 建议的运力落单（省去"采纳→确认"两步）
+  // 一键派单：直接按 AI「综合推荐」承运商落单（非最低价），带议定应付金额快照
   const quickDispatch = useMutation({
     mutationFn: (body: Record<string, unknown>) => apiPost(`/orders/${active!.id}/dispatch`, body),
     onSuccess: () => { closeWb(); toast.success("已一键派单，生成运单"); invalidate(); },
@@ -250,10 +256,21 @@ export function DispatchBoardPage() {
   const oneClickDispatch = () => {
     if (!active || !suggestion) return;
     const type = suggestion.suggested_dispatch_type;
-    const body = type === "own_vehicle"
-      ? { dispatch_type: "own_vehicle", vehicle: suggestion.best_vehicle?.vehicle_id }
-      : { dispatch_type: "third_party", carrier: recCarrierId };
-    quickDispatch.mutate(body);
+    if (type === "own_vehicle") {
+      quickDispatch.mutate({ dispatch_type: "own_vehicle", vehicle: suggestion.best_vehicle?.vehicle_id });
+      return;
+    }
+    // 外包：派给综合推荐承运商（recommendation），议定应付取建议价区间中值
+    const rec = suggestion.recommendation;
+    const band = rec?.suggested_price_band;
+    const agreed = band ? Math.round((band[0] + band[1]) / 2) : undefined;
+    quickDispatch.mutate({
+      dispatch_type: "third_party",
+      carrier: recCarrierId,
+      agreed_payable_amount: agreed,
+      price_source: "recommended",
+      quote_id: rec?.carrier_id,
+    });
   };
   // 网货平台需手填平台名，不走一键；外包需已有推荐承运商，自营需有可用车
   const canOneClick = suggestion
@@ -278,7 +295,7 @@ export function DispatchBoardPage() {
     setTab(initialTab);
     setSuggestion(null);
     setVehicleId(""); setCarrierId(""); setDriverId(""); setTrailerId(""); setCoDriverIds([]);
-    setPlatformName(""); setPlatformOrderNo("");
+    setPlatformName(""); setPlatformOrderNo(""); setAgreedPayable("");
     setExcDesc("");
     if (initialTab === "dispatch") suggest.mutate(o.id);
   }
@@ -711,6 +728,10 @@ export function DispatchBoardPage() {
                           <select value={dispatchType} onChange={(e) => setDispatchType(e.target.value)}>
                             {Object.entries(DISPATCH_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                           </select>
+                        </label>
+                        <label>
+                          议定应付（元）
+                          <input value={agreedPayable} onChange={(e) => setAgreedPayable(e.target.value)} placeholder="与承运商议定的运费，落对账快照" />
                         </label>
                         {dispatchType === "platform" ? (
                           <>

@@ -68,6 +68,38 @@ def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0, volum
     }
 
 
+def _rule_snapshot(rule, quote_result, *, weight, volume, qty, distance) -> dict:
+    """费用规则快照：把当时命中的规则、匹配条件、计费输入与计算明细固化到费用记录，
+    使得后续即便规则/价库被修改，历史对账仍可完整解释「这笔为什么这么算」。"""
+    def _num(v):
+        return float(v) if isinstance(v, (int, float, Decimal)) else v
+
+    conditions = [
+        f"客户:{rule.customer.name}" if rule.customer_id else "",
+        f"承运商:{rule.carrier.name}" if rule.carrier_id else "",
+        f"线路:{rule.route_name}" if rule.route_name else "",
+        f"车型:{rule.vehicle_type}" if rule.vehicle_type else "",
+    ]
+    return {
+        "price_source": "rule",
+        "pricing_rule_id": str(rule.id),
+        "pricing_rule_name": rule.name,
+        "charge_method": rule.charge_method,
+        "matched_condition": " / ".join(c for c in conditions if c) or "通配",
+        "input_snapshot": {
+            "weight_ton": float(weight or 0), "volume_cbm": float(volume or 0),
+            "quantity": int(qty or 0), "distance_km": float(distance or 0),
+        },
+        "calculation_detail": {k: _num(v) for k, v in quote_result.items()},
+        "rule_snapshot": {
+            "base_price": float(rule.base_price), "unit_price": float(rule.unit_price),
+            "min_price": float(rule.min_price), "min_charge_qty": float(rule.min_charge_qty),
+            "tier_prices": rule.tier_prices, "volumetric_factor": float(rule.volumetric_factor),
+            "fuel_surcharge_pct": float(rule.fuel_surcharge_pct),
+        },
+    }
+
+
 def generate_costs(waybill) -> dict:
     """业财结算核心引擎：按报价规则生成运单应收/应付，并支持主副驾智能运费切分（Payee-Split）。"""
     waybill.expenses.filter(source_system="pricing").delete()
@@ -90,6 +122,7 @@ def generate_costs(waybill) -> dict:
             payee_type="customer",
             payee_ref=waybill.customer.name if waybill.customer_id else "",
             source_system="pricing",
+            **_rule_snapshot(rule, quote_result, weight=weight, volume=volume, qty=qty, distance=distance),
         )
         result["receivable"] = 1
 
@@ -110,6 +143,7 @@ def generate_costs(waybill) -> dict:
                 payee_type="carrier",
                 payee_ref=waybill.carrier.name,
                 source_system="pricing",
+                **_rule_snapshot(rule, quote_result, weight=weight, volume=volume, qty=qty, distance=distance),
             )
             result["payable"] += 1
             

@@ -113,19 +113,86 @@ def _assert_carrier_allowed(carrier):
         raise AppError("CARRIER_NOT_ALLOWED", f"{reason}，不可派单。", status=409)
 
 
-def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None,
-                   trailer=None, co_drivers=None, platform_name="", platform_order_no="", operator=None):
-    """派单：生成运单并落承运信息（牵引车/挂车/主副驾）与派单类型，回写订单为已派单。
+def _assert_dispatch_requirements(dispatch_type, carrier, vehicle, platform_name):
+    """按派单类型校验必填要素：外包必须承运商，网货必须平台名，自营必须车辆。"""
+    if dispatch_type == Waybill.DISPATCH_THIRD_PARTY and carrier is None:
+        raise AppError("CARRIER_REQUIRED", "外包承运商派单必须选择承运商。", status=400)
+    if dispatch_type == Waybill.DISPATCH_PLATFORM and not (platform_name or "").strip():
+        raise AppError("PLATFORM_REQUIRED", "网货平台派单必须填写平台名称。", status=400)
+    if dispatch_type in (Waybill.DISPATCH_OWN, Waybill.DISPATCH_FLEET) and vehicle is None:
+        raise AppError("VEHICLE_REQUIRED", "自营派单必须选择车辆。", status=400)
 
+
+def _dispatch_status_for(dispatch_type, driver) -> str:
+    """初始派单后的承运状态。
+
+    - 外包：承运商待接单（pending_accept）；若已回填司机则进入待执行（pending_driver_submit 之后）。
+    - 网货：平台侧承接（pending_accept）。
+    - 自营：有司机→已指派待执行；无司机→待回填司机车辆（pending_driver_submit）。
+    """
+    if dispatch_type == Waybill.DISPATCH_THIRD_PARTY:
+        return "accepted" if driver else "pending_accept"
+    if dispatch_type == Waybill.DISPATCH_PLATFORM:
+        return "pending_accept"
+    return "driver_assigned" if driver else "pending_driver_submit"
+
+
+def _snapshot_payable(waybill, order, *, dispatch_type, carrier, driver, platform_name,
+                      agreed_payable_amount, price_source, quote_id, price_remark):
+    """派单议定应付金额快照：生成应付 ExpenseRecord，记录价格来源。
+
+    对账以此快照为准，不再重新计算，避免规则/价库后续变动导致历史对账不可解释。
+    """
+    if agreed_payable_amount is None:
+        return None
+    from decimal import Decimal
+
+    from apps.finance.models import ExpenseRecord
+
+    amount = Decimal(str(agreed_payable_amount))
+    if amount <= 0:
+        return None
+    if dispatch_type == Waybill.DISPATCH_PLATFORM:
+        payee_type, payee_ref = "platform", (platform_name or "网货平台")
+    elif carrier is not None:
+        payee_type, payee_ref = "carrier", carrier.name
+    elif driver is not None:
+        payee_type, payee_ref = "driver", driver.name
+    else:
+        payee_type, payee_ref = "other", ""
+    return ExpenseRecord.objects.create(
+        waybill=waybill, direction="payable", expense_item_code="freight", amount=amount,
+        occurred_at=timezone.now(), payee_type=payee_type, payee_ref=payee_ref,
+        price_source=price_source or "manual", quote_id=quote_id or "", remark=price_remark or "",
+        input_snapshot={
+            "weight_ton": float(order.cargo_weight_ton or 0),
+            "volume_cbm": float(order.cargo_volume_cbm or 0),
+            "quantity": int(order.cargo_quantity or 0),
+            "route": f"{order.origin or ''}→{order.destination or ''}",
+        },
+        calculation_detail={"agreed_payable": float(amount), "note": "派单议定应付金额快照"},
+    )
+
+
+def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=None,
+                   trailer=None, co_drivers=None, platform_name="", platform_order_no="",
+                   agreed_payable_amount=None, price_source="", quote_id="", price_remark="",
+                   operator=None):
+    """派单：按派单类型校验要素 → 生成运单 → 落承运信息与承运状态 → 议定应付金额快照 → 事件。
+
+    形成闭环：推荐（综合推荐承运商）→ 派单（校验+落库）→ 费用（应付快照）→ 承运商接单（承运状态流转）。
     并发安全：锁定车辆/司机行后校验占用，避免两名调度把同一车/司机重复派出。
     """
     if dispatch_type not in dict(Waybill.DISPATCH_TYPE_CHOICES):
         raise AppError("INVALID_DISPATCH_TYPE", "派单类型非法。", status=400)
     if order.status not in (Order.STATUS_POOLED, Order.STATUS_DISPATCHING, Order.STATUS_CONFIRMED):
         raise AppError("ORDER_NOT_DISPATCHABLE", "订单当前状态不可派单。", status=409)
+    _assert_dispatch_requirements(dispatch_type, carrier, vehicle, platform_name)
 
     with transaction.atomic():
         from apps.masterdata.models import Driver, Vehicle
+
+        from .models import WaybillEvent
 
         if vehicle:
             vehicle = Vehicle.objects.select_for_update().get(id=vehicle.id)
@@ -140,9 +207,30 @@ def dispatch_order(order, *, dispatch_type, carrier=None, vehicle=None, driver=N
             co_drivers=co_drivers, dispatch_type=dispatch_type,
             platform_name=platform_name, platform_order_no=platform_order_no, operator=operator,
         )
+        # 承运状态：按通道与是否已回填司机流转
+        waybill.dispatch_status = _dispatch_status_for(dispatch_type, driver)
+        waybill.save(update_fields=["dispatch_status", "updated_at"])
+        # 费用：议定应付金额快照（对账以此为准）
+        expense = _snapshot_payable(
+            waybill, order, dispatch_type=dispatch_type, carrier=carrier, driver=driver,
+            platform_name=platform_name, agreed_payable_amount=agreed_payable_amount,
+            price_source=price_source, quote_id=quote_id, price_remark=price_remark,
+        )
+        # 事件：订单事件 + 运单事件（含价格来源，供对账与追溯）
         record_order_event(
             order, "dispatched", actor=operator, to_status=order.status, source="dispatch",
             waybill_no=waybill.waybill_no, dispatch_type=dispatch_type,
+        )
+        WaybillEvent.objects.create(
+            waybill=waybill, event_type="dispatched", event_time=timezone.now(), source="dispatch",
+            resource=(carrier.name if carrier else platform_name or (waybill.vehicle.plate_no if waybill.vehicle_id else "")),
+            payload={
+                "dispatch_type": dispatch_type,
+                "dispatch_status": waybill.dispatch_status,
+                "price_source": price_source or ("" if expense is None else "manual"),
+                "agreed_payable": float(agreed_payable_amount) if agreed_payable_amount else 0,
+                "quote_id": quote_id or "",
+            },
         )
         # 工作流编排：派单即自动生成承运合同（告别文字版合同）
         if driver is not None:
@@ -213,12 +301,31 @@ def recommend_dispatch_for_order(order) -> dict:
     }
 
 
-def plan_dispatch_orders(orders) -> dict:
-    """批量智能排线：将相同方向的多个小 LTL 订单合并为一个 FTL 拼单大车派送，并计算降本测算。
+class _LaneNeed:
+    """代表一组同向合并后的承运需求（供承运商评分用的轻量对象）。"""
 
-    仅作为 AI 算法推荐方案返回，不自动落库，供调度员人工审阅确认。
+    def __init__(self, origin, destination, weight_ton, volume_cbm):
+        self.origin = origin
+        self.destination = destination
+        self.cargo_weight_ton = weight_ton
+        self.cargo_volume_cbm = volume_cbm
+
+
+def plan_dispatch_orders(orders) -> dict:
+    """批量智能排线（承运商化）：同向 LTL 订单合成整车承运需求 → 推荐承运商 + 整车报价，
+    生成询价/派单建议。自营车配载仅作兜底参考，不再作为主推荐。
+
+    仅作为算法推荐方案返回，不自动落库，供调度员人工审阅确认。
     """
+    from .carrier_scoring import carrier_recommendation, score_carriers
     from .dispatch import consolidate_and_group_orders
 
-    return consolidate_and_group_orders(orders)
+    plan = consolidate_and_group_orders(orders)
+    # 为每条合并线路推荐合适承运商（找合适承运商，不是找车）
+    for trip in plan.get("consolidated_trips", []):
+        need = _LaneNeed(trip.get("origin", ""), trip.get("destination", ""),
+                         trip.get("total_weight_ton", 0), trip.get("total_volume_cbm", 0))
+        trip["carrier_recommendation"] = carrier_recommendation(need)
+        trip["carrier_candidates"] = score_carriers(need, top=3)
+    return plan
 

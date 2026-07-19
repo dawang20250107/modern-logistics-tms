@@ -59,6 +59,20 @@ class ExpenseRecord(BaseModel):
     payee_ref = models.CharField(max_length=120, blank=True, help_text="收/付款方名称或标识")
     remark = models.CharField(max_length=255, blank=True)
 
+    # ── 价格来源与规则快照（对账可解释：即使规则/价库后来改了，历史对账仍可复原） ──
+    price_source = models.CharField(
+        max_length=32, blank=True, db_index=True,
+        help_text="价格来源：recommended(综合推荐)/cheapest(最低价)/lane_price(线路价库)/manual(人工)/platform(平台)/rule(规则)",
+    )
+    quote_id = models.CharField(max_length=64, blank=True, help_text="报价/线路价库条目标识")
+    pricing_rule_id = models.CharField(max_length=64, blank=True)
+    pricing_rule_name = models.CharField(max_length=120, blank=True)
+    charge_method = models.CharField(max_length=32, blank=True, help_text="计费方式快照")
+    matched_condition = models.CharField(max_length=255, blank=True, help_text="命中的匹配条件（客户/承运商/线路/车型）")
+    input_snapshot = models.JSONField(default=dict, blank=True, help_text="计费输入快照（重量/体积/件数/里程）")
+    calculation_detail = models.JSONField(default=dict, blank=True, help_text="计算明细（各段金额/附加费）")
+    rule_snapshot = models.JSONField(default=dict, blank=True, help_text="规则字段快照（当时的单价/阶梯/下限等）")
+
     class Meta:
         db_table = "fin_expense_record"
         ordering = ["-created_at"]

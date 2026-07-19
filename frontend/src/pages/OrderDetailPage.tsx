@@ -238,6 +238,7 @@ export function OrderDetailPage() {
               )}
             </div>
             {o.cargo_items.length > 0 ? (
+              <div className="table-wrap">
               <table className="table">
                 <thead><tr><th>品名</th><th>件数</th><th>吨</th><th>方</th><th>包装</th><th>温区</th>{splitMode && <th>拆分组</th>}</tr></thead>
                 <tbody>
@@ -256,6 +257,7 @@ export function OrderDetailPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="kv">
                 {kv("货物", o.cargo_desc)}
@@ -322,6 +324,7 @@ export function OrderDetailPage() {
             {o.attachments.length === 0 ? (
               <div className="muted small" style={{ padding: 16 }}>暂无附件</div>
             ) : (
+              <div className="table-wrap">
               <table className="table">
                 <thead><tr><th>类型</th><th>名称</th><th>上传人</th><th>时间</th><th>操作</th></tr></thead>
                 <tbody>
@@ -336,6 +339,7 @@ export function OrderDetailPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>

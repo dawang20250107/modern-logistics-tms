@@ -155,6 +155,7 @@ export function AiWorkbenchPage() {
         ) : sugg.length === 0 ? (
           <StateView kind="empty" title="暂无 AI 建议" hint="AI 分析运单后生成的调度/风控建议会出现在这里。" />
         ) : (
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
@@ -188,6 +189,7 @@ export function AiWorkbenchPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

@@ -190,6 +190,7 @@ export function ControlTowerPage() {
         ) : risky.length === 0 ? (
           <StateView kind="empty" title="暂无风险运单" hint="有高/中风险运单时会在这里预警。" />
         ) : (
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
@@ -216,6 +217,7 @@ export function ControlTowerPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

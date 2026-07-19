@@ -125,6 +125,7 @@ export function CommandCenterPage() {
         ) : pendings.length === 0 ? (
           <StateView kind="empty" scene="pool-empty" />
         ) : (
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr><th>运单号</th><th>线路</th><th>货量</th><th>调度建议</th><th></th></tr>
@@ -154,6 +155,7 @@ export function CommandCenterPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

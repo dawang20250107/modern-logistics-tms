@@ -139,6 +139,7 @@ export function ExceptionsPage() {
         ) : items.length === 0 ? (
           <StateView kind="empty" scene="exception-empty" />
         ) : (
+          <div className="table-wrap">
           <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--line)" }}>
@@ -285,6 +286,7 @@ export function ExceptionsPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

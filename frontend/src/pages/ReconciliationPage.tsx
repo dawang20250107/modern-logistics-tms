@@ -114,6 +114,7 @@ export function ReconciliationPage() {
         <span className="muted small">加载明细…</span>
       ) : (
         <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
+          <div className="table-wrap">
           <table className="table" style={{ margin: 0, fontSize: 12 }}>
             <thead>
               <tr><th>运单号</th><th>费用科目</th><th>金额</th><th>发生时间</th><th>审计结论</th></tr>
@@ -136,6 +137,7 @@ export function ReconciliationPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

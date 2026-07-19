@@ -185,6 +185,7 @@ function OrgTab() {
       ) : (q.data?.tree.length ?? 0) === 0 ? (
         <StateView kind="empty" title="暂无组织" />
       ) : (
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr><th>组织</th><th>类型</th><th>属性</th><th>负责人</th><th>直属</th><th>子树合计</th></tr>
@@ -193,6 +194,7 @@ function OrgTab() {
             {q.data!.tree.map((n) => <OrgTreeNodeRow key={n.id} node={n} depth={0} />)}
           </tbody>
         </table>
+        </div>
       )}
     </div>
     </div>
@@ -314,6 +316,7 @@ function EmployeesTab() {
           <input className="search" placeholder="搜索工号/姓名/手机/职位" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} />
           <span className="muted small">共 {q.data?.total ?? 0} 人</span>
         </div>
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr><th>工号</th><th>姓名</th><th>组织</th><th>职位</th><th>直接上级</th><th>账号</th><th>状态</th><th>操作</th></tr>
@@ -344,11 +347,13 @@ function EmployeesTab() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {(handoverList.data?.items.length ?? 0) > 0 && (
         <div className="panel">
           <div className="panel-head">账号移交记录</div>
+          <div className="table-wrap">
           <table className="table">
             <thead><tr><th>移交人</th><th>接收人</th><th>下属</th><th>部门</th><th>停用账号</th><th>原因</th><th>时间</th></tr></thead>
             <tbody>
@@ -363,6 +368,7 @@ function EmployeesTab() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
@@ -394,6 +400,7 @@ function CoverageRouter() {
           {m.data.resolved.length === 0 ? (
             <div className="muted small">无可承运网点{m.data.excluded.length > 0 ? "（均被排他规则排除）" : ""}。</div>
           ) : (
+            <div className="table-wrap">
             <table className="table">
               <thead><tr><th>排名</th><th>网点</th><th>方式</th><th>命中区划</th><th>优先级</th><th>负责人</th></tr></thead>
               <tbody>
@@ -409,6 +416,7 @@ function CoverageRouter() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
           {m.data.excluded.length > 0 && (
             <div className="muted small">
@@ -634,6 +642,7 @@ function LoginAuditTab() {
       ) : rows.length === 0 ? (
         <StateView kind="empty" title="暂无登录记录" />
       ) : (
+        <div className="table-wrap">
         <table className="table">
           <thead><tr><th>时间</th><th>用户名</th><th>结果</th><th>IP</th><th>客户端</th></tr></thead>
           <tbody>
@@ -648,6 +657,7 @@ function LoginAuditTab() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

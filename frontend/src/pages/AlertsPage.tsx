@@ -73,6 +73,7 @@ export function AlertsPage() {
         ) : items.length === 0 ? (
           <StateView kind="empty" title="暂无报警" hint="有新设备报警或系统预警时会出现在这里。" />
         ) : (
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr><th>类型</th><th>等级</th><th>车牌</th><th>运单</th><th>消息</th><th>触发时间</th><th>状态</th><th>操作</th></tr>
@@ -99,6 +100,7 @@ export function AlertsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

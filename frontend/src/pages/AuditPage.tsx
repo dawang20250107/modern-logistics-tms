@@ -43,6 +43,7 @@ export function AuditPage() {
         ) : items.length === 0 ? (
           <StateView kind="empty" title="暂无日志" />
         ) : (
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr><th>时间</th><th>操作人</th><th>动作</th><th>资源</th><th>方法</th><th>状态</th><th>路径</th></tr>
@@ -63,6 +64,7 @@ export function AuditPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

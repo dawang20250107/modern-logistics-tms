@@ -54,6 +54,7 @@ export function DataCatalogPage() {
       {domains.map((d) => (
         <div key={d} className="panel">
           <div className="panel-head">{d}</div>
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr><th>资产</th><th>物理表</th><th>字段数</th><th>记录数</th><th></th></tr>
@@ -70,6 +71,7 @@ export function DataCatalogPage() {
               ))}
             </tbody>
           </table>
+          </div>
           {assets.filter((a) => a.domain === d && a.table === expanded).map((a) => (
             <div key={a.table} style={{ padding: "0 16px 14px" }}>
               <div className="muted small" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>

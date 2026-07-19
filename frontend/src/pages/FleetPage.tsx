@@ -133,6 +133,7 @@ function CredTable({ title, rows, subjectLabel }: { title: string; rows: Credent
       {rows.length === 0 ? (
         <div className="muted" style={{ padding: 16 }}>无到期证件</div>
       ) : (
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr><th>{subjectLabel}</th><th>证件</th><th>到期日</th><th>剩余</th><th>状态</th></tr>
@@ -149,6 +150,7 @@ function CredTable({ title, rows, subjectLabel }: { title: string; rows: Credent
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -191,6 +193,7 @@ function CredentialLibrary() {
           <div className="muted small">
             {result.driver.name} · {result.driver.phone} · {result.driver.employment_label ?? ""}
           </div>
+          <div className="table-wrap">
           <table className="table">
             <thead><tr><th>证件</th><th>面</th><th>持有人/车牌</th><th>证号</th><th>有效期</th><th>识别</th><th>文件</th></tr></thead>
             <tbody>
@@ -208,6 +211,7 @@ function CredentialLibrary() {
               ))}
             </tbody>
           </table>
+          </div>
           <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
             <select value={credType} onChange={(e) => setCredType(e.target.value)}>
               {Object.entries(CRED_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}

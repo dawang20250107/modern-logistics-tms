@@ -419,6 +419,12 @@ export interface Order {
   is_hazardous: boolean;
   temperature_range: string;
   claimed_by_name: string;
+  customer_level?: string;
+  assigned_to?: string | null;
+  assigned_to_name?: string;
+  assigned_by_name?: string;
+  dispatchable?: boolean;
+  lock_state?: "free" | "mine" | "locked" | "assigned_mine" | "assigned_other";
   created_by_name: string;
   sla_status: string;
   pooled_at: string | null;

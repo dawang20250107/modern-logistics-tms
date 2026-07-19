@@ -53,6 +53,19 @@ const RISK_TAG: Record<string, string> = { high: "high", medium: "medium", low: 
 type DrawerTab = "dispatch" | "track" | "exception";
 type MenuState = { x: number; y: number; order: Order } | null;
 
+const CUST_LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
+
+// 锁定/分派状态渲染：让调度一眼看清这单归谁、能不能派
+function renderLock(o: Order) {
+  switch (o.lock_state) {
+    case "mine": return <span className="tag tag-low tag-act">我锁定</span>;
+    case "locked": return <span className="tag tag-medium" title={`锁定人：${o.claimed_by_name}`}>他人锁定 · {o.claimed_by_name}</span>;
+    case "assigned_mine": return <span className="tag tag-info">分派给我</span>;
+    case "assigned_other": return <span className="tag tag-none" title={`已分派给：${o.assigned_to_name}`}>分派 · {o.assigned_to_name}</span>;
+    default: return <span className="muted small">未锁定</span>;
+  }
+}
+
 export function DispatchBoardPage() {
   const queryClient = useQueryClient();
   const [active, setActive] = useState<Order | null>(null);
@@ -104,11 +117,38 @@ export function DispatchBoardPage() {
 
   const claim = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/claim`, {}),
-    onSuccess: () => { toast.success("认领成功"); invalidate(); },
+    onSuccess: () => { toast.success("已锁定，可由你调派"); invalidate(); },
+    onError: (e: Error) => toast.error(e.message || "锁定失败：可能已被他人锁定"),
   });
   const release = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/release`, {}),
     onSuccess: () => { toast.success("已退回订单池"); invalidate(); },
+  });
+
+  // 总调度分单能力探测 + 可分派成员
+  const dispatchers = useQuery({
+    queryKey: ["dispatchers"],
+    queryFn: () => apiGet<{ is_chief: boolean; me: { id: string; name: string }; dispatchers: Array<{ id: string; name: string; username: string }> }>("/orders/dispatchers"),
+  });
+  const isChief = dispatchers.data?.is_chief ?? false;
+  const [assignTo, setAssignTo] = useState("");
+
+  // 批量锁定（逐单 claim，行锁保证并发安全；统计成功/被抢）
+  const lockMany = useMutation({
+    mutationFn: async (ids: string[]) => {
+      let ok = 0; let fail = 0;
+      for (const id of ids) {
+        try { await apiPost(`/orders/${id}/claim`, {}); ok++; } catch { fail++; }
+      }
+      return { ok, fail };
+    },
+    onSuccess: (r) => { toast.success(`锁定完成：成功 ${r.ok}${r.fail ? ` · ${r.fail} 单已被他人锁定` : ""}`); setPicked(new Set()); invalidate(); },
+  });
+  // 总调度分单
+  const assignMany = useMutation({
+    mutationFn: (v: { ids: string[]; dispatcher: string }) => apiPost<{ assigned: string[]; skipped: string[]; dispatcher: string }>("/orders/assign", v),
+    onSuccess: (r) => { toast.success(`已分派 ${r.assigned.length} 单给 ${r.dispatcher}${r.skipped.length ? ` · 跳过 ${r.skipped.length}` : ""}`); setPicked(new Set()); setAssignTo(""); invalidate(); },
+    onError: (e: Error) => toast.error(e.message || "分单失败"),
   });
 
   const togglePick = (id: string) => setPicked((s) => {
@@ -371,7 +411,18 @@ export function DispatchBoardPage() {
         </div>
         {picked.size > 0 && (
           <div className="batch-bar">
-            <span>已选 {picked.size} 单</span>
+            <span>已选 <b style={{ color: "var(--accent)" }}>{picked.size}</b> 单</span>
+            <div style={{ flex: 1 }} />
+            <button className="btn-ghost" disabled={lockMany.isPending} onClick={() => lockMany.mutate([...picked])}>锁定所选</button>
+            {isChief && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <select className="search" style={{ minWidth: 150, padding: "6px 10px" }} value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
+                  <option value="">分派给…</option>
+                  {(dispatchers.data?.dispatchers ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+                <button className="btn-ghost" disabled={!assignTo || assignMany.isPending} onClick={() => assignMany.mutate({ ids: [...picked], dispatcher: assignTo })}>分单</button>
+              </span>
+            )}
             <button className="btn-primary" disabled={makePlan.isPending} onClick={() => makePlan.mutate()}>智能排线拼单</button>
             <button className="btn-ghost" onClick={() => { setPicked(new Set()); setPlan(null); }}>清除</button>
           </div>
@@ -387,45 +438,58 @@ export function DispatchBoardPage() {
             action={<Link className="btn-primary" to="/intake" style={{ textDecoration: "none" }}>去建单</Link>}
           />
         ) : (
+          <div className="table-wrap">
           <table className="table dispatch-pool" aria-label="订单池">
             <thead>
               <tr>
                 <th style={{ width: 32 }}></th>
-                <th>订单号</th><th>线路</th><th>类型</th><th>优先级</th><th className="num">货量</th><th>等待/时效</th><th>认领</th><th style={{ width: 96 }}></th>
+                <th>订单号</th><th>客户</th><th>线路</th><th>类型</th><th>优先级</th><th className="num">货量</th><th className="num">应收</th><th>等待/时效</th><th>锁定 / 分派</th><th style={{ width: 150 }}>操作</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((o, idx) => {
-                const claimed = o.status === "dispatching";
+                const canDispatch = o.dispatchable !== false;
                 return (
                   <tr
                     key={o.id}
                     className={`pool-row${active?.id === o.id ? " row-active" : ""}${idx === focusIdx ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
                     onMouseEnter={() => setFocusIdx(idx)}
-                    onDoubleClick={() => openWb(o)}
+                    onDoubleClick={() => canDispatch && openWb(o)}
                     onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, order: o }); }}
                   >
                     <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(o.id)} onChange={() => togglePick(o.id)} /></td>
                     <td className="mono">{o.order_no}</td>
+                    <td className="small">
+                      {o.customer_name || "散客"}
+                      {o.customer_level && <span className={`tag ${CUST_LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }} title="客户等级">{o.customer_level}</span>}
+                    </td>
                     <td><b>{o.origin}</b> → <b>{o.destination}</b></td>
-                    <td className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.is_hazardous ? " · 危" : ""}</td>
+                    <td className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</td>
                     <td><span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span></td>
                     <td className="num">{o.cargo_weight_ton}吨/{o.cargo_volume_cbm}方</td>
+                    <td className="num">{o.quoted_amount ? fmtMoney(o.quoted_amount) : "—"}</td>
                     <td className="small">
                       {o.pooled_at && <span title="进池等待时长">{fmtRelative(o.pooled_at)}</span>}
                       {o.sla_status && o.sla_status !== "pending" && o.sla_status !== "on_time" && (
                         <span className={`tag tag-sla_${o.sla_status}`} style={{ marginLeft: 4 }}>{SLA_STATUS_LABEL[o.sla_status]}</span>
                       )}
                     </td>
-                    <td className="small">{claimed ? <span className="tag tag-info">{o.claimed_by_name || "已认领"}</span> : "-"}</td>
+                    <td className="small">{renderLock(o)}</td>
                     <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-                      <button className="btn-primary" onClick={() => openWb(o)}>派单</button>
+                      {(o.lock_state === "free" || o.lock_state === "assigned_mine") && (
+                        <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
+                      )}
+                      {o.lock_state === "mine" && (
+                        <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>
+                      )}
+                      <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          </div>
         )}
         {rows.length > 0 && (
           <div className="muted small" style={{ padding: "8px 17px", borderTop: "1px solid var(--line)" }}>

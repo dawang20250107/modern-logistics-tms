@@ -196,6 +196,49 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .context-menu-wrapper .hotkey { margin-left: auto; font-size: 11px; color: var(--faint); font-family: var(--font-mono); }
 .context-divider { height: 1px; background: var(--line); margin: 4px 2px; }
 
+/* ── Global command palette (Ctrl+K) ────────────────── */
+.cmdk-overlay {
+  position: fixed; inset: 0; z-index: 999999; display: flex; justify-content: center; padding-top: 12vh;
+  background: rgba(16, 18, 24, 0.5); backdrop-filter: blur(6px); animation: wb-fade 0.14s ease-out;
+}
+.cmdk-panel {
+  width: min(660px, 92vw); max-height: 72vh; display: flex; flex-direction: column; overflow: hidden;
+  background: #1b1d24; color: #eef0f5; border: 1px solid rgba(255,255,255,0.10); border-radius: 16px;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06);
+  animation: cmdk-pop 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes cmdk-pop { from { opacity: 0; transform: translateY(-8px) scale(0.985); } to { opacity: 1; transform: none; } }
+.cmdk-input-row { display: flex; align-items: center; gap: 11px; padding: 16px 18px; border-bottom: 1px solid rgba(255,255,255,0.08); color: #c7cbd6; }
+.cmdk-input { flex: 1; background: transparent; border: 0; outline: none; color: #fff; font-size: 15.5px; font-family: var(--font-sans); }
+.cmdk-input::placeholder { color: rgba(255,255,255,0.34); }
+.cmdk-clear { background: rgba(255,255,255,0.08); border: 0; color: rgba(255,255,255,0.6); cursor: pointer; font-size: 15px; width: 22px; height: 22px; border-radius: 6px; line-height: 1; }
+.cmdk-body { overflow-y: auto; flex: 1; padding: 8px; }
+.cmdk-loading { padding: 30px; text-align: center; color: rgba(255,255,255,0.55); font-size: 14px; }
+.cmdk-list { display: flex; flex-direction: column; gap: 2px; }
+.cmdk-section { padding: 10px 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255,255,255,0.34); }
+.cmdk-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px;
+  border-radius: 9px; cursor: pointer; font-size: 13.5px; border: 1px solid transparent;
+  transition: background var(--speed), border-color var(--speed);
+}
+.cmdk-item.active { background: rgba(99,110,240,0.20); border-color: rgba(120,130,250,0.42); }
+.cmdk-item-main { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.cmdk-item-label { color: #f2f3f8; font-weight: 550; }
+.cmdk-item-hint { color: rgba(255,255,255,0.42); font-size: 12px; }
+.cmdk-badge { font-size: 10px; font-weight: 600; color: #b9c0ff; background: rgba(99,110,240,0.22); border: 1px solid rgba(120,130,250,0.34); padding: 1px 6px; border-radius: 5px; flex: none; }
+.cmdk-item-path { font-size: 11.5px; color: rgba(255,255,255,0.30); font-family: var(--font-mono); flex: none; }
+.cmdk-ai { background: rgba(99,110,240,0.10); border: 1px dashed rgba(120,130,250,0.36); color: #c3c8ff; margin-top: 4px; }
+.cmdk-ai.active { background: rgba(99,110,240,0.22); border-style: solid; }
+.cmdk-kbd { font-size: 11px; color: rgba(255,255,255,0.5); }
+.cmdk-empty { padding: 24px; text-align: center; font-size: 13px; color: rgba(255,255,255,0.4); }
+.cmdk-answer { padding: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
+.cmdk-answer-head { font-size: 12px; color: #b9c0ff; }
+.cmdk-answer p { margin: 0; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; color: rgba(255,255,255,0.9); }
+.cmdk-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmdk-tool { font-size: 10px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); padding: 2px 8px; border-radius: 5px; }
+.cmdk-foot { display: flex; justify-content: space-between; padding: 11px 16px; border-top: 1px solid rgba(255,255,255,0.07); font-size: 11.5px; color: rgba(255,255,255,0.4); }
+.cmdk-foot kbd { background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 5px; font-family: var(--font-mono); font-size: 11px; margin: 0 1px; }
+
 /* ── Dispatch workbench drawer ──────────────────────── */
 .wb-overlay {
   position: fixed; inset: 0; z-index: 1100; background: rgba(18,20,26,0.32);

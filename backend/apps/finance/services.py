@@ -291,6 +291,64 @@ def generate_statement(*, direction, counterparty_type, counterparty_id, start, 
     return statement
 
 
+def generate_statement_for_batch(batch, *, external_total=0):
+    """按派车批次一键生成承运商应付对账单：归集该批次各运单的应付流水为一张对账单。
+
+    批次 = 一次委托同一承运商的商务归集，天然对应一个承运商应付分组；
+    对账口径直接取派单时落下的议定应付快照（price_source=batch），可解释、可追溯。
+    幂等：批次已生成对账单则直接返回原单，避免重复归集。
+    """
+    import random
+
+    from django.utils import timezone
+
+    from apps.core.exceptions import AppError
+
+    from .models import ExpenseRecord, Statement, StatementLine
+
+    if batch.carrier_id is None:
+        raise AppError("BATCH_NO_CARRIER", "网货平台批次无承运商，暂不支持一键对账。", status=400)
+    if batch.statement_no:
+        existing = Statement.objects.filter(statement_no=batch.statement_no).first()
+        if existing:
+            return existing
+
+    records = list(
+        ExpenseRecord.objects.select_related("waybill")
+        .filter(direction=Statement.DIRECTION_PAYABLE, waybill__batch_id=batch.id)
+        .order_by("occurred_at")
+    )
+    total = sum((r.amount for r in records), Decimal("0"))
+    dates = [r.occurred_at.date() for r in records if r.occurred_at] or [batch.created_at.date()]
+
+    statement = Statement.objects.create(
+        statement_no=f"ST{timezone.now():%Y%m%d%H%M%S}{random.randint(100, 999)}",
+        direction=Statement.DIRECTION_PAYABLE,
+        counterparty_type=Statement.CP_CARRIER,
+        counterparty_id=str(batch.carrier_id),
+        counterparty_name=batch.carrier.name if batch.carrier else "",
+        period_start=min(dates),
+        period_end=max(dates),
+        total_amount=total,
+        item_count=len(records),
+        external_total=external_total or 0,
+    )
+    StatementLine.objects.bulk_create([
+        StatementLine(
+            statement=statement,
+            expense_record=r,
+            waybill_no=r.waybill.waybill_no if r.waybill else "",
+            expense_item_code=r.expense_item_code,
+            amount=r.amount,
+            occurred_at=r.occurred_at,
+        )
+        for r in records
+    ])
+    batch.statement_no = statement.statement_no
+    batch.save(update_fields=["statement_no", "updated_at"])
+    return statement
+
+
 # 异常审计阈值：超出同科目历史均值 50% 且绝对超出 ≥ 50 元才标红，避免小额噪声误报
 ANOMALY_RATIO = Decimal("1.5")
 ANOMALY_FLOOR = Decimal("50")

@@ -360,6 +360,7 @@ function OrdersTab() {
 
 // ── 批次视图（派车批次台账：多单一次委托同一承运商）──────────────
 function BatchesTab() {
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState("");
   const [drawer, setDrawer] = useState<string | null>(null);
   const q = useQuery({
@@ -370,6 +371,16 @@ function BatchesTab() {
     queryKey: ["dispatch-batch", drawer],
     queryFn: () => apiGet<DispatchBatchDetail>(`/dispatch-batches/${drawer}`),
     enabled: Boolean(drawer),
+  });
+  // 一键生成承运商应付对账单
+  const genStatement = useMutation({
+    mutationFn: (id: string) => apiPost<{ statement_no: string; reused: boolean }>(`/dispatch-batches/${id}/statement`, {}),
+    onSuccess: (r) => {
+      toast.success(r.reused ? `该批次已对账：${r.statement_no}` : `已生成承运商应付对账单：${r.statement_no}`);
+      queryClient.invalidateQueries({ queryKey: ["dispatch-batch"] });
+      queryClient.invalidateQueries({ queryKey: ["dispatch-batches"] });
+    },
+    onError: (e: Error) => toast.error(e.message || "生成对账单失败"),
   });
 
   useEffect(() => {
@@ -460,6 +471,27 @@ function BatchesTab() {
                 </div>
               )}
             </div>
+            {detail.data && detail.data.dispatch_type === "third_party" && (
+              <div className="wb-actions" style={{ borderTop: "1px solid var(--line)" }}>
+                {detail.data.statement_no ? (
+                  <>
+                    <span className="muted small" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span className="tag tag-low">已对账</span>{detail.data.statement_no}
+                    </span>
+                    <div style={{ flex: 1 }} />
+                    <Link className="btn-ghost" to="/reconciliation" style={{ textDecoration: "none" }}>去对账中心</Link>
+                  </>
+                ) : (
+                  <>
+                    <span className="muted small">批次内 {detail.data.order_count} 单应付将归集为一张承运商对账单</span>
+                    <div style={{ flex: 1 }} />
+                    <button className="btn-primary" disabled={genStatement.isPending} onClick={() => genStatement.mutate(detail.data!.id)}>
+                      {genStatement.isPending ? "生成中…" : "生成承运商对账单"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

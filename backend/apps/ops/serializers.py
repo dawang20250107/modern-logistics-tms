@@ -399,7 +399,7 @@ class DispatchBatchSerializer(serializers.ModelSerializer):
         fields = [
             "id", "batch_no", "dispatch_type", "dispatch_type_label", "carrier", "carrier_name",
             "platform_name", "status", "status_label", "allocation", "allocation_label",
-            "total_payable", "order_count", "total_weight_ton", "note",
+            "total_payable", "order_count", "total_weight_ton", "note", "statement_no",
             "created_by_name", "customer_summary", "created_at",
         ]
 

@@ -597,6 +597,7 @@ export interface DispatchBatch {
   order_count: number;
   total_weight_ton: string;
   note: string;
+  statement_no: string;
   created_by_name: string;
   customer_summary: string[];
   created_at: string;

@@ -967,6 +967,21 @@ class DispatchBatchViewSet(OrgScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet
 
         return DispatchBatchDetailSerializer if self.action == "retrieve" else DispatchBatchSerializer
 
+    @action(detail=True, methods=["post"], url_path="statement")
+    def statement(self, request, pk=None):
+        """一键生成该批次的承运商应付对账单（归集批次内各运单应付流水）。"""
+        from apps.finance.serializers import StatementSerializer
+        from apps.finance.services import generate_statement_for_batch
+
+        batch = self.get_object()
+        already = bool(batch.statement_no)
+        stmt = generate_statement_for_batch(batch, external_total=request.data.get("external_total") or 0)
+        return Response({
+            "statement_no": stmt.statement_no,
+            "reused": already,
+            "statement": StatementSerializer(stmt).data,
+        }, status=201)
+
 
 class OrderTemplateViewSet(viewsets.ModelViewSet):
     """录单模板：保存常用订单为模板，一键套用建单。"""

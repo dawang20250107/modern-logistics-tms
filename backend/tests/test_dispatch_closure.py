@@ -126,3 +126,30 @@ def test_physics_city_typo_removed():
     # 「物理」不再被误判为城市；目的地应正确提取为杭州
     assert data.get("origin") != "物理"
     assert data.get("destination") == "杭州"
+
+
+@pytest.mark.django_db
+def test_batch_dispatch_generates_carrier_statement():
+    """批次派承运商 → 一键生成承运商应付对账单（幂等），金额等于批次应付。"""
+    from apps.finance.services import generate_statement_for_batch
+    from apps.ops.order_dispatch import batch_dispatch_orders
+
+    carrier = Carrier.objects.create(code="CS1", name="批次承运商")
+    o1, o2 = _pooled(weight=10), _pooled(weight=5)
+    res = batch_dispatch_orders(
+        [o1.id, o2.id], carrier_id=str(carrier.id), dispatch_type="third_party",
+        total_payable=15000, allocation="by_weight",
+    )
+    assert res["order_count"] == 2
+
+    from apps.ops.models import DispatchBatch
+
+    batch = DispatchBatch.objects.get(batch_no=res["batch_no"])
+    stmt = generate_statement_for_batch(batch)
+    assert stmt.counterparty_name == "批次承运商"
+    assert stmt.direction == "payable"
+    assert stmt.total_amount == Decimal("15000.00")
+    assert stmt.item_count == 2
+    # 幂等：再次生成返回同一张对账单
+    again = generate_statement_for_batch(batch)
+    assert again.id == stmt.id

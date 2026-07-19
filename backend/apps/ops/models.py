@@ -414,6 +414,8 @@ class DispatchBatch(BaseModel, OrgScopedModel):
     order_count = models.IntegerField(default=0)
     total_weight_ton = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     note = models.CharField(max_length=200, blank=True)
+    # 已生成的承运商应付对账单号（批次一键对账后回填，防重复生成）
+    statement_no = models.CharField(max_length=40, blank=True, db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_batches"
     )

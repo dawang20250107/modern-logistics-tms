@@ -38,6 +38,15 @@ def _current_user_or_none(request):
     return user if isinstance(user, get_user_model()) else None
 
 
+def _can_view_all(user) -> bool:
+    """全局数据范围：超管，或被授予 data_scope=all 的角色——可越过"仅本人"看全量。"""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if user.is_superuser:
+        return True
+    return user.role_assignments.filter(role__data_scope="all").exists()
+
+
 def _valid_coord(value) -> bool:
     """轨迹坐标校验：可转 float 且在合理经纬度范围内。"""
     try:
@@ -746,7 +755,8 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         """订单池：在池待派(POOLED) + 调度中(DISPATCHING，已认领)订单，按优先级与进池时间排序。
 
         scope=free  待分配（未锁定/未分派，所有调度可见，供分派/锁定）
-        scope=mine  可调派（本人锁定或被分派给本人）——调度台仅看本人权限内数据
+        scope=mine  可调派（本人锁定或被分派给本人）——普通调度仅看本人权限内数据
+        scope=all   全量（仅超管/全局数据范围可用，其余降级为 mine）
         默认（无 scope）：全部在池+调度中（兼容旧行为）。?mine=1 等价于 scope=mine。
         """
         from django.db.models import Q
@@ -757,7 +767,9 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         scope = request.query_params.get("scope")
         if scope == "free":
             qs = qs.filter(claimed_by__isnull=True, assigned_to__isnull=True)
-        elif scope == "mine" or request.query_params.get("mine") in ("1", "true"):
+        elif scope == "all" and _can_view_all(request.user):
+            pass  # 超管/全局数据范围：看全量可调派池
+        elif scope in ("mine", "all") or request.query_params.get("mine") in ("1", "true"):
             me = _current_user_or_none(request)
             qs = qs.filter(Q(claimed_by=me) | Q(assigned_to=me))
         page = self.paginate_queryset(qs)
@@ -767,11 +779,14 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="dispatched")
     def dispatched_list(self, request):
-        """已调派池：已转运单(CONVERTED)的订单。scope=mine 仅本人锁定/分派过的（调度台默认）。"""
+        """已调派池：已转运单(CONVERTED)的订单。scope=mine 仅本人；scope=all 超管看全量。"""
         from django.db.models import Q
 
         qs = self.get_queryset().filter(status=Order.STATUS_CONVERTED).order_by("-created_at")
-        if request.query_params.get("scope") == "mine" or request.query_params.get("mine") in ("1", "true"):
+        scope = request.query_params.get("scope")
+        if scope == "all" and _can_view_all(request.user):
+            pass
+        elif scope in ("mine", "all") or request.query_params.get("mine") in ("1", "true"):
             me = _current_user_or_none(request)
             qs = qs.filter(Q(claimed_by=me) | Q(assigned_to=me))
         page = self.paginate_queryset(qs)

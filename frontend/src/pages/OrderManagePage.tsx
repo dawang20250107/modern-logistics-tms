@@ -8,9 +8,10 @@ import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import type { DispatchBatch, DispatchBatchDetail, Order, OrderEvent, Paginated } from "../api/types";
 import {
-  BATCH_STATUS_LABEL, BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_EVENT_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SETTLEMENT_LABEL, SOURCE_TYPE_LABEL,
+  BATCH_STATUS_LABEL, BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_EVENT_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SETTLEMENT_LABEL, SLA_STATUS_LABEL, SOURCE_TYPE_LABEL,
 } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import { WaybillsPage } from "./WaybillsPage";
@@ -29,27 +30,40 @@ function OrdersTab() {
   const [bizType, setBizType] = useState("");
   const [priority, setPriority] = useState("");
   const [level, setLevel] = useState("");
-  const [days, setDays] = useState("30");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [excOrder, setExcOrder] = useState<Order | null>(null);
+
+  // 快捷日期范围：设置起止日期（YYYY-MM-DD）
+  const fmtD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const setQuickRange = (kind: string) => {
+    const now = new Date();
+    if (kind === "today") { setDateFrom(fmtD(now)); setDateTo(fmtD(now)); }
+    else if (kind === "7") { const f = new Date(now); f.setDate(f.getDate() - 6); setDateFrom(fmtD(f)); setDateTo(fmtD(now)); }
+    else if (kind === "30") { const f = new Date(now); f.setDate(f.getDate() - 29); setDateFrom(fmtD(f)); setDateTo(fmtD(now)); }
+    else if (kind === "month") { setDateFrom(fmtD(new Date(now.getFullYear(), now.getMonth(), 1))); setDateTo(fmtD(now)); }
+    else { setDateFrom(""); setDateTo(""); }
+  };
 
   // 保存的筛选视图（localStorage 持久化，无需后端）
-  type Preset = { name: string; status: string; channel: string; bizType: string; priority: string; level: string; days: string; search: string };
-  const PRESET_KEY = "om-order-presets";
+  type Preset = { name: string; status: string; channel: string; bizType: string; priority: string; level: string; dateFrom: string; dateTo: string; search: string };
+  const PRESET_KEY = "om-order-presets-v2";
   const [presets, setPresets] = useState<Preset[]>(() => {
     try { return JSON.parse(localStorage.getItem(PRESET_KEY) || "[]"); } catch { return []; }
   });
   const persistPresets = (next: Preset[]) => { setPresets(next); localStorage.setItem(PRESET_KEY, JSON.stringify(next)); };
-  const applyPreset = (p: Preset) => { setStatus(p.status); setChannel(p.channel); setBizType(p.bizType); setPriority(p.priority); setLevel(p.level); setDays(p.days); setSearch(p.search); };
+  const applyPreset = (p: Preset) => { setStatus(p.status); setChannel(p.channel); setBizType(p.bizType); setPriority(p.priority); setLevel(p.level); setDateFrom(p.dateFrom || ""); setDateTo(p.dateTo || ""); setSearch(p.search); };
   const savePreset = () => {
     const name = window.prompt("为当前筛选视图命名：", "")?.trim();
     if (!name) return;
-    const p: Preset = { name, status, channel, bizType, priority, level, days, search };
+    const p: Preset = { name, status, channel, bizType, priority, level, dateFrom, dateTo, search };
     persistPresets([...presets.filter((x) => x.name !== name), p]);
     toast.success(`已保存筛选视图「${name}」`);
   };
-  const anyFilter = Boolean(status || channel || bizType || priority || level || search || days !== "30");
-  const resetFilters = () => { setStatus(""); setChannel(""); setBizType(""); setPriority(""); setLevel(""); setDays("30"); setSearch(""); };
+  const anyFilter = Boolean(status || channel || bizType || priority || level || search || dateFrom || dateTo);
+  const resetFilters = () => { setStatus(""); setChannel(""); setBizType(""); setPriority(""); setLevel(""); setDateFrom(""); setDateTo(""); setSearch(""); };
 
   const filterQs = [
     status && `status=${status}`, channel && `channel=${channel}`,
@@ -71,12 +85,16 @@ function OrdersTab() {
   const rows = useMemo(() => {
     let items = q.data?.items ?? [];
     if (level) items = items.filter((o) => (o.customer_level || "") === level);
-    if (days) {
-      const cut = Date.now() - Number(days) * 86400000;
-      items = items.filter((o) => new Date(o.created_at).getTime() >= cut);
+    if (dateFrom) {
+      const from = new Date(`${dateFrom}T00:00:00`).getTime();
+      items = items.filter((o) => new Date(o.created_at).getTime() >= from);
+    }
+    if (dateTo) {
+      const to = new Date(`${dateTo}T23:59:59`).getTime();
+      items = items.filter((o) => new Date(o.created_at).getTime() <= to);
     }
     return items;
-  }, [q.data, level, days]);
+  }, [q.data, level, dateFrom, dateTo]);
   const total = rows.length;
 
   const BATCH_LABEL: Record<string, string> = { confirm: "确认", pool: "进池", cancel: "取消", delete: "删除" };
@@ -151,31 +169,40 @@ function OrdersTab() {
   const toggleAll = () => setSelected((prev) => (rows.length > 0 && rows.every((o) => prev.has(o.id)) ? new Set() : new Set(rows.map((o) => o.id))));
 
   const columns: DataColumn<Order>[] = [
-    { key: "order_no", header: "订单号", width: 165, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono" to={`/orders/${o.id}`}>{o.order_no}</Link> },
-    { key: "customer", header: "客户", width: 160, sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠{(o.exception_count ?? 0) > 1 ? o.exception_count : ""}</span>}</span> },
-    { key: "channel", header: "渠道", width: 90, sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
+    { key: "order_no", header: "订单号 (DD)", width: 170, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono doc-order" to={`/orders/${o.id}`} title="订单">{o.order_no}</Link> },
+    { key: "customer", header: "客户", width: 160, filterable: true, filterValue: (o) => o.customer_name || "散客", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠{(o.exception_count ?? 0) > 1 ? o.exception_count : ""}</span>}</span> },
+    { key: "channel", header: "渠道", width: 90, filterable: true, filterValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
     { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <><b>{o.origin || "?"}</b> → <b>{o.destination || "?"}</b></> },
-    { key: "biz", header: "业务", width: 90, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
+    { key: "biz", header: "业务", width: 90, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
     { key: "cargo", header: "货量", width: 110, align: "right", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}吨/{o.cargo_quantity}件</span> },
     { key: "amount", header: "报价", width: 110, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
-    { key: "priority", header: "优先级", width: 80, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
-    { key: "status", header: "状态", width: 100, sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
-    { key: "sla", header: "SLA", width: 84, sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
-    { key: "lock", header: "锁定/分派", width: 110, sortValue: (o) => o.lock_state ?? "", exportValue: (o) => LOCK_LABEL[o.lock_state ?? "free"] ?? "", render: (o) => o.lock_state && o.lock_state !== "free" ? <span className={`tag ${LOCK_TONE[o.lock_state]}`} title={o.claimed_by_name || o.assigned_to_name}>{LOCK_LABEL[o.lock_state]}{(o.claimed_by_name || o.assigned_to_name) ? ` · ${o.claimed_by_name || o.assigned_to_name}` : ""}</span> : <span className="muted small">—</span> },
-    { key: "creator", header: "建单人", width: 100, sortValue: (o) => o.created_by_name || "", exportValue: (o) => o.created_by_name || "", render: (o) => <span className="small muted">{o.created_by_name || "-"}</span> },
+    { key: "priority", header: "优先级", width: 80, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
+    { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
+    { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
+    { key: "waybill", header: "关联运单 (YD)", width: 150, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 3 }}>{o.waybill_nos.map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}</span> : <span className="muted small">未生成</span> },
+    { key: "creator", header: "建单人", width: 100, filterable: true, filterValue: (o) => o.created_by_name || "-", sortValue: (o) => o.created_by_name || "", exportValue: (o) => o.created_by_name || "", render: (o) => <span className="small muted">{o.created_by_name || "-"}</span> },
     { key: "created", header: "建单时间", width: 130, sortValue: (o) => o.created_at, exportValue: (o) => fmtDateTime(o.created_at), render: (o) => <span className="small" title={fmtDateTime(o.created_at)}>{fmtRelative(o.created_at)}</span> },
     {
-      key: "actions", header: "操作", width: 180, alwaysVisible: true,
+      key: "actions", header: "操作", width: 150, alwaysVisible: true,
       render: (o) => (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           {(o.status === "draft" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "confirm", ids: [o.id] })}>确认</button>}
           {(o.status === "confirmed" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "pool", ids: [o.id] })}>进池</button>}
           {o.status === "pooled" && <Link className="link small" to="/dispatch-board">去派单</Link>}
           <Link className="link small" to={`/orders/${o.id}`}>详情</Link>
-          {(o.waybill_nos ?? []).map((no) => <Link key={no} className="link mono small" to={`/waybills/${no}`}>{no}</Link>)}
         </div>
       ),
     },
+  ];
+
+  // 行右键菜单：批量/单条常用动作直达
+  const rowMenu = (o: Order): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] => [
+    { label: "查看详情", onClick: () => setDrawer(o) },
+    ...((o.status === "draft" || o.status === "pending_confirm") ? [{ label: "确认订单", onClick: () => batch.mutate({ action: "confirm", ids: [o.id] }) }] : []),
+    ...((o.status === "confirmed" || o.status === "pending_confirm") ? [{ label: "进池", onClick: () => batch.mutate({ action: "pool", ids: [o.id] }) }] : []),
+    { label: "登记异常", onClick: () => setExcOrder(o) },
+    { label: "完整详情页", onClick: () => { window.location.href = `/orders/${o.id}`; } },
+    { label: "取消订单", danger: true, disabled: o.status === "cancelled" || o.status === "converted", onClick: async () => { if (await confirmAction({ message: `取消订单 ${o.order_no}？`, tone: "danger", confirmText: "取消订单" })) batch.mutate({ action: "cancel", ids: [o.id] }); } },
   ];
 
   const batchBar = selected.size > 0 ? (
@@ -245,10 +272,21 @@ function OrdersTab() {
         <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={level} onChange={(e) => setLevel(e.target.value)}>
           <option value="">全部等级</option>{["S", "A", "B", "C", "D"].map((l) => <option key={l} value={l}>{l} 级客户</option>)}
         </select>
-        <select className="search" style={{ minWidth: 100, padding: "7px 10px" }} value={days} onChange={(e) => setDays(e.target.value)}>
-          <option value="7">近 7 天</option><option value="30">近 30 天</option><option value="90">近 90 天</option><option value="">全部时间</option>
-        </select>
         <input className="search" style={{ minWidth: 200, flex: 1 }} placeholder="搜索订单号 / 电话 / 始发 / 目的地" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+      {/* 日期范围组（建单时间）*/}
+      <div className="form-row date-range-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0, alignItems: "center" }}>
+        <span className="muted small" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>建单日期
+        </span>
+        <input type="date" className="search" style={{ padding: "6px 9px" }} value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} />
+        <span className="muted">—</span>
+        <input type="date" className="search" style={{ padding: "6px 9px" }} value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} />
+        <button className="chip" onClick={() => setQuickRange("today")}>今天</button>
+        <button className="chip" onClick={() => setQuickRange("7")}>近7天</button>
+        <button className="chip" onClick={() => setQuickRange("30")}>近30天</button>
+        <button className="chip" onClick={() => setQuickRange("month")}>本月</button>
+        {(dateFrom || dateTo) && <button className="linkish small" onClick={() => setQuickRange("")}>清除日期</button>}
       </div>
 
       {/* 保存的筛选视图 */}
@@ -276,13 +314,16 @@ function OrdersTab() {
         (status || channel || bizType || priority || level || search) ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" /> : <StateView kind="empty" scene="cs-empty" />
       ) : (
         <DataTable<Order>
-          columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage" exportName="订单台账"
+          columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage-v2" exportName="订单台账"
           selectable selected={selected} onToggle={toggle} onToggleAll={toggleAll} stickyFirst batchBar={batchBar}
-          onRowClick={(o) => setDrawer(o)}
-          toolbarLeft={<span className="muted small">共 {total} 单{selected.size ? ` · 已选 ${selected.size}` : ""} · 点击行看详情 · 表头排序 · 「列」增减</span>}
+          onRowClick={(o) => setDrawer(o)} rowMenu={rowMenu}
+          toolbarLeft={<span className="muted small">共 {total} 单{selected.size ? ` · 已选 ${selected.size}` : ""} · 点击行看详情 · 右键菜单 · Shift 范围选 · 表头 ⚟ 筛选/排序</span>}
         />
       )}
     </div>
+
+    {/* 登记异常（右键菜单）*/}
+    {excOrder && <ExceptionRegisterModal order={excOrder} onClose={() => setExcOrder(null)} onDone={() => { setExcOrder(null); invalidate(); }} />}
 
     {/* 订单详情抽屉 */}
     {drawer && (

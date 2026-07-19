@@ -1,17 +1,27 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
-// 顶尖 SaaS 表格：列显隐 / 列宽拖拽 / 固定首列 / 多字段排序 / 保存视图 / 批量 / 行内 / 右键 / 导出
+// 顶尖 SaaS 表格：列显隐 / 列宽拖拽 / 固定首列 / 多字段排序 / 列内字段筛选 /
+// 保存视图 / 批量 / Shift 范围选 / 行右键菜单 / 行内 / 导出
 export interface DataColumn<T> {
   key: string;
   header: string;
   render: (row: T) => React.ReactNode;
   sortValue?: (row: T) => string | number;
   exportValue?: (row: T) => string | number;
+  filterValue?: (row: T) => string; // 列筛选取值（缺省用 exportValue/sortValue）
+  filterable?: boolean; // 开启表头字段筛选
   width?: number;
   minWidth?: number;
   align?: "left" | "right";
   defaultHidden?: boolean;
   alwaysVisible?: boolean;
+}
+
+export interface RowMenuItem {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
 }
 
 interface SortState { key: string; dir: "asc" | "desc" }
@@ -29,7 +39,7 @@ function loadView(viewKey: string): ViewState | null {
 export function DataTable<T>({
   columns, rows, rowKey, viewKey, selectable, selected, onToggle, onToggleAll,
   onRowContextMenu, onRowDoubleClick, onRowClick, rowClassName, stickyFirst, toolbarLeft, batchBar, exportName,
-  expandedKey, renderExpanded,
+  expandedKey, renderExpanded, rowMenu,
 }: {
   columns: DataColumn<T>[];
   rows: T[];
@@ -49,6 +59,7 @@ export function DataTable<T>({
   toolbarLeft?: React.ReactNode;
   batchBar?: React.ReactNode;
   exportName?: string;
+  rowMenu?: (row: T) => RowMenuItem[]; // 行右键菜单项
 }) {
   const saved = useMemo(() => loadView(viewKey), [viewKey]);
   const [hidden, setHidden] = useState<Set<string>>(
@@ -57,37 +68,54 @@ export function DataTable<T>({
   const [widths, setWidths] = useState<Record<string, number>>(saved?.widths ?? {});
   const [sort, setSort] = useState<SortState | null>(saved?.sort ?? null);
   const [colMenu, setColMenu] = useState(false);
+  // 列内字段筛选：colKey -> 选中值集合（空/缺省 = 不筛）
+  const [filters, setFilters] = useState<Record<string, Set<string>>>({});
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [filterSearch, setFilterSearch] = useState("");
+  // 行右键菜单
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: RowMenuItem[] } | null>(null);
+  // Shift 范围选锚点
+  const anchorRef = useRef<number>(-1);
 
-  // 保存视图：列显隐 / 列宽 / 排序 持久化
   useEffect(() => {
     try {
       localStorage.setItem(`dt.view.${viewKey}`, JSON.stringify({ hidden: [...hidden], widths, sort }));
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, [viewKey, hidden, widths, sort]);
 
   useEffect(() => {
-    const close = () => setColMenu(false);
+    const close = () => { setColMenu(false); setOpenFilter(null); setCtxMenu(null); };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
 
   const visibleCols = columns.filter((c) => !hidden.has(c.key));
+  const filterText = (c: DataColumn<T>, r: T): string =>
+    String((c.filterValue ? c.filterValue(r) : c.exportValue ? c.exportValue(r) : c.sortValue ? c.sortValue(r) : "") ?? "");
+
+  // 先按列筛选，再排序
+  const filteredRows = useMemo(() => {
+    const active = Object.entries(filters).filter(([, v]) => v && v.size > 0);
+    if (active.length === 0) return rows;
+    return rows.filter((r) => active.every(([key, set]) => {
+      const col = columns.find((c) => c.key === key);
+      return col ? set.has(filterText(col, r)) : true;
+    }));
+  }, [rows, filters, columns]);
 
   const sortedRows = useMemo(() => {
-    if (!sort) return rows;
+    if (!sort) return filteredRows;
     const col = columns.find((c) => c.key === sort.key);
-    if (!col?.sortValue) return rows;
+    if (!col?.sortValue) return filteredRows;
     const val = col.sortValue;
     const dir = sort.dir === "asc" ? 1 : -1;
-    return [...rows].sort((a, b) => {
+    return [...filteredRows].sort((a, b) => {
       const va = val(a), vb = val(b);
       if (va < vb) return -1 * dir;
       if (va > vb) return 1 * dir;
       return 0;
     });
-  }, [rows, sort, columns]);
+  }, [filteredRows, sort, columns]);
 
   const cycleSort = (key: string) => {
     setSort((s) => {
@@ -96,6 +124,21 @@ export function DataTable<T>({
       return null;
     });
   };
+
+  // 某列的可选值（去重、有序）
+  const distinctValues = (c: DataColumn<T>): string[] => {
+    const set = new Set<string>();
+    for (const r of rows) set.add(filterText(c, r));
+    return [...set].sort((a, b) => a.localeCompare(b, "zh"));
+  };
+  const toggleFilterValue = (key: string, val: string) => setFilters((f) => {
+    const next = { ...f };
+    const s = new Set(next[key] ?? []);
+    if (s.has(val)) s.delete(val); else s.add(val);
+    next[key] = s;
+    return next;
+  });
+  const clearFilter = (key: string) => setFilters((f) => { const n = { ...f }; delete n[key]; return n; });
 
   // 列宽拖拽
   const dragRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
@@ -140,12 +183,39 @@ export function DataTable<T>({
 
   const allChecked = selectable && rows.length > 0 && selected && rows.every((r) => selected.has(rowKey(r)));
   const stickyOffset = selectable ? 34 : 0;
+  const activeFilterCount = Object.values(filters).filter((s) => s && s.size > 0).length;
+
+  // 复选：支持 Shift 范围选（以上次点击行为锚点，整段设为目标态）
+  const handleCheck = (e: React.MouseEvent, idx: number, id: string) => {
+    const target = !(selected?.has(id));
+    if (e.shiftKey && anchorRef.current >= 0 && anchorRef.current !== idx) {
+      const [lo, hi] = [Math.min(anchorRef.current, idx), Math.max(anchorRef.current, idx)];
+      for (let i = lo; i <= hi; i++) {
+        const rid = rowKey(sortedRows[i]);
+        if (Boolean(selected?.has(rid)) !== target) onToggle?.(rid);
+      }
+    } else {
+      onToggle?.(id);
+    }
+    anchorRef.current = idx;
+  };
+
+  const openRowMenu = (e: React.MouseEvent, row: T) => {
+    if (rowMenu) {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY, items: rowMenu(row) });
+    }
+    onRowContextMenu?.(e, row);
+  };
 
   return (
     <div className="dt">
       <div className="dt-toolbar">
         <div className="dt-toolbar-main">{toolbarLeft}</div>
         <div className="dt-toolbar-actions">
+          {activeFilterCount > 0 && (
+            <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setFilters({}); }} title="清除所有列筛选">清筛 {activeFilterCount}</button>
+          )}
           <button className="btn-ghost" onClick={exportCsv}>导出</button>
           <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setColMenu((v) => !v); }}>列</button>
           {colMenu && (
@@ -163,7 +233,7 @@ export function DataTable<T>({
                 </label>
               ))}
               <div className="context-divider" />
-              <button className="dt-colreset" onClick={() => { setHidden(new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key))); setWidths({}); setSort(null); }}>重置视图</button>
+              <button className="dt-colreset" onClick={() => { setHidden(new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key))); setWidths({}); setSort(null); setFilters({}); }}>重置视图</button>
             </div>
           )}
         </div>
@@ -183,14 +253,44 @@ export function DataTable<T>({
               {visibleCols.map((c, i) => {
                 const sticky = stickyFirst && i === 0;
                 const left = sticky ? stickyOffset : undefined;
+                const fActive = (filters[c.key]?.size ?? 0) > 0;
                 return (
                   <th
                     key={c.key}
-                    className={`${c.align === "right" ? "num" : ""} ${sticky ? "dt-sticky" : ""} ${c.sortValue ? "dt-sortable" : ""}`}
+                    className={`${c.align === "right" ? "num" : ""} ${sticky ? "dt-sticky" : ""}`}
                     style={{ width: colWidth(c), minWidth: colWidth(c), left }}
-                    onClick={() => c.sortValue && cycleSort(c.key)}
                   >
-                    <span className="dt-th">{c.header}{sort?.key === c.key && <span className="dt-sortic">{sort.dir === "asc" ? "▲" : "▼"}</span>}</span>
+                    <span className="dt-th">
+                      <span className={c.sortValue ? "dt-sortable" : ""} onClick={() => c.sortValue && cycleSort(c.key)}>
+                        {c.header}{sort?.key === c.key && <span className="dt-sortic">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                      </span>
+                      {c.filterable && (
+                        <button
+                          className={`dt-filter-btn${fActive ? " on" : ""}`}
+                          title="按此列筛选"
+                          onClick={(e) => { e.stopPropagation(); setOpenFilter((k) => (k === c.key ? null : c.key)); setFilterSearch(""); }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                        </button>
+                      )}
+                    </span>
+                    {c.filterable && openFilter === c.key && (
+                      <div className="dt-filter-pop" onClick={(e) => e.stopPropagation()}>
+                        <input className="search" autoFocus placeholder="搜索取值…" value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
+                        <div className="dt-filter-list">
+                          {distinctValues(c).filter((v) => !filterSearch || v.toLowerCase().includes(filterSearch.toLowerCase())).map((v) => (
+                            <label key={v} className="dt-colitem">
+                              <input type="checkbox" checked={filters[c.key]?.has(v) ?? false} onChange={() => toggleFilterValue(c.key, v)} />
+                              {v || <span className="muted">（空）</span>}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="dt-filter-foot">
+                          <button className="linkish small" onClick={() => clearFilter(c.key)}>清空</button>
+                          <button className="btn-ghost small" onClick={() => setOpenFilter(null)}>完成</button>
+                        </div>
+                      </div>
+                    )}
                     <span className="dt-resizer" onMouseDown={(e) => onResizeStart(e, c.key, colWidth(c))} />
                   </th>
                 );
@@ -203,7 +303,7 @@ export function DataTable<T>({
                 <td className="dt-empty" colSpan={visibleCols.length + (selectable ? 1 : 0)}>暂无匹配记录</td>
               </tr>
             )}
-            {sortedRows.map((r) => {
+            {sortedRows.map((r, idx) => {
               const id = rowKey(r);
               const isSel = selected?.has(id);
               const expanded = expandedKey != null && expandedKey === id;
@@ -212,13 +312,13 @@ export function DataTable<T>({
                 <Fragment key={id}>
                 <tr
                   className={`${rowClassName?.(r) ?? ""} ${isSel ? "row-sel" : ""}${onRowClick ? " dt-clickable" : ""}`}
-                  onContextMenu={onRowContextMenu ? (e) => onRowContextMenu(e, r) : undefined}
+                  onContextMenu={(rowMenu || onRowContextMenu) ? (e) => openRowMenu(e, r) : undefined}
                   onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(r) : undefined}
                   onClick={onRowClick ? () => onRowClick(r) : undefined}
                 >
                   {selectable && (
-                    <td className="cell-check dt-sticky" style={{ left: 0 }} onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={Boolean(isSel)} onChange={() => onToggle?.(id)} />
+                    <td className="cell-check dt-sticky" style={{ left: 0 }} onClick={(e) => { e.stopPropagation(); handleCheck(e, idx, id); }}>
+                      <input type="checkbox" checked={Boolean(isSel)} readOnly tabIndex={-1} />
                     </td>
                   )}
                   {visibleCols.map((c, i) => {
@@ -241,6 +341,14 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+
+      {ctxMenu && (
+        <ul className="ctx-menu" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={(e) => e.stopPropagation()}>
+          {ctxMenu.items.map((it, i) => (
+            <li key={i} className={`${it.danger ? "danger" : ""}${it.disabled ? " disabled" : ""}`} onClick={() => { if (!it.disabled) { it.onClick(); setCtxMenu(null); } }}>{it.label}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

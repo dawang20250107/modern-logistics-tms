@@ -1089,6 +1089,26 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dt-table thead th.dt-sticky { position: sticky; top: 0; }
 .dt-sortable { cursor: pointer; }
 .dt-sortable:hover { color: var(--accent); }
+/* 列内字段筛选 */
+.dt-filter-btn { border: none; background: none; color: var(--ink-3); cursor: pointer; padding: 1px 2px; display: inline-flex; align-items: center; border-radius: 3px; }
+.dt-filter-btn:hover { color: var(--accent); background: var(--accent-weak); }
+.dt-filter-btn.on { color: var(--accent); }
+.dt-filter-pop {
+  position: absolute; top: 100%; left: 0; z-index: 70; margin-top: 4px; width: 220px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+  font-weight: 400; text-transform: none; letter-spacing: 0;
+}
+.dt-filter-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.dt-filter-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 6px; margin-top: 4px; border-top: 1px solid var(--line); }
+.ctx-menu li.danger { color: var(--red); }
+.ctx-menu li.disabled { opacity: 0.45; cursor: not-allowed; }
+/* 订单号(DD) vs 运单号(YD) 严格区分：不同色标 + 前缀点 */
+.doc-order { color: var(--accent); font-weight: 600; text-decoration: none; }
+.doc-order::before { content: "▸"; margin-right: 3px; opacity: 0.6; font-size: 10px; }
+.doc-order:hover { text-decoration: underline; }
+.doc-waybill { display: inline-flex; align-items: center; gap: 3px; color: var(--violet); text-decoration: none; padding: 1px 6px; border: 1px solid var(--violet-line); border-radius: 5px; background: var(--violet-weak); }
+.doc-waybill::before { content: "🚚"; font-size: 10px; }
+.doc-waybill:hover { border-color: var(--violet); }
 .dt-th { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-sortic { font-size: 9px; color: var(--accent); }
 .dt-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }

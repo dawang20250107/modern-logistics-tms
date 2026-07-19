@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
+import { useAuth } from "../auth/auth";
 import { BatchDispatchModal } from "../components/BatchDispatchModal";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
 import { StateView } from "../components/StateView";
@@ -101,6 +102,11 @@ export function DispatchBoardPage() {
   const [poolTab, setPoolTab] = useState<"unassigned" | "dispatchable" | "dispatched">("unassigned");
   // 登记异常（订单池右键/双击 → 挂到订单，同步调度与订单管理）
   const [excOrder, setExcOrder] = useState<Order | null>(null);
+  // 超管/全局数据范围：可在可调派/已调派看全量（默认全量），普通调度仅本人
+  const { user } = useAuth();
+  const canViewAll = Boolean(user?.is_superuser);
+  const [viewAll, setViewAll] = useState(true);
+  const mineScope = canViewAll && viewAll ? "all" : "mine";
 
   // 待分配池：未锁定/未分派（所有调度可见，供分派/锁定）
   const poolFree = useQuery({
@@ -108,16 +114,16 @@ export function DispatchBoardPage() {
     queryFn: () => apiGet<Paginated<Order>>("/orders/pool?scope=free"),
     refetchInterval: 15000,
   });
-  // 可调派池：仅本人锁定/被分派（调度台只看本人权限内数据）
+  // 可调派池：普通调度仅本人锁定/被分派；超管可看全量（scope=all）
   const poolMine = useQuery({
-    queryKey: ["pool", "mine"],
-    queryFn: () => apiGet<Paginated<Order>>("/orders/pool?scope=mine"),
+    queryKey: ["pool", "mine", mineScope],
+    queryFn: () => apiGet<Paginated<Order>>(`/orders/pool?scope=${mineScope}`),
     refetchInterval: 15000,
   });
-  // 已调派池：本人已转运单的订单（只读审计视图）
+  // 已调派池：本人已转运单（超管可看全量）
   const dispatchedQ = useQuery({
-    queryKey: ["dispatched-orders"],
-    queryFn: () => apiGet<Paginated<Order>>("/orders/dispatched?scope=mine&page_size=80"),
+    queryKey: ["dispatched-orders", mineScope],
+    queryFn: () => apiGet<Paginated<Order>>(`/orders/dispatched?scope=${mineScope}&page_size=80`),
     refetchInterval: 30000,
   });
   const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=200") });
@@ -463,6 +469,12 @@ export function DispatchBoardPage() {
             <span className="pool-tab-dot dot-green" />已调派<span className="pool-tab-n">{poolCounts.dispatched}</span>
           </button>
           <div style={{ flex: 1 }} />
+          {canViewAll && poolTab !== "unassigned" && (
+            <div className="seg-toggle" style={{ marginRight: 4 }}>
+              <button className={`seg-btn${viewAll ? " on" : ""}`} onClick={() => setViewAll(true)} title="超管全局：查看全部">全部</button>
+              <button className={`seg-btn${!viewAll ? " on" : ""}`} onClick={() => setViewAll(false)} title="仅本人锁定/分派">仅我</button>
+            </div>
+          )}
           <button className={`chip${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)}>仅看紧急</button>
         </div>
         <div className="pool-hint">

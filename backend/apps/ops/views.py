@@ -1366,11 +1366,11 @@ class WorkbenchView(APIView):
         today = timezone.localdate()
         open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
 
-        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
+        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments", "exceptions").filter(
             created_by=user, status=Order.STATUS_PENDING_CONFIRM
         )
         pool = Order.objects.filter(status=Order.STATUS_POOLED)
-        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
+        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments", "exceptions").filter(
             status=Order.STATUS_POOLED
         ).order_by("-priority", "pooled_at")[:5]
         return Response({

@@ -1,7 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { apiPost } from "../api/client";
+import { apiGet, apiPost } from "../api/client";
 import { toast } from "../api/toast";
+import type { LookupAnswer, ReplyCardData } from "../api/types";
 
 interface ToolCall {
   tool_name: string;
@@ -82,26 +84,49 @@ export function SpotlightCommandBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, pathname]);
 
-  // 查单跳转：输入像单号/车牌/电话（含数字）即提供直达运单/订单
+  // 直接给答案：输入车牌/电话/单号/客户 → 解析为实体+实时上下文（搜索即工作台）
   const lookup = query.trim();
-  const looksCode = lookup.length >= 4 && /\d/.test(lookup) && !lookup.startsWith("/");
-  const jumpItems = looksCode
-    ? [
-        { label: `查看运单 ${lookup}`, path: `/waybills/${encodeURIComponent(lookup)}` },
-        { label: `查看订单 ${lookup}`, path: `/orders/${encodeURIComponent(lookup)}` },
-      ]
-    : [];
+  const lookupOn = lookup.length >= 2 && !lookup.startsWith("/") && !loading && !response;
+  const lookupQ = useQuery({
+    queryKey: ["cmdk-lookup", lookup],
+    queryFn: () => apiGet<LookupAnswer>(`/lookup?q=${encodeURIComponent(lookup)}`),
+    enabled: lookupOn,
+    staleTime: 10_000,
+  });
+  const answer = lookupOn ? lookupQ.data : undefined;
+  const hasAnswer = Boolean(answer && answer.kind !== "none");
+
+  const copyReply = async (waybillNo: string) => {
+    try {
+      const card = await apiGet<ReplyCardData>(`/waybills/${waybillNo}/reply-card`);
+      await navigator.clipboard.writeText(card.copy_text);
+      toast.success("已复制客户回复文案");
+      setIsOpen(false);
+    } catch {
+      toast.error("复制失败");
+    }
+  };
+  // 答案卡的可执行动作（可键盘选中）
+  const answerActions: { label: string; run: () => void }[] = [];
+  if (hasAnswer && answer) {
+    for (const a of answer.actions ?? []) {
+      if (a === "view_waybill" && answer.waybill_no) answerActions.push({ label: `查看运单 ${answer.waybill_no}`, run: () => { navigate(`/waybills/${answer.waybill_no}`); setIsOpen(false); } });
+      if (a === "view_order" && answer.order_no) answerActions.push({ label: `查看订单 ${answer.order_no}`, run: () => { navigate(`/orders/${answer.order_no}`); setIsOpen(false); } });
+      if (a === "call_driver" && answer.driver_phone) answerActions.push({ label: `联系司机 ${answer.driver_phone}`, run: () => { window.location.href = `tel:${answer.driver_phone}`; } });
+      if (a === "copy_reply" && answer.waybill_no) answerActions.push({ label: "复制客户回复", run: () => copyReply(answer.waybill_no!) });
+    }
+  }
 
   const showAi = query.trim().length > 0 && !query.trim().startsWith("/");
-  // 可选中的扁平结果：查单跳转 + 命令 + （可选）AI 分析行
+  // 可选中的扁平结果：答案动作 + 命令 + （可选）AI 分析行
   const results = useMemo(
     () => [
-      ...jumpItems.map((j) => ({ kind: "jump" as string, cmd: null, jump: j })),
-      ...matched.map((c) => ({ kind: c.kind as string, cmd: c, jump: null })),
-      ...(showAi ? [{ kind: "ai" as string, cmd: null, jump: null }] : []),
+      ...answerActions.map((a) => ({ kind: "answer" as string, cmd: null, jump: null, act: a })),
+      ...matched.map((c) => ({ kind: c.kind as string, cmd: c, jump: null, act: null })),
+      ...(showAi ? [{ kind: "ai" as string, cmd: null, jump: null, act: null }] : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [matched, showAi, lookup],
+    [matched, showAi, lookup, hasAnswer, answerActions.length],
   );
 
   useEffect(() => {
@@ -115,9 +140,8 @@ export function SpotlightCommandBar() {
       handleSearchSubmit();
       return;
     }
-    if (item.kind === "jump" && item.jump) {
-      navigate(item.jump.path);
-      setIsOpen(false);
+    if (item.kind === "answer" && item.act) {
+      item.act.run();
       return;
     }
     if (item.cmd) {
@@ -233,7 +257,18 @@ export function SpotlightCommandBar() {
 
           {!loading && !response && (
             <div className="cmdk-list">
-              {results.length === 0 && <div className="cmdk-empty">无匹配的命令</div>}
+              {/* 富答案卡：搜索结果本身成为工作台 */}
+              {hasAnswer && answer && (
+                <div className="cmdk-answercard">
+                  <div className="cmdk-answercard-title">{answer.title}</div>
+                  <div className="cmdk-answercard-fields">
+                    {(answer.fields ?? []).map((f, i) => (
+                      <div key={i}><span>{f.label}</span><b>{f.value}</b></div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {results.length === 0 && !hasAnswer && <div className="cmdk-empty">无匹配的命令</div>}
               {results.map((item) => {
                 renderIdx += 1;
                 const idx = renderIdx;
@@ -246,14 +281,14 @@ export function SpotlightCommandBar() {
                     </div>
                   );
                 }
-                if (item.kind === "jump" && item.jump) {
-                  const header = lastSection !== "查单跳转" ? "查单跳转" : null;
-                  lastSection = "查单跳转";
+                if (item.kind === "answer" && item.act) {
+                  const header = lastSection !== "操作" ? "操作" : null;
+                  lastSection = "操作";
                   return (
-                    <div key={item.jump.path}>
-                      {header && <div className="cmdk-section">查单跳转</div>}
+                    <div key={`act-${item.act.label}`}>
+                      {header && <div className="cmdk-section">操作</div>}
                       <div className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
-                        <span className="cmdk-item-main"><span className="cmdk-badge">直达</span><span className="cmdk-item-label">{item.jump.label}</span></span>
+                        <span className="cmdk-item-main"><span className="cmdk-badge">直达</span><span className="cmdk-item-label">{item.act.label}</span></span>
                         <span className="cmdk-item-path">↵</span>
                       </div>
                     </div>

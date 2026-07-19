@@ -231,6 +231,12 @@ h1, h2, h3, h4 { letter-spacing: -0.022em; }
 .cmdk-ai.active { background: rgba(99,110,240,0.22); border-style: solid; }
 .cmdk-kbd { font-size: 11px; color: rgba(255,255,255,0.5); }
 .cmdk-empty { padding: 24px; text-align: center; font-size: 13px; color: rgba(255,255,255,0.4); }
+.cmdk-answercard { margin: 4px 4px 8px; padding: 12px 14px; background: rgba(99,110,240,0.12); border: 1px solid rgba(120,130,250,0.32); border-radius: 10px; }
+.cmdk-answercard-title { font-size: 14px; font-weight: 650; color: #eef0ff; margin-bottom: 8px; }
+.cmdk-answercard-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }
+.cmdk-answercard-fields > div { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; }
+.cmdk-answercard-fields span { color: rgba(255,255,255,0.5); }
+.cmdk-answercard-fields b { color: #f2f3f8; font-weight: 550; }
 .cmdk-answer { padding: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
 .cmdk-answer-head { font-size: 12px; color: #b9c0ff; }
 .cmdk-answer p { margin: 0; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; color: rgba(255,255,255,0.9); }

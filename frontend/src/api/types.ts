@@ -696,6 +696,16 @@ export interface CustomerContext {
   open_orders: CustomerOrderBrief[];
   counts: { total: number; open: number; exceptions: number; receipt_pending: number };
 }
+export interface LookupAnswer {
+  kind: "waybill" | "order" | "vehicle" | "driver" | "customer" | "none";
+  title?: string;
+  waybill_no?: string;
+  order_no?: string;
+  customer_id?: string;
+  driver_phone?: string;
+  fields?: Array<{ label: string; value: string }>;
+  actions?: string[];
+}
 export interface FinanceCardData {
   waybill_no: string; customer_name: string; carrier_name: string;
   receivable: number; payable: number; other_fee: number; gross_margin: number;

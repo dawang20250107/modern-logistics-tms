@@ -5,6 +5,7 @@ from .views import (
     DriverReminderViewSet,
     ExceptionViewSet,
     IntegrationStatusView,
+    LookupView,
     OrderTemplateViewSet,
     OrderViewSet,
     PublicOrderIntakeView,
@@ -49,6 +50,7 @@ urlpatterns = [
     path("track", PublicTrackingView.as_view(), name="public-track"),
     path("public/orders", PublicOrderIntakeView.as_view(), name="public-order-intake"),
     path("workbench", WorkbenchView.as_view(), name="workbench"),
+    path("lookup", LookupView.as_view(), name="lookup"),
     path("integrations/status", IntegrationStatusView.as_view(), name="integration-status"),
     *_driver_portal_urls(),
 ]

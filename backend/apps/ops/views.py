@@ -1185,6 +1185,15 @@ class IntegrationStatusView(APIView):
         return Response(integration_status())
 
 
+class LookupView(APIView):
+    """全局查单：输入车牌/电话/单号/客户，直接返回实体 + 实时上下文答案卡。"""
+
+    def get(self, request):
+        from .lookup import global_lookup
+
+        return Response(global_lookup(request.query_params.get("q", "")))
+
+
 class WorkbenchView(APIView):
     """个人工作台「我的待办」：按角色聚合当前用户最该处理的事项。"""
 

@@ -387,14 +387,34 @@ export function DispatchBoardPage() {
 
   return (
     <div className="stack dispatch-page">
-      {/* 调度工作流概览条：待派→紧急→临期→执行，一眼定位当前该处理什么 */}
-      <div className="wf-strip">
-        <div className="wf-seg"><span>待派订单</span><b>{wf.pending}</b></div>
-        <button className={`wf-seg wf-clickable${urgentOnly ? " on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} title="仅看紧急">
-          <span>紧急</span><b className={wf.urgent ? "wf-hot" : ""}>{wf.urgent}</b>
-        </button>
-        <div className="wf-seg"><span>临期 / 超时</span><b className={wf.atRisk ? "wf-warn" : ""}>{wf.atRisk}</b></div>
-        <div className="wf-seg"><span>已选待排线</span><b className={wf.picked ? "wf-accent" : ""}>{wf.picked}</b></div>
+      {/* 调度指挥台：待派→紧急→临期→执行，一眼定位当前该处理什么 */}
+      <div className="dispatch-deck">
+        <div className="deck-brand">
+          <div className="deck-brand-ic"><IconTruck size={22} /></div>
+          <div>
+            <div className="deck-title">调度指挥台</div>
+            <div className="deck-sub">{mineOnly ? "我认领的订单" : "全部待派订单"} · 实时刷新 · ↑↓/Enter 键盘直达</div>
+          </div>
+        </div>
+        <div className="deck-metrics">
+          <div className="deck-tile deck-tile-neutral">
+            <div className="deck-tile-ic"><IconTruck size={16} /></div>
+            <div className="deck-tile-body"><b>{wf.pending}</b><span>待派订单</span></div>
+          </div>
+          <button className={`deck-tile deck-tile-hot deck-clickable${urgentOnly ? " on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} title="仅看紧急">
+            <div className="deck-tile-ic"><IconZap size={16} /></div>
+            <div className="deck-tile-body"><b className={wf.urgent ? "num-hot" : ""}>{wf.urgent}</b><span>紧急 {urgentOnly ? "· 已筛" : ""}</span></div>
+            {wf.urgent > 0 && <span className="deck-pulse" aria-hidden />}
+          </button>
+          <div className="deck-tile deck-tile-warn">
+            <div className="deck-tile-ic"><IconAlert size={16} /></div>
+            <div className="deck-tile-body"><b className={wf.atRisk ? "num-warn" : ""}>{wf.atRisk}</b><span>临期 / 超时</span></div>
+          </div>
+          <div className="deck-tile deck-tile-accent">
+            <div className="deck-tile-ic"><IconCheckCircle size={16} /></div>
+            <div className="deck-tile-body"><b className={wf.picked ? "num-accent" : ""}>{wf.picked}</b><span>已选待排线</span></div>
+          </div>
+        </div>
       </div>
       <div className="panel dispatch-board-panel">
         <div className="panel-head">

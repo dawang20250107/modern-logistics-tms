@@ -185,13 +185,16 @@ select {
 .nav-collapsed .nav-collapse-btn .nav-label { display: none; }
 
 /* ── Dispatch pool (compact, dispatcher-tuned) ──────── */
-.dispatch-pool tbody tr.pool-row { cursor: pointer; }
+.dispatch-pool tbody tr.pool-row { cursor: pointer; transition: background var(--speed); }
 .dispatch-pool th, .dispatch-pool td { padding: 8px 14px; }
 .pool-row.row-urgent td:first-child { box-shadow: inset 3px 0 0 var(--red); }
-.pool-row.row-urgent { background: rgba(208,36,44,0.03); }
+.pool-row.row-urgent { background: rgba(208,36,44,0.035); }
+.pool-row.row-urgent:hover { background: rgba(208,36,44,0.07); }
 .pool-row.row-active { background: var(--accent-weak) !important; }
 .pool-row.row-focus { box-shadow: inset 0 0 0 2px var(--accent-weak-2); }
 .pool-row:hover { background: var(--panel-2); }
+/* 锁定态高亮：属于我的一眼可辨 */
+.tag.tag-act { position: relative; }
 
 /* ── Right-click context menu ───────────────────────── */
 .ctx-menu {
@@ -918,6 +921,55 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .wf-hot { color: var(--red) !important; }
 .wf-warn { color: var(--amber) !important; }
 .wf-accent { color: var(--accent) !important; }
+
+/* ── 调度指挥台（#11 调派工作台创意美化）─────────────── */
+.dispatch-deck {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  padding: 16px 20px; border-radius: 14px; border: 1px solid var(--line);
+  background: linear-gradient(135deg, #1b1e25 0%, #16181d 100%);
+  box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
+}
+.dispatch-deck::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(680px 120px at 8% -30%, rgba(75,88,240,0.28), transparent 70%);
+}
+.deck-brand { display: flex; align-items: center; gap: 13px; position: relative; z-index: 1; }
+.deck-brand-ic {
+  width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center;
+  color: #fff; background: linear-gradient(135deg, var(--accent), #6d6ff5);
+  box-shadow: 0 6px 18px -6px rgba(75,88,240,0.7);
+}
+.deck-title { color: #f4f5f8; font-size: 17px; font-weight: 680; letter-spacing: -0.01em; line-height: 1.15; }
+.deck-sub { color: rgba(232,234,240,0.62); font-size: 12px; margin-top: 3px; }
+.deck-metrics { display: flex; gap: 10px; flex-wrap: wrap; position: relative; z-index: 1; }
+.deck-tile {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; min-width: 116px;
+  border-radius: 11px; border: 1px solid rgba(255,255,255,0.09); background: rgba(255,255,255,0.045);
+  position: relative; text-align: left; font: inherit; color: inherit; transition: border-color var(--speed), background var(--speed), transform var(--speed);
+}
+.deck-tile-ic { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #cfd2e0; background: rgba(255,255,255,0.06); flex: none; }
+.deck-tile-body { display: flex; flex-direction: column; line-height: 1.1; }
+.deck-tile-body b { font-size: 21px; font-weight: 700; color: #f4f5f8; letter-spacing: -0.02em; font-variant-numeric: tabular-nums slashed-zero; }
+.deck-tile-body span { font-size: 11.5px; color: rgba(232,234,240,0.6); margin-top: 3px; white-space: nowrap; }
+.deck-tile-hot .deck-tile-ic { color: #ff9ea2; background: rgba(208,36,44,0.18); }
+.deck-tile-warn .deck-tile-ic { color: #ffcf87; background: rgba(214,158,46,0.18); }
+.deck-tile-accent .deck-tile-ic { color: #b9befb; background: rgba(75,88,240,0.22); }
+.deck-clickable { cursor: pointer; }
+.deck-clickable:hover { border-color: rgba(255,255,255,0.28); background: rgba(255,255,255,0.08); }
+.deck-clickable.on { border-color: var(--accent); background: rgba(75,88,240,0.2); }
+.num-hot { color: #ff8f94 !important; }
+.num-warn { color: #ffc978 !important; }
+.num-accent { color: #b9befb !important; }
+.deck-pulse {
+  position: absolute; top: 9px; right: 9px; width: 7px; height: 7px; border-radius: 50%;
+  background: #ff5a5f; box-shadow: 0 0 0 0 rgba(255,90,95,0.6); animation: deck-pulse 1.8s ease-out infinite;
+}
+@keyframes deck-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255,90,95,0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(255,90,95,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,90,95,0); }
+}
+@media (prefers-reduced-motion: reduce) { .deck-pulse { animation: none; } }
 
 /* ── 客服工作台：左建单 · 右客户上下文 ─────────────── */
 .cs-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }

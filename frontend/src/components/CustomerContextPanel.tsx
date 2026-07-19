@@ -37,7 +37,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
       </div>
 
       {/* 关键计数 */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, padding: "12px 16px" }}>
+      <div className="ctx-stats">
         <div className="stat-mini"><div className="stat-mini-n">{c.counts.open}</div><div className="stat-mini-l">未完成</div></div>
         <div className="stat-mini"><div className="stat-mini-n" style={{ color: c.counts.exceptions ? "var(--red)" : undefined }}>{c.counts.exceptions}</div><div className="stat-mini-l">异常</div></div>
         <div className="stat-mini"><div className="stat-mini-n" style={{ color: c.counts.receipt_pending ? "var(--amber)" : undefined }}>{c.counts.receipt_pending}</div><div className="stat-mini-l">回单未返</div></div>
@@ -45,7 +45,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
 
       {/* 授信 */}
       {cr.limit > 0 && (
-        <div style={{ padding: "0 16px 12px" }}>
+        <div className="ctx-sec">
           <div className="muted small" style={{ marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
             <span>授信占用</span>
             <span style={{ color: cr.over_limit ? "var(--red)" : "var(--ink-2)" }}>{money(cr.outstanding)} / {money(cr.limit)}</span>
@@ -59,7 +59,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
 
       {/* 常用线路 */}
       {c.common_routes.length > 0 && (
-        <div style={{ padding: "0 16px 12px" }}>
+        <div className="ctx-sec">
           <div className="section-label" style={{ marginBottom: 6 }}>常用线路</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {c.common_routes.map((r) => <span key={r} className="tag tag-info">{r}</span>)}
@@ -69,7 +69,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
 
       {/* 常用收货地址 */}
       {c.common_deliveries.length > 0 && (
-        <div style={{ padding: "0 16px 12px" }}>
+        <div className="ctx-sec">
           <div className="section-label" style={{ marginBottom: 6 }}>常用收货地址</div>
           <div className="stack" style={{ gap: 4 }}>
             {c.common_deliveries.slice(0, 3).map((a, i) => (
@@ -83,7 +83,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
 
       {/* 未完成订单 */}
       {c.open_orders.length > 0 && (
-        <div style={{ padding: "0 16px 14px" }}>
+        <div className="ctx-sec">
           <div className="section-label" style={{ marginBottom: 6 }}>未完成订单</div>
           <table className="table" style={{ fontSize: 12.5 }}>
             <tbody>

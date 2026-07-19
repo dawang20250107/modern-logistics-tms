@@ -76,85 +76,57 @@ export function DriverPortalPage() {
 
   if (!token) {
     return (
-      <div className="public-page" style={{ background: "#f8fafc", padding: "10vh 20px" }}>
-        <div className="public-card driver-card" style={{ padding: "40px 30px", border: "none", boxShadow: "0 20px 40px rgba(0,0,0,0.08)" }}>
-          <div style={{ textAlign: "center", marginBottom: 30 }}>
-            <div style={{ width: 64, height: 64, background: "var(--grad)", borderRadius: 16, margin: "0 auto 16px", display: "grid", placeItems: "center", fontSize: 32, boxShadow: "0 10px 20px rgba(75,88,240,0.3)" }}></div>
-            <div className="public-brand" style={{ fontSize: 24, letterSpacing: 1 }}>智运 · 司机端</div>
+      <div className="public-page">
+        <div className="public-card driver-card" style={{ padding: "40px 30px" }}>
+          <div className="drv-login-hero">
+            <div className="drv-login-badge" />
+            <div className="public-brand" style={{ fontSize: 24 }}>智运 · 司机端</div>
             <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>手机号 + 身份证后6位 安全登录</p>
           </div>
-          
-          <div className="grid-form" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <label style={{ fontSize: 13, fontWeight: "bold" }}>
-              手机号
-              <input 
-                value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" 
-                placeholder="请输入预留的手机号"
-                style={{ padding: "14px 16px", fontSize: 16, borderRadius: 12, marginTop: 6, background: "#f1f5f9", border: "1px solid transparent" }} 
-              />
+          <div className="drv-login-fields">
+            <label>手机号
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="请输入预留的手机号" />
             </label>
-            <label style={{ fontSize: 13, fontWeight: "bold" }}>
-              身份证后 6 位
-              <input 
-                value={idTail} onChange={(e) => setIdTail(e.target.value)} type="password" 
-                placeholder="请输入身份证最后6位数字"
-                style={{ padding: "14px 16px", fontSize: 16, borderRadius: 12, marginTop: 6, background: "#f1f5f9", border: "1px solid transparent", letterSpacing: 4 }} 
-              />
+            <label>身份证后 6 位
+              <input value={idTail} onChange={(e) => setIdTail(e.target.value)} type="password" placeholder="请输入身份证最后6位数字" style={{ letterSpacing: 4 }} />
             </label>
           </div>
-          <button 
-            className="btn-primary" 
-            style={{ width: "100%", marginTop: 30, padding: 16, fontSize: 16, borderRadius: 12, fontWeight: "bold" }} 
-            disabled={!phone || idTail.length !== 6}
-            onClick={login}
-          >
-            安 全 登 录
-          </button>
+          <button className="btn-primary drv-login-submit" disabled={!phone || idTail.length !== 6} onClick={login}>安全登录</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="public-page" style={{ alignItems: "flex-start", padding: "20px 16px", background: "#f1f5f9" }}>
-      <div className="public-card driver-card" style={{ padding: 0, overflow: "hidden", border: "none", boxShadow: "0 10px 30px rgba(0,0,0,0.06)" }}>
-        {/* 顶部深色司机身份面板 */}
-        <div style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", padding: "24px 20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, border: "2px solid rgba(255,255,255,0.2)" }}>
-               ‍
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 18, fontWeight: "bold", letterSpacing: 1 }}>{tasks?.driver.name}</span>
-                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", fontFamily: "monospace" }}>{tasks?.driver.phone}</span>
+    <div className="public-page" style={{ alignItems: "flex-start" }}>
+      <div className="public-card driver-card" style={{ padding: 0, overflow: "hidden" }}>
+        {/* 顶部司机身份面板 */}
+        <div className="drv-topbar">
+          <div className="cluster-between">
+            <div className="cluster" style={{ gap: 14 }}>
+              <div className="drv-avatar">{tasks?.driver.name?.[0] ?? "司"}</div>
+              <div className="stack-sm" style={{ gap: 4 }}>
+                <span className="drv-name">{tasks?.driver.name}</span>
+                <span className="drv-phone">{tasks?.driver.phone}</span>
               </div>
             </div>
-            <button 
-              className="btn-ghost" 
-              style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", padding: "6px 12px", borderRadius: 20, fontSize: 12 }} 
-              onClick={() => { localStorage.removeItem("driver_token"); setToken(""); setTasks(null); }}
-            >
-              退出
-            </button>
+            <button className="drv-logout" onClick={() => { localStorage.removeItem("driver_token"); setToken(""); setTasks(null); }}>退出</button>
           </div>
         </div>
 
         {/* 任务流与打卡区 */}
-        <div style={{ padding: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: "var(--ink)" }}>在途运输任务</h3>
-            <span className="tag" style={{ background: "rgba(75,88,240,0.1)", color: "var(--brand)", fontWeight: "bold" }}>
-              {tasks?.waybills.length ?? 0} 单进行中
-            </span>
+        <div className="drv-body">
+          <div className="drv-body-head">
+            <h3>在途运输任务</h3>
+            <span className="tag tag-info">{tasks?.waybills.length ?? 0} 单进行中</span>
           </div>
 
           {(tasks?.waybills.length ?? 0) === 0 ? (
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px dashed var(--line-strong)" }}>
+            <div style={{ background: "var(--panel)", borderRadius: 12, border: "1px dashed var(--line-2)" }}>
               <StateView kind="empty" scene="driver-empty" />
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="stack-md">
               {(tasks?.waybills ?? []).map((w) => (
                 <WaybillCard key={w.waybill_no} wb={w} token={token} />
               ))}

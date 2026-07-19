@@ -160,6 +160,8 @@ REST_FRAMEWORK = {
         "driver_login": env("THROTTLE_DRIVER_LOGIN", default="10/min"),
         # 自助注册限流，防批量刷号
         "register": env("THROTTLE_REGISTER", default="10/min"),
+        # 密码找回请求/校验限流，防爆破
+        "password_reset": env("THROTTLE_PASSWORD_RESET", default="8/min"),
         # LLM/Agent 调用单独限额，防 token 成本 DoS
         "ai": env("THROTTLE_AI", default="30/min"),
     },

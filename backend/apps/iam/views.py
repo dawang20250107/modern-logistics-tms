@@ -58,6 +58,8 @@ class MeView(APIView):
                 "nickname": user.nickname,
                 "phone": user.phone,
                 "email": user.email,
+                "avatar_url": request.build_absolute_uri(user.avatar.url) if user.avatar else None,
+                "preferences": user.preferences or {},
                 "is_staff": user.is_staff,
                 "is_superuser": user.is_superuser,
                 "organization_id": str(user.organization_id) if user.organization_id else None,
@@ -72,13 +74,21 @@ class MeView(APIView):
         )
 
     def patch(self, request):
-        """本人资料自助维护：仅昵称/手机号/邮箱。"""
+        """本人资料自助维护：昵称/手机号/邮箱 + 个人偏好（白名单键）。"""
         serializer = ProfileUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         user = request.user
         for field in ("nickname", "phone", "email"):
             if field in serializer.validated_data:
                 setattr(user, field, serializer.validated_data[field])
+        prefs = request.data.get("preferences")
+        if isinstance(prefs, dict):
+            allowed = {"default_route", "table_density", "page_size", "notify_desktop", "notify_email"}
+            merged = {**(user.preferences or {})}
+            for key, value in prefs.items():
+                if key in allowed:
+                    merged[key] = value
+            user.preferences = merged
         user.save()
         return self.get(request)
 

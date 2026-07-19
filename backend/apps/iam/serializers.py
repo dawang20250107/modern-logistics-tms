@@ -226,3 +226,13 @@ class ChangePasswordSerializer(serializers.Serializer):
         if attrs.get("old_password") and attrs.get("old_password") == attrs.get("new_password"):
             raise serializers.ValidationError({"new_password": "新密码不能与当前密码相同"})
         return attrs
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    identifier = serializers.CharField()
+    code = serializers.CharField(max_length=6, min_length=6)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate_new_password(self, value):
+        password_validation.validate_password(value)
+        return value

@@ -14,6 +14,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DataCatalogPage } from "./pages/DataCatalogPage";
 import { DispatchBoardPage } from "./pages/DispatchBoardPage";
 import { ExceptionsPage } from "./pages/ExceptionsPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { FleetPage } from "./pages/FleetPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MonitorPage } from "./pages/MonitorPage";
@@ -35,6 +36,7 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot" element={<ForgotPasswordPage />} />
           <Route path="/track" element={<TrackingPage />} />
           <Route path="/submit" element={<CustomerOrderPage />} />
           <Route path="/driver" element={<DriverPortalPage />} />

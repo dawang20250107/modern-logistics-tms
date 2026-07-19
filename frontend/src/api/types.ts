@@ -6,6 +6,8 @@ export interface CurrentUser {
   nickname: string;
   phone: string;
   email: string;
+  avatar_url: string | null;
+  preferences: UserPreferences;
   is_staff: boolean;
   is_superuser: boolean;
   organization_id: string | null;
@@ -15,6 +17,19 @@ export interface CurrentUser {
   roles: string[];
   role_names: string[];
   permissions: string[];
+}
+
+export interface UserPreferences {
+  default_route?: string;
+  table_density?: "standard" | "compact";
+  page_size?: number;
+  notify_desktop?: boolean;
+  notify_email?: boolean;
+}
+
+export interface AuthMethods {
+  password: boolean;
+  wechat: { enabled: boolean; note: string };
 }
 
 export interface LoginAttemptRow {

@@ -619,6 +619,32 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 @media (max-width: 980px) { .profile-grid { grid-template-columns: 1fr; } }
 
+/* 登录方式切换 tabs */
+.auth-tabs { display: flex; gap: 4px; padding: 3px; background: var(--panel-3); border-radius: var(--radius-sm); margin-bottom: 2px; }
+.auth-tab { flex: 1; padding: 8px; border: none; background: transparent; border-radius: var(--radius-xs); font: inherit; font-size: 13px; font-weight: 550; color: var(--muted); cursor: pointer; transition: background var(--speed), color var(--speed); }
+.auth-tab.on { background: var(--panel); color: var(--ink); box-shadow: var(--shadow-xs); }
+.auth-tab:hover:not(.on) { color: var(--ink-2); }
+
+/* 微信扫码（预留） */
+.wechat-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 14px 0 4px; }
+.wechat-qr { position: relative; padding: 10px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--panel); }
+.wechat-badge { position: absolute; top: -8px; right: -8px; background: var(--amber-weak); color: var(--amber); border: 1px solid var(--amber-line); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.wechat-title { font-weight: 650; font-size: 15px; }
+
+.linkish { background: none; border: none; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; padding: 0; }
+.linkish:hover { text-decoration: underline; }
+.dev-hint { font-size: 12px; color: var(--amber); background: var(--amber-weak); border: 1px solid var(--amber-line); border-radius: var(--radius-sm); padding: 8px 10px; }
+
+/* 个人中心头像上传 */
+.profile-avatar-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; }
+.profile-avatar { position: relative; border: none; padding: 0; overflow: hidden; cursor: pointer; }
+.profile-avatar .profile-avatar-edit {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 0; font-size: 10.5px; font-weight: 600;
+  background: rgba(18,20,26,0.55); color: #fff; opacity: 0; transition: opacity var(--speed);
+}
+.profile-avatar:hover .profile-avatar-edit { opacity: 1; }
+.profile-avatar-remove { font-size: 11.5px; }
+
 /* topbar 账户入口 */
 .topbar-account { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: var(--ink-2); padding: 4px 8px 4px 4px; border-radius: 999px; border: 1px solid transparent; transition: background var(--speed), border-color var(--speed); }
 .topbar-account:hover { background: var(--panel-2); border-color: var(--line); }

@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { ApiError, apiGet } from "../api/client";
 import { fmtDateTime, fmtRelative } from "../api/format";
-import type { LoginAttemptRow } from "../api/types";
+import type { LoginAttemptRow, UserPreferences } from "../api/types";
 import { useAuth } from "../auth/auth";
 import { PasswordField } from "../auth/PasswordField";
 import { passwordStrength } from "../auth/password";
@@ -22,8 +22,19 @@ function initialOf(name: string): string {
   return c.toUpperCase();
 }
 
+const ROUTE_OPTIONS: { value: string; label: string }[] = [
+  { value: "/", label: "运营总览（默认）" },
+  { value: "/intake", label: "客服接单" },
+  { value: "/dispatch-board", label: "调度台" },
+  { value: "/waybills", label: "运单管理" },
+  { value: "/reconciliation", label: "对账中心" },
+  { value: "/dashboard", label: "经营看板" },
+];
+
 export function ProfilePage() {
-  const { user, updateProfile, changePassword } = useAuth();
+  const { user, updateProfile, changePassword, uploadAvatar, removeAvatar } = useAuth();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   // 资料编辑
   const [editing, setEditing] = useState(false);
@@ -38,6 +49,14 @@ export function ProfilePage() {
   const [confirmPwd, setConfirmPwd] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
   const strength = useMemo(() => passwordStrength(newPwd), [newPwd]);
+
+  // 个人偏好
+  const [prefs, setPrefs] = useState<UserPreferences>(user?.preferences ?? {});
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  const prefsDirty = useMemo(
+    () => JSON.stringify(prefs) !== JSON.stringify(user?.preferences ?? {}),
+    [prefs, user?.preferences],
+  );
 
   const history = useQuery({
     queryKey: ["login-history"],
@@ -85,11 +104,65 @@ export function ProfilePage() {
 
   const pwdReady = oldPwd.length > 0 && strength.score >= 2 && newPwd === confirmPwd && confirmPwd.length > 0;
 
+  async function onPickAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast.error("图片过大，请控制在 2MB 内");
+    setAvatarBusy(true);
+    try {
+      await uploadAvatar(file);
+      toast.success("头像已更新");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "上传失败");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function onRemoveAvatar() {
+    setAvatarBusy(true);
+    try {
+      await removeAvatar();
+      toast.success("已移除头像");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "移除失败");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function savePrefs() {
+    setSavingPrefs(true);
+    try {
+      await updateProfile({ preferences: prefs });
+      toast.success("偏好已保存");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "保存失败");
+    } finally {
+      setSavingPrefs(false);
+    }
+  }
+
   return (
     <div className="stack">
       {/* 头部：账户概览 */}
       <div className="panel profile-hero">
-        <div className="profile-avatar">{initialOf(displayName)}</div>
+        <div className="profile-avatar-wrap">
+          <button
+            type="button"
+            className="profile-avatar"
+            onClick={() => fileRef.current?.click()}
+            disabled={avatarBusy}
+            title="点击更换头像"
+            style={user.avatar_url ? { backgroundImage: `url(${user.avatar_url})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+          >
+            {!user.avatar_url && initialOf(displayName)}
+            <span className="profile-avatar-edit">{avatarBusy ? "…" : "更换"}</span>
+          </button>
+          {user.avatar_url && <button type="button" className="linkish profile-avatar-remove" onClick={onRemoveAvatar} disabled={avatarBusy}>移除</button>}
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={onPickAvatar} />
+        </div>
         <div className="profile-id">
           <div className="profile-name">
             {displayName}
@@ -198,6 +271,36 @@ export function ProfilePage() {
                   <span className="muted small">暂无权限点，等待管理员分配角色后生效。</span>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              偏好设置
+              <button className="btn-primary" disabled={savingPrefs || !prefsDirty} onClick={savePrefs}>{savingPrefs ? "保存中…" : "保存"}</button>
+            </div>
+            <div className="stack" style={{ padding: "14px 18px", gap: 14 }}>
+              <label className="field">
+                <span>登录后默认进入</span>
+                <select value={prefs.default_route ?? "/"} onChange={(e) => setPrefs((p) => ({ ...p, default_route: e.target.value }))}>
+                  {ROUTE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+              <label className="field">
+                <span>列表密度</span>
+                <select value={prefs.table_density ?? "standard"} onChange={(e) => setPrefs((p) => ({ ...p, table_density: e.target.value as "standard" | "compact" }))}>
+                  <option value="standard">标准</option>
+                  <option value="compact">紧凑</option>
+                </select>
+              </label>
+              <label className="checkline">
+                <input type="checkbox" checked={prefs.notify_desktop ?? false} onChange={(e) => setPrefs((p) => ({ ...p, notify_desktop: e.target.checked }))} />
+                <span>桌面通知（异常/派单提醒）</span>
+              </label>
+              <label className="checkline">
+                <input type="checkbox" checked={prefs.notify_email ?? false} onChange={(e) => setPrefs((p) => ({ ...p, notify_email: e.target.checked }))} />
+                <span>邮件通知（对账/回单摘要）</span>
+              </label>
             </div>
           </div>
 

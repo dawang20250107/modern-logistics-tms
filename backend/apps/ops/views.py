@@ -458,6 +458,13 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
         return Response(reply_card(self.get_object()))
 
+    @action(detail=True, methods=["get"], url_path="finance-card")
+    def finance_card(self, request, waybill_no=None):
+        """单票财务卡：客户报价/承运商报价/其他费/毛利/异常扣款/是否可对账。"""
+        from apps.finance.services import waybill_finance_card
+
+        return Response(waybill_finance_card(self.get_object()))
+
     @action(detail=False, methods=["post"], url_path="dispatch-plan")
     def dispatch_plan(self, request):
         from .dispatch import plan_dispatch

@@ -377,3 +377,58 @@ def aging_report(direction: str) -> dict:
         result.append(item)
     result.sort(key=lambda x: x["total"], reverse=True)
     return {"direction": direction, "rows": result, "totals": totals}
+
+
+def waybill_finance_card(waybill) -> dict:
+    """单票财务卡：客户报价 / 承运商报价 / 平台服务费 / 预计·实际毛利 /
+    是否可对账（回单满足付款条件、无未决异常扣款）。
+
+    - 应收（客户报价）= 该运单应收费用合计
+    - 应付（承运商报价）= 该运单应付费用合计
+    - 其他（平台服务费/杂费）= 外部费用合计
+    - 毛利 = 应收 − 应付 − 其他
+    - 异常扣款 = 该运单未结异常的责任金额
+    - 可对账 = 回单已回收/核销 且 无未决异常
+    """
+    from django.db.models import Sum
+
+    from apps.ops.models import ExceptionRecord
+
+    def _sum(direction):
+        return float(
+            ExpenseRecord.objects.filter(waybill=waybill, direction=direction)
+            .aggregate(s=Sum("amount")).get("s") or 0
+        )
+
+    receivable = _sum("receivable")
+    payable = _sum("payable")
+    other = _sum("external")
+    gross = round(receivable - payable - other, 2)
+
+    open_exc = ExceptionRecord.objects.filter(waybill=waybill).exclude(status="resolved")
+    exception_deduction = float(open_exc.aggregate(s=Sum("amount")).get("s") or 0)
+    has_open_exception = open_exc.exists()
+
+    receipt_ok = waybill.receipt_status in ("returned", "audited")
+    reconcilable = receipt_ok and not has_open_exception
+
+    blockers = []
+    if not receipt_ok:
+        blockers.append("回单未回收")
+    if has_open_exception:
+        blockers.append("存在未决异常")
+
+    return {
+        "waybill_no": waybill.waybill_no,
+        "customer_name": waybill.customer.name if waybill.customer_id else "散客",
+        "carrier_name": waybill.carrier.name if waybill.carrier_id else "",
+        "receivable": receivable,
+        "payable": payable,
+        "other_fee": other,
+        "gross_margin": gross,
+        "margin_pct": round(gross / receivable, 3) if receivable else None,
+        "exception_deduction": exception_deduction,
+        "receipt_ok": receipt_ok,
+        "reconcilable": reconcilable,
+        "blockers": blockers,
+    }

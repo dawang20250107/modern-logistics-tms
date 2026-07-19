@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { apiGet, apiUpload } from "../api/client";
 import { toast } from "../api/toast";
 import { CarrierCenter } from "../components/CarrierCenter";
+import { DataTable, type DataColumn } from "../components/DataTable";
 import { LanePriceLib } from "../components/LanePriceLib";
+import { StateView } from "../components/StateView";
 import type {
   CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
   ExpiringCredentials, Paginated, Vehicle,
@@ -21,13 +23,16 @@ function daysText(d: number): string {
   return `剩 ${d} 天`;
 }
 
-// ── 主数据列表通用外壳（搜索 + 表格） ─────────────────────────
-function ListPanel<T>({
-  queryKey, url, columns, searchKeys, placeholder,
+// ── 主数据列表通用外壳（搜索 + DataTable 顶尖表格能力） ─────────
+function ResourceTable<T>({
+  queryKey, url, columns, rowKey, viewKey, exportName, searchKeys, placeholder,
 }: {
   queryKey: string;
   url: string;
-  columns: { header: string; render: (row: T) => React.ReactNode; num?: boolean }[];
+  columns: DataColumn<T>[];
+  rowKey: (row: T) => string;
+  viewKey: string;
+  exportName: string;
   searchKeys: (row: T) => string;
   placeholder: string;
 }) {
@@ -46,73 +51,76 @@ function ListPanel<T>({
         <input className="search" style={{ width: 240 }} placeholder={placeholder} value={kw} onChange={(e) => setKw(e.target.value)} />
       </div>
       {q.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" onRetry={() => q.refetch()} />
       ) : rows.length === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无数据。</div>
+        <StateView kind="empty" title={kw ? "没有匹配的记录" : "暂无数据"} hint={kw ? "调整搜索关键词再试。" : undefined} />
       ) : (
-        <table className="table">
-          <thead><tr>{columns.map((c, i) => <th key={i} className={c.num ? "num" : undefined}>{c.header}</th>)}</tr></thead>
-          <tbody>
-            {rows.map((row, ri) => (
-              <tr key={ri}>{columns.map((c, ci) => <td key={ci} className={c.num ? "num" : undefined}>{c.render(row)}</td>)}</tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable<T>
+          columns={columns}
+          rows={rows}
+          rowKey={rowKey}
+          viewKey={viewKey}
+          exportName={exportName}
+          stickyFirst
+          toolbarLeft={<span className="muted small">共 {rows.length} 条 · 点击表头排序 · 「列」增减字段</span>}
+        />
       )}
     </div>
   );
 }
 
+const vehicleColumns: DataColumn<Vehicle>[] = [
+  { key: "plate", header: "车牌", width: 130, alwaysVisible: true, sortValue: (v) => v.plate_no, exportValue: (v) => v.plate_no, render: (v) => <span className="mono">{v.plate_no}</span> },
+  { key: "type", header: "车型", width: 110, sortValue: (v) => v.vehicle_class_label || v.vehicle_type || "", exportValue: (v) => v.vehicle_class_label || v.vehicle_type || "", render: (v) => v.vehicle_class_label || v.vehicle_type || "-" },
+  { key: "body", header: "车厢", width: 90, sortValue: (v) => v.body_type_label || "", exportValue: (v) => v.body_type_label || "", render: (v) => v.body_type_label || "-" },
+  { key: "ton", header: "核载(吨)", width: 100, align: "right", sortValue: (v) => Number(v.load_capacity_ton) || 0, exportValue: (v) => v.load_capacity_ton ?? "", render: (v) => v.load_capacity_ton ?? "-" },
+  { key: "cbm", header: "容积(方)", width: 100, align: "right", sortValue: (v) => Number(v.volume_capacity_cbm) || 0, exportValue: (v) => v.volume_capacity_cbm ?? "", render: (v) => v.volume_capacity_cbm ?? "-" },
+  { key: "owner", header: "归属", width: 120, sortValue: (v) => v.carrier_name || v.dispatch_source_label || "", exportValue: (v) => v.carrier_name || v.dispatch_source_label || "自有", render: (v) => v.carrier_name || (v.dispatch_source_label ?? "自有") },
+  { key: "active", header: "状态", width: 80, sortValue: (v) => (v.is_active ? "1" : "0"), exportValue: (v) => (v.is_active ? "启用" : "停用"), render: (v) => <span className={`tag ${v.is_active ? "tag-low" : "tag-none"}`}>{v.is_active ? "启用" : "停用"}</span> },
+];
 function VehiclesTab() {
   return (
-    <ListPanel<Vehicle>
-      queryKey="rh-vehicles" url="/vehicles?page_size=300" placeholder="搜索车牌 / 车型"
-      searchKeys={(v) => `${v.plate_no} ${v.vehicle_type ?? ""} ${v.carrier_name ?? ""}`}
-      columns={[
-        { header: "车牌", render: (v) => <span className="mono">{v.plate_no}</span> },
-        { header: "车型", render: (v) => v.vehicle_class_label || v.vehicle_type || "-" },
-        { header: "车厢", render: (v) => v.body_type_label || "-" },
-        { header: "核载(吨)", num: true, render: (v) => v.load_capacity_ton ?? "-" },
-        { header: "容积(方)", num: true, render: (v) => v.volume_capacity_cbm ?? "-" },
-        { header: "归属", render: (v) => v.carrier_name || (v.dispatch_source_label ?? "自有") },
-        { header: "状态", render: (v) => <span className={`tag ${v.is_active ? "tag-low" : "tag-none"}`}>{v.is_active ? "启用" : "停用"}</span> },
-      ]}
+    <ResourceTable<Vehicle>
+      queryKey="rh-vehicles" url="/vehicles?page_size=300" placeholder="搜索车牌 / 车型" viewKey="fleet-vehicles" exportName="车辆档案"
+      rowKey={(v) => v.id} searchKeys={(v) => `${v.plate_no} ${v.vehicle_type ?? ""} ${v.carrier_name ?? ""}`} columns={vehicleColumns}
     />
   );
 }
 
+const driverColumns: DataColumn<Driver>[] = [
+  { key: "name", header: "姓名", width: 110, alwaysVisible: true, sortValue: (d) => d.name, exportValue: (d) => d.name, render: (d) => d.name },
+  { key: "phone", header: "电话", width: 130, sortValue: (d) => d.phone || "", exportValue: (d) => d.phone || "", render: (d) => <span className="mono">{d.phone || "-"}</span> },
+  { key: "emp", header: "用工", width: 100, sortValue: (d) => d.employment_label || "", exportValue: (d) => d.employment_label || "", render: (d) => d.employment_label || "-" },
+  { key: "lic", header: "准驾", width: 80, sortValue: (d) => d.license_type || "", exportValue: (d) => d.license_type || "", render: (d) => d.license_type || "-" },
+  { key: "exp", header: "驾照有效期", width: 120, sortValue: (d) => d.license_expiry || "", exportValue: (d) => d.license_expiry || "", render: (d) => d.license_expiry || "-" },
+  { key: "owner", header: "归属", width: 120, sortValue: (d) => d.carrier_name || "", exportValue: (d) => d.carrier_name || "自有", render: (d) => d.carrier_name || "自有" },
+  { key: "active", header: "状态", width: 80, sortValue: (d) => (d.is_active ? "1" : "0"), exportValue: (d) => (d.is_active ? "在职" : "停用"), render: (d) => <span className={`tag ${d.is_active ? "tag-low" : "tag-none"}`}>{d.is_active ? "在职" : "停用"}</span> },
+];
 function DriversTab() {
   return (
-    <ListPanel<Driver>
-      queryKey="rh-drivers" url="/drivers?page_size=300" placeholder="搜索姓名 / 电话"
-      searchKeys={(d) => `${d.name} ${d.phone ?? ""} ${d.carrier_name ?? ""}`}
-      columns={[
-        { header: "姓名", render: (d) => d.name },
-        { header: "电话", render: (d) => <span className="mono">{d.phone || "-"}</span> },
-        { header: "用工", render: (d) => d.employment_label || "-" },
-        { header: "准驾", render: (d) => d.license_type || "-" },
-        { header: "驾照有效期", render: (d) => d.license_expiry || "-" },
-        { header: "归属", render: (d) => d.carrier_name || "自有" },
-        { header: "状态", render: (d) => <span className={`tag ${d.is_active ? "tag-low" : "tag-none"}`}>{d.is_active ? "在职" : "停用"}</span> },
-      ]}
+    <ResourceTable<Driver>
+      queryKey="rh-drivers" url="/drivers?page_size=300" placeholder="搜索姓名 / 电话" viewKey="fleet-drivers" exportName="司机档案"
+      rowKey={(d) => d.id} searchKeys={(d) => `${d.name} ${d.phone ?? ""} ${d.carrier_name ?? ""}`} columns={driverColumns}
     />
   );
 }
 
+const customerColumns: DataColumn<Customer>[] = [
+  { key: "code", header: "编码", width: 110, alwaysVisible: true, sortValue: (c) => c.code, exportValue: (c) => c.code, render: (c) => <span className="mono">{c.code}</span> },
+  { key: "name", header: "客户名称", width: 160, sortValue: (c) => c.name, exportValue: (c) => c.name, render: (c) => c.name },
+  { key: "contact", header: "联系人", width: 100, sortValue: (c) => c.contact_name || "", exportValue: (c) => c.contact_name || "", render: (c) => c.contact_name || "-" },
+  { key: "phone", header: "电话", width: 130, sortValue: (c) => c.contact_phone || "", exportValue: (c) => c.contact_phone || "", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
+  { key: "credit", header: "授信额度", width: 120, align: "right", sortValue: (c) => Number(c.credit_limit) || 0, exportValue: (c) => Number(c.credit_limit) || 0, render: (c) => Number(c.credit_limit) > 0 ? `¥${Number(c.credit_limit).toLocaleString()}` : "不限" },
+  { key: "days", header: "账期(天)", width: 90, align: "right", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => c.credit_days ?? "", render: (c) => c.credit_days },
+  { key: "active", header: "状态", width: 80, sortValue: (c) => (c.is_active ? "1" : "0"), exportValue: (c) => (c.is_active ? "启用" : "停用"), render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
+];
 function CustomersTab() {
   return (
-    <ListPanel<Customer>
-      queryKey="rh-customers" url="/customers?page_size=300" placeholder="搜索编码 / 名称 / 电话"
-      searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`}
-      columns={[
-        { header: "编码", render: (c) => <span className="mono">{c.code}</span> },
-        { header: "客户名称", render: (c) => c.name },
-        { header: "联系人", render: (c) => c.contact_name || "-" },
-        { header: "电话", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
-        { header: "授信额度", num: true, render: (c) => Number(c.credit_limit) > 0 ? `¥${Number(c.credit_limit).toLocaleString()}` : "不限" },
-        { header: "账期(天)", num: true, render: (c) => c.credit_days },
-        { header: "状态", render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
-      ]}
+    <ResourceTable<Customer>
+      queryKey="rh-customers" url="/customers?page_size=300" placeholder="搜索编码 / 名称 / 电话" viewKey="fleet-customers" exportName="客户"
+      rowKey={(c) => c.id} searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`} columns={customerColumns}
     />
   );
 }

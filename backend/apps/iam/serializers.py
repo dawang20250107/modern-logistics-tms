@@ -163,3 +163,66 @@ class AccountHandoverSerializer(serializers.ModelSerializer):
             "disabled_account", "created_at",
         ]
         read_only_fields = fields
+
+
+# ── 自助账户：注册 / 资料 / 改密（个人中心） ─────────────────────
+from django.contrib.auth import get_user_model, password_validation  # noqa: E402
+
+
+class RegisterSerializer(serializers.Serializer):
+    """自助注册：仅创建基础账号；组织与角色由管理员在组织中台分配（不自授权限）。"""
+
+    username = serializers.CharField(max_length=150)
+    nickname = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+
+    def validate_username(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("用户名不能为空")
+        if get_user_model().objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("该用户名已被占用")
+        return value
+
+    def validate_password(self, value):
+        password_validation.validate_password(value)
+        return value
+
+    def create(self, validated_data):
+        user = get_user_model()(
+            username=validated_data["username"],
+            nickname=validated_data.get("nickname", ""),
+            phone=validated_data.get("phone", ""),
+            is_active=True,
+        )
+        user.set_password(validated_data["password"])
+        user.save()
+        return user
+
+
+class ProfileUpdateSerializer(serializers.Serializer):
+    """本人资料自助维护（仅昵称/手机号/邮箱；不含组织、角色、启停等敏感字段）。"""
+
+    nickname = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate_old_password(self, value):
+        if not self.context["request"].user.check_password(value):
+            raise serializers.ValidationError("当前密码不正确")
+        return value
+
+    def validate_new_password(self, value):
+        password_validation.validate_password(value, self.context["request"].user)
+        return value
+
+    def validate(self, attrs):
+        if attrs.get("old_password") and attrs.get("old_password") == attrs.get("new_password"):
+            raise serializers.ValidationError({"new_password": "新密码不能与当前密码相同"})
+        return attrs

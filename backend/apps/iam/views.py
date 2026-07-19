@@ -26,6 +26,7 @@ from .serializers import (
     EmployeeSerializer,
     OrganizationSerializer,
     PermissionSerializer,
+    ProfileUpdateSerializer,
     RoleAssignmentSerializer,
     RoleSerializer,
     ServiceAreaSerializer,
@@ -47,20 +48,39 @@ class MeView(APIView):
         roles = list(
             user.role_assignments.select_related("role").values_list("role__code", flat=True).distinct()
         )
+        role_names = list(
+            user.role_assignments.select_related("role").values_list("role__name", flat=True).distinct()
+        )
         return Response(
             {
                 "id": str(user.id),
                 "username": user.username,
                 "nickname": user.nickname,
                 "phone": user.phone,
+                "email": user.email,
                 "is_staff": user.is_staff,
                 "is_superuser": user.is_superuser,
                 "organization_id": str(user.organization_id) if user.organization_id else None,
+                "organization_name": user.organization.name if user.organization_id else None,
+                "date_joined": user.date_joined,
+                "last_login": user.last_login,
                 "roles": roles,
+                "role_names": role_names,
                 # 前端据此收敛导航与操作入口（超管为 ["*"]）
                 "permissions": sorted(effective_permissions(user)),
             }
         )
+
+    def patch(self, request):
+        """本人资料自助维护：仅昵称/手机号/邮箱。"""
+        serializer = ProfileUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        for field in ("nickname", "phone", "email"):
+            if field in serializer.validated_data:
+                setattr(user, field, serializer.validated_data[field])
+        user.save()
+        return self.get(request)
 
 
 class OrganizationViewSet(viewsets.ModelViewSet):

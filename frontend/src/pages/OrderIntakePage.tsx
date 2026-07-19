@@ -7,12 +7,14 @@ import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type { Order, OrderChannel, Paginated } from "../api/types";
 import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
+import { CustomerContextPanel } from "../components/CustomerContextPanel";
 import { EmptyState } from "../components/EmptyState";
 import { OrderLifecycle } from "../components/OrderLifecycle";
 import { StructuredOrderForm } from "../components/StructuredOrderForm";
 
 export function OrderIntakePage() {
   const queryClient = useQueryClient();
+  const [ctxCustomer, setCtxCustomer] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -76,7 +78,10 @@ export function OrderIntakePage() {
   return (
     <div className="stack">
       <OrderLifecycle />
-      <StructuredOrderForm onCreated={invalidate} />
+      <div className="cs-workbench">
+        <StructuredOrderForm onCreated={invalidate} onCustomerChange={setCtxCustomer} />
+        <CustomerContextPanel customerId={ctxCustomer} />
+      </div>
 
       <div className="panel">
         <div className="panel-head">

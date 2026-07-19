@@ -71,7 +71,7 @@ const CHANNEL_META: Record<string, { icon: string; hint: string; sourcePlacehold
 const emptyCargo = (): OrderCargoItem => ({ name: "", quantity: "", weight_ton: "", volume_cbm: "", package_type: "", temperature_range: "", remark: "" });
 const emptyStop = (t: "pickup" | "delivery"): OrderStop => ({ stop_type: t, city: "", address: "", contact_name: "", contact_phone: "", expected_start: "", expected_end: "", cargo_note: "" });
 
-export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
+export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated: () => void; onCustomerChange?: (id: string) => void }) {
   const [activeMode, setActiveMode] = useState<"standard" | "ai" | "batch">("standard");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [cargo, setCargo] = useState<OrderCargoItem[]>([emptyCargo()]);
@@ -470,7 +470,7 @@ export function StructuredOrderForm({ onCreated }: { onCreated: () => void }) {
                 </select>
               </label>
               <label>签约客户
-                <select value={form.customer} onChange={(e) => set("customer", e.target.value)}>
+                <select value={form.customer} onChange={(e) => { set("customer", e.target.value); onCustomerChange?.(e.target.value); }}>
                   <option value="">选择签约客户（可选）</option>
                   {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>

@@ -680,6 +680,28 @@ export interface Carrier {
   expiry_alerts?: CarrierExpiryAlert[];
   performance?: CarrierPerformance | null;
 }
+export interface CustomerAddrRow { address: string; contact_name: string; contact_phone: string; count: number }
+export interface CustomerOrderBrief {
+  order_no: string; status: string; status_label: string; route: string; cargo: string;
+  quoted_amount: number; created_at: string | null;
+}
+export interface CustomerContext {
+  customer_id: string; name: string;
+  profile: { settlement_type: string; credit_limit: number; credit_days: number; billing_day: number };
+  credit: { limit: number; outstanding: number; available: number | null; used_pct: number | null; over_limit: boolean };
+  common_routes: string[];
+  common_pickups: CustomerAddrRow[];
+  common_deliveries: CustomerAddrRow[];
+  recent_orders: CustomerOrderBrief[];
+  open_orders: CustomerOrderBrief[];
+  counts: { total: number; open: number; exceptions: number; receipt_pending: number };
+}
+export interface ReplyCardData {
+  waybill_no: string; route: string; status: string; status_label: string;
+  driver_name: string; driver_phone: string; plate_no: string;
+  latest_node: { node: string; at: string | null } | null;
+  eta: string | null; receipt_status: string; exception: string | null; copy_text: string;
+}
 export interface CarrierLanePrice {
   id: string; carrier: string; carrier_name?: string;
   origin_city: string; dest_city: string; vehicle_type?: string; vehicle_length_m?: number | string;

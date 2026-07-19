@@ -7,6 +7,7 @@ import { confirmAction } from "../api/confirm";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
+import { ReplyCard } from "../components/ReplyCard";
 
 const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
 const FILTER_KEY = "waybills.filters.v1";
@@ -507,6 +508,9 @@ export function WaybillsPage() {
                   <div><span>应付 / 成本</span><b className="num">{drawerWaybill.payable_amount ? `¥${drawerWaybill.payable_amount.toLocaleString()}` : "—"}</b></div>
                   <div><span>代收货款</span><b className="num" style={{ color: Number(drawerWaybill.cod_amount) > 0 ? "var(--amber)" : undefined }}>{Number(drawerWaybill.cod_amount) > 0 ? `¥${Number(drawerWaybill.cod_amount).toLocaleString()}` : "—"}</b></div>
                 </div>
+
+                <div className="section-label">客户回复</div>
+                <ReplyCard waybillNo={drawerWaybill.waybill_no} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 10, padding: "14px 18px", borderTop: "1px solid var(--line)" }}>

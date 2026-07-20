@@ -8,6 +8,7 @@ import { toast } from "../api/toast";
 import { COD_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { CopyCode } from "../components/CopyCode";
+import { StateView } from "../components/StateView";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
 const fmt = fmtDateTime;
@@ -215,7 +216,7 @@ export function WaybillDetailPage() {
     },
   });
 
-  if (detail.isLoading) return <div className="muted" style={{ padding: 40, textAlign: "center" }}>加载中…</div>;
+  if (detail.isLoading) return <StateView kind="loading" />;
   if (detail.isError || !detail.data) return <div className="muted" style={{ padding: 40, textAlign: "center" }}>运单不存在或无权访问。</div>;
   
   const w = detail.data;
@@ -314,7 +315,7 @@ export function WaybillDetailPage() {
             ) : traj.data ? (
               <TrajectoryMap traj={traj.data} />
             ) : (
-              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>暂无轨迹数据。</div>
+              <StateView kind="empty" title="暂无轨迹数据" hint="车辆定位上报后将在此显示轨迹。" compact />
             )}
             
             {w.stops && w.stops.length > 0 && (
@@ -416,7 +417,7 @@ export function WaybillDetailPage() {
             <div className="panel-head" style={{ background: "rgba(139,92,246,0.06)", color: "var(--violet)", borderBottomColor: "var(--violet)" }}>
               AI 建议            </div>
             {w.agent_suggestions.length === 0 ? (
-              <div className="muted small" style={{ padding: 24, textAlign: "center" }}>暂无建议</div>
+              <StateView kind="empty" title="暂无建议" compact />
             ) : (
               <ul className="suggestions" style={{ padding: "12px 18px" }}>
                 {w.agent_suggestions.map((s) => (
@@ -557,7 +558,7 @@ export function WaybillDetailPage() {
               </div>
 
               {(receipts.data?.items ?? []).length === 0 ? (
-                <div className="muted small" style={{ textAlign: "center", padding: "10px 0" }}>暂无电子回单</div>
+                <StateView kind="empty" title="暂无电子回单" hint="司机上传回单后在此查看。" compact />
               ) : (
                 <div className="stack" style={{ gap: 8 }}>
                   {(receipts.data?.items ?? []).map((r) => (

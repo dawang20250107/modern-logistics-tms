@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { API_BASE_URL } from "../api/client";
 import { fmtMoney } from "../api/format";
+import { useModalA11y } from "../api/useModalA11y";
 import { toast } from "../api/toast";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
@@ -43,6 +44,8 @@ export function DriverPortalPage() {
   const [idTail, setIdTail] = useState("");
   const [tasks, setTasks] = useState<Tasks | null>(null);
   const [active, setActive] = useState<Reminder | null>(null);
+  const cmdRef = useRef<HTMLDivElement>(null);
+  useModalA11y(Boolean(active), cmdRef, () => setActive(null));
 
   const loadTasks = useCallback(async (tk: string) => {
     try {
@@ -146,8 +149,8 @@ export function DriverPortalPage() {
         const lv = CMD_LEVEL[active.level ?? "important"] ?? CMD_LEVEL.important;
         return (
           <div className="driver-modal-mask" style={{ backdropFilter: "blur(4px)" }}>
-            <div className="driver-modal" style={{ padding: 0, overflow: "hidden" }}>
-              <div style={{ background: lv.grad, color: "#fff", padding: "20px 24px" }}>
+            <div ref={cmdRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`调度指令 ${lv.tag}`} className="driver-modal" style={{ padding: 0, overflow: "hidden" }}>
+              <div style={{ background: lv.grad, color: "var(--hero-ink)", padding: "20px 24px" }}>
                 <div className="driver-modal-title" style={{ color: "#fff", display: "flex", alignItems: "center", gap: 8 }}>
                   调度中心 · {lv.tag}
                 </div>

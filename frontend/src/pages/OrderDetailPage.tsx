@@ -326,7 +326,7 @@ export function OrderDetailPage() {
               </label>
             </div>
             {o.attachments.length === 0 ? (
-              <div className="muted small" style={{ padding: 16 }}>暂无附件</div>
+              <StateView kind="empty" title="暂无附件" hint="上传合同 / 磅单 / 回单等文件后在此查看。" compact />
             ) : (
               <div className="table-wrap">
               <table className="table">

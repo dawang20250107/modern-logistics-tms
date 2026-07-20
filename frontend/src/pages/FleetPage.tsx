@@ -97,10 +97,10 @@ function ResourceTable<T>({
 
 const vehicleColumns: DataColumn<Vehicle>[] = [
   { key: "plate", header: "车牌", width: 130, alwaysVisible: true, sortField: "plate_no", sortValue: (v) => v.plate_no, exportValue: (v) => v.plate_no, render: (v) => <span className="mono">{v.plate_no}</span> },
-  { key: "type", header: "车型", width: 110, sortField: "vehicle_type", sortValue: (v) => v.vehicle_class_label || v.vehicle_type || "", exportValue: (v) => v.vehicle_class_label || v.vehicle_type || "", render: (v) => v.vehicle_class_label || v.vehicle_type || "-" },
-  { key: "body", header: "车厢", width: 90, sortValue: (v) => v.body_type_label || "", exportValue: (v) => v.body_type_label || "", render: (v) => v.body_type_label || "-" },
-  { key: "ton", header: "核载(吨)", width: 100, align: "right", sortField: "load_capacity_ton", sortValue: (v) => Number(v.load_capacity_ton) || 0, exportValue: (v) => v.load_capacity_ton ?? "", render: (v) => v.load_capacity_ton ?? "-" },
-  { key: "cbm", header: "容积(方)", width: 100, align: "right", sortField: "volume_capacity_cbm", sortValue: (v) => Number(v.volume_capacity_cbm) || 0, exportValue: (v) => v.volume_capacity_cbm ?? "", render: (v) => v.volume_capacity_cbm ?? "-" },
+  { key: "type", header: "车型", width: 110, sortField: "vehicle_type", sortValue: (v) => v.vehicle_class_label || v.vehicle_type || "", exportValue: (v) => v.vehicle_class_label || v.vehicle_type || "", render: (v) => v.vehicle_class_label || v.vehicle_type || "—" },
+  { key: "body", header: "车厢", width: 90, sortValue: (v) => v.body_type_label || "", exportValue: (v) => v.body_type_label || "", render: (v) => v.body_type_label || "—" },
+  { key: "ton", header: "核载(吨)", width: 100, align: "right", sortField: "load_capacity_ton", sortValue: (v) => Number(v.load_capacity_ton) || 0, exportValue: (v) => v.load_capacity_ton ?? "", render: (v) => v.load_capacity_ton ?? "—" },
+  { key: "cbm", header: "容积(方)", width: 100, align: "right", sortField: "volume_capacity_cbm", sortValue: (v) => Number(v.volume_capacity_cbm) || 0, exportValue: (v) => v.volume_capacity_cbm ?? "", render: (v) => v.volume_capacity_cbm ?? "—" },
   { key: "owner", header: "归属", width: 120, sortField: "owner_name", sortValue: (v) => v.carrier_name || v.dispatch_source_label || "", exportValue: (v) => v.carrier_name || v.dispatch_source_label || "自有", render: (v) => v.carrier_name || (v.dispatch_source_label ?? "自有") },
   { key: "active", header: "状态", width: 80, sortField: "is_active", sortValue: (v) => (v.is_active ? "1" : "0"), exportValue: (v) => (v.is_active ? "启用" : "停用"), render: (v) => <span className={`tag ${v.is_active ? "tag-low" : "tag-none"}`}>{v.is_active ? "启用" : "停用"}</span> },
 ];
@@ -125,10 +125,10 @@ function VehiclesTab() {
 const DRIVER_EMP_LABEL: Record<string, string> = { employee: "自有员工", outsourced: "外协外调", carrier_driver: "承运商司机", temp: "临时" };
 const driverColumns: DataColumn<Driver>[] = [
   { key: "name", header: "姓名", width: 110, alwaysVisible: true, sortField: "name", sortValue: (d) => d.name, exportValue: (d) => d.name, render: (d) => d.name },
-  { key: "phone", header: "电话", width: 130, sortField: "phone", sortValue: (d) => d.phone || "", exportValue: (d) => d.phone || "", render: (d) => <span className="mono">{d.phone || "-"}</span> },
-  { key: "emp", header: "用工", width: 100, sortField: "employment_type", sortValue: (d) => d.employment_label || "", exportValue: (d) => d.employment_label || "", render: (d) => d.employment_label || "-" },
-  { key: "lic", header: "准驾", width: 80, sortField: "license_type", sortValue: (d) => d.license_type || "", exportValue: (d) => d.license_type || "", render: (d) => d.license_type || "-" },
-  { key: "exp", header: "驾照有效期", width: 120, sortField: "license_expiry", sortValue: (d) => d.license_expiry || "", exportValue: (d) => d.license_expiry || "", render: (d) => d.license_expiry || "-" },
+  { key: "phone", header: "电话", width: 130, sortField: "phone", sortValue: (d) => d.phone || "", exportValue: (d) => d.phone || "", render: (d) => <span className="mono">{d.phone || "—"}</span> },
+  { key: "emp", header: "用工", width: 100, sortField: "employment_type", sortValue: (d) => d.employment_label || "", exportValue: (d) => d.employment_label || "", render: (d) => d.employment_label || "—" },
+  { key: "lic", header: "准驾", width: 80, sortField: "license_type", sortValue: (d) => d.license_type || "", exportValue: (d) => d.license_type || "", render: (d) => d.license_type || "—" },
+  { key: "exp", header: "驾照有效期", width: 120, sortField: "license_expiry", sortValue: (d) => d.license_expiry || "", exportValue: (d) => d.license_expiry || "", render: (d) => d.license_expiry || "—" },
   { key: "owner", header: "归属", width: 120, sortField: "owner_name", sortValue: (d) => d.carrier_name || "", exportValue: (d) => d.carrier_name || "自有", render: (d) => d.carrier_name || "自有" },
   { key: "active", header: "状态", width: 80, sortField: "is_active", sortValue: (d) => (d.is_active ? "1" : "0"), exportValue: (d) => (d.is_active ? "在职" : "停用"), render: (d) => <span className={`tag ${d.is_active ? "tag-low" : "tag-none"}`}>{d.is_active ? "在职" : "停用"}</span> },
 ];
@@ -158,8 +158,8 @@ const customerColumns: DataColumn<Customer>[] = [
   { key: "name", header: "客户名称", width: 160, sortField: "name", sortValue: (c) => c.name, exportValue: (c) => c.name, render: (c) => c.name },
   { key: "level", header: "等级", width: 70, sortField: "level", sortValue: (c) => c.level || "B", exportValue: (c) => c.level || "B", render: (c) => <span className={`tag ${CUST_LEVEL_TONE[c.level || "B"] ?? "tag-none"}`} title={c.level_label}>{c.level || "B"}</span> },
   { key: "category", header: "分类", width: 80, sortField: "category", sortValue: (c) => c.category || "", exportValue: (c) => CUST_CATEGORY_LABEL[c.category || ""] ?? c.category ?? "", render: (c) => CUST_CATEGORY_LABEL[c.category || "enterprise"] ?? "企业" },
-  { key: "contact", header: "联系人", width: 100, sortField: "contact_name", sortValue: (c) => c.contact_name || "", exportValue: (c) => c.contact_name || "", render: (c) => c.contact_name || "-" },
-  { key: "phone", header: "电话", width: 130, sortField: "contact_phone", sortValue: (c) => c.contact_phone || "", exportValue: (c) => c.contact_phone || "", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
+  { key: "contact", header: "联系人", width: 100, sortField: "contact_name", sortValue: (c) => c.contact_name || "", exportValue: (c) => c.contact_name || "", render: (c) => c.contact_name || "—" },
+  { key: "phone", header: "电话", width: 130, sortField: "contact_phone", sortValue: (c) => c.contact_phone || "", exportValue: (c) => c.contact_phone || "", render: (c) => <span className="mono">{c.contact_phone || "—"}</span> },
   { key: "credit", header: "授信额度", width: 120, align: "right", sortField: "credit_limit", sortValue: (c) => Number(c.credit_limit) || 0, exportValue: (c) => Number(c.credit_limit) || 0, render: (c) => Number(c.credit_limit) > 0 ? fmtMoney(c.credit_limit) : "不限" },
   { key: "days", header: "账期(天)", width: 90, align: "right", sortField: "credit_days", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => c.credit_days ?? "", render: (c) => c.credit_days },
   { key: "active", header: "状态", width: 80, sortField: "is_active", sortValue: (c) => (c.is_active ? "1" : "0"), exportValue: (c) => (c.is_active ? "启用" : "停用"), render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
@@ -260,9 +260,9 @@ function CredentialLibrary() {
                 <tr key={c.id}>
                   <td>{c.cred_type_label}</td>
                   <td className="small">{c.side_label}</td>
-                  <td className="small">{c.holder_name || "-"}</td>
-                  <td className="small">{c.cert_no || "-"}</td>
-                  <td className="small">{c.expiry_date || "-"}</td>
+                  <td className="small">{c.holder_name || "—"}</td>
+                  <td className="small">{c.cert_no || "—"}</td>
+                  <td className="small">{c.expiry_date || "—"}</td>
                   <td><span className={`tag${c.ocr_status === "done" ? " tag-low" : ""}`}>{OCR_STATUS_LABEL[c.ocr_status] ?? c.ocr_status}</span></td>
                   <td>{c.file_display ? <a className="link small" href={c.file_display} target="_blank" rel="noreferrer">查看</a> : "-"}</td>
                 </tr>

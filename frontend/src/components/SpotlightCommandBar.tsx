@@ -171,6 +171,12 @@ export function SpotlightCommandBar() {
         setIsOpen(false);
         return;
       }
+      // 焦点陷阱：命令面板仅单输入框驱动，Tab 不应把焦点带到背景
+      if (e.key === "Tab") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        return;
+      }
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) => (results.length ? (prev + 1) % results.length : 0));

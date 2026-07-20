@@ -447,16 +447,16 @@ export function ReconciliationPage() {
               应收应付一体化：总览敞口 → 生成对账单 → 异常审计 → 账龄分析 → 收付款核销闭环。
             </div>
           </div>
-          <div className="recon-tabs">
+          <div className="recon-tabs" role="tablist" aria-label="对账中心视图">
             {([["overview", "对账总览"], ["statements", "对账单台账"], ["aging", "账龄分析"], ["settle", "收付款核销"]] as const).map(([k, label]) => (
-              <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleQueue.length > 0 ? <span className="recon-badge">{settleQueue.length}</span> : null}</button>
+              <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleQueue.length > 0 ? <span className="recon-badge">{settleQueue.length}</span> : null}</button>
             ))}
           </div>
         </div>
       </div>
 
-      {tab === "overview" && <OverviewTab />}
-      {tab === "aging" && <AgingTab />}
+      {tab === "overview" && <div className="tab-fade"><OverviewTab /></div>}
+      {tab === "aging" && <div className="tab-fade"><AgingTab /></div>}
 
       {tab === "statements" && (
         <div className="panel om-panel" style={{ flex: 1 }}>

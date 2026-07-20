@@ -492,6 +492,8 @@ select {
 /* Content transition */
 .content > .stack { animation: fadeUp 200ms cubic-bezier(0.32, 0.72, 0, 1); }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Tab 面板切换轻量淡入（配合 key={tab} 重挂载触发；受全局 reduced-motion 降级）*/
+.tab-fade { animation: fadeUp 220ms cubic-bezier(0.32, 0.72, 0, 1); }
 
 .main { display: flex; flex-direction: column; min-width: 0; height: 100vh; overflow: hidden; }
 .topbar {

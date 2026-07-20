@@ -99,27 +99,29 @@ export function LanePriceLib() {
         <div className="form-section">
           <div className="section-label">新增线路价库条目</div>
           <div className="grid-form">
-            <label>承运商
+            <label>承运商 *
               <select value={form.carrier} onChange={(e) => set("carrier", e.target.value)}>
                 <option value="">选择承运商</option>
                 {(carriers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.city ? ` · ${c.city}` : ""}</option>)}
               </select>
             </label>
-            <label>起点城市<input value={form.origin_city} onChange={(e) => set("origin_city", e.target.value)} placeholder="如 上海" /></label>
-            <label>终点城市<input value={form.dest_city} onChange={(e) => set("dest_city", e.target.value)} placeholder="如 杭州" /></label>
+            <label>起点城市 *<input value={form.origin_city} onChange={(e) => set("origin_city", e.target.value)} placeholder="如 上海" /></label>
+            <label>终点城市 *<input value={form.dest_city} onChange={(e) => set("dest_city", e.target.value)} placeholder="如 杭州" /></label>
             <label>车型<input value={form.vehicle_type} onChange={(e) => set("vehicle_type", e.target.value)} placeholder="如 高栏/厢式" /></label>
-            <label>车长(米)<input value={form.vehicle_length_m} onChange={(e) => set("vehicle_length_m", e.target.value)} placeholder="如 13" /></label>
-            <label>标准价<input value={form.standard_price} onChange={(e) => set("standard_price", e.target.value)} placeholder="¥" /></label>
-            <label>最低价<input value={form.min_price} onChange={(e) => set("min_price", e.target.value)} placeholder="¥" /></label>
-            <label>最高价<input value={form.max_price} onChange={(e) => set("max_price", e.target.value)} placeholder="¥" /></label>
-            <label>最近成交价<input value={form.last_deal_price} onChange={(e) => set("last_deal_price", e.target.value)} placeholder="¥" /></label>
+            <label>车长(米)<input inputMode="decimal" value={form.vehicle_length_m} onChange={(e) => set("vehicle_length_m", e.target.value)} placeholder="如 13" /></label>
+            <label>标准价 *<input inputMode="decimal" value={form.standard_price} onChange={(e) => set("standard_price", e.target.value)} placeholder="¥" /></label>
+            <label>最低价<input inputMode="decimal" value={form.min_price} onChange={(e) => set("min_price", e.target.value)} placeholder="¥" /></label>
+            <label>最高价<input inputMode="decimal" value={form.max_price} onChange={(e) => set("max_price", e.target.value)} placeholder="¥" /></label>
+            <label>最近成交价<input inputMode="decimal" value={form.last_deal_price} onChange={(e) => set("last_deal_price", e.target.value)} placeholder="¥" /></label>
             <label className="check-label"><input type="checkbox" checked={form.is_preferred} onChange={(e) => set("is_preferred", e.target.checked)} />常用</label>
             <label className="check-label"><input type="checkbox" checked={form.is_recommended} onChange={(e) => set("is_recommended", e.target.checked)} />推荐</label>
             <label>备注<input value={form.note} onChange={(e) => set("note", e.target.value)} placeholder="议价空间 / 排队风险等" /></label>
           </div>
           <div className="form-actions">
-            <button className="btn-primary" disabled={!canSubmit || create.isPending} onClick={() => create.mutate()}>{create.isPending ? "保存中…" : "保存"}</button>
+            <button className="btn-primary" disabled={!canSubmit || create.isPending} onClick={() => create.mutate()}
+              title={canSubmit ? "保存线路价" : "请补全：承运商 / 起点 / 终点 / 标准价"}>{create.isPending ? "保存中…" : "保存"}</button>
             <button className="btn-ghost" onClick={() => { setForm({ ...BLANK }); setAdding(false); }}>取消</button>
+            {!canSubmit && <span className="muted small" style={{ alignSelf: "center", color: "var(--amber)" }}>▸ 带 * 为必填：承运商 / 起点 / 终点 / 标准价</span>}
           </div>
         </div>
       )}

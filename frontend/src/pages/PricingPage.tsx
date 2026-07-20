@@ -72,8 +72,8 @@ export function PricingPage() {
   });
   const patch = useMutation({
     mutationFn: (v: { id: string; is_active: boolean }) => apiPatch(`/finance/pricing-rules/${v.id}`, { is_active: v.is_active }),
-    onSuccess: invalidate,
-    meta: { silent: true },
+    onSuccess: (_d, v) => { invalidate(); toast.success(v.is_active ? "规则已启用" : "规则已停用"); },
+    onError: (e: Error) => toast.error(e.message || "切换失败，请重试"),
   });
   const remove = useMutation({
     mutationFn: (id: string) => apiDelete(`/finance/pricing-rules/${id}`),
@@ -149,7 +149,7 @@ export function PricingPage() {
           </div>
         </div>
         <div className="form-actions">
-          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
+          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
             {editing ? "保存修改" : "新增规则"}
           </button>
           {editing && <button className="btn-ghost" onClick={reset}>取消编辑</button>}

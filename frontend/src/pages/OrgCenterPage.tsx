@@ -155,7 +155,7 @@ function OrgCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void
         <label>负责人<input value={form.manager_name} onChange={(e) => set("manager_name", e.target.value)} placeholder="负责人姓名" /></label>
       </div>
       <div className="form-actions">
-        <button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()}>新增组织</button>
+        <button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()} title={!form.code ? "请填写编码" : !form.name ? "请填写名称" : undefined}>新增组织</button>
       </div>
     </div>
   );
@@ -227,7 +227,7 @@ function EmployeeCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () =>
         <label>职位<input value={form.position} onChange={(e) => set("position", e.target.value)} placeholder="如 调度专员" /></label>
       </div>
       <div className="form-actions">
-        <button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()}>新增员工</button>
+        <button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()} title={!form.employee_no ? "请填写工号" : !form.name ? "请填写姓名" : undefined}>新增员工</button>
       </div>
     </div>
   );
@@ -532,7 +532,7 @@ function AreaCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => voi
         <label>优先级<input type="number" placeholder="数值大者优先" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
       </div>
       <div className="form-actions">
-        <button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()}>新增区划</button>
+        <button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()} title={!org ? "请选择组织" : !regionName ? "请填写区划名称" : undefined}>新增区划</button>
       </div>
     </div>
   );

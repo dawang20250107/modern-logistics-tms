@@ -22,8 +22,10 @@ export function RegionCascader({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey, true); };
   }, [open]);
 
   const label = [value.province, value.city, value.district].filter((x) => x && x !== "市辖区").join(" ");
@@ -68,7 +70,9 @@ export function RegionCascader({
               style={{ padding: "4px 10px", fontSize: 12 }}
               onClick={() => toast.info("地图选址为预留能力：配置高德地图 AMAP_KEY 后可拖拽打点、逆地理编码自动回填省市区。")}
             >
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>📍 地图选址（预留）</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                地图选址（预留）</span>
             </button>
           </div>
         </div>

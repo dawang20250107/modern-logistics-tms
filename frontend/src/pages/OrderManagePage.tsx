@@ -227,7 +227,7 @@ function OrdersTab() {
             <option value="">分派给…</option>
             {(dispatchers.data?.dispatchers ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
-          <button className="btn-ghost" disabled={!assignTo || assign.isPending} onClick={() => assign.mutate({ ids: [...selected], dispatcher: assignTo })}>分单</button>
+          <button className="btn-ghost" disabled={!assignTo || assign.isPending} onClick={() => assign.mutate({ ids: [...selected], dispatcher: assignTo })} title={!assignTo ? "请先选择调度员" : "分给所选调度员"}>分单</button>
         </span>
       )}
       <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>取消</button>

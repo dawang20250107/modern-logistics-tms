@@ -369,6 +369,12 @@ export function DispatchBoardPage() {
           ? Boolean(suggestion.best_vehicle)
           : Boolean(recCarrierId))
     : false;
+  // 一键派单不可用时的原因（用于按钮 title 与行内提示，避免静默禁用）
+  const oneClickReason = !suggestion ? "请先测算推荐"
+    : suggestion.suggested_dispatch_type === "platform" ? "网货平台需在下方手工指派"
+    : suggestion.suggested_dispatch_type === "own_vehicle" && !suggestion.best_vehicle ? "暂无可用自有车辆"
+    : !recCarrierId && suggestion.suggested_dispatch_type !== "own_vehicle" ? "未匹配到推荐承运商"
+    : "";
 
 
   // 抽屉开合
@@ -893,6 +899,7 @@ export function DispatchBoardPage() {
                           style={{ flex: 1.6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                           disabled={!canOneClick || quickDispatch.isPending || activeGone}
                           onClick={oneClickDispatch}
+                          title={oneClickReason || "按推荐承运商直接落单"}
                         >
                           <IconZap size={14} className="icon-offset"/> {quickDispatch.isPending ? "派单中…" : "一键派单"}
                         </button>
@@ -901,11 +908,12 @@ export function DispatchBoardPage() {
                           style={{ flex: 1 }}
                           disabled={!canOneClick}
                           onClick={adopt}
-                          title="仅填入下方指派表单，便于手工微调"
+                          title={oneClickReason || "仅填入下方指派表单，便于手工微调"}
                         >
                           采纳并微调
                         </button>
                       </div>
+                      {oneClickReason && <div className="muted small" style={{ marginTop: 6, color: "var(--amber)" }}>▸ {oneClickReason}</div>}
                     </div>
 
                     {suggestion.vehicle_candidates.length > 0 && (

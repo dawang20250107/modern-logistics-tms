@@ -56,7 +56,9 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div ref={cardRef} className="modal-card" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
+      <div ref={cardRef} className="modal-card" onClick={(e) => e.stopPropagation()} tabIndex={-1}
+        onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !invalid && !settle.isPending) { e.preventDefault(); settle.mutate(); } }}
+      >
         <div className="modal-head">
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{isAR ? "登记收款核销" : "登记付款核销"}</div>
@@ -72,7 +74,7 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
         <div className="grid-form" style={{ padding: "14px 18px" }}>
           <label>本次{isAR ? "收款" : "付款"}金额
             <div style={{ display: "flex", gap: 6 }}>
-              <input autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
+              <input autoFocus inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
               <button className="btn-ghost" style={{ padding: "0 10px", fontSize: 12 }} onClick={() => setAmount(outstanding.toFixed(2))}>全额</button>
             </div>
           </label>
@@ -85,12 +87,16 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
           <label>凭证/流水号<input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="银行流水号 / 承兑号" /></label>
           <label style={{ gridColumn: "1 / -1" }}>备注<input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="部分付款说明 / 尾款约定等" /></label>
         </div>
+        {amt > outstanding + 0.01 && (
+          <div className="settle-hint" style={{ color: "var(--red)" }}>本次金额超过未结余额 <b>{fmtMoney(outstanding)}</b>，请调整（不可超额核销）。</div>
+        )}
         {amt > 0 && amt < outstanding - 0.01 && (
           <div className="settle-hint">部分核销后仍剩 <b>{fmtMoney(outstanding - amt)}</b> 未结，单据将标记「部分结算」。</div>
         )}
         <div className="modal-actions" style={{ padding: "12px 18px", borderTop: "1px solid var(--line)" }}>
           <button className="btn-ghost" onClick={onClose}>取消</button>
-          <button className="btn-primary" disabled={invalid || settle.isPending} onClick={() => settle.mutate()}>
+          <button className="btn-primary" disabled={invalid || settle.isPending} onClick={() => settle.mutate()}
+            title={amt <= 0 ? "请填写核销金额" : amt > outstanding + 0.01 ? "金额不可超过未结余额" : "Ctrl+Enter 提交"}>
             {settle.isPending ? "核销中…" : `确认${isAR ? "收款" : "付款"}`}
           </button>
         </div>
@@ -485,10 +491,12 @@ export function ReconciliationPage() {
               <label>账期开始<input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
               <label>账期结束<input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
               <label>到期日<input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></label>
-              <label>对方金额<input placeholder="稽核用" value={externalTotal} onChange={(e) => setExternalTotal(e.target.value)} style={{ width: 90 }} /></label>
-              <button className="btn-primary" disabled={!counterpartyId || generate.isPending} onClick={() => generate.mutate()}>
+              <label>对方金额<input inputMode="decimal" placeholder="稽核用" value={externalTotal} onChange={(e) => setExternalTotal(e.target.value)} style={{ width: 90 }} /></label>
+              <button className="btn-primary" disabled={!counterpartyId || generate.isPending} onClick={() => generate.mutate()}
+                title={!counterpartyId ? `请先选择${cpType === "customer" ? "客户" : "承运商"}` : "生成对账单"}>
                 {generate.isPending ? "生成中…" : "生成"}
               </button>
+              {!counterpartyId && <span className="muted small" style={{ alignSelf: "center", color: "var(--amber)" }}>▸ 请先选择对手方</span>}
             </div>
           )}
 

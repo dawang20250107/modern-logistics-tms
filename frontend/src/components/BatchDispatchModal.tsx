@@ -124,7 +124,7 @@ export function BatchDispatchModal({
           <div className="bd-row2">
             <div className="bd-field">
               <label>批次总议定应付（元）</label>
-              <input className="search" value={totalPayable} disabled={allocation === "manual"}
+              <input className="search" inputMode="decimal" value={totalPayable} disabled={allocation === "manual"}
                 onChange={(e) => setTotalPayable(e.target.value)} placeholder={allocation === "manual" ? "逐单填写，自动汇总" : "与承运商议定的总运费"} />
             </div>
             <div className="bd-field">
@@ -150,7 +150,7 @@ export function BatchDispatchModal({
                       <td className="num small">{o.cargo_weight_ton}吨</td>
                       <td className="num">
                         {allocation === "manual" ? (
-                          <input className="search" style={{ width: 96, textAlign: "right", padding: "3px 6px" }}
+                          <input className="search" inputMode="decimal" style={{ width: 96, textAlign: "right", padding: "3px 6px" }}
                             value={manual[o.id] ?? ""} onChange={(e) => setManual((m) => ({ ...m, [o.id]: e.target.value }))} placeholder="0" />
                         ) : <b>{fmtMoney(preview[o.id] ?? 0)}</b>}
                       </td>

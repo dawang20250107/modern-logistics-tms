@@ -5,6 +5,7 @@ import { ApiError } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { PasswordField } from "../auth/PasswordField";
 import { passwordStrength } from "../auth/password";
+import { AuthHero } from "../components/AuthHero";
 
 export function RegisterPage() {
   const { register, user } = useAuth();
@@ -47,22 +48,7 @@ export function RegisterPage() {
 
   return (
     <div className="auth">
-      <aside className="auth-hero">
-        <div className="auth-hero-top">
-          <span className="brand-mark auth-mark">智</span>
-          <span className="auth-logo">智运 TMS</span>
-        </div>
-        <div className="auth-hero-mid">
-          <h1 className="auth-slogan">加入承运协同<br />开启数字化运营</h1>
-          <p className="auth-tagline">注册后由管理员为你分配组织与角色，即可进入对应工作台</p>
-          <ul className="auth-points">
-            <li><span>◆</span>客服 · 调度 · 承运 · 财务多角色协同</li>
-            <li><span>◆</span>权限按岗位收敛，看到的就是你能做的</li>
-            <li><span>◆</span>全程操作留痕，安全合规可追溯</li>
-          </ul>
-        </div>
-        <div className="auth-foot">© 2026 智运 · Modern Logistics TMS</div>
-      </aside>
+      <AuthHero />
       <main className="auth-form-wrap">
         <form className="auth-form" onSubmit={onSubmit}>
           <div className="auth-form-brand">ZHIYUN TMS</div>

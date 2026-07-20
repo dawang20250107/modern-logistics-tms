@@ -107,3 +107,17 @@ export const IconBox = (p: any) => (
 export const IconDragHandle = (p: any) => (
   <BaseIcon {...p}><circle cx="9" cy="5" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="19" r="1" fill="currentColor"/><circle cx="15" cy="5" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="19" r="1" fill="currentColor"/></BaseIcon>
 );
+
+// === State-view icons (line, strokeWidth 1.5) ===
+export const IconInbox = (p: any) => (
+  <BaseIcon {...p}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></BaseIcon>
+);
+export const IconLock = (p: any) => (
+  <BaseIcon {...p}><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></BaseIcon>
+);
+export const IconWifiOff = (p: any) => (
+  <BaseIcon {...p}><line x1="2" x2="22" y1="2" y2="22" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M2 8.82a15 15 0 0 1 4.17-2.65" /><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76" /><path d="M16.85 11.25a10 10 0 0 1 2.22 1.68" /><path d="M5 13a10 10 0 0 1 5.24-2.76" /><line x1="12" x2="12.01" y1="20" y2="20" /></BaseIcon>
+);
+export const IconClock = (p: any) => (
+  <BaseIcon {...p}><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></BaseIcon>
+);

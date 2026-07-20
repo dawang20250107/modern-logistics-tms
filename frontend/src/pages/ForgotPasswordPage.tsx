@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError, apiPost } from "../api/client";
 import { PasswordField } from "../auth/PasswordField";
 import { passwordStrength } from "../auth/password";
+import { AuthHero } from "../components/AuthHero";
 
 interface RequestResult {
   sent: boolean;
@@ -63,22 +64,7 @@ export function ForgotPasswordPage() {
 
   return (
     <div className="auth">
-      <aside className="auth-hero">
-        <div className="auth-hero-top">
-          <span className="brand-mark auth-mark">智</span>
-          <span className="auth-logo">智运 TMS</span>
-        </div>
-        <div className="auth-hero-mid">
-          <h1 className="auth-slogan">找回访问<br />安全重设密码</h1>
-          <p className="auth-tagline">通过绑定的邮箱或手机号验证身份后重设密码</p>
-          <ul className="auth-points">
-            <li><span>◆</span>验证码 10 分钟内有效、一次性使用</li>
-            <li><span>◆</span>不泄露账号是否存在，防撞库枚举</li>
-            <li><span>◆</span>重设即时生效，全端重新登录</li>
-          </ul>
-        </div>
-        <div className="auth-foot">© 2026 智运 · Modern Logistics TMS</div>
-      </aside>
+      <AuthHero />
       <main className="auth-form-wrap">
         {step === 1 ? (
           <form className="auth-form" onSubmit={requestCode}>

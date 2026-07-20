@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/auth";
 import { PasswordField } from "../auth/PasswordField";
+import { AuthHero } from "../components/AuthHero";
 
 const REMEMBER_KEY = "login:remember-username";
 type Method = "password" | "wechat";
@@ -45,22 +46,7 @@ export function LoginPage() {
 
   return (
     <div className="auth">
-      <aside className="auth-hero">
-        <div className="auth-hero-top">
-          <span className="brand-mark auth-mark">智</span>
-          <span className="auth-logo">智运 TMS</span>
-        </div>
-        <div className="auth-hero-mid">
-          <h1 className="auth-slogan">接单 · 调度 · 承运<br />结算一体协同</h1>
-          <p className="auth-tagline">面向 B2B 公路货运的承运商协同型运输管理平台</p>
-          <ul className="auth-points">
-            <li><span>◆</span>客服接单 · 客户上下文一屏直达</li>
-            <li><span>◆</span>调度比价 · 外包 / 网货 / 自营协同派单</li>
-            <li><span>◆</span>在途可视 · 异常闭环 · 回单对账</li>
-          </ul>
-        </div>
-        <div className="auth-foot">© 2026 智运 · Modern Logistics TMS</div>
-      </aside>
+      <AuthHero />
       <main className="auth-form-wrap">
         <div className="auth-form">
           <div className="auth-form-brand">ZHIYUN TMS</div>

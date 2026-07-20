@@ -675,28 +675,29 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .auth { min-height: 100vh; display: grid; grid-template-columns: 1.05fr 1fr; }
 .auth-hero {
   position: relative; overflow: hidden; color: #d7dce6; padding: 48px 56px;
-  display: flex; flex-direction: column; justify-content: space-between;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
   background:
-    radial-gradient(720px 460px at 12% 8%, rgba(75,88,240,0.34), transparent 60%),
-    radial-gradient(680px 460px at 96% 92%, rgba(34,211,238,0.26), transparent 58%),
+    radial-gradient(760px 520px at 50% 34%, rgba(75,88,240,0.32), transparent 62%),
+    radial-gradient(620px 460px at 82% 96%, rgba(34,211,238,0.24), transparent 58%),
     linear-gradient(180deg, #12151c 0%, #0b0d12 100%);
 }
 .auth-hero::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
-  background-size: 40px 40px; -webkit-mask-image: radial-gradient(72% 72% at 50% 35%, #000 0%, transparent 100%); mask-image: radial-gradient(72% 72% at 50% 35%, #000 0%, transparent 100%);
+  background-size: 40px 40px; -webkit-mask-image: radial-gradient(66% 66% at 50% 44%, #000 0%, transparent 100%); mask-image: radial-gradient(66% 66% at 50% 44%, #000 0%, transparent 100%);
 }
-.auth-hero-top, .auth-hero-mid, .auth-foot { position: relative; z-index: 1; }
-.auth-hero-top { display: flex; align-items: center; gap: 12px; }
-.auth-mark { width: 38px; height: 38px; font-size: 18px; border-radius: 10px; }
-.auth-logo { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: 0.01em; }
-.auth-slogan { margin: 0 0 16px; font-size: 40px; font-weight: 700; line-height: 1.18; letter-spacing: -0.02em; color: #fff; }
-.auth-slogan .accent, .auth-slogan b { background: linear-gradient(135deg, #8b96ff, #22d3ee); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.auth-tagline { margin: 0 0 30px; color: #97a2b6; font-size: 14px; letter-spacing: 0.01em; }
-.auth-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 13px; }
-.auth-points li { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #c2cbda; }
-.auth-points li span { font-size: 16px; opacity: 0.9; color: var(--accent); }
-.auth-foot { color: #5a6273; font-size: 12px; letter-spacing: 0.01em; }
+/* 居中门面：高清品牌图标 + 名称 */
+.auth-hero-center { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.auth-logo-mark {
+  width: 108px; height: 108px; border-radius: 28px; display: grid; place-items: center;
+  font-size: 56px; font-weight: 800; color: #fff; background: var(--accent-grad);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.14), 0 18px 50px -12px rgba(34,211,238,0.7), inset 0 2px 0 rgba(255,255,255,0.28);
+}
+.auth-logo-name { font-size: 30px; font-weight: 750; letter-spacing: 0.04em; color: #fff; }
+.auth-logo-name::after {
+  content: ""; display: block; width: 46px; height: 3px; margin: 14px auto 0; border-radius: 2px;
+  background: linear-gradient(90deg, #8b96ff, #22d3ee);
+}
 .auth-form-wrap { display: grid; place-items: center; background: var(--bg); padding: 32px; }
 .auth-form {
   width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-md);
@@ -1485,6 +1486,82 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .ctower .kpi-label { font-size: 12px; }
 .ct-metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ct-period { flex: none; }
+
+/* ═══════ 运输驾驶舱（指挥中心：实用 + 排版美学）═══════ */
+/* 顶部指挥磁贴带：6 列自适应，玻璃卡 + 图标 + 渐变大数字 + 副信息 */
+.ct-hero { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.ct-tile { text-decoration: none; color: inherit; gap: 4px; padding: 13px 15px 12px; }
+.ct-tile:hover { color: inherit; }
+.ct-tile-top { display: flex; align-items: center; gap: 8px; }
+.ct-tile-ic {
+  width: 26px; height: 26px; flex: none; border-radius: 8px; display: grid; place-items: center;
+  color: var(--accent); background: var(--accent-weak); border: 1px solid var(--accent-weak-2);
+}
+.ct-tile .kpi-label { text-transform: none; letter-spacing: 0.01em; font-size: 12px; }
+.ct-tile .kpi-value { font-size: 26px; }
+.ct-tile-sub { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* toned tiles: 图标块随语义色 */
+.ct-tile.kpi-blue .ct-tile-ic { color: var(--blue); background: var(--blue-weak); border-color: var(--blue-line); }
+.ct-tile.kpi-amber .ct-tile-ic { color: var(--amber); background: var(--amber-weak); border-color: var(--amber-line); }
+.ct-tile.kpi-red .ct-tile-ic { color: var(--red); background: var(--red-weak); border-color: var(--red-line); }
+
+/* 主 / 侧 双列布局 */
+.ct-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+.ct-side { gap: 14px; }
+.ct-side-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.ct-sub-label { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); margin-top: 4px; }
+
+/* 运单状态分布：分段条 + 图例 */
+.ct-dist { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.ct-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: var(--panel-3); box-shadow: inset 0 0 0 1px var(--line); }
+.ct-bar-seg { height: 100%; transition: width var(--speed); }
+.ct-bar-seg:not(:last-child) { box-shadow: 1px 0 0 rgba(255,255,255,0.4); }
+.ct-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.ct-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.ct-legend-item b { font-variant-numeric: tabular-nums; color: var(--ink); }
+.ct-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+/* 待办快捷 chips */
+.ct-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ct-chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px; text-decoration: none;
+  font-size: 12.5px; color: var(--ink-2); background: var(--panel-3); border: 1px solid var(--line-2); transition: border-color var(--speed), color var(--speed);
+}
+.ct-chip:hover { border-color: var(--accent-cyan); color: var(--ink); }
+.ct-chip b { font-variant-numeric: tabular-nums; color: var(--accent); }
+.ct-chip-amber b { color: var(--amber); } .ct-chip-blue b { color: var(--blue); } .ct-chip-red b { color: var(--red); }
+
+/* 可点任务行 */
+.ct-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm); text-decoration: none;
+  color: var(--ink-2); transition: background var(--speed);
+}
+.ct-row:hover { background: color-mix(in srgb, var(--accent-cyan) 8%, transparent); }
+.ct-row-no { color: var(--accent); flex: none; }
+.ct-row-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.ct-row-go { color: var(--faint); flex: none; }
+
+/* 财务敞口 */
+.ct-expo { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.ct-expo > div { display: flex; flex-direction: column; gap: 1px; }
+.ct-expo span { font-size: 11.5px; color: var(--muted); }
+.ct-expo b { font-size: 17px; font-weight: 680; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.ct-rank { display: grid; grid-template-columns: 1fr 84px auto; align-items: center; gap: 8px; font-size: 12.5px; }
+.ct-rank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.ct-rank-bar { height: 7px; border-radius: 999px; background: var(--panel-3); overflow: hidden; }
+.ct-rank-bar > span { display: block; height: 100%; background: var(--accent-grad); border-radius: 999px; }
+.ct-rank-val { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* 证件预警行 */
+.ct-cred { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.ct-cred .tag { flex: none; }
+.ct-cred-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+
+@media (max-width: 1100px) {
+  .ct-hero { grid-template-columns: repeat(3, 1fr); }
+  .ct-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) { .ct-hero { grid-template-columns: repeat(2, 1fr); } }
 
 /* ═══════ 服务端表格：固定高度 + 表体内部滚动 + 分页页脚贴底 ═══════ */
 .dt-fill { display: flex; flex-direction: column; flex: 1; min-height: 0; }

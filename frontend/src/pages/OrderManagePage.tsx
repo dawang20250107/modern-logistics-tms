@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiDownload, apiGet, apiPost } from "../api/client";
@@ -14,6 +14,7 @@ import { DataTable, type DataColumn } from "../components/DataTable";
 import { CopyCode } from "../components/CopyCode";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
 import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { useModalA11y } from "../api/useModalA11y";
 import { useServerTable } from "../api/useServerTable";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
@@ -141,12 +142,8 @@ function OrdersTab() {
     enabled: Boolean(drawer),
   });
 
-  useEffect(() => {
-    if (!drawer) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawer]);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  useModalA11y(Boolean(drawer), drawerRef, () => setDrawer(null));
 
   // 台账概览（funnel 服务端聚合，全量计数，不受分页/筛选影响）
   const stats = useMemo(() => {
@@ -314,7 +311,7 @@ function OrdersTab() {
     {/* 订单详情抽屉 */}
     {drawer && (
       <div className="wb-overlay" onClick={() => setDrawer(null)}>
-        <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
+        <div ref={drawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
           <div className="wb-drawer-head">
             <div>
               <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}><CopyCode value={drawer.order_no} /></div>
@@ -432,12 +429,8 @@ function BatchesTab() {
     onError: (e: Error) => toast.error(e.message || "生成对账单失败"),
   });
 
-  useEffect(() => {
-    if (!drawer) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawer]);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  useModalA11y(Boolean(drawer), drawerRef, () => setDrawer(null));
 
   const columns: DataColumn<DispatchBatch>[] = [
     { key: "batch_no", header: "批次号", width: 165, alwaysVisible: true, sortField: "batch_no", sortValue: (b) => b.batch_no, exportValue: (b) => b.batch_no, render: (b) => <span className="mono">{b.batch_no}</span> },
@@ -499,7 +492,7 @@ function BatchesTab() {
 
       {drawer && (
         <div className="wb-overlay" onClick={() => setDrawer(null)}>
-          <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
+          <div ref={drawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
             <div className="wb-drawer-head">
               <div>
                 <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}>{detail.data?.batch_no ?? "批次"}</div>

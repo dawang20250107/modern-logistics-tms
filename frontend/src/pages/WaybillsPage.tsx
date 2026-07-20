@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { apiGet, apiPatch, apiPost } from "../api/client";
@@ -8,6 +8,7 @@ import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
+import { useModalA11y } from "../api/useModalA11y";
 import { useServerTable } from "../api/useServerTable";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { CopyCode } from "../components/CopyCode";
@@ -73,6 +74,8 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [drawerWaybill, setDrawerWaybill] = useState<Waybill | null>(null);
+  const wbDrawerRef = useRef<HTMLDivElement>(null);
+  useModalA11y(Boolean(drawerWaybill), wbDrawerRef, () => setDrawerWaybill(null));
 
   // === 批量选择状态 ===
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -437,7 +440,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
       {/* 双击侧滑详情抽屉（Precision Graphite） */}
       {drawerWaybill && (
         <div className="wb-overlay" onClick={() => setDrawerWaybill(null)}>
-          <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
+          <div ref={wbDrawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
             <div className="wb-drawer-head">
               <div>
                 <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}><CopyCode value={drawerWaybill.waybill_no} /></div>

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { useModalA11y } from "../api/useModalA11y";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type {
@@ -39,6 +40,8 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
   const [ref, setRef] = useState("");
   const [remark, setRemark] = useState("");
   const isAR = statement.direction === "receivable";
+  const cardRef = useRef<HTMLDivElement>(null);
+  useModalA11y(true, cardRef, onClose);
 
   const settle = useMutation({
     mutationFn: () => apiPost(`/finance/statements/${statement.id}/settle`, {
@@ -53,7 +56,7 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div ref={cardRef} className="modal-card" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
         <div className="modal-head">
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{isAR ? "登记收款核销" : "登记付款核销"}</div>
@@ -69,7 +72,7 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
         <div className="grid-form" style={{ padding: "14px 18px" }}>
           <label>本次{isAR ? "收款" : "付款"}金额
             <div style={{ display: "flex", gap: 6 }}>
-              <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
+              <input autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
               <button className="btn-ghost" style={{ padding: "0 10px", fontSize: 12 }} onClick={() => setAmount(outstanding.toFixed(2))}>全额</button>
             </div>
           </label>

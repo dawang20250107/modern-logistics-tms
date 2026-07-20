@@ -1,8 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 
 import { apiPost } from "../api/client";
 import { toast } from "../api/toast";
+import { useModalA11y } from "../api/useModalA11y";
 import type { Order } from "../api/types";
 
 // 人工登记异常类型（与后端 EXCEPTION_TYPE_CHOICES 人工部分对齐）
@@ -24,12 +25,8 @@ export function ExceptionRegisterModal({
   const [excType, setExcType] = useState("transit_delay");
   const [level, setLevel] = useState("medium");
   const [desc, setDesc] = useState("");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useModalA11y(true, cardRef, onClose);
 
   const submit = useMutation({
     mutationFn: () => apiPost(`/orders/${order.id}/report-exception`, {
@@ -41,7 +38,7 @@ export function ExceptionRegisterModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" style={{ width: "min(460px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
+      <div ref={cardRef} className="modal-card" style={{ width: "min(460px, 94vw)" }} onClick={(e) => e.stopPropagation()} tabIndex={-1}>
         <div className="bd-head">
           <div>
             <div className="bd-title">登记异常</div>

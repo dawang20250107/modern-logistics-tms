@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet } from "../api/client";
+import { useModalA11y } from "../api/useModalA11y";
 import { fmtRelative } from "../api/format";
 import type { Order, Paginated } from "../api/types";
 import { BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL } from "../api/types";
@@ -157,12 +158,8 @@ export function OrderIntakePage() {
     queryClient.invalidateQueries({ queryKey: ["cs-order-pool"] });
   };
 
-  useEffect(() => {
-    if (!showCtx) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowCtx(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [showCtx]);
+  const ctxRef = useRef<HTMLDivElement>(null);
+  useModalA11y(showCtx && Boolean(ctxCustomer), ctxRef, () => setShowCtx(false));
 
   return (
     <div className={`stack${tab === "pool" ? " table-page" : ""}`}>
@@ -194,7 +191,7 @@ export function OrderIntakePage() {
 
       {showCtx && ctxCustomer && (
         <div className="modal-overlay" onClick={() => setShowCtx(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div ref={ctxRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="客户上下文" className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <span>客户上下文</span>
               <button className="btn-ghost" onClick={() => setShowCtx(false)}>关闭 [Esc]</button>

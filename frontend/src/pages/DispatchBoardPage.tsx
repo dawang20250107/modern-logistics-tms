@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
 import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
+import { useModalA11y } from "../api/useModalA11y";
 import { useAuth } from "../auth/auth";
 import { BatchDispatchModal } from "../components/BatchDispatchModal";
 import { DataTable, type DataColumn } from "../components/DataTable";
@@ -160,12 +161,9 @@ export function DispatchBoardPage() {
     if (["order_pooled", "order_claimed", "order_dispatched"].includes(e.type)) invalidate();
   });
 
-  // Esc 关闭抽屉（右键菜单由 DataTable 内置管理）
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeWb(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // 抽屉无障碍：焦点陷阱 / Esc 关闭 / 关闭后焦点归还（右键菜单由 DataTable 内置管理）
+  const wbRef = useRef<HTMLElement>(null);
+  useModalA11y(Boolean(active), wbRef, closeWb);
 
   const claim = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/claim`, {}),
@@ -301,6 +299,7 @@ export function DispatchBoardPage() {
       setDispatchType(data.suggested_dispatch_type);
       if (data.best_vehicle) setVehicleId("");
     },
+    onError: (e: Error) => toast.error(e.message || "测算推荐失败，请重试"),
   });
   const recCarrierId = suggestion?.recommendation?.carrier_id ?? suggestion?.best_carrier?.carrier_id ?? "";
   const pickCarrier = (id: string) => { setDispatchType("third_party"); setCarrierId(id); };
@@ -785,7 +784,7 @@ export function DispatchBoardPage() {
       {/* 派单工作台抽屉 */}
       {active && (
         <div className="wb-overlay" onClick={closeWb}>
-          <aside className="wb-drawer" onClick={(e) => e.stopPropagation()}>
+          <aside ref={wbRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="订单派单" className="wb-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="wb-drawer-head">
               <div>
                 <div style={{ fontSize: 15, fontWeight: 650 }}>派单工作台</div>

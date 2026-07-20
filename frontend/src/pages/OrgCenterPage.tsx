@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 
 import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { hasPerm, useAuth } from "../auth/auth";
 import { toast } from "../api/toast";
+import { useModalA11y } from "../api/useModalA11y";
 import type {
   AccountHandover,
   CoverageResult,
@@ -240,12 +241,8 @@ function RoleAssignModal({ emp, onClose }: { emp: Employee; onClose: () => void 
   const current = useQuery({ queryKey: ["emp-roles", emp.id], queryFn: () => apiGet<RoleAssignment[]>(`/org/employees/${emp.id}/roles`) });
   const [sel, setSel] = useState<Set<string> | null>(null);
   const state = sel ?? new Set((current.data ?? []).map((a) => a.role));
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalA11y(true, modalRef, onClose);
 
   const toggle = (id: string) => setSel(() => { const n = new Set(state); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const save = useMutation({
@@ -261,7 +258,7 @@ function RoleAssignModal({ emp, onClose }: { emp: Employee; onClose: () => void 
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
+      <div ref={modalRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="分配角色" className="modal-card" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
         <div className="bd-head">
           <div>
             <div className="bd-title">分配角色</div>

@@ -1426,6 +1426,10 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 /* ── Form density / focus consistency ───────────────── */
 .btn-ghost:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
 input[type="checkbox"] { accent-color: var(--accent); }
+/* 中等宽度（笔记本/平板横）：4 KPI 先降到 2 列，避免被压扁 */
+@media (max-width: 1180px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
 @media (max-width: 760px) {
   .content { padding: 16px; }
   .topbar { padding: 0 14px; }
@@ -1433,6 +1437,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
   .panel-head, .dt-toolbar, .form-row { align-items: flex-start; }
   .search { min-width: 0; width: 100%; }
+}
+@media (max-width: 520px) {
+  .kpi-row { grid-template-columns: 1fr; }
 }
 
 /* ══════════════════ 对账中心（Reconciliation Center） ══════════════════ */

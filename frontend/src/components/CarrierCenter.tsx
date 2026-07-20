@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { apiGet } from "../api/client";
 import { fmtMoney } from "../api/format";
+import { useModalA11y } from "../api/useModalA11y";
 import { useServerTable } from "../api/useServerTable";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
 import { DataTable, type DataColumn } from "./DataTable";
@@ -42,10 +43,12 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
   });
   const c = detail.data;
   const perf = c?.performance;
+  const drawerRef = useRef<HTMLDivElement>(null);
+  useModalA11y(true, drawerRef, onClose);
 
   return (
     <div className="wb-overlay" onClick={onClose}>
-      <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
+      <div ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="承运商详情" className="wb-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="wb-drawer-head">
           <div>
             <div style={{ fontSize: 16, fontWeight: 650, display: "flex", alignItems: "center", gap: 8 }}>

@@ -226,9 +226,9 @@ export function OrderDetailPage() {
             ) : (
               <div className="kv">
                 {kv("线路", `${o.origin} → ${o.destination}`)}
-                {kv("提货地址", o.pickup_address)}
-                {kv("送货地址", o.delivery_address)}
-                {kv("发货联系", `${o.contact_name} ${o.contact_phone}`)}
+                {kv("提货地址", o.pickup_address ? <CopyCode value={o.pickup_address} /> : "—")}
+                {kv("送货地址", o.delivery_address ? <CopyCode value={o.delivery_address} /> : "—")}
+                {kv("发货联系", <span>{o.contact_name} {o.contact_phone ? <CopyCode value={o.contact_phone} /> : ""}</span>)}
               </div>
             )}
           </div>

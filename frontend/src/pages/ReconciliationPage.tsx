@@ -105,7 +105,7 @@ function OverviewTab() {
 
   const StatusChips = ({ s }: { s: StatementOverview["receivable"] }) => (
     <div className="ov-status">
-      <span className="tag tag-medium">草稿 {s.draft}</span>
+      <span className="tag tag-none">草稿 {s.draft}</span>
       <span className="tag tag-info">已确认 {s.confirmed}</span>
       <span className="tag tag-medium">部分 {s.partial}</span>
       <span className="tag tag-low">已结 {s.settled_count}</span>
@@ -119,21 +119,25 @@ function OverviewTab() {
           <div className="ov-label">应收未结（AR）</div>
           <div className="ov-value">{fmtMoney(d.receivable.outstanding)}</div>
           <div className="ov-sub">应收合计 {fmtMoney(d.receivable.total)} · 已收 {(collectRate * 100).toFixed(0)}%</div>
-          <div className="ov-bar"><div style={{ width: `${Math.min(collectRate * 100, 100)}%`, background: "var(--green)" }} /></div>
-          <StatusChips s={d.receivable} />
+          <div className="ov-foot">
+            <div className="ov-bar"><div style={{ width: `${Math.min(collectRate * 100, 100)}%`, background: "var(--green)" }} /></div>
+            <StatusChips s={d.receivable} />
+          </div>
         </div>
         <div className="ov-card ov-ap">
           <div className="ov-label">应付未结（AP）</div>
           <div className="ov-value">{fmtMoney(d.payable.outstanding)}</div>
           <div className="ov-sub">应付合计 {fmtMoney(d.payable.total)} · 已付 {(payRate * 100).toFixed(0)}%</div>
-          <div className="ov-bar"><div style={{ width: `${Math.min(payRate * 100, 100)}%`, background: "var(--amber)" }} /></div>
-          <StatusChips s={d.payable} />
+          <div className="ov-foot">
+            <div className="ov-bar"><div style={{ width: `${Math.min(payRate * 100, 100)}%`, background: "var(--amber)" }} /></div>
+            <StatusChips s={d.payable} />
+          </div>
         </div>
         <div className="ov-card ov-net">
           <div className="ov-label">净头寸（应收未结 − 应付未结）</div>
           <div className="ov-value" style={{ color: d.net_position >= 0 ? "var(--green)" : "var(--red)" }}>{fmtMoney(d.net_position)}</div>
           <div className="ov-sub">{d.net_position >= 0 ? "净应收，现金流向好" : "净应付，需备付资金"}</div>
-          <div className="ov-split">
+          <div className="ov-split ov-foot">
             <div><span>本期新增单据</span><b>{d.period.count} 张</b></div>
             <div><span>本期应收</span><b>{fmtMoney(d.period.receivable)}</b></div>
             <div><span>本期应付</span><b>{fmtMoney(d.period.payable)}</b></div>
@@ -144,7 +148,8 @@ function OverviewTab() {
           <div className="ov-value" style={{ color: (d.overdue.receivable.amount + d.overdue.payable.amount) > 0 ? "var(--red)" : "var(--muted)" }}>
             {fmtMoney(d.overdue.receivable.amount + d.overdue.payable.amount)}
           </div>
-          <div className="ov-split">
+          <div className="ov-sub">{(d.overdue.receivable.amount + d.overdue.payable.amount) > 0 ? "需重点催收/排款" : "无逾期，账期健康"}</div>
+          <div className="ov-split ov-foot">
             <div><span>逾期应收</span><b style={d.overdue.receivable.amount > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(d.overdue.receivable.amount)}（{d.overdue.receivable.count}）</b></div>
             <div><span>逾期应付</span><b style={d.overdue.payable.amount > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(d.overdue.payable.amount)}（{d.overdue.payable.count}）</b></div>
           </div>

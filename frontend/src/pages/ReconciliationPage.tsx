@@ -10,7 +10,8 @@ import type {
 } from "../api/types";
 import { PAYMENT_METHOD_LABEL, STATEMENT_STATUS_LABEL } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
-import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { useServerTable } from "../api/useServerTable";
 import { StateView } from "../components/StateView";
 
 type Tab = "overview" | "statements" | "aging" | "settle";
@@ -271,12 +272,26 @@ export function ReconciliationPage() {
     queryKey: ["cp", cpType],
     queryFn: () => apiGet<Paginated<Customer | Carrier>>(`/${cpType === "customer" ? "customers" : "carriers"}?page_size=200`),
   });
-  const statements = useQuery({
+  // 对账单台账：服务端筛选 + 分页 + 排序（对全量生效）
+  const st = useServerTable<Statement>({
     queryKey: ["statements"],
-    queryFn: () => apiGet<Paginated<Statement>>("/finance/statements?page_size=200"),
+    path: "/finance/statements",
+    pageSize: 50,
+    defaultSort: { field: "created_at", dir: "desc" },
+    model: stmtModel,
+  });
+  // 收付款核销队列：所有已确认/部分结算且有未结余额（服务端筛选，不受台账分页影响）
+  const SETTLE_FILTER = encodeURIComponent(JSON.stringify({ combinator: "and", conditions: [
+    { field: "status", op: "in", value: ["confirmed", "partial"] },
+    { field: "out", op: "gt", value: "0.01" },
+  ] }));
+  const settleQ = useQuery({
+    queryKey: ["settle-queue"],
+    queryFn: () => apiGet<Paginated<Statement>>(`/finance/statements?page_size=200&filter=${SETTLE_FILTER}`),
   });
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["statements"] });
+    queryClient.invalidateQueries({ queryKey: ["settle-queue"] });
     queryClient.invalidateQueries({ queryKey: ["stmt-overview"] });
     queryClient.invalidateQueries({ queryKey: ["aging"] });
   };
@@ -307,13 +322,9 @@ export function ReconciliationPage() {
   });
 
   const cps = counterparties.data?.items ?? [];
-  const items = statements.data?.items ?? [];
+  const items = st.rows; // 当前页
   const stmtActiveCount = activeConditionCount(stmtModel, STMT_FILTER_FIELDS);
-  const filteredStmts = applyFilterModel(items, stmtModel, STMT_FILTER_FIELDS);
-  const settleQueue = useMemo(
-    () => items.filter((s) => (s.status === "confirmed" || s.status === "partial") && num(s.outstanding) > 0.01),
-    [items],
-  );
+  const settleQueue = settleQ.data?.items ?? [];
 
   const auditOne = useMutation({
     mutationFn: (id: string) => apiPost<StatementAuditResult>(`/finance/statements/${id}/audit`, {}),
@@ -338,15 +349,15 @@ export function ReconciliationPage() {
   const statusTag = (s: Statement) => <span className={`tag ${STATUS_TAG[s.status] ?? "tag-none"}`}>{s.status_label ?? STATEMENT_STATUS_LABEL[s.status] ?? s.status}</span>;
 
   const stmtColumns: DataColumn<Statement>[] = [
-    { key: "no", header: "系统结算单号", width: 190, alwaysVisible: true, sortValue: (s) => s.statement_no, exportValue: (s) => s.statement_no, render: (s) => <span className="mono" style={{ fontWeight: 700, color: "var(--accent)", fontSize: 13 }}>{expanded === s.id ? "▼" : "▶"} {s.statement_no}</span> },
-    { key: "dir", header: "方向", width: 90, filterable: true, filterValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), sortValue: (s) => s.direction, exportValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), render: (s) => <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "AR 应收" : "AP 应付"}</span> },
-    { key: "cp", header: "对手方", width: 150, filterable: true, filterValue: (s) => s.counterparty_name, sortValue: (s) => s.counterparty_name, exportValue: (s) => s.counterparty_name, render: (s) => <span style={{ fontWeight: 600 }}>{s.counterparty_name}</span> },
+    { key: "no", header: "系统结算单号", width: 190, alwaysVisible: true, sortField: "statement_no", sortValue: (s) => s.statement_no, exportValue: (s) => s.statement_no, render: (s) => <span className="mono" style={{ fontWeight: 700, color: "var(--accent)", fontSize: 13 }}>{expanded === s.id ? "▼" : "▶"} {s.statement_no}</span> },
+    { key: "dir", header: "方向", width: 90, filterable: true, filterValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), sortField: "direction", sortValue: (s) => s.direction, exportValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), render: (s) => <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "AR 应收" : "AP 应付"}</span> },
+    { key: "cp", header: "对手方", width: 150, filterable: true, filterValue: (s) => s.counterparty_name, sortField: "counterparty_name", sortValue: (s) => s.counterparty_name, exportValue: (s) => s.counterparty_name, render: (s) => <span style={{ fontWeight: 600 }}>{s.counterparty_name}</span> },
     { key: "period", header: "账期 / 到期", width: 180, exportValue: (s) => `${s.period_start}~${s.period_end}${s.due_date ? ` 到期${s.due_date}` : ""}`, render: (s) => <span className="small muted mono">{s.period_start}~{s.period_end}{s.due_date ? <><br /><span style={{ color: "var(--amber)" }}>到期 {s.due_date}</span></> : ""}</span> },
-    { key: "amt", header: "应结金额", width: 120, align: "right", sortValue: (s) => num(s.total_amount), exportValue: (s) => num(s.total_amount), render: (s) => <span style={{ fontWeight: 700 }}>{fmtMoney(s.total_amount)}</span> },
-    { key: "settled", header: "已核销", width: 110, align: "right", sortValue: (s) => num(s.settled_amount), exportValue: (s) => num(s.settled_amount), render: (s) => num(s.settled_amount) > 0 ? <span style={{ color: "var(--green)" }}>{fmtMoney(s.settled_amount)}</span> : <span className="muted">—</span> },
-    { key: "out", header: "未结余额", width: 120, align: "right", sortValue: (s) => num(s.outstanding), exportValue: (s) => num(s.outstanding), render: (s) => num(s.outstanding) > 0.01 ? <span style={{ fontWeight: 700, color: "var(--accent)" }}>{fmtMoney(s.outstanding)}</span> : <span className="tag tag-low">已结清</span> },
-    { key: "diff", header: "差异", width: 110, align: "right", sortValue: (s) => Math.abs(num(s.diff)), exportValue: (s) => num(s.diff), render: (s) => num(s.diff) !== 0 && num(s.external_total) > 0 ? <span className="mono" style={{ color: "var(--red)", fontWeight: 700 }}>{fmtMoney(s.diff)}</span> : <span className="muted small">无差异</span> },
-    { key: "status", header: "状态", width: 100, filterable: true, filterValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => statusTag(s) },
+    { key: "amt", header: "应结金额", width: 120, align: "right", sortField: "total_amount", sortValue: (s) => num(s.total_amount), exportValue: (s) => num(s.total_amount), render: (s) => <span style={{ fontWeight: 700 }}>{fmtMoney(s.total_amount)}</span> },
+    { key: "settled", header: "已核销", width: 110, align: "right", sortField: "settled_amount", sortValue: (s) => num(s.settled_amount), exportValue: (s) => num(s.settled_amount), render: (s) => num(s.settled_amount) > 0 ? <span style={{ color: "var(--green)" }}>{fmtMoney(s.settled_amount)}</span> : <span className="muted">—</span> },
+    { key: "out", header: "未结余额", width: 120, align: "right", sortField: "outstanding_anno", sortValue: (s) => num(s.outstanding), exportValue: (s) => num(s.outstanding), render: (s) => num(s.outstanding) > 0.01 ? <span style={{ fontWeight: 700, color: "var(--accent)" }}>{fmtMoney(s.outstanding)}</span> : <span className="tag tag-low">已结清</span> },
+    { key: "diff", header: "差异", width: 110, align: "right", sortField: "diff_anno", sortValue: (s) => Math.abs(num(s.diff)), exportValue: (s) => num(s.diff), render: (s) => num(s.diff) !== 0 && num(s.external_total) > 0 ? <span className="mono" style={{ color: "var(--red)", fontWeight: 700 }}>{fmtMoney(s.diff)}</span> : <span className="muted small">无差异</span> },
+    { key: "status", header: "状态", width: 100, filterable: true, filterValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, sortField: "status", sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => statusTag(s) },
     { key: "act", header: "财务操作", width: 110, alwaysVisible: true, render: (s) => (
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
         {s.status === "draft" ? <button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button>
@@ -417,7 +428,7 @@ export function ReconciliationPage() {
   );
 
   return (
-    <div className="stack" style={{ position: "relative" }}>
+    <div className={`stack${tab === "statements" ? " table-page" : ""}`} style={{ position: "relative" }}>
       <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <div>
@@ -440,7 +451,7 @@ export function ReconciliationPage() {
       {tab === "statements" && (
         <div className="panel om-panel" style={{ flex: 1 }}>
           <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
-            <span>对账单台账<span className="ai-pill">{filteredStmts.length}</span></span>
+            <span>对账单台账<span className="ai-pill">{st.total}</span></span>
             <div style={{ flex: 1 }} />
             <div style={{ position: "relative" }}>
               <button className={`btn-ghost${stmtActiveCount > 0 || showStmtFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowStmtFilter((v) => !v); }}>
@@ -488,23 +499,22 @@ export function ReconciliationPage() {
                 <button className="linkish small" onClick={() => setStmtModel(EMPTY_MODEL)}>清空条件</button>
               </div>
             )}
-            {statements.isLoading ? (
-              <StateView kind="loading" compact />
-            ) : statements.isError ? (
-              <StateView kind="error" onRetry={() => statements.refetch()} />
-            ) : filteredStmts.length === 0 ? (
-              <StateView kind="empty" scene="recon-empty" />
+            {st.isError ? (
+              <StateView kind="error" onRetry={() => st.refetch()} />
             ) : (
               <DataTable<Statement>
                 columns={stmtColumns}
-                rows={filteredStmts}
+                rows={items}
                 rowKey={(s) => s.id}
                 viewKey="statements"
                 exportName="对账单"
+                server={st.server}
+                fill
                 onRowClick={(s) => setExpanded(expanded === s.id ? "" : s.id)}
                 expandedKey={expanded}
                 renderExpanded={renderStmtDetail}
-                toolbarLeft={<span className="muted small">共 {filteredStmts.length} 张 · 点行看明细/核销流水 · 表头 ⚟ 筛选/排序</span>}
+                emptyState={<StateView kind="empty" scene="recon-empty" />}
+                toolbarLeft={<span className="muted small">点行看明细/核销流水 · 点表头排序</span>}
               />
             )}
         </div>
@@ -517,7 +527,7 @@ export function ReconciliationPage() {
             <div style={{ flex: 1 }} />
             <span className="muted small">已确认 / 部分结算且仍有未结余额的对账单</span>
           </div>
-          {statements.isLoading ? (
+          {settleQ.isLoading ? (
             <StateView kind="loading" compact />
           ) : settleQueue.length === 0 ? (
             <StateView kind="empty" title="暂无待核销单据" hint="确认对账单后，会进入此队列等待收付款核销。" />

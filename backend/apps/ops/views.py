@@ -75,7 +75,7 @@ def _expense_payload(item):
     }
 
 
-class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+class WaybillViewSet(ServerFilterMixin, OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = (
         Waybill.objects.select_related("customer", "carrier", "vehicle", "trailer", "driver")
         .prefetch_related("driver_assignments__driver")  # 消除列表 drivers 的 N+1
@@ -114,10 +114,46 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     }
     lookup_field = "waybill_no"
     lookup_value_regex = "[^/]+"
-    search_fields = ["waybill_no", "route_name", "customer__name", "vehicle__plate_no"]
+    search_fields = ["waybill_no", "route_name", "customer__name", "vehicle__plate_no", "origin", "destination"]
     filterset_fields = ["status", "risk_level", "receipt_status"]
-    ordering_fields = ["eta_drift_minutes", "created_at", "waybill_no"]
+    ordering_fields = [
+        "eta_drift_minutes", "created_at", "waybill_no", "customer__name", "status",
+        "receipt_status", "receivable_total", "payable_total", "cod_amount",
+    ]
     ordering = ["-eta_drift_minutes", "risk_level", "waybill_no"]
+    server_filter_fields = {
+        "waybill_no": FilterField("text", "waybill_no"),
+        "customer": FilterField("text", "customer__name"),
+        "route": FilterField("text", paths=["origin", "destination"]),
+        "vehicle": FilterField("text", "vehicle__plate_no"),
+        "status": FilterField("enum", "status"),
+        "channel": FilterField("enum", "channel_code"),  # 派生列（get_queryset 注解 自营/外包/网货）
+        "receipt": FilterField("enum", "receipt_status"),
+        "receivable": FilterField("number", "receivable_total"),
+        "payable": FilterField("number", "payable_total"),
+        "cod": FilterField("number", "cod_amount"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import Case, CharField, Value, When
+
+        return super().get_queryset().annotate(
+            channel_code=Case(
+                When(dispatch_type__in=["own_vehicle", "fleet"], then=Value("自营")),
+                When(dispatch_type="third_party", then=Value("外包")),
+                When(dispatch_type="platform", then=Value("网货")),
+                default=Value(""), output_field=CharField(),
+            ),
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """运单状态计数（服务端全量聚合），供运单台账快速状态药丸。"""
+        from django.db.models import Count
+
+        qs = self.get_queryset()
+        by_status = {r["status"]: r["n"] for r in qs.values("status").annotate(n=Count("id"))}
+        return Response({"by_status": by_status, "total": qs.count()})
 
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):

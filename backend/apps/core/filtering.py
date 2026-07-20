@@ -83,6 +83,16 @@ def _cond_q(field: FilterField, op: str, value):
             return ~any_path("__in", vals)
         return None
 
+    if t == "bool":
+        # 布尔列以「是/否」枚举暴露（前端值 "1"/"0"），把字符串安全转成 True/False
+        raw = value if isinstance(value, list) else ([value] if value not in (None, "") else [])
+        truthy = {"1", "true", "yes", "y", "t"}
+        wanted = {str(v).strip().lower() in truthy for v in raw if v not in (None, "")}
+        if not wanted:
+            return None
+        q = any_path("__in", list(wanted))
+        return ~q if op == "nin" else q
+
     p = paths[0]
 
     if t == "number":

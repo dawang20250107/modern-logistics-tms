@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
+from apps.core.filtering import FilterField, ServerFilterMixin
 from apps.iam.scoping import OrgScopedQuerysetMixin
 
 from .models import (
@@ -27,11 +28,36 @@ from .serializers import (
 )
 
 
-class StatementViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+class StatementViewSet(ServerFilterMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     queryset = Statement.objects.prefetch_related("lines").all()
     serializer_class = StatementSerializer
     filterset_fields = ["direction", "status", "counterparty_type", "counterparty_id"]
     search_fields = ["statement_no", "counterparty_name"]
+    ordering_fields = [
+        "statement_no", "counterparty_name", "direction", "status", "total_amount",
+        "settled_amount", "created_at", "outstanding_anno", "diff_anno",
+    ]
+    server_filter_fields = {
+        "no": FilterField("text", "statement_no"),
+        "cp": FilterField("text", "counterparty_name"),
+        "dir": FilterField("enum", "direction"),
+        "status": FilterField("enum", "status"),
+        "amt": FilterField("number", "total_amount"),
+        "out": FilterField("number", "outstanding_anno"),
+        "diff": FilterField("number", "diff_anno"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import F
+        from django.db.models.functions import Abs
+
+        return (
+            super().get_queryset()
+            .annotate(
+                outstanding_anno=F("total_amount") - F("settled_amount"),
+                diff_anno=Abs(F("total_amount") - F("external_total")),
+            )
+        )
 
     def get_serializer_class(self):
         return StatementListSerializer if self.action == "list" else StatementSerializer

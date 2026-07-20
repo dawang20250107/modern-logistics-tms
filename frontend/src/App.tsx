@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
+import { GlobalProgress } from "./components/GlobalProgress";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./auth/auth";
 import { AdminHubPage } from "./pages/AdminHubPage";
@@ -27,6 +28,7 @@ export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <GlobalProgress />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />

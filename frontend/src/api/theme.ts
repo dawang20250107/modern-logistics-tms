@@ -20,7 +20,15 @@ export function applyTheme(t: Theme): void {
 
 export const THEME_EVENT = "tms-theme-change";
 
+let animTimer: ReturnType<typeof setTimeout> | undefined;
+
 export function setTheme(t: Theme): void {
+  // 切换瞬间对全元素启用短暂 crossfade，避免明暗硬切的突兀感
+  const root = document.documentElement;
+  root.classList.add("theme-anim");
+  if (animTimer) clearTimeout(animTimer);
+  animTimer = setTimeout(() => root.classList.remove("theme-anim"), 320);
+
   applyTheme(t);
   try {
     localStorage.setItem(KEY, t);

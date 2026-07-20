@@ -261,7 +261,9 @@ export function DataTable<T>({
 
       {batchBar}
 
-      <div className="dt-scroll">
+      {server && <div className={`dt-loadbar${server.loading ? " on" : ""}`} aria-hidden />}
+
+      <div className={`dt-scroll${server?.loading ? " dt-busy" : ""}`}>
         <table className="table dt-table">
           <thead>
             <tr>

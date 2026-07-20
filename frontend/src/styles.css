@@ -1577,3 +1577,33 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 /* ── 科技风：经营图表窄屏降列（此前两列栅格未响应）── */
 @media (max-width: 980px) { .bm-charts { grid-template-columns: 1fr !important; } }
+
+/* ═══════ 操作体验打磨：加载反馈 + 主题平滑过渡 ═══════ */
+/* 全局请求进度条：任意后台请求/写操作进行时，顶部滑动一道青光 */
+.gp-bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 2.5px; z-index: 100000; pointer-events: none;
+  opacity: 0; transition: opacity 0.2s ease;
+  background: linear-gradient(90deg, transparent 0%, var(--accent) 40%, var(--accent-cyan) 60%, transparent 100%);
+  background-size: 42% 100%; background-repeat: no-repeat;
+  box-shadow: 0 0 8px var(--glow);
+}
+.gp-bar.on { opacity: 1; animation: gp-slide 0.95s linear infinite; }
+@keyframes gp-slide { 0% { background-position: -42% 0; } 100% { background-position: 142% 0; } }
+
+/* 表格局部加载：工具条下方细进度条 + 表体轻微降透明，翻页/筛选有即时反馈 */
+.dt-loadbar {
+  height: 0; flex: none; overflow: hidden; opacity: 0; transition: opacity 0.18s ease, height 0.18s ease;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+  background-size: 40% 100%; background-repeat: no-repeat;
+}
+.dt-loadbar.on { height: 2px; opacity: 1; animation: gp-slide 0.9s linear infinite; }
+.dt-scroll.dt-busy { opacity: 0.6; transition: opacity 0.15s ease; }
+
+/* 主题切换平滑过渡：仅在切换瞬间对全元素启用短暂 crossfade，之后自动移除 */
+:root.theme-anim, :root.theme-anim * {
+  transition: background-color 0.26s ease, border-color 0.26s ease, color 0.2s ease, fill 0.2s ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gp-bar.on, .dt-loadbar.on { animation: none; }
+  :root.theme-anim, :root.theme-anim * { transition: none !important; }
+}

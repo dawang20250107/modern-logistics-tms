@@ -802,6 +802,8 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .row-actions button.btn-primary:hover { background: var(--accent); color: #fff; filter: brightness(1.06); }
 /* 调度三池：操作是本池的核心任务，始终可见（不做 hover 才显） */
 .dispatch-pool tbody tr .row-actions { opacity: 1; }
+/* 调度池已迁移到 DataTable：派单/锁定为关键操作，保持常显（不靠悬浮） */
+.dispatch-board-panel .dt-table tbody tr .row-actions { opacity: 1; }
 .table tbody tr.row-sel { background: var(--accent-weak); }
 .cell-check { width: 34px; text-align: center; }
 .cell-check input { accent-color: var(--accent); cursor: pointer; }
@@ -1102,7 +1104,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dt-sortable { cursor: pointer; }
 .dt-sortable:hover { color: var(--accent); }
 /* 列内字段筛选 */
-.dt-filter-btn { border: none; background: none; color: var(--ink-3); cursor: pointer; padding: 1px 2px; display: inline-flex; align-items: center; border-radius: 3px; }
+.dt-filter-btn { flex: none; border: none; background: none; color: var(--ink-3); cursor: pointer; padding: 1px 2px; display: inline-flex; align-items: center; border-radius: 3px; }
 .dt-filter-btn:hover { color: var(--accent); background: var(--accent-weak); }
 .dt-filter-btn.on { color: var(--accent); }
 .dt-filter-pop {
@@ -1132,8 +1134,10 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .fb-comb button { border: none; background: var(--panel); color: var(--ink-2); font-size: 12px; padding: 5px 11px; cursor: pointer; }
 .fb-comb button.on { background: var(--accent); color: #fff; font-weight: 600; }
 .fb-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; }
-.fb-row { display: grid; grid-template-columns: 130px 96px 1fr 26px; gap: 8px; align-items: center; }
-.fb-row > .search { padding: 6px 9px; }
+.fb-row { display: grid; grid-template-columns: 148px 118px 1fr 26px; gap: 8px; align-items: center; }
+/* 覆盖全局 select 的 padding-right:30px!important（否则运算符 3 字标签被箭头挤压截断） */
+.fb-row > .search { padding: 6px 9px; font-size: 13px; }
+.fb-row > select.search { padding: 6px 22px 6px 9px !important; }
 .fb-val { min-width: 0; }
 .fb-val > .search { width: 100%; }
 .fb-enum { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -1147,7 +1151,9 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .filter-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 4px 3px 9px; border-radius: 6px; background: var(--accent-weak); color: var(--accent); font-size: 12px; border: 1px solid var(--accent-weak-2); }
 .filter-chip button { border: none; background: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; opacity: 0.7; }
 .filter-chip button:hover { opacity: 1; }
-.dt-th { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-th { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; }
+/* 只让字段名文本这一段收缩+省略号；筛选漏斗按钮 flex:none 永不被挤压截断（修复表头压缩截断） */
+.dt-th > span:first-child { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-sortic { font-size: 9px; color: var(--accent); }
 .dt-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }
 .dt-resizer:hover { background: linear-gradient(90deg, transparent, var(--accent-weak-2)); }
@@ -1325,3 +1331,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .btn-primary.is-on { background: var(--panel); color: var(--accent); border: 1px solid var(--accent); }
 /* 台账头部按钮统一高度对齐 */
 .om-panel .panel-head > .btn-ghost, .om-panel .panel-head > .btn-primary { height: 32px; display: inline-flex; align-items: center; }
+
+/* 客服工作台 Tab 栏 */
+.cs-tabbar { display: flex; align-items: center; gap: 12px; }
+
+/* DataTable 单元格横向留白收紧：提升密度，并为窄的可筛选表头留出漏斗图标空间 */
+.dt-table th, .dt-table td { padding-left: 12px; padding-right: 12px; }

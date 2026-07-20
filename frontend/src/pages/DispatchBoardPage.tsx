@@ -7,13 +7,31 @@ import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { useAuth } from "../auth/auth";
 import { BatchDispatchModal } from "../components/BatchDispatchModal";
+import { DataTable, type DataColumn } from "../components/DataTable";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
+import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { StateView } from "../components/StateView";
 import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconWarning, IconMoney, IconDragHandle, IconCheckCircle, IconMapPin, IconGitBranch, IconX } from "../components/Icons";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 import type { Carrier, DispatchSuggestion, Driver, Order, Paginated, Vehicle } from "../api/types";
-import { BODY_TYPE_LABEL, BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, PRIORITY_LABEL, SLA_STATUS_LABEL } from "../api/types";
+import { BODY_TYPE_LABEL, BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SLA_STATUS_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
+
+const enumOpts = (m: Record<string, string>) => Object.entries(m).map(([value, label]) => ({ value, label }));
+
+// 调度池顶级筛选字段（AND/OR 多条件）
+const DISPATCH_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "order_no", label: "订单号", type: "text", accessor: (o) => (o as Order).order_no },
+  { key: "customer", label: "客户", type: "text", accessor: (o) => (o as Order).customer_name || "" },
+  { key: "route", label: "线路", type: "text", accessor: (o) => `${(o as Order).origin || ""}→${(o as Order).destination || ""}` },
+  { key: "business_type", label: "业务类型", type: "enum", options: enumOpts(BUSINESS_TYPE_LABEL), accessor: (o) => (o as Order).business_type },
+  { key: "priority", label: "优先级", type: "enum", options: enumOpts(PRIORITY_LABEL), accessor: (o) => (o as Order).priority },
+  { key: "sla", label: "SLA", type: "enum", options: enumOpts(SLA_STATUS_LABEL), accessor: (o) => (o as Order).sla_status },
+  { key: "level", label: "客户等级", type: "enum", options: ["S", "A", "B", "C", "D"].map((v) => ({ value: v, label: `${v} 级` })), accessor: (o) => (o as Order).customer_level || "" },
+  { key: "exception", label: "异常", type: "enum", options: [{ value: "1", label: "有异常" }, { value: "0", label: "无异常" }], accessor: (o) => ((o as Order).exception_count ?? 0) > 0 ? "1" : "0" },
+  { key: "weight", label: "货量(吨)", type: "number", accessor: (o) => Number((o as Order).cargo_weight_ton) || 0 },
+  { key: "amount", label: "应收(元)", type: "number", accessor: (o) => Number((o as Order).quoted_amount) || 0 },
+];
 
 interface ConsolidatedTrip {
   route: string;
@@ -46,7 +64,6 @@ interface PlanResult {
 const RISK_TAG: Record<string, string> = { high: "high", medium: "medium", low: "low" };
 
 type DrawerTab = "dispatch" | "track";
-type MenuState = { x: number; y: number; order: Order } | null;
 
 const CUST_LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
 
@@ -82,8 +99,10 @@ export function DispatchBoardPage() {
   const queryClient = useQueryClient();
   const [active, setActive] = useState<Order | null>(null);
   const [tab, setTab] = useState<DrawerTab>("dispatch");
-  const [menu, setMenu] = useState<MenuState>(null);
   const [focusIdx, setFocusIdx] = useState(-1);
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [poolSearch, setPoolSearch] = useState("");
   const [suggestion, setSuggestion] = useState<DispatchSuggestion | null>(null);
   const [dispatchType, setDispatchType] = useState("third_party");
   const [carrierId, setCarrierId] = useState("");
@@ -140,13 +159,11 @@ export function DispatchBoardPage() {
     if (["order_pooled", "order_claimed", "order_dispatched"].includes(e.type)) invalidate();
   });
 
-  // Esc 关闭抽屉；全局点击关闭右键菜单
+  // Esc 关闭抽屉（右键菜单由 DataTable 内置管理）
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { closeWb(); setMenu(null); } };
-    const onClick = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeWb(); };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("click", onClick);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("click", onClick); };
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const claim = useMutation({
@@ -390,7 +407,14 @@ export function DispatchBoardPage() {
     dispatchable: mineOrders.length,
     dispatched: dispatchedOrders.length,
   };
-  const rows = poolTab === "unassigned" ? unassignedRows : poolTab === "dispatchable" ? dispatchableRows : dispatchedRows;
+  const rowsBase = poolTab === "unassigned" ? unassignedRows : poolTab === "dispatchable" ? dispatchableRows : dispatchedRows;
+  const filterActive = activeConditionCount(model, DISPATCH_FILTER_FIELDS);
+  const searchLc = poolSearch.trim().toLowerCase();
+  const rows = applyFilterModel(
+    searchLc ? rowsBase.filter((o) => `${o.order_no} ${o.customer_name ?? ""} ${o.origin ?? ""} ${o.destination ?? ""}`.toLowerCase().includes(searchLc)) : rowsBase,
+    model, DISPATCH_FILTER_FIELDS,
+  );
+  const anyPoolFilter = Boolean(searchLc) || urgentOnly || filterActive > 0;
   const poolLoading = poolTab === "unassigned" ? poolFree.isLoading : poolTab === "dispatchable" ? poolMine.isLoading : dispatchedQ.isLoading;
   // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
   const activeGone = Boolean(active) && !poolMine.isLoading && !orders.some((o) => o.id === active?.id);
@@ -424,6 +448,64 @@ export function DispatchBoardPage() {
     queryFn: () => apiGet<Trajectory>(`/telematics/waybills/${trackNo}/trajectory`),
     enabled: Boolean(active) && tab === "track" && Boolean(trackNo),
   });
+
+  // 订单池列（三池共用；操作/审计列按 poolTab 分支）——与全站表格能力对齐（列筛选/排序/框选/右键/导出/列显隐）
+  const poolColumns: DataColumn<Order>[] = [
+    { key: "order_no", header: "订单号", width: 138, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <span className="mono">{o.order_no}</span> },
+    { key: "customer", header: "客户", width: 150, filterable: true, filterValue: (o) => o.customer_name || "散客", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => (
+      <span className="small">
+        {o.customer_name || "散客"}
+        {o.customer_level && <span className={`tag ${CUST_LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }} title="客户等级">{o.customer_level}</span>}
+        {(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="该订单有未闭环异常">⚠ 异常{(o.exception_count ?? 0) > 1 ? `×${o.exception_count}` : ""}</span>}
+      </span>
+    ) },
+    { key: "route", header: "线路", width: 138, filterable: true, filterValue: (o) => `${o.origin || ""}→${o.destination || ""}`, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin}→${o.destination}`, render: (o) => <span className="small"><b>{o.origin}</b> → <b>{o.destination}</b></span> },
+    { key: "type", header: "类型", width: 96, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
+    { key: "priority", header: "优先级", width: 86, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
+    { key: "cargo", header: "货量", width: 106, align: "right", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_volume_cbm}方`, render: (o) => <span className="small">{o.cargo_weight_ton}吨/{o.cargo_volume_cbm}方</span> },
+    { key: "amount", header: "应收", width: 94, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <>{o.quoted_amount ? fmtMoney(o.quoted_amount) : "—"}</> },
+    { key: "audit", header: "状态 / 时间审计", width: 194, exportValue: (o) => o.lock_state || "", render: (o) => (
+      <div className="audit-cell">
+        <span className="audit-lock">{renderLock(o)}</span>
+        <span className="audit-time">
+          {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0
+            ? <>{renderAudit(o, poolTab)} · <Link className="link mono" to={`/waybills/${o.waybill_nos[0]}`} onClick={(e) => e.stopPropagation()}>{o.waybill_nos[0]}</Link></>
+            : renderAudit(o, poolTab)}
+          {poolTab === "unassigned" && o.sla_status && o.sla_status !== "pending" && o.sla_status !== "on_time" && (
+            <span className={`tag tag-sla_${o.sla_status}`} style={{ marginLeft: 4 }}>{SLA_STATUS_LABEL[o.sla_status]}</span>
+          )}
+        </span>
+      </div>
+    ) },
+    { key: "act", header: "操作", width: 156, alwaysVisible: true, render: (o) => {
+      const canDispatch = o.dispatchable !== false;
+      return (
+        <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+          {poolTab === "unassigned" && (<>
+            <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
+            <button onClick={() => setExcOrder(o)}>登记异常</button>
+          </>)}
+          {poolTab === "dispatchable" && (<>
+            {o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
+            <button onClick={() => setExcOrder(o)}>登记异常</button>
+            <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
+          </>)}
+          {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0 && (
+            <Link className="link small" to={`/waybills/${o.waybill_nos[0]}`}>查看运单</Link>
+          )}
+        </div>
+      );
+    } },
+  ];
+
+  const poolRowMenu = (o: Order) => [
+    { label: "精准派单", onClick: () => openWb(o, "dispatch") },
+    o.status !== "dispatching"
+      ? { label: "认领订单", onClick: () => claim.mutate(o.id) }
+      : { label: "退回订单池", onClick: () => release.mutate(o.id) },
+    { label: "查看轨迹", onClick: () => openWb(o, "track") },
+    { label: "登记异常", onClick: () => setExcOrder(o) },
+  ];
 
   return (
     <div className="stack dispatch-page">
@@ -482,6 +564,17 @@ export function DispatchBoardPage() {
           {poolTab === "dispatchable" && "可调派：仅本人锁定/被分派的订单，可执行派单。查看他人或全量订单请去「订单管理」。"}
           {poolTab === "dispatched" && "已调派：本人已生成运单的订单（只读）。查看全量已派请去「订单管理」。"}
         </div>
+        {filterActive > 0 && (
+          <div className="om-chips">
+            <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+            {model.conditions.map((c) => {
+              const label = describeCondition(c, DISPATCH_FILTER_FIELDS);
+              if (!label) return null;
+              return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+            })}
+            <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
+          </div>
+        )}
 
         {picked.size > 0 && poolTab !== "dispatched" && (
           <div className="batch-bar">
@@ -504,84 +597,39 @@ export function DispatchBoardPage() {
         )}
         {poolLoading ? (
           <StateView kind="loading" compact />
-        ) : rows.length === 0 ? (
-          <StateView
-            kind="empty"
-            scene="pool-empty"
-            title={urgentOnly ? "暂无紧急订单" : poolTab === "unassigned" ? "待分配池为空" : poolTab === "dispatchable" ? "可调派池为空" : "暂无已调派订单"}
-            hint={poolTab === "unassigned" ? "已确认订单进池后在此等待分派/锁定" : poolTab === "dispatchable" ? "在「待分配」锁定或由总调度分派后，订单进入此池可派单" : "派单后订单在此留痕，可追溯调派时间"}
-            action={poolTab === "unassigned" ? <Link className="btn-primary" to="/intake" style={{ textDecoration: "none" }}>去建单</Link> : undefined}
-          />
         ) : (
-          <div className="table-wrap">
-          <table className="table dispatch-pool" aria-label="订单池">
-            <thead>
-              <tr>
-                {poolTab !== "dispatched" && <th style={{ width: 32 }}></th>}
-                <th>订单号</th><th>客户</th><th>线路</th><th>类型</th><th>优先级</th><th className="num">货量</th><th className="num">应收</th>
-                <th>状态 / 时间审计</th><th style={{ width: 160 }}>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((o, idx) => {
-                const canDispatch = o.dispatchable !== false;
-                return (
-                  <tr
-                    key={o.id}
-                    className={`pool-row${active?.id === o.id ? " row-active" : ""}${idx === focusIdx ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
-                    onMouseEnter={() => setFocusIdx(idx)}
-                    onDoubleClick={() => { if (poolTab === "dispatchable" && canDispatch) openWb(o); else if (poolTab === "unassigned") setExcOrder(o); }}
-                    onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, order: o }); }}
-                  >
-                    {poolTab !== "dispatched" && <td onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={picked.has(o.id)} onChange={() => togglePick(o.id)} /></td>}
-                    <td className="mono">{o.order_no}</td>
-                    <td className="small">
-                      {o.customer_name || "散客"}
-                      {o.customer_level && <span className={`tag ${CUST_LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }} title="客户等级">{o.customer_level}</span>}
-                      {(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="该订单有未闭环异常">⚠ 异常{(o.exception_count ?? 0) > 1 ? `×${o.exception_count}` : ""}</span>}
-                    </td>
-                    <td><b>{o.origin}</b> → <b>{o.destination}</b></td>
-                    <td className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</td>
-                    <td><span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span></td>
-                    <td className="num">{o.cargo_weight_ton}吨/{o.cargo_volume_cbm}方</td>
-                    <td className="num">{o.quoted_amount ? fmtMoney(o.quoted_amount) : "—"}</td>
-                    <td className="small">
-                      <div className="audit-cell">
-                        <span className="audit-lock">{renderLock(o)}</span>
-                        <span className="audit-time">
-                          {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0 ? (
-                            <>{renderAudit(o, poolTab)} · <Link className="link mono" to={`/waybills/${o.waybill_nos[0]}`}>{o.waybill_nos[0]}</Link></>
-                          ) : renderAudit(o, poolTab)}
-                          {poolTab === "unassigned" && o.sla_status && o.sla_status !== "pending" && o.sla_status !== "on_time" && (
-                            <span className={`tag tag-sla_${o.sla_status}`} style={{ marginLeft: 4 }}>{SLA_STATUS_LABEL[o.sla_status]}</span>
-                          )}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="row-actions" onClick={(e) => e.stopPropagation()}>
-                      {poolTab === "unassigned" && (
-                        <>
-                          <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
-                          <button onClick={() => setExcOrder(o)}>登记异常</button>
-                        </>
-                      )}
-                      {poolTab === "dispatchable" && (
-                        <>
-                          {o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
-                          <button onClick={() => setExcOrder(o)}>登记异常</button>
-                          <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
-                        </>
-                      )}
-                      {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0 && (
-                        <Link className="link small" to={`/waybills/${o.waybill_nos[0]}`}>查看运单</Link>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </div>
+          <DataTable<Order>
+            columns={poolColumns} rows={rows} rowKey={(o) => o.id} viewKey={`dispatch-pool-${poolTab}`} exportName={`调度池-${poolTab}`}
+            selectable={poolTab !== "dispatched"} selected={picked} onToggle={togglePick}
+            onToggleAll={() => setPicked((s) => s.size >= rows.length && rows.length > 0 ? new Set() : new Set(rows.map((o) => o.id)))}
+            stickyFirst rowMenu={poolRowMenu}
+            onRowDoubleClick={(o) => { if (poolTab === "dispatchable" && o.dispatchable !== false) openWb(o); else if (poolTab === "unassigned") setExcOrder(o); }}
+            rowClassName={(o) => `pool-row${active?.id === o.id ? " row-active" : ""}${rows[focusIdx]?.id === o.id ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
+            emptyState={
+              <StateView
+                kind="empty"
+                scene="pool-empty"
+                title={anyPoolFilter ? "没有匹配的订单" : urgentOnly ? "暂无紧急订单" : poolTab === "unassigned" ? "待分配池为空" : poolTab === "dispatchable" ? "可调派池为空" : "暂无已调派订单"}
+                hint={anyPoolFilter ? "调整筛选条件再试。" : poolTab === "unassigned" ? "已确认订单进池后在此等待分派/锁定" : poolTab === "dispatchable" ? "在「待分配」锁定或由总调度分派后，订单进入此池可派单" : "派单后订单在此留痕，可追溯调派时间"}
+                action={!anyPoolFilter && poolTab === "unassigned" ? <Link className="btn-primary" to="/intake" style={{ textDecoration: "none" }}>去建单</Link> : undefined}
+              />
+            }
+            toolbarLeft={
+              <>
+                <span className="muted small">共 {rows.length} 单{picked.size ? ` · 已选 ${picked.size}` : ""}</span>
+                <input className="search" style={{ minWidth: 170, flex: 1, maxWidth: 280 }} placeholder="搜索 订单号 / 客户 / 线路" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} />
+                <div style={{ position: "relative" }}>
+                  <button className={`btn-ghost${filterActive > 0 || showBuilder ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowBuilder((v) => !v); }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                      高级筛选{filterActive > 0 ? ` · ${filterActive}` : ""}
+                    </span>
+                  </button>
+                  {showBuilder && <FilterBuilder fields={DISPATCH_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
+                </div>
+              </>
+            }
+          />
         )}
         {rows.length > 0 && poolTab === "dispatchable" && (
           <div className="muted small" style={{ padding: "8px 17px", borderTop: "1px solid var(--line)" }}>
@@ -735,22 +783,6 @@ export function DispatchBoardPage() {
             )}
           </div>
         </div>
-      )}
-
-      {/* 右键快捷菜单 */}
-      {menu && (
-        <ul
-          className="ctx-menu"
-          style={{ top: menu.y, left: menu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <li onClick={() => { openWb(menu.order, "dispatch"); setMenu(null); }}><IconZap size={14} className="icon-offset" /> 精准派单</li>
-          {menu.order.status !== "dispatching"
-            ? <li onClick={() => { claim.mutate(menu.order.id); setMenu(null); }}>认领订单</li>
-            : <li onClick={() => { release.mutate(menu.order.id); setMenu(null); }}>退回订单池</li>}
-          <li onClick={() => { openWb(menu.order, "track"); setMenu(null); }}><IconMapPin size={14} className="icon-offset" /> 查看轨迹</li>
-          <li onClick={() => { setExcOrder(menu.order); setMenu(null); }}><IconGitBranch size={14} className="icon-offset" /> 登记异常</li>
-        </ul>
       )}
 
       {/* 派单工作台抽屉 */}

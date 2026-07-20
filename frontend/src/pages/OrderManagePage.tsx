@@ -149,7 +149,6 @@ function OrdersTab() {
       pooled: all.filter((o) => o.status === "pooled" || o.status === "dispatching").length,
       dispatched: all.filter((o) => o.status === "converted" || o.status === "completed").length,
       today: all.filter((o) => new Date(o.created_at).toDateString() === today).length,
-      amount: all.reduce((s, o) => s + (Number(o.quoted_amount) || 0), 0),
     };
   }, [q.data]);
 
@@ -173,7 +172,7 @@ function OrdersTab() {
     { key: "biz", header: "业务", width: 90, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
     { key: "cargo", header: "货量", width: 110, align: "right", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}吨/{o.cargo_quantity}件</span> },
     { key: "amount", header: "报价", width: 110, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
-    { key: "priority", header: "优先级", width: 80, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
+    { key: "priority", header: "优先级", width: 92, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
     { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
     { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
     { key: "waybill", header: "关联运单 (YD)", width: 150, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 3 }}>{o.waybill_nos.map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}</span> : <span className="muted small">未生成</span> },
@@ -241,37 +240,11 @@ function OrdersTab() {
       <button className={`om-stat om-clickable${statusActive("pooled") ? " on" : ""}`} onClick={() => quickStatus("pooled")}><div className="om-stat-n" style={{ color: stats.pooled ? "var(--blue)" : undefined }}>{stats.pooled}</div><div className="om-stat-l">池中待派 →</div></button>
       <div className="om-stat"><div className="om-stat-n" style={{ color: stats.dispatched ? "var(--green)" : undefined }}>{stats.dispatched}</div><div className="om-stat-l">已派/完成</div></div>
       <div className="om-stat"><div className="om-stat-n">{stats.today}</div><div className="om-stat-l">今日新建</div></div>
-      <div className="om-stat"><div className="om-stat-n" style={{ fontSize: 14 }}>{fmtMoney(stats.amount)}</div><div className="om-stat-l">报价合计</div></div>
     </div>
 
     <div className="panel om-panel">
-      {/* 单行筛选栏：搜索 + 高级筛选 + 视图 + 重置/保存 */}
-      <div className="om-filterbar">
-        <span className="om-title">订单台账<span className="ai-pill">{total}</span></span>
-        <input className="search" style={{ minWidth: 190, flex: 1, maxWidth: 320 }} placeholder="搜索 订单号 / 客户 / 电话 / 线路" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <div style={{ position: "relative" }}>
-          <button className={`btn-ghost${activeCount > 0 || showBuilder ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowBuilder((v) => !v); }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
-              高级筛选{activeCount > 0 ? ` · ${activeCount}` : ""}
-            </span>
-          </button>
-          {showBuilder && <FilterBuilder fields={ORDER_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
-        </div>
-        {presets.length > 0 && (
-          <select className="search" style={{ maxWidth: 130 }} value="" onChange={(e) => { const p = presets.find((x) => x.name === e.target.value); if (p) applyPreset(p); e.target.value = ""; }}>
-            <option value="">筛选视图…</option>
-            {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-          </select>
-        )}
-        <div style={{ flex: 1 }} />
-        {anyFilter && <button className="linkish small" onClick={resetFilters}>重置</button>}
-        <button className="btn-ghost small" disabled={!anyFilter} onClick={savePreset}>保存视图</button>
-        <button className="btn-ghost small" onClick={() => apiDownload("/orders/export?page_size=5000", "orders.csv")}>导出全部</button>
-      </div>
-
-      {/* 活动筛选条件 chips */}
-      {(activeCount > 0 || presets.some(() => false)) && (
+      {/* 活动筛选条件 chips（在工具条上方，仅有条件时出现） */}
+      {activeCount > 0 && (
         <div className="om-chips">
           <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
           {model.conditions.map((c) => {
@@ -287,14 +260,44 @@ function OrdersTab() {
         <StateView kind="loading" compact />
       ) : q.isError ? (
         <StateView kind="error" onRetry={() => q.refetch()} />
-      ) : rows.length === 0 ? (
-        anyFilter ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" /> : <StateView kind="empty" scene="cs-empty" />
       ) : (
         <DataTable<Order>
           columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage-v2" exportName="订单台账"
           selectable selected={selected} onToggle={toggle} onToggleAll={toggleAll} stickyFirst batchBar={batchBar}
           onRowClick={(o) => setDrawer(o)} rowMenu={rowMenu}
-          toolbarLeft={<span className="muted small">共 {total} 单{selected.size ? ` · 已选 ${selected.size}` : ""} · 点击行看详情 · 右键菜单 · Shift 范围选 · 表头 ⚟ 筛选/排序</span>}
+          hideExport
+          emptyState={anyFilter
+            ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" />
+            : <StateView kind="empty" scene="cs-empty" />}
+          toolbarLeft={
+            <>
+              <span className="om-title" style={{ marginRight: 2 }}>订单台账<span className="ai-pill">{total}</span></span>
+              <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 300 }} placeholder="搜索 订单号 / 客户 / 电话 / 线路" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div style={{ position: "relative" }}>
+                <button className={`btn-ghost${activeCount > 0 || showBuilder ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowBuilder((v) => !v); }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                    高级筛选{activeCount > 0 ? ` · ${activeCount}` : ""}
+                  </span>
+                </button>
+                {showBuilder && <FilterBuilder fields={ORDER_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
+              </div>
+              {presets.length > 0 && (
+                <select className="search" style={{ maxWidth: 130, minWidth: 96 }} value="" onChange={(e) => { const p = presets.find((x) => x.name === e.target.value); if (p) applyPreset(p); e.target.value = ""; }}>
+                  <option value="">筛选视图…</option>
+                  {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select>
+              )}
+              {selected.size > 0 && <span className="muted small">已选 {selected.size}</span>}
+            </>
+          }
+          toolbarRight={
+            <>
+              {anyFilter && <button className="linkish small" onClick={resetFilters}>重置</button>}
+              <button className="btn-ghost" disabled={!anyFilter} onClick={savePreset}>保存视图</button>
+              <button className="btn-ghost" onClick={() => apiDownload("/orders/export?page_size=5000", "orders.csv")}>导出全部</button>
+            </>
+          }
         />
       )}
     </div>

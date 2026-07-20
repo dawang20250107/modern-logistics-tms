@@ -38,8 +38,8 @@ function loadView(viewKey: string): ViewState | null {
 
 export function DataTable<T>({
   columns, rows, rowKey, viewKey, selectable, selected, onToggle, onToggleAll,
-  onRowContextMenu, onRowDoubleClick, onRowClick, rowClassName, stickyFirst, toolbarLeft, batchBar, exportName,
-  expandedKey, renderExpanded, rowMenu,
+  onRowContextMenu, onRowDoubleClick, onRowClick, rowClassName, stickyFirst, toolbarLeft, toolbarRight, batchBar, exportName,
+  expandedKey, renderExpanded, rowMenu, hideExport, emptyState,
 }: {
   columns: DataColumn<T>[];
   rows: T[];
@@ -57,9 +57,12 @@ export function DataTable<T>({
   rowClassName?: (row: T) => string;
   stickyFirst?: boolean;
   toolbarLeft?: React.ReactNode;
+  toolbarRight?: React.ReactNode; // 调用方注入的操作按钮，置于内置 导出/列 之前，实现单行工具条
   batchBar?: React.ReactNode;
   exportName?: string;
   rowMenu?: (row: T) => RowMenuItem[]; // 行右键菜单项
+  hideExport?: boolean; // 页面已自带导出（如服务端全量导出）时隐藏内置导出，避免重复
+  emptyState?: React.ReactNode; // 无数据时展示（替代默认「暂无匹配记录」），工具条仍可见以便清除筛选
 }) {
   const saved = useMemo(() => loadView(viewKey), [viewKey]);
   const [hidden, setHidden] = useState<Set<string>>(
@@ -213,10 +216,11 @@ export function DataTable<T>({
       <div className="dt-toolbar">
         <div className="dt-toolbar-main">{toolbarLeft}</div>
         <div className="dt-toolbar-actions">
+          {toolbarRight}
           {activeFilterCount > 0 && (
             <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setFilters({}); }} title="清除所有列筛选">清筛 {activeFilterCount}</button>
           )}
-          <button className="btn-ghost" onClick={exportCsv}>导出</button>
+          {!hideExport && <button className="btn-ghost" onClick={exportCsv}>导出</button>}
           <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setColMenu((v) => !v); }}>列</button>
           {colMenu && (
             <div className="dt-colmenu" onClick={(e) => e.stopPropagation()}>
@@ -300,7 +304,9 @@ export function DataTable<T>({
           <tbody>
             {sortedRows.length === 0 && (
               <tr>
-                <td className="dt-empty" colSpan={visibleCols.length + (selectable ? 1 : 0)}>暂无匹配记录</td>
+                <td className="dt-empty" colSpan={visibleCols.length + (selectable ? 1 : 0)}>
+                  {emptyState ?? "暂无匹配记录"}
+                </td>
               </tr>
             )}
             {sortedRows.map((r, idx) => {

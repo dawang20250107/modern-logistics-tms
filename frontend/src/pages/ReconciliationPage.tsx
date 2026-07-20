@@ -433,7 +433,7 @@ export function ReconciliationPage() {
 
   return (
     <div className={`stack${tab === "statements" ? " table-page" : ""}`} style={{ position: "relative" }}>
-      <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
+      <div className="panel" style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", border: "none" }}>
         <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: "bold" }}>对账中心</div>

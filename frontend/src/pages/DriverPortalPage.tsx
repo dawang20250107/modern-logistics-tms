@@ -10,9 +10,9 @@ interface Reminder { id: string; title: string; content: string; level?: string;
 
 // 调度指令分级：普通蓝(信息) / 重要琥珀(注意) / 紧急红(必须确认)
 const CMD_LEVEL: Record<string, { grad: string; solid: string; tag: string; label: string }> = {
-  normal: { grad: "linear-gradient(135deg,#2563eb,#1e50c0)", solid: "#2563eb", tag: "普通指令", label: "确认" },
-  important: { grad: "linear-gradient(135deg,#b8860b,#8a6508)", solid: "#92610a", tag: "重要指令", label: "我已知悉" },
-  urgent: { grad: "linear-gradient(135deg,#d0242c,#a81d24)", solid: "#d0242c", tag: "紧急指令", label: "我已阅读并严格执行" },
+  normal: { grad: "linear-gradient(135deg,var(--blue),#1e50c0)", solid: "var(--blue)", tag: "普通指令", label: "确认" },
+  important: { grad: "linear-gradient(135deg,#b8860b,#8a6508)", solid: "var(--amber)", tag: "重要指令", label: "我已知悉" },
+  urgent: { grad: "linear-gradient(135deg,var(--red),#a81d24)", solid: "var(--red)", tag: "紧急指令", label: "我已阅读并严格执行" },
 };
 interface NextStep { node: string; label: string; kind: string }
 interface WaybillBrief {

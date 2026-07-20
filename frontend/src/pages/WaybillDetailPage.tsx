@@ -227,16 +227,16 @@ export function WaybillDetailPage() {
     <div className="stack" style={{ gap: 16 }}>
       {/* 运单头部 */}
       <div className="panel" style={{ overflow: "visible" }}>
-        <div style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
+        <div style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
           <div className="stack" style={{ gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}><CopyCode value={w.waybill_no} /></span>
-              <span className="tag" style={{ background: "rgba(255,255,255,0.12)", color: "#e4e4e7", border: "1px solid rgba(255,255,255,0.2)", fontWeight: 500 }}>
+              <span className="tag" style={{ background: "var(--hero-line)", color: "var(--hero-ink)", border: "1px solid var(--hero-line)", fontWeight: 500 }}>
                 {STATUS_LABEL[w.status] ?? w.status}
               </span>
               {w.receipt_status === "returned" && <span className="tag tag-low">回单已核验</span>}
             </div>
-            <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 13, display: "flex", gap: 16, fontWeight: 400 }}>
+            <div style={{ color: "var(--hero-sub)", fontSize: 13, display: "flex", gap: 16, fontWeight: 400 }}>
               <span>{w.route_name} ({w.origin} → {w.destination})</span>
               <span>{w.customer_name || "散客"}</span>
               <span>{w.vehicle_plate || "自营/待指派"}</span>
@@ -248,7 +248,7 @@ export function WaybillDetailPage() {
               风险 {RISK_LABEL[w.risk_level]}
             </span>
             <div className="row-actions">
-              <button className="btn-ghost" style={{ color: "#fff", border: "1px solid rgba(255,255,255,0.2)", background: "transparent" }} disabled={analyze.isPending} onClick={() => analyze.mutate()}>
+              <button className="btn-ghost" style={{ color: "var(--hero-ink)", border: "1px solid var(--hero-line)", background: "transparent" }} disabled={analyze.isPending} onClick={() => analyze.mutate()}>
                 风险分析
               </button>
               {w.next_statuses.map((s) => (

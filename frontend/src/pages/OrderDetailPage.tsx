@@ -158,7 +158,7 @@ export function OrderDetailPage() {
       <DocumentLineage orderId={id} />
 
       {o.approval_status !== "none" && (
-        <div className="panel" style={{ borderLeft: `4px solid ${o.approval_status === "rejected" ? "var(--red)" : o.approval_status === "approved" ? "var(--green)" : "var(--amber, #e8a33d)"}` }}>
+        <div className="panel" style={{ borderLeft: `4px solid ${o.approval_status === "rejected" ? "var(--red)" : o.approval_status === "approved" ? "var(--green)" : "var(--amber)"}` }}>
           <div className="form-actions" style={{ borderBottom: "none" }}>
             <span className={`tag tag-${o.approval_status === "approved" ? "low" : o.approval_status === "rejected" ? "high" : "medium"}`}>
               审批：{APPROVAL_STATUS_LABEL[o.approval_status]}

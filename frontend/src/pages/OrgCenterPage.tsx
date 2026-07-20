@@ -656,7 +656,7 @@ function RbacTab() {
             {matrix.modules.map((g) => (
               <Fragment key={g.module}>
                 <tr>
-                  <td colSpan={matrix.roles.length + 1} className="muted small" style={{ background: "var(--panel-2, rgba(255,255,255,0.03))", fontWeight: 600 }}>
+                  <td colSpan={matrix.roles.length + 1} className="muted small" style={{ background: "var(--panel-2)", fontWeight: 600 }}>
                     {g.module}
                   </td>
                 </tr>

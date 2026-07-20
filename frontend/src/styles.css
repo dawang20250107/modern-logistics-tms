@@ -78,6 +78,7 @@
   --shadow-md: 0 2px 4px rgba(18, 20, 26, 0.06), 0 6px 12px rgba(18, 20, 26, 0.08), 0 12px 24px rgba(18, 20, 26, 0.06);
   --shadow-lg: 0 4px 8px rgba(18, 20, 26, 0.06), 0 12px 24px rgba(18, 20, 26, 0.10), 0 24px 48px rgba(18, 20, 26, 0.14);
 
+  --radius-lg: 14px;   /* 门面卡片/弹窗/登录卡（收敛此前散落的裸 14px） */
   --radius: 12px;
   --radius-sm: 9px;
   --radius-xs: 6px;
@@ -89,8 +90,40 @@
   --sp-5: 20px;
   --sp-6: 24px;
   --sp-8: 32px;
+
+  /* 字号阶梯（与 --sp-* 对齐的排版刻度，收敛此前 9 套关键数字字号）*/
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 23px;
+  --text-3xl: 28px;
+  --display: 34px;
+  /* 字重三档 */
+  --fw-medium: 550;
+  --fw-semibold: 640;
+  --fw-bold: 720;
+  /* 行高三档 */
+  --lh-tight: 1.12;
+  --lh-snug: 1.32;
+  --lh-normal: 1.55;
+
+  /* 三级文本（ink → ink-2 → ink-3 → muted → faint），此前 --ink-3 未定义致 4 处静默失效 */
+  --ink-3: #52586a;
+
+  /* 深色门面（Hero/驾驶舱顶栏/司机端/对账头）统一渐变与前景，收敛 4+ 处重复深色串 */
+  --hero-grad: linear-gradient(135deg, #1b1e25 0%, #16181d 100%);
+  --hero-ink: #ffffff;
+  --hero-sub: rgba(255, 255, 255, 0.62);
+  --hero-line: rgba(255, 255, 255, 0.12);
+
   --speed: 120ms cubic-bezier(0.32, 0.72, 0, 1);
   --font-mono: "SF Mono", "JetBrains Mono", "Roboto Mono", ui-monospace, Consolas, monospace;
+  --mono: var(--font-mono); /* 别名：修复 .lin-conn 等引用未定义 --mono 的回退丢失 */
+  /* 线性卡车图标（供 mask 使用，随 currentColor 上色）*/
+  --icon-truck: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 3h13v13H1z'/%3E%3Cpath d='M14 8h4l3 3v5h-7z'/%3E%3Ccircle cx='5.5' cy='18.5' r='1.8'/%3E%3Ccircle cx='17.5' cy='18.5' r='1.8'/%3E%3C/svg%3E");
 
   /* Canonical sans stack, also exposed as --font-sans (see aliases) */
   font-family: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -133,10 +166,17 @@
   --surface-solid: #12151c;
   --ink: #e9edf5;
   --ink-2: #bcc4d2;
+  --ink-3: #949cad;
   --muted: #8b93a3;
   --faint: #5f6675;
   --line: rgba(255, 255, 255, 0.09);
   --line-2: rgba(255, 255, 255, 0.16);
+
+  /* 深色门面：暗色下加深一档并保持青蓝底噪 */
+  --hero-grad: linear-gradient(135deg, #1a1e29 0%, #10131b 100%);
+  --hero-ink: #f2f5fb;
+  --hero-sub: rgba(233, 237, 245, 0.60);
+  --hero-line: rgba(255, 255, 255, 0.10);
 
   --accent-weak: rgba(75, 88, 240, 0.20);
   --accent-weak-2: rgba(75, 88, 240, 0.32);
@@ -932,7 +972,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .cell-check input { accent-color: var(--accent); cursor: pointer; }
 
 /* ── AI result (code/JSON) ──────────────────────────── */
-.result-box { margin: 0 18px 16px; padding: 14px; background: #14161c; color: #cbd0da; border-radius: 8px; font-size: 12px; overflow: auto; max-height: 320px; border: 1px solid #272b34; font-family: var(--font-mono); }
+.result-box { margin: 0 18px 16px; padding: 14px; background: var(--side-bg); color: var(--side-ink); border-radius: var(--radius-sm); font-size: 12px; overflow: auto; max-height: 320px; border: 1px solid var(--side-line); font-family: var(--font-mono); }
 
 /* ── Toaster ────────────────────────────────────────── */
 .toaster { position: fixed; right: 20px; bottom: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; max-width: 380px; }
@@ -1013,7 +1053,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .drv-login-fields input { padding: 14px 16px; font-size: 16px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line-2); }
 .drv-login-fields input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 .drv-login-submit { width: 100%; margin-top: var(--sp-6); padding: 16px; font-size: 16px; border-radius: 12px; font-weight: 700; }
-.drv-topbar { background: linear-gradient(135deg, #1b1e25 0%, #16181d 100%); color: #fff; padding: var(--sp-6) var(--sp-5); }
+.drv-topbar { background: var(--hero-grad); color: var(--hero-ink); padding: var(--sp-6) var(--sp-5); }
 .drv-avatar { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.1); display: grid; place-items: center; border: 2px solid rgba(255,255,255,0.2); font-size: 18px; font-weight: 700; }
 .drv-name { font-size: 17px; font-weight: 700; }
 .drv-phone { font-size: 13px; color: rgba(255,255,255,0.6); font-family: var(--font-mono); }
@@ -1023,7 +1063,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .drv-body-head h3 { margin: 0; font-size: 16px; color: var(--ink); }
 
 /* ── 司机端极简（大按钮/下一步） ────────────────────── */
-.drv-card { background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+.drv-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
 .drv-card-head { padding: 14px 16px; border-bottom: 1px dashed var(--line); display: flex; justify-content: space-between; align-items: center; }
 .drv-addr { padding: 12px 16px; border-bottom: 1px dashed var(--line); display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
 .drv-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
@@ -1071,7 +1111,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dispatch-deck {
   display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
   padding: 16px 20px; border-radius: 14px; border: 1px solid var(--line);
-  background: linear-gradient(135deg, #1b1e25 0%, #16181d 100%);
+  background: var(--hero-grad);
   box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
 }
 .dispatch-deck::before {
@@ -1161,7 +1201,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 /* ── 资源库总览（#12b 资源库深度设计）───────────────── */
 .rh-hero {
   padding: 16px 20px; border-radius: 14px; border: 1px solid var(--line);
-  background: linear-gradient(135deg, #1b1e25 0%, #16181d 100%);
+  background: var(--hero-grad);
   box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
 }
 .rh-hero::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(620px 120px at 92% -30%, rgba(75,88,240,0.26), transparent 70%); }
@@ -1244,7 +1284,9 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .doc-order::before { content: "▸"; margin-right: 3px; opacity: 0.6; font-size: 10px; }
 .doc-order:hover { text-decoration: underline; }
 .doc-waybill { display: inline-flex; align-items: center; gap: 3px; color: var(--violet); text-decoration: none; padding: 1px 6px; border: 1px solid var(--violet-line); border-radius: 5px; background: var(--violet-weak); }
-.doc-waybill::before { content: "🚚"; font-size: 10px; }
+/* 线性卡车图标（替换残留 emoji，随文本色，与全站 SVG 图标体系统一）*/
+.doc-waybill::before { content: ""; width: 12px; height: 12px; flex: none; background: currentColor;
+  -webkit-mask: var(--icon-truck) center / contain no-repeat; mask: var(--icon-truck) center / contain no-repeat; }
 .doc-waybill:hover { border-color: var(--violet); }
 
 /* ── 高级多条件筛选器 ─────────────────────────────────── */
@@ -1378,10 +1420,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 
 /* ══════════════════ 对账中心（Reconciliation Center） ══════════════════ */
-.recon-tabs { display: inline-flex; gap: 2px; padding: 3px; background: rgba(255,255,255,0.08); border-radius: 10px; }
-.recon-tabs button { position: relative; padding: 7px 14px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.62); background: transparent; border: none; border-radius: 7px; cursor: pointer; transition: all .14s; }
-.recon-tabs button:hover { color: #fff; }
-.recon-tabs button.active { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(75,88,240,0.32); }
+.recon-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--hero-line); border-radius: var(--radius-sm); }
+.recon-tabs button { position: relative; padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--hero-sub); background: transparent; border: none; border-radius: 7px; cursor: pointer; transition: all .14s; }
+.recon-tabs button:hover { color: var(--hero-ink); }
+.recon-tabs button.active { background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-glow); }
 .recon-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 6px; font-size: 10px; font-weight: 700; color: #fff; background: var(--red); border-radius: 8px; }
 
 /* 总览看板 */

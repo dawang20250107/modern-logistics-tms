@@ -27,7 +27,7 @@ export function AdminHubPage() {
 
   return (
     <div className="stack">
-      <div className="panel" style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", border: "none" }}>
+      <div className="panel" style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", border: "none" }}>
         <div style={{ padding: "20px 24px" }}>
           <div style={{ fontSize: 22, fontWeight: 700 }}>管理后台</div>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>

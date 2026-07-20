@@ -21,7 +21,8 @@ export function SignaturePad({ onChange, height = 140 }: { onChange: (dataUrl: s
     if (!drawing.current || !ref.current) return;
     const ctx = ref.current.getContext("2d")!;
     const p = pos(e);
-    ctx.strokeStyle = "#0c1320";
+    // 随主题取签名色（暗色下白底黑线不可见问题）
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#0c1320";
     ctx.lineWidth = 2.2;
     ctx.lineCap = "round";
     ctx.beginPath();

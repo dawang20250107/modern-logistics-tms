@@ -45,9 +45,10 @@ const PERIODS: { key: string; label: string; days: number }[] = [
   { key: "year", label: "年", days: 365 },
 ];
 
-export function BusinessMetrics() {
+export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) {
   const [period, setPeriod] = useState("month");
-  const days = PERIODS.find((p) => p.key === period)?.days ?? 30;
+  const controlled = externalDays != null;
+  const days = externalDays ?? (PERIODS.find((p) => p.key === period)?.days ?? 30);
 
   const dash = useQuery({
     queryKey: ["analytics", "dashboard"],
@@ -74,11 +75,13 @@ export function BusinessMetrics() {
           <div className="panel" style={{ padding: 18, height: 380, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div className="section-label" style={{ margin: 0 }}>营业额与利润趋势 ({financeMetrics.data.period})</div>
-              <div className="seg-toggle">
-                {PERIODS.map((p) => (
-                  <button key={p.key} className={`seg-btn${period === p.key ? " on" : ""}`} onClick={() => setPeriod(p.key)}>{p.label}</button>
-                ))}
-              </div>
+              {!controlled && (
+                <div className="seg-toggle">
+                  {PERIODS.map((p) => (
+                    <button key={p.key} className={`seg-btn${period === p.key ? " on" : ""}`} onClick={() => setPeriod(p.key)}>{p.label}</button>
+                  ))}
+                </div>
+              )}
             </div>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={financeMetrics.data.trend} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>

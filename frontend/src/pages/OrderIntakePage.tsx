@@ -83,7 +83,6 @@ function CsOrderPool() {
 
   return (
     <div className="panel om-panel">
-      <div className="pool-hint">近期订单跟进池 · 双击行或右键可「登记异常」，登记后订单打标并同步调度与订单管理。全量台账请去订单管理。</div>
       {activeCount > 0 && (
         <div className="om-chips">
           <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>

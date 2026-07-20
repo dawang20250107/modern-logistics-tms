@@ -559,11 +559,6 @@ export function DispatchBoardPage() {
           )}
           <button className={`chip${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)}>仅看紧急</button>
         </div>
-        <div className="pool-hint">
-          {poolTab === "unassigned" && "待分配：尚未锁定/分派的订单。总调度可分派给调度，调度可自行锁定——锁定或分派后进入「可调派」才能派单。右键/双击订单可登记异常。"}
-          {poolTab === "dispatchable" && "可调派：仅本人锁定/被分派的订单，可执行派单。查看他人或全量订单请去「订单管理」。"}
-          {poolTab === "dispatched" && "已调派：本人已生成运单的订单（只读）。查看全量已派请去「订单管理」。"}
-        </div>
         {filterActive > 0 && (
           <div className="om-chips">
             <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>

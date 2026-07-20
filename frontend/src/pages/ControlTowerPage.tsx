@@ -1,28 +1,20 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { apiGet, apiPost } from "../api/client";
-import type { ExpiringCredentials, Paginated, QueryWaybillResult, Waybill } from "../api/types";
+import { apiGet } from "../api/client";
+import type { ExpiringCredentials, Paginated, Waybill } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 import { hasPerm, useAuth } from "../auth/auth";
 import { BusinessMetrics } from "../components/BusinessMetrics";
-import { IconSparkles, IconTerminal, IconSearch } from "../components/Icons";
-import { StateView } from "../components/StateView";
 
-const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
-
-const EVT_LABEL: Record<string, string> = {
-  risk: "风险", alert: "报警", order_pooled: "进池", order_claimed: "认领",
-  order_dispatched: "派单", waybill_status: "运单", waybill_split: "拆单", waybill_merge: "合单",
-  receipt_ocr: "回单", agent_suggestions: "智能建议", notification: "通知", order_sla: "时效",
-};
-function evtText(e: { data?: Record<string, unknown> }): string {
-  const d = (e.data ?? {}) as Record<string, string | number>;
-  if (d.waybill_no) return `运单 ${d.waybill_no}${d.risk_level ? " 风险变化" : ""}`;
-  if (d.order_no) return `订单 ${d.order_no}`;
-  return "有新动态";
-}
+// 驾驶舱日期联动：驱动经营指标仪表（近 N 天）
+const CT_PERIODS: { days: number; label: string }[] = [
+  { days: 7, label: "近7天" },
+  { days: 30, label: "近30天" },
+  { days: 90, label: "近90天" },
+  { days: 365, label: "近1年" },
+];
 
 function Kpi({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
@@ -36,8 +28,7 @@ function Kpi({ label, value, tone }: { label: string; value: number; tone?: stri
 export function ControlTowerPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
+  const [days, setDays] = useState(30);
 
   const waybills = useQuery({
     queryKey: ["waybills", "all"],
@@ -45,12 +36,7 @@ export function ControlTowerPage() {
   });
 
   // 实时事件：到达即刷新看板
-  const events = useEventStream(() => queryClient.invalidateQueries({ queryKey: ["waybills"] }));
-
-  const ask = useMutation({
-    mutationFn: (q: string) => apiPost<QueryWaybillResult>("/ai/query-waybill", { query: q }),
-    onSuccess: (data) => setAnswer(data.answer),
-  });
+  useEventStream(() => queryClient.invalidateQueries({ queryKey: ["waybills"] }));
 
   const wb = useQuery({
     queryKey: ["workbench"],
@@ -70,7 +56,6 @@ export function ControlTowerPage() {
   });
 
   const items = waybills.data?.items ?? [];
-  const risky = items.filter((w) => w.risk_level === "high" || w.risk_level === "medium");
   const pendingReceipt = items.filter((w) => w.receipt_status === "pending");
   const inTransit = items.filter((w) => w.status === "in_transit");
   const w = wb.data;
@@ -84,11 +69,11 @@ export function ControlTowerPage() {
   ].filter((t) => t.value > 0) : [];
 
   return (
-    <div className="stack">
+    <div className="stack ctower">
       {todos.length > 0 && (
         <div className="panel">
           <div className="panel-head">我的待办</div>
-          <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: `repeat(${Math.min(todos.length, 6)}, 1fr)` }}>
+          <div className="kpi-row" style={{ padding: 12, gridTemplateColumns: `repeat(${Math.min(todos.length, 6)}, 1fr)` }}>
             {todos.map((t) => (
               <Link key={t.label} to={t.to} className={`kpi${t.tone ? ` kpi-${t.tone}` : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
                 <div className="kpi-value">{t.value}</div>
@@ -101,89 +86,20 @@ export function ControlTowerPage() {
       <div className="kpi-row">
         <Kpi label="运单总数" value={items.length} />
         <Kpi label="运输中" value={inTransit.length} tone="blue" />
-        <Kpi label="风险运单" value={risky.length} tone="red" />
         <Kpi label="待回单" value={pendingReceipt.length} tone="amber" />
       </div>
 
-      <button
-        type="button"
-        className="panel"
-        aria-label="打开 AI 助手命令面板（快捷键 Ctrl K）"
-        style={{
-          display: "block", width: "100%", textAlign: "left", font: "inherit", color: "inherit",
-          background: "var(--accent-weak)",
-          border: "1px solid var(--accent-weak-2)",
-          cursor: "pointer",
-          transition: "all 0.2s"
-        }}
-        onClick={() => {
-          const e = new KeyboardEvent("keydown", { ctrlKey: true, key: "k" });
-          window.dispatchEvent(e);
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = "var(--accent-weak-2)"}
-        onMouseLeave={(e) => e.currentTarget.style.background = "var(--accent-weak)"}
-      >
-        <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ fontSize: 14, fontWeight: "600", color: "var(--brand)", display: "flex", alignItems: "center", gap: 8 }}>
-              <IconSparkles size={20} className="icon-offset" /> AI 助手
-            </div>
-            <div className="muted small" style={{ color: "var(--ink-2)" }}>
-              使用自然语言查询运单、拼单或利润测算。
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}><IconTerminal size={14} className="icon-offset" /> 快捷键</span>
-            <span style={{ background: "var(--panel)", color: "var(--ink)", padding: "4px 8px", borderRadius: 4, fontWeight: "500", fontFamily: "var(--font-mono)", fontSize: 12, border: "1px solid var(--line)" }}>
-              Ctrl K
-            </span>
-          </div>
-        </div>
-      </button>
-
-      <div className="panel">
-        <div className="panel-head">风险与异常</div>
-        {waybills.isLoading ? (
-          <StateView kind="loading" compact />
-        ) : risky.length === 0 ? (
-          <StateView kind="empty" title="暂无风险运单" hint="有高/中风险运单时会在这里预警。" />
-        ) : (
-          <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>运单号</th>
-                <th>线路</th>
-                <th>风险等级</th>
-                <th>ETA 偏移(分钟)</th>
-                <th>回单状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              {risky.map((w) => (
-                <tr key={w.id}>
-                  <td>
-                    <Link className="link mono interactive-text" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>
-                  </td>
-                  <td><span title={`起讫：${w.origin} → ${w.destination}`}>{w.route_name}</span></td>
-                  <td>
-                    <span className={`tag tag-${w.risk_level}`}>{RISK_LABEL[w.risk_level]}</span>
-                  </td>
-                  <td className="mono" style={{ color: "var(--red)" }}>+{w.eta_drift_minutes} 分钟</td>
-                  <td>{w.receipt_status === "returned" ? "已回收" : w.receipt_status === "pending" ? "待回收" : w.receipt_status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        )}
-      </div>
-
-      {/* 经营指标（原「经营看板」并入）：管理者纵览经营视角 */}
       {hasPerm(user, "analytics.view") && (
         <>
-          <div className="section-label" style={{ marginTop: 4 }}>经营指标</div>
-          <BusinessMetrics />
+          <div className="section-label ct-metrics-head">
+            经营指标
+            <div className="seg-toggle ct-period">
+              {CT_PERIODS.map((p) => (
+                <button key={p.days} className={`seg-btn${days === p.days ? " on" : ""}`} onClick={() => setDays(p.days)}>{p.label}</button>
+              ))}
+            </div>
+          </div>
+          <BusinessMetrics days={days} />
         </>
       )}
     </div>

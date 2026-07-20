@@ -373,7 +373,6 @@ function ResourceOverview({ onJump }: { onJump: (tab: string) => void }) {
           <div className="rh-hero-ic"><IconDatabase size={22} /></div>
           <div>
             <div className="rh-hero-title">资源库</div>
-            <div className="rh-hero-sub">承运商 · 运力 · 客户 · 合规 一体化主数据，派单与计价的统一底座</div>
           </div>
         </div>
       </div>

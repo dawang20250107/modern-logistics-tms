@@ -662,17 +662,17 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .om-clickable.on { border-color: var(--accent); box-shadow: var(--ring); }
 
 /* ── 订单流转四段（客服工作台） ───────────────────────── */
-.lc4 { display: flex; align-items: stretch; gap: 0; padding: 16px 18px; }
+.lc4 { display: flex; align-items: stretch; gap: 0; padding: 10px 14px; }
 .lc4-item { display: flex; align-items: center; flex: 1; }
-.lc4-card { flex: 1; border: 1px solid var(--line-2); border-radius: var(--radius); padding: 14px 16px; background: var(--panel-2); transition: border-color var(--speed), box-shadow var(--speed); }
+.lc4-card { flex: 1; display: flex; align-items: baseline; gap: 8px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--panel-2); transition: border-color var(--speed), box-shadow var(--speed); }
 .lc4-card.on { background: var(--panel); box-shadow: var(--shadow-xs); }
-.lc4-count { font-size: 26px; font-weight: 720; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
-.lc4-label { font-size: 13.5px; font-weight: 600; margin-top: 6px; }
-.lc4-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.lc4-count { font-size: 19px; font-weight: 720; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+.lc4-label { font-size: 12.5px; font-weight: 600; }
+.lc4-sub { font-size: 11px; color: var(--muted); margin-left: auto; }
 .lc4-blue.on { border-top: 2px solid var(--blue); } .lc4-blue .lc4-count { color: var(--blue); }
 .lc4-green.on { border-top: 2px solid var(--green); } .lc4-green .lc4-count { color: var(--green); }
 .lc4-amber.on { border-top: 2px solid var(--amber); } .lc4-amber .lc4-count { color: var(--amber); }
-.lc4-arrow { color: var(--line-2); font-size: 18px; padding: 0 12px; flex: none; }
+.lc4-arrow { color: var(--line-2); font-size: 14px; padding: 0 8px; flex: none; }
 @media (max-width: 860px) { .lc4 { flex-direction: column; gap: 10px; } .lc4-item { flex-direction: column; } .lc4-arrow { transform: rotate(90deg); padding: 6px 0; } }
 
 /* 唤起客户上下文的轻按钮 */
@@ -1356,3 +1356,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .lin-stmt.lin-ap { border-left: 3px solid var(--amber); }
 .lin-empty { padding: 12px 14px; border: 1px dashed var(--line-2); border-radius: 10px; }
 .lin-batches { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px dashed var(--line); }
+
+/* 运输驾驶舱：KPI 卡片缩小，空间让给经营指标；日期联动置于经营指标标题行 */
+.ctower .kpi { padding: 11px 14px 10px; gap: 2px; }
+.ctower .kpi-value { font-size: 22px; }
+.ctower .kpi-label { font-size: 12px; }
+.ct-metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ct-period { flex: none; }

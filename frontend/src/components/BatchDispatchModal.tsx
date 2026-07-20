@@ -1,9 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { apiPost } from "../api/client";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
+import { useModalA11y } from "../api/useModalA11y";
 import type { BatchDispatchResult, Carrier, Order } from "../api/types";
 import { ALLOCATION_LABEL } from "../api/types";
 
@@ -24,12 +25,8 @@ export function BatchDispatchModal({
   const [allocation, setAllocation] = useState("by_weight");
   const [manual, setManual] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useModalA11y(true, cardRef, onClose);
 
   const totalWeight = useMemo(() => orders.reduce((s, o) => s + (Number(o.cargo_weight_ton) || 0), 0), [orders]);
   const customers = useMemo(() => [...new Set(orders.map((o) => o.customer_name || "散客"))], [orders]);
@@ -77,13 +74,18 @@ export function BatchDispatchModal({
     onError: (e: Error) => toast.error(e.message || "批次派单失败"),
   });
 
-  const canSubmit = orders.length > 0
-    && (dispatchType === "third_party" ? Boolean(carrier) : Boolean(platformName))
-    && (allocation === "manual" ? manualSum > 0 : total > 0);
+  const missingReason = orders.length === 0 ? "无可派订单"
+    : dispatchType === "third_party" && !carrier ? "请选择承运商"
+    : dispatchType === "platform" && !platformName ? "请填写网货平台"
+    : (allocation === "manual" ? manualSum <= 0 : total <= 0) ? "请填写议定应付"
+    : "";
+  const canSubmit = !missingReason;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card bd-modal" onClick={(e) => e.stopPropagation()}>
+      <div ref={cardRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="bd-title" className="modal-card bd-modal" onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && canSubmit && !submit.isPending) { e.preventDefault(); submit.mutate(); } }}
+      >
         <div className="bd-head">
           <div>
             <div className="bd-title">批量派承运商</div>
@@ -172,10 +174,10 @@ export function BatchDispatchModal({
         </div>
 
         <div className="bd-foot">
-          <span className="muted small">一批 → {orders.length} 张独立运单（各自回单/签收/对账），批次统一对账</span>
+          <span className="muted small">{missingReason ? <span style={{ color: "var(--amber)" }}>▸ {missingReason}后可批派</span> : "一批 → " + orders.length + " 张独立运单（各自回单/签收/对账），批次统一对账"}</span>
           <div style={{ flex: 1 }} />
           <button className="btn-ghost" onClick={onClose}>取消</button>
-          <button className="btn-primary" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()}>
+          <button className="btn-primary" disabled={!canSubmit || submit.isPending} onClick={() => submit.mutate()} title={missingReason || "Ctrl+Enter 提交"}>
             {submit.isPending ? "生成批次中…" : `确认批派 ${orders.length} 单`}
           </button>
         </div>

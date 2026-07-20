@@ -53,7 +53,7 @@ export function SignaturePad({ onChange, height = 140 }: { onChange: (dataUrl: s
         onPointerUp={end}
         onPointerLeave={end}
       />
-      <button className="btn-ghost" style={{ marginTop: 8 }} onClick={clear}>清除签名</button>
+      <button type="button" className="btn-ghost" style={{ marginTop: 8 }} onClick={clear}>清除签名</button>
     </div>
   );
 }

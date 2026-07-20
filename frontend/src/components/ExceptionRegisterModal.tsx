@@ -38,7 +38,9 @@ export function ExceptionRegisterModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div ref={cardRef} className="modal-card" style={{ width: "min(460px, 94vw)" }} onClick={(e) => e.stopPropagation()} tabIndex={-1}>
+      <div ref={cardRef} className="modal-card" style={{ width: "min(460px, 94vw)" }} onClick={(e) => e.stopPropagation()} tabIndex={-1}
+        onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && desc.trim() && !submit.isPending) { e.preventDefault(); submit.mutate(); } }}
+      >
         <div className="bd-head">
           <div>
             <div className="bd-title">登记异常</div>
@@ -77,8 +79,8 @@ export function ExceptionRegisterModal({
           <span className="muted small">登记后订单打「异常」标记，同步至调度与订单管理台账</span>
           <div style={{ flex: 1 }} />
           <button className="btn-ghost" onClick={onClose}>取消</button>
-          <button className="btn-primary" disabled={!desc.trim() || submit.isPending} onClick={() => submit.mutate()}>
-            {submit.isPending ? "登记中…" : "登记异常"}
+          <button className="btn-primary" disabled={!desc.trim() || submit.isPending} onClick={() => submit.mutate()} title={!desc.trim() ? "请先填写情况描述" : "Ctrl+Enter 提交"}>
+            {submit.isPending ? "登记中…" : "登记异常 (Ctrl+Enter)"}
           </button>
         </div>
       </div>

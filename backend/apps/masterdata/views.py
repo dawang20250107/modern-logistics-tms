@@ -34,7 +34,10 @@ class CustomerViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     required_permissions = _MD_PERMS
     search_fields = ["code", "name", "contact_phone"]
     filterset_fields = ["is_active"]
-    ordering_fields = ["code", "name", "created_at", "level", "credit_limit", "credit_days", "contact_name"]
+    ordering_fields = [
+        "code", "name", "created_at", "level", "category", "credit_limit",
+        "credit_days", "contact_name", "contact_phone", "is_active",
+    ]
     server_filter_fields = {
         "name": FilterField("text", "name"),
         "code": FilterField("text", "code"),
@@ -77,7 +80,7 @@ class CarrierViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     }
     search_fields = ["code", "name", "contact_phone", "city"]
     filterset_fields = ["is_active", "grade", "blacklisted", "carrier_type"]
-    ordering_fields = ["code", "name", "grade", "created_at", "city", "credit_days", "carrier_type"]
+    ordering_fields = ["code", "name", "grade", "created_at", "city", "credit_days", "carrier_type", "is_active"]
     server_filter_fields = {
         "name": FilterField("text", "name"),
         "code": FilterField("text", "code"),
@@ -139,7 +142,10 @@ class CarrierLanePriceViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     }
     search_fields = ["origin_city", "dest_city", "carrier__name", "vehicle_type"]
     filterset_fields = ["origin_city", "dest_city", "carrier", "is_active", "is_recommended", "is_preferred"]
-    ordering_fields = ["origin_city", "dest_city", "standard_price", "created_at", "last_deal_price", "carrier__name"]
+    ordering_fields = [
+        "origin_city", "dest_city", "standard_price", "created_at",
+        "last_deal_price", "carrier__name", "vehicle_type", "flag_code",
+    ]
     server_filter_fields = {
         "origin": FilterField("text", "origin_city"),
         "dest": FilterField("text", "dest_city"),
@@ -169,7 +175,10 @@ class VehicleViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     required_permissions = _MD_PERMS
     search_fields = ["plate_no", "vehicle_type"]
     filterset_fields = ["is_active", "carrier", "vehicle_class", "dispatch_source"]
-    ordering_fields = ["plate_no", "created_at", "load_capacity_ton", "volume_capacity_cbm"]
+    ordering_fields = [
+        "plate_no", "created_at", "load_capacity_ton", "volume_capacity_cbm",
+        "vehicle_type", "owner_name", "is_active",
+    ]
     server_filter_fields = {
         "plate": FilterField("text", "plate_no"),
         "type": FilterField("text", "vehicle_type"),
@@ -195,7 +204,7 @@ class DriverViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     filterset_fields = ["is_active", "carrier", "employment_type", "app_registered"]
     ordering_fields = [
         "name", "created_at", "cumulative_waybills", "cumulative_freight",
-        "phone", "employment_type", "owner_name",
+        "phone", "employment_type", "owner_name", "license_type", "license_expiry", "is_active",
     ]
     server_filter_fields = {
         "name": FilterField("text", "name"),

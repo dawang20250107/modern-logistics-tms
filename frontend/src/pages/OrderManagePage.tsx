@@ -532,7 +532,7 @@ function BatchesTab() {
 export function OrderManagePage() {
   const [tab, setTab] = useState<"order" | "waybill" | "batch">("order");
   return (
-    <div className={`stack${tab === "order" ? " table-page" : ""}`}>
+    <div className={`stack${tab === "order" || tab === "waybill" ? " table-page" : ""}`}>
       <div className="seg-toggle" style={{ alignSelf: "flex-start" }}>
         <button className={`seg-btn${tab === "order" ? " on" : ""}`} onClick={() => setTab("order")}>订单</button>
         <button className={`seg-btn${tab === "waybill" ? " on" : ""}`} onClick={() => setTab("waybill")}>运单</button>

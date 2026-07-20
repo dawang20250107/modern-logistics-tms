@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
+import { useServerTable } from "../api/useServerTable";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
 import { DataTable, type DataColumn } from "./DataTable";
-import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "./FilterBuilder";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "./FilterBuilder";
 import { StateView } from "./StateView";
 
 const LANE_FILTER_FIELDS: FilterFieldDef[] = [
@@ -27,22 +28,19 @@ const BLANK = {
 
 export function LanePriceLib() {
   const qc = useQueryClient();
-  const [kw, setKw] = useState("");
+  const [search, setSearch] = useState("");
   const [form, setForm] = useState<typeof BLANK>({ ...BLANK });
   const [adding, setAdding] = useState(false);
   const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
   const [showFilter, setShowFilter] = useState(false);
   const laneActiveCount = activeConditionCount(model, LANE_FILTER_FIELDS);
+  const anyFilter = Boolean(search) || laneActiveCount > 0;
 
   const carriers = useQuery({ queryKey: ["lp-carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=300") });
-  const lanes = useQuery({ queryKey: ["lane-prices"], queryFn: () => apiGet<Paginated<CarrierLanePrice>>("/carrier-lane-prices?page_size=300") });
-
-  const rows = useMemo(() => {
-    let items = lanes.data?.items ?? [];
-    const k = kw.trim().toLowerCase();
-    if (k) items = items.filter((l) => `${l.origin_city} ${l.dest_city} ${l.carrier_name ?? ""} ${l.vehicle_type ?? ""}`.toLowerCase().includes(k));
-    return applyFilterModel(items, model, LANE_FILTER_FIELDS);
-  }, [lanes.data, kw, model]);
+  const st = useServerTable<CarrierLanePrice>({
+    queryKey: ["lane-prices"], path: "/carrier-lane-prices", pageSize: 50,
+    defaultSort: { field: "origin_city", dir: "asc" }, model, search,
+  });
 
   const create = useMutation({
     mutationFn: () => apiPost<CarrierLanePrice>("/carrier-lane-prices", {
@@ -64,6 +62,7 @@ export function LanePriceLib() {
       setForm({ ...BLANK });
       setAdding(false);
       qc.invalidateQueries({ queryKey: ["lane-prices"] });
+      st.refetch();
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -72,35 +71,18 @@ export function LanePriceLib() {
   const canSubmit = form.carrier && form.origin_city.trim() && form.dest_city.trim() && form.standard_price;
 
   const laneColumns: DataColumn<CarrierLanePrice>[] = [
-    { key: "lane", header: "线路", width: 130, alwaysVisible: true, sortValue: (l) => `${l.origin_city}${l.dest_city}`, exportValue: (l) => `${l.origin_city}→${l.dest_city}`, render: (l) => <>{l.origin_city}→{l.dest_city}</> },
-    { key: "carrier", header: "承运商", width: 150, filterable: true, filterValue: (l) => l.carrier_name || "", sortValue: (l) => l.carrier_name || "", exportValue: (l) => l.carrier_name || "", render: (l) => l.carrier_name },
-    { key: "vehicle", header: "车型/车长", width: 120, filterable: true, filterValue: (l) => l.vehicle_type || "", exportValue: (l) => `${l.vehicle_type || ""}${l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}`, render: (l) => <span className="small">{l.vehicle_type || "—"}{l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}</span> },
-    { key: "standard", header: "标准价", width: 100, align: "right", sortValue: (l) => Number(l.standard_price) || 0, exportValue: (l) => Number(l.standard_price) || 0, render: (l) => <>{fmtMoney(l.standard_price)}</> },
+    { key: "lane", header: "线路", width: 130, alwaysVisible: true, sortField: "origin_city", sortValue: (l) => `${l.origin_city}${l.dest_city}`, exportValue: (l) => `${l.origin_city}→${l.dest_city}`, render: (l) => <>{l.origin_city}→{l.dest_city}</> },
+    { key: "carrier", header: "承运商", width: 150, sortField: "carrier__name", sortValue: (l) => l.carrier_name || "", exportValue: (l) => l.carrier_name || "", render: (l) => l.carrier_name },
+    { key: "vehicle", header: "车型/车长", width: 120, sortField: "vehicle_type", exportValue: (l) => `${l.vehicle_type || ""}${l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}`, render: (l) => <span className="small">{l.vehicle_type || "—"}{l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}</span> },
+    { key: "standard", header: "标准价", width: 100, align: "right", sortField: "standard_price", sortValue: (l) => Number(l.standard_price) || 0, exportValue: (l) => Number(l.standard_price) || 0, render: (l) => <>{fmtMoney(l.standard_price)}</> },
     { key: "band", header: "区间", width: 130, align: "right", exportValue: (l) => `${l.min_price}~${l.max_price}`, render: (l) => <span className="small">{Number(l.min_price) > 0 || Number(l.max_price) > 0 ? `¥${Number(l.min_price).toLocaleString()}~${Number(l.max_price).toLocaleString()}` : "—"}</span> },
-    { key: "last", header: "最近成交", width: 100, align: "right", sortValue: (l) => Number(l.last_deal_price) || 0, exportValue: (l) => Number(l.last_deal_price) || 0, render: (l) => <>{Number(l.last_deal_price) > 0 ? `¥${Number(l.last_deal_price).toLocaleString()}` : "—"}</> },
-    { key: "flag", header: "标记", width: 80, sortValue: (l) => (l.is_recommended ? "0" : l.is_preferred ? "1" : "2"), exportValue: (l) => (l.is_recommended ? "推荐" : l.is_preferred ? "常用" : ""), render: (l) => l.is_recommended ? <span className="tag tag-low">推荐</span> : l.is_preferred ? <span className="tag tag-info">常用</span> : <span className="muted">—</span> },
+    { key: "last", header: "最近成交", width: 100, align: "right", sortField: "last_deal_price", sortValue: (l) => Number(l.last_deal_price) || 0, exportValue: (l) => Number(l.last_deal_price) || 0, render: (l) => <>{Number(l.last_deal_price) > 0 ? `¥${Number(l.last_deal_price).toLocaleString()}` : "—"}</> },
+    { key: "flag", header: "标记", width: 80, sortField: "flag_code", sortValue: (l) => (l.is_recommended ? "0" : l.is_preferred ? "1" : "2"), exportValue: (l) => (l.is_recommended ? "推荐" : l.is_preferred ? "常用" : ""), render: (l) => l.is_recommended ? <span className="tag tag-low">推荐</span> : l.is_preferred ? <span className="tag tag-info">常用</span> : <span className="muted">—</span> },
     { key: "eff", header: "有效期", width: 100, exportValue: (l) => (l.effective_to ? `至 ${l.effective_to}` : "长期"), render: (l) => <span className="small">{l.effective_to ? `至 ${l.effective_to}` : "长期"}</span> },
   ];
 
   return (
-    <div className="panel">
-      <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>线路承运商价库<span className="ai-pill">{rows.length}</span></span>
-        <div style={{ flex: 1 }} />
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input className="search" style={{ width: 220 }} placeholder="搜索线路 / 承运商 / 车型" value={kw} onChange={(e) => setKw(e.target.value)} />
-          <div style={{ position: "relative" }}>
-            <button className={`btn-ghost${laneActiveCount > 0 || showFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowFilter((v) => !v); }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
-                高级筛选{laneActiveCount > 0 ? ` · ${laneActiveCount}` : ""}
-              </span>
-            </button>
-            {showFilter && <FilterBuilder fields={LANE_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowFilter(false)} />}
-          </div>
-          <button className="btn-primary" onClick={() => setAdding((v) => !v)}>{adding ? "收起" : "+ 新增价库"}</button>
-        </div>
-      </div>
+    <div className="panel om-panel">
       {laneActiveCount > 0 && (
         <div className="om-chips">
           <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
@@ -142,21 +124,36 @@ export function LanePriceLib() {
         </div>
       )}
 
-      {lanes.isLoading ? (
-        <StateView kind="loading" compact />
-      ) : lanes.isError ? (
-        <StateView kind="error" onRetry={() => lanes.refetch()} />
-      ) : rows.length === 0 ? (
-        <StateView kind="empty" title="暂无价库条目" hint="维护后，调度台可直接按线路比价选承运商。" />
+      {st.isError ? (
+        <StateView kind="error" onRetry={() => st.refetch()} />
       ) : (
         <DataTable<CarrierLanePrice>
-          columns={laneColumns}
-          rows={rows}
-          rowKey={(l) => l.id}
-          viewKey="lane-prices"
-          exportName="线路价库"
-          stickyFirst
-          toolbarLeft={<span className="muted small">共 {rows.length} 条 · 点击表头排序 · 「列」增减字段</span>}
+          columns={laneColumns} rows={st.rows} rowKey={(l) => l.id} viewKey="lane-prices" exportName="线路价库"
+          stickyFirst server={st.server} fill hideExport
+          emptyState={anyFilter
+            ? <StateView kind="empty" title="没有匹配的价库条目" hint="调整搜索/筛选条件再试。" />
+            : <StateView kind="empty" title="暂无价库条目" hint="维护后，调度台可直接按线路比价选承运商。" />}
+          toolbarLeft={
+            <>
+              <span className="om-title" style={{ marginRight: 2 }}>线路承运商价库<span className="ai-pill">{st.total}</span></span>
+              <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 260 }} placeholder="搜索线路 / 承运商 / 车型" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div style={{ position: "relative" }}>
+                <button className={`btn-ghost${laneActiveCount > 0 || showFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowFilter((v) => !v); }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                    高级筛选{laneActiveCount > 0 ? ` · ${laneActiveCount}` : ""}
+                  </span>
+                </button>
+                {showFilter && <FilterBuilder fields={LANE_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowFilter(false)} />}
+              </div>
+            </>
+          }
+          toolbarRight={
+            <>
+              {anyFilter && <button className="linkish small" onClick={() => { setSearch(""); setModel(EMPTY_MODEL); }}>重置</button>}
+              <button className="btn-primary" onClick={() => setAdding((v) => !v)}>{adding ? "收起" : "+ 新增价库"}</button>
+            </>
+          }
         />
       )}
     </div>

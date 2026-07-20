@@ -6,9 +6,10 @@ import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { CarrierCenter } from "../components/CarrierCenter";
 import { DataTable, type DataColumn } from "../components/DataTable";
-import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { LanePriceLib } from "../components/LanePriceLib";
 import { StateView } from "../components/StateView";
+import { useServerTable } from "../api/useServerTable";
 import { IconGitBranch, IconMapPin, IconTruck, IconBox, IconDatabase, IconShield, IconWarning, IconArrowRight } from "../components/Icons";
 import type {
   Carrier, CarrierLanePrice, CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
@@ -26,51 +27,30 @@ function daysText(d: number): string {
   return `剩 ${d} 天`;
 }
 
-// ── 主数据列表通用外壳（搜索 + 高级多条件筛选 + DataTable 顶尖表格能力） ──
+// ── 主数据列表通用外壳（服务端搜索 + 高级多条件筛选 + 分页/排序 + 固定布局） ──
 function ResourceTable<T>({
-  queryKey, url, columns, rowKey, viewKey, exportName, searchKeys, placeholder, filterFields,
+  queryKey, path, columns, rowKey, viewKey, exportName, placeholder, filterFields, defaultSort, title,
 }: {
   queryKey: string;
-  url: string;
+  path: string; // 服务端列表接口，如 "/vehicles"
   columns: DataColumn<T>[];
   rowKey: (row: T) => string;
   viewKey: string;
   exportName: string;
-  searchKeys: (row: T) => string;
   placeholder: string;
   filterFields?: FilterFieldDef[];
+  defaultSort?: { field: string; dir: "asc" | "desc" };
+  title: string;
 }) {
-  const [kw, setKw] = useState("");
+  const [search, setSearch] = useState("");
   const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
   const [showFilter, setShowFilter] = useState(false);
-  const q = useQuery({ queryKey: [queryKey], queryFn: () => apiGet<Paginated<T>>(url) });
   const activeCount = filterFields ? activeConditionCount(model, filterFields) : 0;
-  const rows = useMemo(() => {
-    let items = q.data?.items ?? [];
-    const k = kw.trim().toLowerCase();
-    if (k) items = items.filter((r) => searchKeys(r).toLowerCase().includes(k));
-    if (filterFields) items = applyFilterModel(items, model, filterFields);
-    return items;
-  }, [q.data, kw, searchKeys, model, filterFields]);
+  const anyFilter = Boolean(search) || activeCount > 0;
+  const st = useServerTable<T>({ queryKey: [queryKey], path, pageSize: 50, defaultSort: defaultSort ?? null, model, search });
 
   return (
-    <div className="panel">
-      <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>清单<span className="ai-pill">{rows.length}</span></span>
-        <div style={{ flex: 1 }} />
-        <input className="search" style={{ width: 240 }} placeholder={placeholder} value={kw} onChange={(e) => setKw(e.target.value)} />
-        {filterFields && (
-          <div style={{ position: "relative" }}>
-            <button className={`btn-ghost${activeCount > 0 || showFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowFilter((v) => !v); }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
-                高级筛选{activeCount > 0 ? ` · ${activeCount}` : ""}
-              </span>
-            </button>
-            {showFilter && <FilterBuilder fields={filterFields} model={model} onChange={setModel} onClose={() => setShowFilter(false)} />}
-          </div>
-        )}
-      </div>
+    <div className="panel om-panel">
       {filterFields && activeCount > 0 && (
         <div className="om-chips">
           <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
@@ -82,21 +62,33 @@ function ResourceTable<T>({
           <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
         </div>
       )}
-      {q.isLoading ? (
-        <StateView kind="loading" compact />
-      ) : q.isError ? (
-        <StateView kind="error" onRetry={() => q.refetch()} />
-      ) : rows.length === 0 ? (
-        <StateView kind="empty" title={kw || activeCount ? "没有匹配的记录" : "暂无数据"} hint={kw || activeCount ? "调整搜索/筛选条件再试。" : undefined} />
+      {st.isError ? (
+        <StateView kind="error" onRetry={() => st.refetch()} />
       ) : (
         <DataTable<T>
-          columns={columns}
-          rows={rows}
-          rowKey={rowKey}
-          viewKey={viewKey}
-          exportName={exportName}
-          stickyFirst
-          toolbarLeft={<span className="muted small">共 {rows.length} 条 · 表头 ⚟ 筛选/排序 · 「列」增减字段</span>}
+          columns={columns} rows={st.rows} rowKey={rowKey} viewKey={viewKey} exportName={exportName}
+          stickyFirst server={st.server} fill hideExport
+          emptyState={anyFilter
+            ? <StateView kind="empty" title="没有匹配的记录" hint="调整搜索/筛选条件再试。" />
+            : <StateView kind="empty" title="暂无数据" />}
+          toolbarLeft={
+            <>
+              <span className="om-title" style={{ marginRight: 2 }}>{title}<span className="ai-pill">{st.total}</span></span>
+              <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 280 }} placeholder={placeholder} value={search} onChange={(e) => setSearch(e.target.value)} />
+              {filterFields && (
+                <div style={{ position: "relative" }}>
+                  <button className={`btn-ghost${activeCount > 0 || showFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowFilter((v) => !v); }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                      高级筛选{activeCount > 0 ? ` · ${activeCount}` : ""}
+                    </span>
+                  </button>
+                  {showFilter && <FilterBuilder fields={filterFields} model={model} onChange={setModel} onClose={() => setShowFilter(false)} />}
+                </div>
+              )}
+            </>
+          }
+          toolbarRight={anyFilter ? <button className="linkish small" onClick={() => { setSearch(""); setModel(EMPTY_MODEL); }}>重置</button> : undefined}
         />
       )}
     </div>
@@ -104,13 +96,13 @@ function ResourceTable<T>({
 }
 
 const vehicleColumns: DataColumn<Vehicle>[] = [
-  { key: "plate", header: "车牌", width: 130, alwaysVisible: true, sortValue: (v) => v.plate_no, exportValue: (v) => v.plate_no, render: (v) => <span className="mono">{v.plate_no}</span> },
-  { key: "type", header: "车型", width: 110, sortValue: (v) => v.vehicle_class_label || v.vehicle_type || "", exportValue: (v) => v.vehicle_class_label || v.vehicle_type || "", render: (v) => v.vehicle_class_label || v.vehicle_type || "-" },
+  { key: "plate", header: "车牌", width: 130, alwaysVisible: true, sortField: "plate_no", sortValue: (v) => v.plate_no, exportValue: (v) => v.plate_no, render: (v) => <span className="mono">{v.plate_no}</span> },
+  { key: "type", header: "车型", width: 110, sortField: "vehicle_type", sortValue: (v) => v.vehicle_class_label || v.vehicle_type || "", exportValue: (v) => v.vehicle_class_label || v.vehicle_type || "", render: (v) => v.vehicle_class_label || v.vehicle_type || "-" },
   { key: "body", header: "车厢", width: 90, sortValue: (v) => v.body_type_label || "", exportValue: (v) => v.body_type_label || "", render: (v) => v.body_type_label || "-" },
-  { key: "ton", header: "核载(吨)", width: 100, align: "right", sortValue: (v) => Number(v.load_capacity_ton) || 0, exportValue: (v) => v.load_capacity_ton ?? "", render: (v) => v.load_capacity_ton ?? "-" },
-  { key: "cbm", header: "容积(方)", width: 100, align: "right", sortValue: (v) => Number(v.volume_capacity_cbm) || 0, exportValue: (v) => v.volume_capacity_cbm ?? "", render: (v) => v.volume_capacity_cbm ?? "-" },
-  { key: "owner", header: "归属", width: 120, sortValue: (v) => v.carrier_name || v.dispatch_source_label || "", exportValue: (v) => v.carrier_name || v.dispatch_source_label || "自有", render: (v) => v.carrier_name || (v.dispatch_source_label ?? "自有") },
-  { key: "active", header: "状态", width: 80, sortValue: (v) => (v.is_active ? "1" : "0"), exportValue: (v) => (v.is_active ? "启用" : "停用"), render: (v) => <span className={`tag ${v.is_active ? "tag-low" : "tag-none"}`}>{v.is_active ? "启用" : "停用"}</span> },
+  { key: "ton", header: "核载(吨)", width: 100, align: "right", sortField: "load_capacity_ton", sortValue: (v) => Number(v.load_capacity_ton) || 0, exportValue: (v) => v.load_capacity_ton ?? "", render: (v) => v.load_capacity_ton ?? "-" },
+  { key: "cbm", header: "容积(方)", width: 100, align: "right", sortField: "volume_capacity_cbm", sortValue: (v) => Number(v.volume_capacity_cbm) || 0, exportValue: (v) => v.volume_capacity_cbm ?? "", render: (v) => v.volume_capacity_cbm ?? "-" },
+  { key: "owner", header: "归属", width: 120, sortField: "owner_name", sortValue: (v) => v.carrier_name || v.dispatch_source_label || "", exportValue: (v) => v.carrier_name || v.dispatch_source_label || "自有", render: (v) => v.carrier_name || (v.dispatch_source_label ?? "自有") },
+  { key: "active", header: "状态", width: 80, sortField: "is_active", sortValue: (v) => (v.is_active ? "1" : "0"), exportValue: (v) => (v.is_active ? "启用" : "停用"), render: (v) => <span className={`tag ${v.is_active ? "tag-low" : "tag-none"}`}>{v.is_active ? "启用" : "停用"}</span> },
 ];
 const vehicleFilterFields: FilterFieldDef[] = [
   { key: "plate", label: "车牌", type: "text", accessor: (v) => (v as Vehicle).plate_no },
@@ -123,34 +115,37 @@ const vehicleFilterFields: FilterFieldDef[] = [
 function VehiclesTab() {
   return (
     <ResourceTable<Vehicle>
-      queryKey="rh-vehicles" url="/vehicles?page_size=300" placeholder="搜索车牌 / 车型" viewKey="fleet-vehicles" exportName="车辆档案"
-      rowKey={(v) => v.id} searchKeys={(v) => `${v.plate_no} ${v.vehicle_type ?? ""} ${v.carrier_name ?? ""}`} columns={vehicleColumns} filterFields={vehicleFilterFields}
+      queryKey="rh-vehicles" path="/vehicles" title="车辆档案" placeholder="搜索车牌 / 车型" viewKey="fleet-vehicles" exportName="车辆档案"
+      defaultSort={{ field: "plate_no", dir: "asc" }}
+      rowKey={(v) => v.id} columns={vehicleColumns} filterFields={vehicleFilterFields}
     />
   );
 }
 
+const DRIVER_EMP_LABEL: Record<string, string> = { employee: "自有员工", outsourced: "外协外调", carrier_driver: "承运商司机", temp: "临时" };
 const driverColumns: DataColumn<Driver>[] = [
-  { key: "name", header: "姓名", width: 110, alwaysVisible: true, sortValue: (d) => d.name, exportValue: (d) => d.name, render: (d) => d.name },
-  { key: "phone", header: "电话", width: 130, sortValue: (d) => d.phone || "", exportValue: (d) => d.phone || "", render: (d) => <span className="mono">{d.phone || "-"}</span> },
-  { key: "emp", header: "用工", width: 100, sortValue: (d) => d.employment_label || "", exportValue: (d) => d.employment_label || "", render: (d) => d.employment_label || "-" },
-  { key: "lic", header: "准驾", width: 80, sortValue: (d) => d.license_type || "", exportValue: (d) => d.license_type || "", render: (d) => d.license_type || "-" },
-  { key: "exp", header: "驾照有效期", width: 120, sortValue: (d) => d.license_expiry || "", exportValue: (d) => d.license_expiry || "", render: (d) => d.license_expiry || "-" },
-  { key: "owner", header: "归属", width: 120, sortValue: (d) => d.carrier_name || "", exportValue: (d) => d.carrier_name || "自有", render: (d) => d.carrier_name || "自有" },
-  { key: "active", header: "状态", width: 80, sortValue: (d) => (d.is_active ? "1" : "0"), exportValue: (d) => (d.is_active ? "在职" : "停用"), render: (d) => <span className={`tag ${d.is_active ? "tag-low" : "tag-none"}`}>{d.is_active ? "在职" : "停用"}</span> },
+  { key: "name", header: "姓名", width: 110, alwaysVisible: true, sortField: "name", sortValue: (d) => d.name, exportValue: (d) => d.name, render: (d) => d.name },
+  { key: "phone", header: "电话", width: 130, sortField: "phone", sortValue: (d) => d.phone || "", exportValue: (d) => d.phone || "", render: (d) => <span className="mono">{d.phone || "-"}</span> },
+  { key: "emp", header: "用工", width: 100, sortField: "employment_type", sortValue: (d) => d.employment_label || "", exportValue: (d) => d.employment_label || "", render: (d) => d.employment_label || "-" },
+  { key: "lic", header: "准驾", width: 80, sortField: "license_type", sortValue: (d) => d.license_type || "", exportValue: (d) => d.license_type || "", render: (d) => d.license_type || "-" },
+  { key: "exp", header: "驾照有效期", width: 120, sortField: "license_expiry", sortValue: (d) => d.license_expiry || "", exportValue: (d) => d.license_expiry || "", render: (d) => d.license_expiry || "-" },
+  { key: "owner", header: "归属", width: 120, sortField: "owner_name", sortValue: (d) => d.carrier_name || "", exportValue: (d) => d.carrier_name || "自有", render: (d) => d.carrier_name || "自有" },
+  { key: "active", header: "状态", width: 80, sortField: "is_active", sortValue: (d) => (d.is_active ? "1" : "0"), exportValue: (d) => (d.is_active ? "在职" : "停用"), render: (d) => <span className={`tag ${d.is_active ? "tag-low" : "tag-none"}`}>{d.is_active ? "在职" : "停用"}</span> },
 ];
 const driverFilterFields: FilterFieldDef[] = [
   { key: "name", label: "姓名", type: "text", accessor: (d) => (d as Driver).name },
   { key: "phone", label: "电话", type: "text", accessor: (d) => (d as Driver).phone || "" },
-  { key: "emp", label: "用工", type: "text", accessor: (d) => (d as Driver).employment_label || "" },
-  { key: "lic", label: "准驾", type: "text", accessor: (d) => (d as Driver).license_type || "" },
+  { key: "emp", label: "用工", type: "enum", options: Object.entries(DRIVER_EMP_LABEL).map(([value, label]) => ({ value, label })), accessor: (d) => (d as Driver).employment_type || "" },
+  { key: "license", label: "准驾", type: "text", accessor: (d) => (d as Driver).license_type || "" },
   { key: "owner", label: "归属", type: "text", accessor: (d) => (d as Driver).carrier_name || "自有" },
   { key: "active", label: "状态", type: "enum", options: [{ value: "1", label: "在职" }, { value: "0", label: "停用" }], accessor: (d) => ((d as Driver).is_active ? "1" : "0") },
 ];
 function DriversTab() {
   return (
     <ResourceTable<Driver>
-      queryKey="rh-drivers" url="/drivers?page_size=300" placeholder="搜索姓名 / 电话" viewKey="fleet-drivers" exportName="司机档案"
-      rowKey={(d) => d.id} searchKeys={(d) => `${d.name} ${d.phone ?? ""} ${d.carrier_name ?? ""}`} columns={driverColumns} filterFields={driverFilterFields}
+      queryKey="rh-drivers" path="/drivers" title="司机档案" placeholder="搜索姓名 / 电话" viewKey="fleet-drivers" exportName="司机档案"
+      defaultSort={{ field: "name", dir: "asc" }}
+      rowKey={(d) => d.id} columns={driverColumns} filterFields={driverFilterFields}
     />
   );
 }
@@ -159,15 +154,15 @@ const CUST_LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B
 const CUST_CATEGORY_LABEL: Record<string, string> = { individual: "个体", enterprise: "企业", government: "政府" };
 
 const customerColumns: DataColumn<Customer>[] = [
-  { key: "code", header: "编码", width: 110, alwaysVisible: true, sortValue: (c) => c.code, exportValue: (c) => c.code, render: (c) => <span className="mono">{c.code}</span> },
-  { key: "name", header: "客户名称", width: 160, sortValue: (c) => c.name, exportValue: (c) => c.name, render: (c) => c.name },
-  { key: "level", header: "等级", width: 70, sortValue: (c) => c.level || "B", exportValue: (c) => c.level || "B", render: (c) => <span className={`tag ${CUST_LEVEL_TONE[c.level || "B"] ?? "tag-none"}`} title={c.level_label}>{c.level || "B"}</span> },
-  { key: "category", header: "分类", width: 80, sortValue: (c) => c.category || "", exportValue: (c) => CUST_CATEGORY_LABEL[c.category || ""] ?? c.category ?? "", render: (c) => CUST_CATEGORY_LABEL[c.category || "enterprise"] ?? "企业" },
-  { key: "contact", header: "联系人", width: 100, sortValue: (c) => c.contact_name || "", exportValue: (c) => c.contact_name || "", render: (c) => c.contact_name || "-" },
-  { key: "phone", header: "电话", width: 130, sortValue: (c) => c.contact_phone || "", exportValue: (c) => c.contact_phone || "", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
-  { key: "credit", header: "授信额度", width: 120, align: "right", sortValue: (c) => Number(c.credit_limit) || 0, exportValue: (c) => Number(c.credit_limit) || 0, render: (c) => Number(c.credit_limit) > 0 ? fmtMoney(c.credit_limit) : "不限" },
-  { key: "days", header: "账期(天)", width: 90, align: "right", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => c.credit_days ?? "", render: (c) => c.credit_days },
-  { key: "active", header: "状态", width: 80, sortValue: (c) => (c.is_active ? "1" : "0"), exportValue: (c) => (c.is_active ? "启用" : "停用"), render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
+  { key: "code", header: "编码", width: 110, alwaysVisible: true, sortField: "code", sortValue: (c) => c.code, exportValue: (c) => c.code, render: (c) => <span className="mono">{c.code}</span> },
+  { key: "name", header: "客户名称", width: 160, sortField: "name", sortValue: (c) => c.name, exportValue: (c) => c.name, render: (c) => c.name },
+  { key: "level", header: "等级", width: 70, sortField: "level", sortValue: (c) => c.level || "B", exportValue: (c) => c.level || "B", render: (c) => <span className={`tag ${CUST_LEVEL_TONE[c.level || "B"] ?? "tag-none"}`} title={c.level_label}>{c.level || "B"}</span> },
+  { key: "category", header: "分类", width: 80, sortField: "category", sortValue: (c) => c.category || "", exportValue: (c) => CUST_CATEGORY_LABEL[c.category || ""] ?? c.category ?? "", render: (c) => CUST_CATEGORY_LABEL[c.category || "enterprise"] ?? "企业" },
+  { key: "contact", header: "联系人", width: 100, sortField: "contact_name", sortValue: (c) => c.contact_name || "", exportValue: (c) => c.contact_name || "", render: (c) => c.contact_name || "-" },
+  { key: "phone", header: "电话", width: 130, sortField: "contact_phone", sortValue: (c) => c.contact_phone || "", exportValue: (c) => c.contact_phone || "", render: (c) => <span className="mono">{c.contact_phone || "-"}</span> },
+  { key: "credit", header: "授信额度", width: 120, align: "right", sortField: "credit_limit", sortValue: (c) => Number(c.credit_limit) || 0, exportValue: (c) => Number(c.credit_limit) || 0, render: (c) => Number(c.credit_limit) > 0 ? fmtMoney(c.credit_limit) : "不限" },
+  { key: "days", header: "账期(天)", width: 90, align: "right", sortField: "credit_days", sortValue: (c) => c.credit_days ?? 0, exportValue: (c) => c.credit_days ?? "", render: (c) => c.credit_days },
+  { key: "active", header: "状态", width: 80, sortField: "is_active", sortValue: (c) => (c.is_active ? "1" : "0"), exportValue: (c) => (c.is_active ? "启用" : "停用"), render: (c) => <span className={`tag ${c.is_active ? "tag-low" : "tag-none"}`}>{c.is_active ? "启用" : "停用"}</span> },
 ];
 const customerFilterFields: FilterFieldDef[] = [
   { key: "name", label: "客户名称", type: "text", accessor: (c) => (c as Customer).name },
@@ -182,8 +177,9 @@ const customerFilterFields: FilterFieldDef[] = [
 function CustomersTab() {
   return (
     <ResourceTable<Customer>
-      queryKey="rh-customers" url="/customers?page_size=300" placeholder="搜索编码 / 名称 / 电话" viewKey="fleet-customers" exportName="客户"
-      rowKey={(c) => c.id} searchKeys={(c) => `${c.code} ${c.name} ${c.contact_phone ?? ""}`} columns={customerColumns} filterFields={customerFilterFields}
+      queryKey="rh-customers" path="/customers" title="客户" placeholder="搜索编码 / 名称 / 电话" viewKey="fleet-customers" exportName="客户"
+      defaultSort={{ field: "code", dir: "asc" }}
+      rowKey={(c) => c.id} columns={customerColumns} filterFields={customerFilterFields}
     />
   );
 }
@@ -410,11 +406,14 @@ const RESOURCE_TABS: { key: string; label: string; render: (jump: (t: string) =>
   { key: "compliance", label: "证件合规", render: () => <ComplianceTab /> },
 ];
 
+// 固定布局（表格内滚 + 底部分页贴底）的 Tab：其余（总览/证件合规）为普通纵向流
+const FIXED_TABS = new Set(["carriers", "lanes", "vehicles", "drivers", "customers"]);
+
 export function FleetPage() {
   const [tab, setTab] = useState("overview");
   const current = RESOURCE_TABS.find((t) => t.key === tab) ?? RESOURCE_TABS[0];
   return (
-    <div className="stack">
+    <div className={`stack${FIXED_TABS.has(tab) ? " table-page" : ""}`}>
       <div className="seg-tabs">
         {RESOURCE_TABS.map((t) => (
           <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>

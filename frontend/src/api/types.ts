@@ -282,7 +282,7 @@ export interface ExceptionEvent {
   event_time: string;
 }
 export const EXC_EVENT_LABEL: Record<string, string> = {
-  create: "立案", assign: "指派", handle: "处理", ai_resolve: "AI 诊断", close: "闭环",
+  create: "立案", assign: "指派", handle: "处理", close: "闭环",
 };
 
 export interface Receipt {
@@ -933,6 +933,16 @@ export interface LookupAnswer {
   driver_phone?: string;
   fields?: Array<{ label: string; value: string }>;
   actions?: string[];
+}
+export interface LookupResult {
+  kind: "waybill" | "order" | "customer" | "carrier" | "statement";
+  title: string;
+  subtitle: string;
+  path: string;
+}
+export interface LookupResponse {
+  answer: LookupAnswer;
+  results: LookupResult[];
 }
 export interface FinanceCardData {
   waybill_no: string; customer_name: string; carrier_name: string;

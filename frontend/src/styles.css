@@ -251,6 +251,7 @@ select {
 .cmdk-item-label { color: #f2f3f8; font-weight: 550; }
 .cmdk-item-hint { color: rgba(255,255,255,0.42); font-size: 12px; }
 .cmdk-badge { font-size: 10px; font-weight: 600; color: #b9c0ff; background: rgba(99,110,240,0.22); border: 1px solid rgba(120,130,250,0.34); padding: 1px 6px; border-radius: 5px; flex: none; }
+.cmdk-badge-hit { color: rgba(255,255,255,0.72); background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); min-width: 18px; text-align: center; }
 .cmdk-item-path { font-size: 11.5px; color: rgba(255,255,255,0.30); font-family: var(--font-mono); flex: none; }
 .cmdk-ai { background: rgba(99,110,240,0.10); border: 1px dashed rgba(120,130,250,0.36); color: #c3c8ff; margin-top: 4px; }
 .cmdk-ai.active { background: rgba(99,110,240,0.22); border-style: solid; }

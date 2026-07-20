@@ -129,3 +129,73 @@ def global_lookup(q: str) -> dict:
         }
 
     return {"kind": "none"}
+
+
+def global_search(q: str, *, limit: int = 12) -> dict:
+    """命令面板工作台：返回「精确答案卡」+「跨实体可跳转结果列表」。
+
+    answer：最相关单实体的实时上下文卡（沿用 global_lookup）。
+    results：运单/订单/客户/承运商/对账单的多命中列表，每项可点击直达对应详情/台账。
+    """
+    from django.db.models import Q
+
+    from apps.finance.models import Statement
+    from apps.masterdata.models import Carrier, Customer
+
+    from .models import Order, Waybill
+
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"answer": {"kind": "none"}, "results": []}
+
+    answer = global_lookup(q)
+    results: list[dict] = []
+
+    def status_label(model, code):
+        return dict(model.STATUS_CHOICES).get(code, code) if hasattr(model, "STATUS_CHOICES") else code
+
+    # 运单（有详情页）
+    for wb in (
+        Waybill.objects.select_related("customer")
+        .filter(Q(waybill_no__icontains=q) | Q(customer__name__icontains=q) | Q(origin__icontains=q) | Q(destination__icontains=q))
+        .exclude(status="voided").order_by("-created_at")[:5]
+    ):
+        results.append({
+            "kind": "waybill", "title": f"运单 {wb.waybill_no}",
+            "subtitle": f"{wb.origin or '?'}→{wb.destination or '?'} · {status_label(Waybill, wb.status)}"
+                        + (f" · {wb.customer.name}" if wb.customer_id else ""),
+            "path": f"/waybills/{wb.waybill_no}",
+        })
+
+    # 订单（有详情页）
+    for od in (
+        Order.objects.select_related("customer")
+        .filter(Q(order_no__icontains=q) | Q(customer__name__icontains=q) | Q(origin__icontains=q) | Q(destination__icontains=q))
+        .order_by("-created_at")[:5]
+    ):
+        results.append({
+            "kind": "order", "title": f"订单 {od.order_no}",
+            "subtitle": f"{od.origin or '?'}→{od.destination or '?'} · {status_label(Order, od.status)}"
+                        + (f" · {od.customer.name}" if od.customer_id else ""),
+            "path": f"/orders/{od.id}",
+        })
+
+    # 客户 / 承运商 / 对账单（跳对应台账）
+    for c in Customer.objects.filter(Q(name__icontains=q) | Q(code__icontains=q))[:3]:
+        active = Waybill.objects.filter(customer=c, status__in=_ACTIVE).count()
+        results.append({
+            "kind": "customer", "title": f"客户 {c.name}",
+            "subtitle": f"在途 {active} · 账期 {c.credit_days} 天", "path": "/fleet",
+        })
+    for c in Carrier.objects.filter(Q(name__icontains=q) | Q(code__icontains=q))[:3]:
+        results.append({
+            "kind": "carrier", "title": f"承运商 {c.name}",
+            "subtitle": f"{c.city or '—'} · {c.grade or '—'}级", "path": "/fleet",
+        })
+    for s in Statement.objects.filter(Q(statement_no__icontains=q) | Q(counterparty_name__icontains=q))[:3]:
+        results.append({
+            "kind": "statement", "title": f"对账单 {s.statement_no}",
+            "subtitle": f"{s.counterparty_name} · {status_label(Statement, s.status)}", "path": "/reconciliation",
+        })
+
+    return {"answer": answer, "results": results[:limit]}

@@ -1288,48 +1288,6 @@ class ExceptionViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         )
         return Response(ExceptionSerializer(exc).data)
 
-    @action(detail=True, methods=["post"], url_path="ai-resolve")
-    def ai_resolve(self, request, pk=None):
-        """AI 自动化排查与异常预案生成：根据当前异常信息调用底层 LangGraph 大脑进行核验并建议。"""
-        from apps.ai.services.agent_runner import run_agent
-
-        from .services import record_exception_event
-
-        exc = self.get_object()
-        from_status = exc.status
-
-        # 将异常交由 AI 处理，使用结构化系统 Prompt 引导
-        prompt = (
-            f"请作为资深物流安全调度主管，审查并处理以下运输异常：\n"
-            f"异常类型: {exc.get_exception_type_display()} (级别: {exc.get_level_display()})\n"
-            f"运单关联: {exc.waybill.waybill_no if exc.waybill else '无'}\n"
-            f"详细描述: {exc.description}\n\n"
-            f"请执行以下动作：\n"
-            f"1. 调用相关工具查阅该运单的时效或详情（若适用）。\n"
-            f"2. 给出具体的业务定损建议、后续人工操作要求，以及降低该类风险的根本措施。\n"
-            f"3. 必须输出 '风险阻断' 的确认方案。"
-        )
-
-        # 调用核心 AI Agent 服务（固定 thread_id，复诊同一异常时可续接上下文）
-        agent_result = run_agent(prompt, thread_id=f"exception_{exc.id}")
-
-        # 回写 AI 的判断报告至异常工单的备忘录，并且推进状态到处理中
-        exc.resolution = f"🤖 [AI 智能诊断与预案]\n{agent_result['answer']}\n\n[原有处理]: {exc.resolution}"
-        if exc.status == ExceptionRecord.STATUS_PENDING:
-            exc.status = ExceptionRecord.STATUS_HANDLING
-        exc.save(update_fields=["resolution", "status", "updated_at"])
-        record_exception_event(
-            exc, "ai_resolve", actor=request.user, from_status=from_status, to_status=exc.status,
-            note=agent_result["answer"], tool_calls=agent_result.get("tool_calls"),
-        )
-
-        return Response({
-            "status": exc.status,
-            "ai_resolution": agent_result["answer"],
-            "tool_calls": agent_result["tool_calls"]
-        })
-
-
 class ReceiptViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     # 回单挂在运单上，按运单组织归属其数据范围
     org_field = "waybill__organization"
@@ -1453,12 +1411,12 @@ class IntegrationStatusView(APIView):
 
 
 class LookupView(APIView):
-    """全局查单：输入车牌/电话/单号/客户，直接返回实体 + 实时上下文答案卡。"""
+    """全局工作台检索：输入车牌/电话/单号/客户/承运商，返回精确答案卡 + 跨实体可跳转结果列表。"""
 
     def get(self, request):
-        from .lookup import global_lookup
+        from .lookup import global_search
 
-        return Response(global_lookup(request.query_params.get("q", "")))
+        return Response(global_search(request.query_params.get("q", "")))
 
 
 class WorkbenchView(APIView):

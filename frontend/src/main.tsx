@@ -9,6 +9,10 @@ import { App } from "./App";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Toaster } from "./components/Toaster";
 import "./styles.css";
+import { initTheme } from "./api/theme";
+
+// 主题初始化（亮为主 + 暗可切换）：在渲染前落 data-theme，避免明暗闪烁
+initTheme();
 
 // 全局兜底：任何写操作失败都给用户明确反馈（交付级「无差错使用」）。
 // 组件可用 useMutation({ meta: { silent: true } }) 自行处理错误、跳过全局提示。

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { hasPerm, useAuth } from "../auth/auth";
+import { getTheme, toggleTheme, type Theme } from "../api/theme";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
@@ -55,6 +56,26 @@ function currentPageTitle(pathname: string) {
   if (pathname.startsWith("/orders/")) return "订单详情";
   if (pathname.startsWith("/waybills/")) return "运单详情";
   return "运输驾驶舱";
+}
+
+// 日/夜主题切换（亮为主 + 暗可切换）
+function ThemeToggle() {
+  const [theme, setThemeState] = useState<Theme>(() => getTheme());
+  const flip = () => setThemeState(toggleTheme());
+  const dark = theme === "dark";
+  return (
+    <button className="theme-toggle" onClick={flip} title={dark ? "切换到亮色" : "切换到暗色"} aria-label="切换主题">
+      {dark ? (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="4.2" /><path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" />
+        </svg>
+      ) : (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+        </svg>
+      )}
+    </button>
+  );
 }
 
 export function AppLayout() {
@@ -131,6 +152,7 @@ export function AppLayout() {
             <span className="topbar-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd>查单 / 派单</span>
           </div>
           <div className="topbar-user">
+            <ThemeToggle />
             <NotificationBell />
             <NavLink to="/profile" className="topbar-account" title="个人中心">
               <span className="topbar-avatar">{((user?.nickname || user?.username || "?").trim()[0] ?? "?").toUpperCase()}</span>

@@ -1,15 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart, Legend, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
 import { apiGet } from "../api/client";
+import { readCssVars, THEME_EVENT } from "../api/theme";
 import type { MetricCard } from "../api/types";
 import { METRIC_DOMAIN_LABEL } from "../api/types";
 import { Sparkline } from "./Sparkline";
 import { StateView } from "./StateView";
+
+const CHART_VARS = [
+  "--chart-revenue", "--chart-cost", "--chart-profit", "--chart-grid", "--chart-tip-bg", "--chart-tip-ink",
+  "--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5", "--chart-6", "--chart-7",
+];
+// 图表色随主题切换重算（recharts 需要真实色值，不吃 CSS 变量透传）
+function useChartTokens() {
+  const [tok, setTok] = useState<Record<string, string>>(() => readCssVars(CHART_VARS));
+  useEffect(() => {
+    const on = () => setTok(readCssVars(CHART_VARS));
+    window.addEventListener(THEME_EVENT, on);
+    return () => window.removeEventListener(THEME_EVENT, on);
+  }, []);
+  return tok;
+}
 
 // 经营指标（原「经营看板」）：并入运输驾驶舱，作为管理者纵览的经营视角。
 // 基于实收实付台账自动聚合：营收/成本/毛利趋势 + 成本构成 + 分域 KPI。
@@ -37,7 +53,6 @@ function trendDelta(points?: Array<{ value: number }>): { dir: "up" | "down" | "
 
 const DOMAIN_ORDER = ["ops", "fleet", "order", "finance"];
 const TONE: Record<string, string> = { ops: "blue", fleet: "blue", order: "amber", finance: "" };
-const COLORS = ["#2563eb", "#0ea5e9", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
 
 const PERIODS: { key: string; label: string; days: number }[] = [
   { key: "day", label: "日", days: 7 },
@@ -47,6 +62,8 @@ const PERIODS: { key: string; label: string; days: number }[] = [
 
 export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) {
   const [period, setPeriod] = useState("month");
+  const c = useChartTokens();
+  const PIE = [c["--chart-1"], c["--chart-2"], c["--chart-3"], c["--chart-4"], c["--chart-5"], c["--chart-6"], c["--chart-7"]];
   const controlled = externalDays != null;
   const days = externalDays ?? (PERIODS.find((p) => p.key === period)?.days ?? 30);
 
@@ -87,18 +104,18 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
               <ComposedChart data={financeMetrics.data.trend} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
+                    <stop offset="5%" stopColor={c["--chart-revenue"]} stopOpacity={0.35} />
+                    <stop offset="95%" stopColor={c["--chart-2"]} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={c["--chart-grid"]} />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(val) => `¥${val / 1000}k`} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 10px 24px rgba(0,0,0,0.1)", fontSize: 12 }} formatter={(value) => formatRmb(Number(value))} />
+                <Tooltip contentStyle={{ borderRadius: 10, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} formatter={(value) => formatRmb(Number(value))} />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                <Area type="monotone" name="主营收入" dataKey="revenue" fill="url(#colorRevenue)" stroke="#2563eb" strokeWidth={3} />
-                <Bar name="外协成本/支出" dataKey="cost" barSize={16} fill="#94a3b8" radius={[4, 4, 0, 0]} />
-                <Area type="monotone" name="毛利润" dataKey="profit" fill="none" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" />
+                <Area type="monotone" name="主营收入" dataKey="revenue" fill="url(#colorRevenue)" stroke={c["--chart-revenue"]} strokeWidth={3} />
+                <Bar name="外协成本/支出" dataKey="cost" barSize={16} fill={c["--chart-cost"]} radius={[4, 4, 0, 0]} />
+                <Area type="monotone" name="毛利润" dataKey="profit" fill="none" stroke={c["--chart-profit"]} strokeWidth={2} strokeDasharray="5 5" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -111,10 +128,10 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Tooltip formatter={(value) => formatRmb(Number(value))} contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 10px 24px rgba(0,0,0,0.1)", fontSize: 12 }} />
+                  <Tooltip formatter={(value) => formatRmb(Number(value))} contentStyle={{ borderRadius: 10, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} />
                   <Legend iconType="circle" layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ fontSize: 12 }} />
                   <Pie data={pieData} cx="40%" cy="50%" innerRadius={65} outerRadius={100} paddingAngle={4} dataKey="value" stroke="none">
-                    {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                    {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={PIE[index % PIE.length]} />)}
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>

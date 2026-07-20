@@ -1077,10 +1077,27 @@ class OrderViewSet(ServerFilterMixin, OrgScopedQuerysetMixin, viewsets.ModelView
         return Response(WaybillSerializer(waybill).data, status=201)
 
 
-class DispatchBatchViewSet(OrgScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+class DispatchBatchViewSet(ServerFilterMixin, OrgScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     """派车批次台账：多单一次委托同一承运商的商务归集，展开为各票独立运单。"""
 
     permission_classes = [IsAuthenticated]
+    search_fields = ["batch_no", "carrier__name", "platform_name"]
+    ordering_fields = [
+        "created_at", "batch_no", "status", "dispatch_type", "total_payable",
+        "order_count", "total_weight_ton", "carrier__name",
+    ]
+    ordering = ["-created_at"]
+    server_filter_fields = {
+        "batch_no": FilterField("text", "batch_no"),
+        "carrier": FilterField("text", "carrier__name"),
+        "channel": FilterField("enum", "dispatch_type"),
+        "status": FilterField("enum", "status"),
+        "allocation": FilterField("enum", "allocation"),
+        "payable": FilterField("number", "total_payable"),
+        "count": FilterField("number", "order_count"),
+        "weight": FilterField("number", "total_weight_ton"),
+        "created_at": FilterField("date", "created_at"),
+    }
 
     def get_queryset(self):
         from .models import DispatchBatch

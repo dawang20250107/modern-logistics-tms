@@ -6,10 +6,11 @@ import { apiGet } from "../api/client";
 import { fmtRelative } from "../api/format";
 import type { Order, Paginated } from "../api/types";
 import { BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL } from "../api/types";
+import { useServerTable } from "../api/useServerTable";
 import { CustomerContextPanel } from "../components/CustomerContextPanel";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
-import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { OrderLifecycle } from "../components/OrderLifecycle";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
@@ -29,14 +30,8 @@ const CS_POOL_FILTER_FIELDS: FilterFieldDef[] = [
   { key: "created_at", label: "建单时间", type: "date", accessor: (o) => (o as Order).created_at },
 ];
 
-const POOL_QUERY = {
-  queryKey: ["cs-order-pool"],
-  queryFn: () => apiGet<Paginated<Order>>("/orders?ordering=-created_at&page_size=200"),
-  refetchInterval: 20000,
-};
-
-// 客服订单池：与全站表格能力对齐的 DataTable（列显隐/排序/列筛选/右键/框选/导出/保存视图）
-// + 页面级高级多条件筛选（AND/OR）。双击行/右键可「登记异常」，同步调度与订单管理。
+// 客服订单池：与全站表格能力对齐的 DataTable（服务端搜索/高级筛选/排序/分页）。
+// 双击行/右键可「登记异常」，同步调度与订单管理。
 function CsOrderPool() {
   const queryClient = useQueryClient();
   const [excOrder, setExcOrder] = useState<Order | null>(null);
@@ -44,30 +39,39 @@ function CsOrderPool() {
   const [search, setSearch] = useState("");
   const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
   const [showBuilder, setShowBuilder] = useState(false);
-  const q = useQuery(POOL_QUERY);
 
   const activeCount = activeConditionCount(model, CS_POOL_FILTER_FIELDS);
-  const items = q.data?.items ?? [];
-  const excTotal = items.filter((o) => (o.exception_count ?? 0) > 0).length;
+  // 「仅看异常」下沉服务端：在筛选模型上附加异常条件（AND 语义）
+  const effectiveModel = useMemo<FilterModel>(() => {
+    if (!onlyException) return model;
+    return {
+      combinator: "and",
+      conditions: [
+        { id: "__exc", field: "exception", op: "in", value: ["1"] },
+        ...(model.combinator === "and" ? model.conditions : []),
+      ],
+    };
+  }, [onlyException, model]);
 
-  const rows = useMemo(() => {
-    let list = items;
-    if (onlyException) list = list.filter((o) => (o.exception_count ?? 0) > 0);
-    const k = search.trim().toLowerCase();
-    if (k) list = list.filter((o) => `${o.order_no} ${o.customer_name ?? ""} ${o.origin ?? ""} ${o.destination ?? ""}`.toLowerCase().includes(k));
-    return applyFilterModel(list, model, CS_POOL_FILTER_FIELDS);
-  }, [items, onlyException, search, model]);
+  const st = useServerTable<Order>({
+    queryKey: ["cs-order-pool"],
+    path: "/orders",
+    pageSize: 50,
+    defaultSort: { field: "created_at", dir: "desc" },
+    model: effectiveModel,
+    search,
+  });
   const anyFilter = Boolean(search.trim()) || onlyException || activeCount > 0;
 
   const columns: DataColumn<Order>[] = [
-    { key: "order_no", header: "订单号 (DD)", width: 172, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="mono small doc-order" to={`/orders/${o.id}`} onClick={(e) => e.stopPropagation()}>{o.order_no}</Link> },
-    { key: "customer", header: "客户", width: 170, filterable: true, filterValue: (o) => o.customer_name || "散客", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => (
+    { key: "order_no", header: "订单号 (DD)", width: 172, alwaysVisible: true, sortField: "order_no", sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="mono small doc-order" to={`/orders/${o.id}`} onClick={(e) => e.stopPropagation()}>{o.order_no}</Link> },
+    { key: "customer", header: "客户", width: 170, sortField: "customer__name", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => (
       <span className="small">{o.customer_name || "散客"}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠ 异常{(o.exception_count ?? 0) > 1 ? `×${o.exception_count}` : ""}</span>}</span>
     ) },
-    { key: "route", header: "线路", width: 150, filterable: true, filterValue: (o) => `${o.origin || ""}→${o.destination || ""}`, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin}→${o.destination}`, render: (o) => <span className="small"><b>{o.origin}</b> → <b>{o.destination}</b></span> },
-    { key: "channel", header: "渠道", width: 100, filterable: true, filterValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small muted">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
-    { key: "status", header: "订单状态", width: 116, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
-    { key: "created_at", header: "建单", width: 108, sortValue: (o) => o.created_at, exportValue: (o) => o.created_at, render: (o) => <span className="small muted" title={o.created_at}>{fmtRelative(o.created_at)}</span> },
+    { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin}→${o.destination}`, render: (o) => <span className="small"><b>{o.origin}</b> → <b>{o.destination}</b></span> },
+    { key: "channel", header: "渠道", width: 100, sortField: "channel", exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small muted">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
+    { key: "status", header: "订单状态", width: 116, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
+    { key: "created_at", header: "建单", width: 108, sortField: "created_at", sortValue: (o) => o.created_at, exportValue: (o) => o.created_at, render: (o) => <span className="small muted" title={o.created_at}>{fmtRelative(o.created_at)}</span> },
     { key: "act", header: "操作", width: 120, alwaysVisible: true, render: (o) => (
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
         <button onClick={() => setExcOrder(o)}>登记异常</button>
@@ -94,20 +98,18 @@ function CsOrderPool() {
           <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
         </div>
       )}
-      {q.isLoading ? (
-        <StateView kind="loading" compact />
-      ) : q.isError ? (
-        <StateView kind="error" onRetry={() => q.refetch()} />
+      {st.isError ? (
+        <StateView kind="error" onRetry={() => st.refetch()} />
       ) : (
         <DataTable<Order>
-          columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="cs-order-pool" exportName="客服订单池"
-          stickyFirst rowMenu={rowMenu} onRowDoubleClick={(o) => setExcOrder(o)}
+          columns={columns} rows={st.rows} rowKey={(o) => o.id} viewKey="cs-order-pool" exportName="客服订单池"
+          stickyFirst server={st.server} fill hideExport rowMenu={rowMenu} onRowDoubleClick={(o) => setExcOrder(o)}
           emptyState={anyFilter
             ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" />
             : <StateView kind="empty" title="暂无订单" hint="在「建单工作台」建单后将在此跟进。" />}
           toolbarLeft={
             <>
-              <span className="om-title" style={{ marginRight: 2 }}>订单池<span className="ai-pill">{rows.length}</span></span>
+              <span className="om-title" style={{ marginRight: 2 }}>订单池<span className="ai-pill">{st.total}</span></span>
               <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 300 }} placeholder="搜索 订单号 / 客户 / 线路" value={search} onChange={(e) => setSearch(e.target.value)} />
               <div style={{ position: "relative" }}>
                 <button className={`btn-ghost${activeCount > 0 || showBuilder ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowBuilder((v) => !v); }}>
@@ -118,7 +120,7 @@ function CsOrderPool() {
                 </button>
                 {showBuilder && <FilterBuilder fields={CS_POOL_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
               </div>
-              <button className={`chip${onlyException ? " chip-on" : ""}`} onClick={() => setOnlyException((v) => !v)}>仅看异常{excTotal ? ` ${excTotal}` : ""}</button>
+              <button className={`chip${onlyException ? " chip-on" : ""}`} onClick={() => setOnlyException((v) => !v)}>仅看异常</button>
             </>
           }
           toolbarRight={<Link className="link small" to="/waybills">去订单管理 →</Link>}
@@ -142,8 +144,13 @@ export function OrderIntakePage() {
   const [tab, setTab] = useState<"build" | "pool">("build");
   const [ctxCustomer, setCtxCustomer] = useState("");
   const [showCtx, setShowCtx] = useState(false);
-  const poolQ = useQuery(POOL_QUERY); // 与池内查询同 key，react-query 去重，仅用于 Tab 计数徽标
-  const poolCount = poolQ.data?.items?.length ?? 0;
+  // Tab 计数徽标：服务端全量计数（page_size=1 仅取 total）
+  const poolQ = useQuery({
+    queryKey: ["cs-order-pool-count"],
+    queryFn: () => apiGet<Paginated<Order>>("/orders?page_size=1"),
+    refetchInterval: 30000,
+  });
+  const poolCount = poolQ.data?.total ?? 0;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["orders"] });
@@ -158,7 +165,7 @@ export function OrderIntakePage() {
   }, [showCtx]);
 
   return (
-    <div className="stack">
+    <div className={`stack${tab === "pool" ? " table-page" : ""}`}>
       <div className="cs-tabbar">
         <div className="seg-tabs">
           <button className={tab === "build" ? "active" : ""} onClick={() => setTab("build")}>建单工作台</button>

@@ -384,14 +384,34 @@ function OrdersTab() {
   );
 }
 
+// 派车批次高级筛选字段（与后端 server_filter_fields 对齐）
+const BATCH_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "batch_no", label: "批次号", type: "text", accessor: (b) => (b as DispatchBatch).batch_no },
+  { key: "carrier", label: "承运商/平台", type: "text", accessor: (b) => (b as DispatchBatch).carrier_name || (b as DispatchBatch).platform_name || "" },
+  { key: "status", label: "状态", type: "enum", options: Object.entries(BATCH_STATUS_LABEL).map(([value, label]) => ({ value, label })), accessor: (b) => (b as DispatchBatch).status },
+  { key: "payable", label: "总应付(元)", type: "number", accessor: (b) => Number((b as DispatchBatch).total_payable) || 0 },
+  { key: "count", label: "运单数", type: "number", accessor: (b) => (b as DispatchBatch).order_count },
+  { key: "weight", label: "总货量(吨)", type: "number", accessor: (b) => Number((b as DispatchBatch).total_weight_ton) || 0 },
+];
+
 // ── 批次视图（派车批次台账：多单一次委托同一承运商）──────────────
 function BatchesTab() {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("");
   const [drawer, setDrawer] = useState<string | null>(null);
-  const q = useQuery({
-    queryKey: ["dispatch-batches", status],
-    queryFn: () => apiGet<Paginated<DispatchBatch>>(`/dispatch-batches?page_size=200${status ? `&status=${status}` : ""}`),
+  const [search, setSearch] = useState("");
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const batchActiveCount = activeConditionCount(model, BATCH_FILTER_FIELDS);
+  const anyFilter = Boolean(search) || Boolean(status) || batchActiveCount > 0;
+  const st = useServerTable<DispatchBatch>({
+    queryKey: ["dispatch-batches"],
+    path: "/dispatch-batches",
+    pageSize: 50,
+    defaultSort: { field: "created_at", dir: "desc" },
+    model,
+    search,
+    extraParams: { status: status || undefined },
   });
   const detail = useQuery({
     queryKey: ["dispatch-batch", drawer],
@@ -418,40 +438,61 @@ function BatchesTab() {
     return () => window.removeEventListener("keydown", onKey);
   }, [drawer]);
 
-  const rows = q.data?.items ?? [];
   const columns: DataColumn<DispatchBatch>[] = [
-    { key: "batch_no", header: "批次号", width: 165, alwaysVisible: true, sortValue: (b) => b.batch_no, exportValue: (b) => b.batch_no, render: (b) => <span className="mono">{b.batch_no}</span> },
-    { key: "carrier", header: "承运商 / 平台", width: 150, sortValue: (b) => b.carrier_name || b.platform_name, exportValue: (b) => b.carrier_name || b.platform_name, render: (b) => <span>{b.carrier_name || b.platform_name || "—"}<span className="tag tag-info small" style={{ marginLeft: 6 }}>{b.dispatch_type_label}</span></span> },
+    { key: "batch_no", header: "批次号", width: 165, alwaysVisible: true, sortField: "batch_no", sortValue: (b) => b.batch_no, exportValue: (b) => b.batch_no, render: (b) => <span className="mono">{b.batch_no}</span> },
+    { key: "carrier", header: "承运商 / 平台", width: 150, sortField: "carrier__name", sortValue: (b) => b.carrier_name || b.platform_name, exportValue: (b) => b.carrier_name || b.platform_name, render: (b) => <span>{b.carrier_name || b.platform_name || "—"}<span className="tag tag-info small" style={{ marginLeft: 6 }}>{b.dispatch_type_label}</span></span> },
     { key: "customers", header: "涉及客户", width: 200, sortValue: (b) => b.customer_summary.join(","), exportValue: (b) => b.customer_summary.join("、"), render: (b) => <span className="small">{b.customer_summary.length > 1 ? <span className="tag tag-medium" style={{ marginRight: 4 }}>跨客户</span> : null}{b.customer_summary.slice(0, 2).join("、")}{b.customer_summary.length > 2 ? ` +${b.customer_summary.length - 2}` : ""}</span> },
-    { key: "count", header: "运单数", width: 80, align: "right", sortValue: (b) => b.order_count, exportValue: (b) => b.order_count, render: (b) => <b>{b.order_count}</b> },
-    { key: "weight", header: "总货量", width: 100, align: "right", sortValue: (b) => Number(b.total_weight_ton), exportValue: (b) => b.total_weight_ton, render: (b) => <span className="num">{Number(b.total_weight_ton).toFixed(1)}吨</span> },
-    { key: "payable", header: "总应付", width: 120, align: "right", sortValue: (b) => Number(b.total_payable), exportValue: (b) => Number(b.total_payable), render: (b) => <span className="num">{fmtMoney(b.total_payable)}</span> },
+    { key: "count", header: "运单数", width: 80, align: "right", sortField: "order_count", sortValue: (b) => b.order_count, exportValue: (b) => b.order_count, render: (b) => <b>{b.order_count}</b> },
+    { key: "weight", header: "总货量", width: 100, align: "right", sortField: "total_weight_ton", sortValue: (b) => Number(b.total_weight_ton), exportValue: (b) => b.total_weight_ton, render: (b) => <span className="num">{Number(b.total_weight_ton).toFixed(1)}吨</span> },
+    { key: "payable", header: "总应付", width: 120, align: "right", sortField: "total_payable", sortValue: (b) => Number(b.total_payable), exportValue: (b) => Number(b.total_payable), render: (b) => <span className="num">{fmtMoney(b.total_payable)}</span> },
     { key: "alloc", header: "分摊", width: 90, sortValue: (b) => b.allocation, exportValue: (b) => b.allocation_label, render: (b) => <span className="small muted">{b.allocation_label}</span> },
-    { key: "status", header: "状态", width: 90, sortValue: (b) => b.status, exportValue: (b) => b.status_label, render: (b) => <span className={`tag ${b.status === "cancelled" ? "tag-none" : b.status === "completed" ? "tag-low" : "tag-info"}`}>{b.status_label}</span> },
+    { key: "status", header: "状态", width: 90, sortField: "status", sortValue: (b) => b.status, exportValue: (b) => b.status_label, render: (b) => <span className={`tag ${b.status === "cancelled" ? "tag-none" : b.status === "completed" ? "tag-low" : "tag-info"}`}>{b.status_label}</span> },
     { key: "creator", header: "建批人", width: 100, sortValue: (b) => b.created_by_name, exportValue: (b) => b.created_by_name, render: (b) => <span className="small muted">{b.created_by_name || "—"}</span> },
-    { key: "created", header: "建批时间", width: 130, sortValue: (b) => b.created_at, exportValue: (b) => fmtDateTime(b.created_at), render: (b) => <span className="small" title={fmtDateTime(b.created_at)}>{fmtRelative(b.created_at)}</span> },
+    { key: "created", header: "建批时间", width: 130, sortField: "created_at", sortValue: (b) => b.created_at, exportValue: (b) => fmtDateTime(b.created_at), render: (b) => <span className="small" title={fmtDateTime(b.created_at)}>{fmtRelative(b.created_at)}</span> },
   ];
 
   return (
-    <div className="panel">
-      <div className="panel-head" style={{ flexWrap: "wrap", gap: 10 }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>派车批次<span className="ai-pill">{rows.length}</span></span>
-      </div>
+    <div className="panel om-panel">
+      {batchActiveCount > 0 && (
+        <div className="om-chips">
+          <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+          {model.conditions.map((c) => {
+            const label = describeCondition(c, BATCH_FILTER_FIELDS);
+            if (!label) return null;
+            return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+          })}
+          <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
+        </div>
+      )}
       <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
         <button className={`chip${status === "" ? " chip-on" : ""}`} onClick={() => setStatus("")}>全部</button>
-        {Object.entries(BATCH_STATUS_LABEL).map(([k, v]) => <button key={k} className={`chip${status === k ? " chip-on" : ""}`} onClick={() => setStatus(k)}>{v}</button>)}
+        {Object.entries(BATCH_STATUS_LABEL).map(([k, v]) => <button key={k} className={`chip${status === k ? " chip-on" : ""}`} onClick={() => setStatus(status === k ? "" : k)}>{v}</button>)}
       </div>
-      {q.isLoading ? (
-        <StateView kind="loading" compact />
-      ) : q.isError ? (
-        <StateView kind="error" onRetry={() => q.refetch()} />
-      ) : rows.length === 0 ? (
-        <StateView kind="empty" title="暂无派车批次" hint="在调度工作台选中多单 →「批量派承运商」即可生成批次。" />
+      {st.isError ? (
+        <StateView kind="error" onRetry={() => st.refetch()} />
       ) : (
         <DataTable<DispatchBatch>
-          columns={columns} rows={rows} rowKey={(b) => b.id} viewKey="dispatch-batches" exportName="派车批次"
-          stickyFirst onRowClick={(b) => setDrawer(b.id)}
-          toolbarLeft={<span className="muted small">共 {rows.length} 批 · 点击行看批次内运单 · 批次 = 承运商应付统一对账分组</span>}
+          columns={columns} rows={st.rows} rowKey={(b) => b.id} viewKey="dispatch-batches" exportName="派车批次"
+          stickyFirst server={st.server} fill hideExport onRowClick={(b) => setDrawer(b.id)}
+          emptyState={anyFilter
+            ? <StateView kind="empty" title="没有匹配的派车批次" hint="调整搜索/筛选条件再试。" />
+            : <StateView kind="empty" title="暂无派车批次" hint="在调度工作台选中多单 →「批量派承运商」即可生成批次。" />}
+          toolbarLeft={
+            <>
+              <span className="om-title" style={{ marginRight: 2 }}>派车批次<span className="ai-pill">{st.total}</span></span>
+              <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 280 }} placeholder="搜索 批次号 / 承运商" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div style={{ position: "relative" }}>
+                <button className={`btn-ghost${batchActiveCount > 0 || showBuilder ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowBuilder((v) => !v); }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                    高级筛选{batchActiveCount > 0 ? ` · ${batchActiveCount}` : ""}
+                  </span>
+                </button>
+                {showBuilder && <FilterBuilder fields={BATCH_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
+              </div>
+            </>
+          }
+          toolbarRight={<span className="muted small">批次 = 承运商应付统一对账分组</span>}
         />
       )}
 
@@ -532,7 +573,7 @@ function BatchesTab() {
 export function OrderManagePage() {
   const [tab, setTab] = useState<"order" | "waybill" | "batch">("order");
   return (
-    <div className={`stack${tab === "order" || tab === "waybill" ? " table-page" : ""}`}>
+    <div className={`stack${tab === "order" || tab === "waybill" || tab === "batch" ? " table-page" : ""}`}>
       <div className="seg-toggle" style={{ alignSelf: "flex-start" }}>
         <button className={`seg-btn${tab === "order" ? " on" : ""}`} onClick={() => setTab("order")}>订单</button>
         <button className={`seg-btn${tab === "waybill" ? " on" : ""}`} onClick={() => setTab("waybill")}>运单</button>

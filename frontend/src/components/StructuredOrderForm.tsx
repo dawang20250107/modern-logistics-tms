@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { fmtMoney } from "../api/format";
@@ -286,16 +286,42 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
   const totalQty = cleanCargo().reduce((s, c) => s + (Number(c.quantity) || 0), 0);
   const volumetric = totalVolume * 0.333;
   const chargeable = Math.max(totalWeight, volumetric);
-  const valid = form.origin.trim() && form.destination.trim();
+  // 即时校验：按 UI 的「*」必填标记（始发城市 / 目的城市 / 至少一条货品名称）
+  const errs = {
+    origin: !form.origin.trim(),
+    destination: !form.destination.trim(),
+    cargo: !cargo.some((c) => c.name.trim()),
+  };
+  const valid = !errs.origin && !errs.destination && !errs.cargo;
+  const [showErrors, setShowErrors] = useState(false);
+  const originRef = useRef<HTMLLabelElement>(null);
+  const destRef = useRef<HTMLLabelElement>(null);
+  const cargoRef = useRef<HTMLDivElement>(null);
+
+  // 提交前校验并「错误定位」：滚动+聚焦到第一个缺失项，并列出缺什么
+  const trySubmit = (status: "pending_confirm" | "draft") => {
+    if (submit.isPending) return;
+    if (status === "draft") { submit.mutate("draft"); return; } // 暂存草稿允许不完整
+    if (!valid) {
+      setShowErrors(true);
+      const missing = [errs.origin && "始发城市", errs.destination && "目的城市", errs.cargo && "货品名称"].filter(Boolean) as string[];
+      toast.error(`请补全必填项：${missing.join("、")}`);
+      const target = errs.origin ? originRef.current : errs.destination ? destRef.current : cargoRef.current;
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      target?.querySelector<HTMLElement>("input")?.focus();
+      return;
+    }
+    submit.mutate("pending_confirm");
+  };
 
   return (
     <div
       className="panel"
       style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)" }}
       onKeyDown={(e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && activeMode === "standard" && valid && !submit.isPending) {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && activeMode === "standard" && !submit.isPending) {
           e.preventDefault();
-          submit.mutate("pending_confirm");
+          trySubmit("pending_confirm");
         }
       }}
     >
@@ -392,7 +418,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                     <button className="btn-secondary" style={{ flex: 1, padding: 12 }} onClick={() => setActiveMode("standard")}>
                       进入标准表单进行微调
                     </button>
-                    <button className="btn-primary" style={{ flex: 1.5, padding: 12, background: "var(--green)", borderColor: "var(--green)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>
+                    <button className="btn-primary" style={{ flex: 1.5, padding: 12, background: "var(--green)", borderColor: "var(--green)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} disabled={submit.isPending} onClick={() => trySubmit("pending_confirm")}>
                       <IconCheck size={16} className="icon-offset" /> 确认建单
                     </button>
                   </div>
@@ -539,8 +565,8 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             </div>
 
             <div className="grid-form">
-              <label>始发城市 *<CityCombobox value={form.origin} onChange={(v) => set("origin", v)} placeholder="输入或选择，如 无锡" /></label>
-              <label>目的城市 *<CityCombobox value={form.destination} onChange={(v) => set("destination", v)} placeholder="输入或选择，如 上海" /></label>
+              <label ref={originRef} className={showErrors && errs.origin ? "field-err" : ""}>始发城市 *<CityCombobox value={form.origin} onChange={(v) => set("origin", v)} placeholder="输入或选择，如 无锡" />{showErrors && errs.origin && <span className="field-err-hint">请填写始发城市</span>}</label>
+              <label ref={destRef} className={showErrors && errs.destination ? "field-err" : ""}>目的城市 *<CityCombobox value={form.destination} onChange={(v) => set("destination", v)} placeholder="输入或选择，如 上海" />{showErrors && errs.destination && <span className="field-err-hint">请填写目的城市</span>}</label>
             </div>
 
             {form.customer && ((addressBook.data?.pickup.length ?? 0) > 0 || (addressBook.data?.delivery.length ?? 0) > 0) && (
@@ -576,15 +602,15 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
           </div>
 
           {/* 3. 货物明细列表 */}
-          <div className="form-section" style={{ padding: "18px 18px 0" }}>
+          <div ref={cargoRef} className="form-section" style={{ padding: "18px 18px 0" }}>
             <div className="section-label" style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-              <span>货物明细</span>
+              <span>货物明细 {showErrors && errs.cargo && <span className="field-err-hint">请至少填写一条货品名称</span>}</span>
               <span className="muted small">合计: {totalQty} 件 / {totalWeight.toFixed(2)} 吨 / {totalVolume.toFixed(2)} 方</span>
               {volumetric > totalWeight && <span className="tag tag-medium">抛重 {chargeable.toFixed(2)} 吨 计费</span>}
             </div>
             {cargo.map((c, i) => (
               <div key={i} className="line-row" style={{ marginTop: 8 }}>
-                <input placeholder="货品名称 *" style={{ flex: 2 }} value={c.name} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
+                <input placeholder="货品名称 *" className={showErrors && errs.cargo && i === 0 ? "input-err" : ""} style={{ flex: 2 }} value={c.name} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
                 <input placeholder="件数" style={{ width: 70 }} value={c.quantity} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
                 <input placeholder="重量(吨)" style={{ width: 70 }} value={c.weight_ton} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, weight_ton: e.target.value } : x))} />
                 <input placeholder="体积(方)" style={{ width: 70 }} value={c.volume_cbm} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, volume_cbm: e.target.value } : x))} />
@@ -686,8 +712,8 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
 
           {/* 5. 表单提交控制 */}
           <div className="form-actions" style={{ padding: "0 18px 20px", display: "flex", gap: 10, alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 14 }}>
-            <button className="btn-primary" style={{ padding: "10px 24px" }} disabled={!valid || submit.isPending} onClick={() => submit.mutate("pending_confirm")}>确认提交</button>
-            <button className="btn-ghost" disabled={submit.isPending} onClick={() => submit.mutate("draft")}>暂存草稿</button>
+            <button className="btn-primary" style={{ padding: "10px 24px" }} disabled={submit.isPending} onClick={() => trySubmit("pending_confirm")}>确认提交</button>
+            <button className="btn-ghost" disabled={submit.isPending} onClick={() => trySubmit("draft")}>暂存草稿</button>
             <button className="btn-ghost" onClick={reset}>清空</button>
             <label className="switch-mini" title="提交后保留客户/来源等抬头，仅清空货物与线路，便于连续录单">
               <input type="checkbox" checked={continuous} onChange={(e) => setContinuous(e.target.checked)} /> 连续建单
@@ -697,7 +723,12 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             <input placeholder="另存为新订单模板名" style={{ width: 160 }} value={tplName} onChange={(e) => setTplName(e.target.value)} />
             <button className="btn-ghost" disabled={!tplName.trim() || saveTpl.isPending} onClick={() => saveTpl.mutate()}>存为模板</button>
           </div>
-          {!valid && <div className="muted small" style={{ padding: "0 18px 14px", color: "var(--red)" }}>请至少填写始发城市与目的城市</div>}
+          {showErrors && !valid && (
+            <div className="small" style={{ padding: "0 18px 14px", color: "var(--red)", display: "flex", alignItems: "center", gap: 6 }}>
+              <IconX size={13} className="icon-offset" />
+              还需补全：{[errs.origin && "始发城市", errs.destination && "目的城市", errs.cargo && "货品名称"].filter(Boolean).join("、")}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
+from apps.core.filtering import FilterField, ServerFilterMixin
 from apps.core.redis import get_redis
 from apps.finance.models import ExpenseRecord
 from apps.finance.services import generate_costs
@@ -497,7 +498,7 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         return Response(WaybillSerializer(merged).data, status=201)
 
 
-class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+class OrderViewSet(ServerFilterMixin, OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     # 订单本身无组织外键，按建单人所属组织归属其数据范围（组织子树可见）
     org_field = "created_by__organization"
     queryset = (
@@ -507,8 +508,40 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     )
     serializer_class = OrderSerializer
     filterset_fields = ["status", "channel", "source_type", "business_type", "priority"]
-    search_fields = ["order_no", "remark", "contact_phone", "origin", "destination"]
-    ordering_fields = ["created_at", "order_no", "priority"]
+    search_fields = ["order_no", "remark", "contact_phone", "origin", "destination", "customer__name"]
+    ordering_fields = [
+        "created_at", "order_no", "priority", "status", "sla_status", "channel",
+        "business_type", "quoted_amount", "cargo_weight_ton", "customer__name",
+    ]
+    # 服务端筛选字段映射（前端 FilterBuilder → ORM 路径）
+    server_filter_fields = {
+        "order_no": FilterField("text", "order_no"),
+        "customer": FilterField("text", "customer__name"),
+        "route": FilterField("text", paths=["origin", "destination"]),
+        "creator": FilterField("text", paths=["created_by__username", "created_by__nickname"]),
+        "status": FilterField("enum", "status"),
+        "channel": FilterField("enum", "channel"),
+        "business_type": FilterField("enum", "business_type"),
+        "priority": FilterField("enum", "priority"),
+        "settlement": FilterField("enum", "settlement_type"),
+        "level": FilterField("enum", "customer__level"),
+        "sla": FilterField("enum", "sla_status"),
+        "exception": FilterField("enum", "has_open_exc"),  # 派生列（get_queryset 注解 0/1）
+        "amount": FilterField("number", "quoted_amount"),
+        "weight": FilterField("number", "cargo_weight_ton"),
+        "created_at": FilterField("date", "created_at"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import Case, Exists, IntegerField, OuterRef, Value, When
+
+        from apps.ops.models import ExceptionRecord
+
+        qs = super().get_queryset()
+        open_exc = ExceptionRecord.objects.filter(order=OuterRef("pk")).exclude(status__in=["closed", "rejected"])
+        return qs.annotate(
+            has_open_exc=Case(When(Exists(open_exc), then=Value(1)), default=Value(0), output_field=IntegerField()),
+        )
 
     @action(detail=True, methods=["get"], url_path="lineage")
     def lineage(self, request, pk=None):

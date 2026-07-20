@@ -1363,3 +1363,15 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .ctower .kpi-label { font-size: 12px; }
 .ct-metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ct-period { flex: none; }
+
+/* ═══════ 服务端表格：固定高度 + 表体内部滚动 + 分页页脚贴底 ═══════ */
+.dt-fill { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dt-fill .dt-scroll { flex: 1; min-height: 0; max-height: none; overflow: auto; }
+.dt-pager { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); background: var(--panel); flex: none; }
+.dt-pager-btns { display: flex; align-items: center; gap: 6px; }
+.dt-pager-cur { font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0 8px; font-weight: 600; }
+.dt-pager .btn-ghost.small:disabled { opacity: .4; cursor: default; }
+/* 固定高度表格页：表格面板撑满剩余视口，页脚贴近页面底部，页面不随行下滑 */
+.table-page { height: 100%; }
+.table-page > .om-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.om-panel > .dt-fill { flex: 1; min-height: 0; }

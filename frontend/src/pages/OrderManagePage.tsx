@@ -12,7 +12,8 @@ import {
 } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
-import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { useServerTable } from "../api/useServerTable";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import { WaybillsPage } from "./WaybillsPage";
@@ -75,24 +76,31 @@ function OrdersTab() {
   });
   const statusActive = (st: string) => model.conditions.some((c) => c.field === "status" && Array.isArray(c.value) && (c.value as string[]).length === 1 && (c.value as string[])[0] === st);
 
-  const q = useQuery({
+  // 服务端筛选 + 分页 + 排序（高级筛选/搜索/排序全部下沉后端，对全量生效）
+  const st = useServerTable<Order>({
     queryKey: ["orders-manage"],
-    queryFn: () => apiGet<Paginated<Order>>("/orders?page_size=500&ordering=-created_at"),
+    path: "/orders",
+    pageSize: 50,
+    defaultSort: { field: "created_at", dir: "desc" },
+    model,
+    search,
+  });
+  const rows = st.rows;
+  const total = st.total;
+  // 台账概览：用 funnel 聚合（服务端全量计数，不受分页影响）
+  const funnel = useQuery({
+    queryKey: ["orders", "funnel"],
+    queryFn: () => apiGet<{ by_status: Record<string, number>; today_created: number; total: number }>("/orders/funnel"),
+    refetchInterval: 30000,
   });
   const dispatchers = useQuery({
     queryKey: ["dispatchers"],
     queryFn: () => apiGet<{ is_chief: boolean; dispatchers: Array<{ id: string; name: string }> }>("/orders/dispatchers"),
   });
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orders-manage"] });
-
-  // 快速搜索（订单号/客户/线路）+ 高级多条件（AND/OR）全在客户端求值
-  const rows = useMemo(() => {
-    let items = q.data?.items ?? [];
-    const kw = search.trim().toLowerCase();
-    if (kw) items = items.filter((o) => [o.order_no, o.customer_name, o.origin, o.destination, o.contact_phone].some((x) => String(x ?? "").toLowerCase().includes(kw)));
-    return applyFilterModel(items, model, ORDER_FILTER_FIELDS);
-  }, [q.data, search, model]);
-  const total = rows.length;
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["orders-manage"] });
+    queryClient.invalidateQueries({ queryKey: ["orders", "funnel"] });
+  };
 
   const BATCH_LABEL: Record<string, string> = { confirm: "确认", pool: "进池", cancel: "取消", delete: "删除" };
   const batch = useMutation({
@@ -139,18 +147,17 @@ function OrdersTab() {
     return () => window.removeEventListener("keydown", onKey);
   }, [drawer]);
 
-  // 台账概览（基于已加载集）
+  // 台账概览（funnel 服务端聚合，全量计数，不受分页/筛选影响）
   const stats = useMemo(() => {
-    const all = q.data?.items ?? [];
-    const today = new Date().toDateString();
+    const bs = funnel.data?.by_status ?? {};
     return {
-      total: all.length,
-      pending: all.filter((o) => o.status === "draft" || o.status === "pending_confirm").length,
-      pooled: all.filter((o) => o.status === "pooled" || o.status === "dispatching").length,
-      dispatched: all.filter((o) => o.status === "converted" || o.status === "completed").length,
-      today: all.filter((o) => new Date(o.created_at).toDateString() === today).length,
+      total: funnel.data?.total ?? 0,
+      pending: (bs.draft ?? 0) + (bs.pending_confirm ?? 0),
+      pooled: (bs.pooled ?? 0) + (bs.dispatching ?? 0),
+      dispatched: (bs.converted ?? 0) + (bs.completed ?? 0),
+      today: funnel.data?.today_created ?? 0,
     };
-  }, [q.data]);
+  }, [funnel.data]);
 
   const runBatch = async (action: string) => {
     const ids = [...selected];
@@ -165,19 +172,19 @@ function OrdersTab() {
   const toggleAll = () => setSelected((prev) => (rows.length > 0 && rows.every((o) => prev.has(o.id)) ? new Set() : new Set(rows.map((o) => o.id))));
 
   const columns: DataColumn<Order>[] = [
-    { key: "order_no", header: "订单号 (DD)", width: 170, alwaysVisible: true, sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono doc-order" to={`/orders/${o.id}`} title="订单">{o.order_no}</Link> },
-    { key: "customer", header: "客户", width: 160, filterable: true, filterValue: (o) => o.customer_name || "散客", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠{(o.exception_count ?? 0) > 1 ? o.exception_count : ""}</span>}</span> },
-    { key: "channel", header: "渠道", width: 90, filterable: true, filterValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
+    { key: "order_no", header: "订单号 (DD)", width: 170, alwaysVisible: true, sortField: "order_no", sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono doc-order" to={`/orders/${o.id}`} title="订单">{o.order_no}</Link> },
+    { key: "customer", header: "客户", width: 160, filterable: true, filterValue: (o) => o.customer_name || "散客", sortField: "customer__name", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠{(o.exception_count ?? 0) > 1 ? o.exception_count : ""}</span>}</span> },
+    { key: "channel", header: "渠道", width: 90, filterable: true, filterValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, sortField: "channel", sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
     { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <><b>{o.origin || "?"}</b> → <b>{o.destination || "?"}</b></> },
-    { key: "biz", header: "业务", width: 90, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
-    { key: "cargo", header: "货量", width: 110, align: "right", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}吨/{o.cargo_quantity}件</span> },
-    { key: "amount", header: "报价", width: 110, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
-    { key: "priority", header: "优先级", width: 92, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
-    { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
-    { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
+    { key: "biz", header: "业务", width: 90, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortField: "business_type", sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
+    { key: "cargo", header: "货量", width: 110, align: "right", sortField: "cargo_weight_ton", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}吨/{o.cargo_quantity}件</span> },
+    { key: "amount", header: "报价", width: 110, align: "right", sortField: "quoted_amount", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
+    { key: "priority", header: "优先级", width: 92, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortField: "priority", sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
+    { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
+    { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortField: "sla_status", sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
     { key: "waybill", header: "关联运单 (YD)", width: 150, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 3 }}>{o.waybill_nos.map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}</span> : <span className="muted small">未生成</span> },
     { key: "creator", header: "建单人", width: 100, filterable: true, filterValue: (o) => o.created_by_name || "-", sortValue: (o) => o.created_by_name || "", exportValue: (o) => o.created_by_name || "", render: (o) => <span className="small muted">{o.created_by_name || "-"}</span> },
-    { key: "created", header: "建单时间", width: 130, sortValue: (o) => o.created_at, exportValue: (o) => fmtDateTime(o.created_at), render: (o) => <span className="small" title={fmtDateTime(o.created_at)}>{fmtRelative(o.created_at)}</span> },
+    { key: "created", header: "建单时间", width: 130, sortField: "created_at", sortValue: (o) => o.created_at, exportValue: (o) => fmtDateTime(o.created_at), render: (o) => <span className="small" title={fmtDateTime(o.created_at)}>{fmtRelative(o.created_at)}</span> },
     {
       key: "actions", header: "操作", width: 150, alwaysVisible: true,
       render: (o) => (
@@ -256,16 +263,14 @@ function OrdersTab() {
         </div>
       )}
 
-      {q.isLoading ? (
-        <StateView kind="loading" compact />
-      ) : q.isError ? (
-        <StateView kind="error" onRetry={() => q.refetch()} />
+      {st.isError ? (
+        <StateView kind="error" onRetry={() => st.refetch()} />
       ) : (
         <DataTable<Order>
           columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage-v2" exportName="订单台账"
           selectable selected={selected} onToggle={toggle} onToggleAll={toggleAll} stickyFirst batchBar={batchBar}
           onRowClick={(o) => setDrawer(o)} rowMenu={rowMenu}
-          hideExport
+          hideExport server={st.server} fill
           emptyState={anyFilter
             ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" />
             : <StateView kind="empty" scene="cs-empty" />}
@@ -527,7 +532,7 @@ function BatchesTab() {
 export function OrderManagePage() {
   const [tab, setTab] = useState<"order" | "waybill" | "batch">("order");
   return (
-    <div className="stack">
+    <div className={`stack${tab === "order" ? " table-page" : ""}`}>
       <div className="seg-toggle" style={{ alignSelf: "flex-start" }}>
         <button className={`seg-btn${tab === "order" ? " on" : ""}`} onClick={() => setTab("order")}>订单</button>
         <button className={`seg-btn${tab === "waybill" ? " on" : ""}`} onClick={() => setTab("waybill")}>运单</button>

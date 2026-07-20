@@ -9,12 +9,23 @@ export interface DataColumn<T> {
   sortValue?: (row: T) => string | number;
   exportValue?: (row: T) => string | number;
   filterValue?: (row: T) => string; // 列筛选取值（缺省用 exportValue/sortValue）
-  filterable?: boolean; // 开启表头字段筛选
+  filterable?: boolean; // 开启表头字段筛选（仅客户端模式）
+  sortField?: string; // 服务端排序的 ORM 字段名（server 模式下有此值才可点表头排序）
   width?: number;
   minWidth?: number;
   align?: "left" | "right";
   defaultHidden?: boolean;
   alwaysVisible?: boolean;
+}
+
+export interface ServerPage {
+  serverSort: { field: string; dir: "asc" | "desc" } | null;
+  onServerSort: (field: string) => void;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  loading?: boolean;
 }
 
 export interface RowMenuItem {
@@ -39,7 +50,7 @@ function loadView(viewKey: string): ViewState | null {
 export function DataTable<T>({
   columns, rows, rowKey, viewKey, selectable, selected, onToggle, onToggleAll,
   onRowContextMenu, onRowDoubleClick, onRowClick, rowClassName, stickyFirst, toolbarLeft, toolbarRight, batchBar, exportName,
-  expandedKey, renderExpanded, rowMenu, hideExport, emptyState,
+  expandedKey, renderExpanded, rowMenu, hideExport, emptyState, server, fill,
 }: {
   columns: DataColumn<T>[];
   rows: T[];
@@ -63,6 +74,8 @@ export function DataTable<T>({
   rowMenu?: (row: T) => RowMenuItem[]; // 行右键菜单项
   hideExport?: boolean; // 页面已自带导出（如服务端全量导出）时隐藏内置导出，避免重复
   emptyState?: React.ReactNode; // 无数据时展示（替代默认「暂无匹配记录」），工具条仍可见以便清除筛选
+  server?: ServerPage; // 服务端模式：受控排序 + 分页；禁用客户端排序/列筛选
+  fill?: boolean; // 固定高度：表体撑满视口并内部滚动，分页页脚贴近底部（页面不随行下滑）
 }) {
   const saved = useMemo(() => loadView(viewKey), [viewKey]);
   const [hidden, setHidden] = useState<Set<string>>(
@@ -120,6 +133,9 @@ export function DataTable<T>({
     });
   }, [filteredRows, sort, columns]);
 
+  // server 模式：服务端已排序/筛选/分页，直接渲染当页 rows
+  const displayRows = server ? rows : sortedRows;
+
   const cycleSort = (key: string) => {
     setSort((s) => {
       if (!s || s.key !== key) return { key, dir: "asc" };
@@ -171,7 +187,7 @@ export function DataTable<T>({
     const cols = visibleCols;
     const esc = (v: string | number) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const head = cols.map((c) => esc(c.header)).join(",");
-    const body = sortedRows.map((r) =>
+    const body = displayRows.map((r) =>
       cols.map((c) => esc(c.exportValue ? c.exportValue(r) : (c.sortValue ? c.sortValue(r) : ""))).join(","),
     );
     const csv = "﻿" + [head, ...body].join("\r\n");
@@ -194,7 +210,7 @@ export function DataTable<T>({
     if (e.shiftKey && anchorRef.current >= 0 && anchorRef.current !== idx) {
       const [lo, hi] = [Math.min(anchorRef.current, idx), Math.max(anchorRef.current, idx)];
       for (let i = lo; i <= hi; i++) {
-        const rid = rowKey(sortedRows[i]);
+        const rid = rowKey(displayRows[i]);
         if (Boolean(selected?.has(rid)) !== target) onToggle?.(rid);
       }
     } else {
@@ -212,7 +228,7 @@ export function DataTable<T>({
   };
 
   return (
-    <div className="dt">
+    <div className={`dt${fill ? " dt-fill" : ""}`}>
       <div className="dt-toolbar">
         <div className="dt-toolbar-main">{toolbarLeft}</div>
         <div className="dt-toolbar-actions">
@@ -264,21 +280,33 @@ export function DataTable<T>({
                     className={`${c.align === "right" ? "num" : ""} ${sticky ? "dt-sticky" : ""}`}
                     style={{ width: colWidth(c), minWidth: colWidth(c), left }}
                   >
-                    <span className="dt-th">
-                      <span className={c.sortValue ? "dt-sortable" : ""} onClick={() => c.sortValue && cycleSort(c.key)}>
-                        {c.header}{sort?.key === c.key && <span className="dt-sortic">{sort.dir === "asc" ? "▲" : "▼"}</span>}
-                      </span>
-                      {c.filterable && (
-                        <button
-                          className={`dt-filter-btn${fActive ? " on" : ""}`}
-                          title="按此列筛选"
-                          onClick={(e) => { e.stopPropagation(); setOpenFilter((k) => (k === c.key ? null : c.key)); setFilterSearch(""); }}
-                        >
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
-                        </button>
-                      )}
-                    </span>
-                    {c.filterable && openFilter === c.key && (
+                    {(() => {
+                      const sortable = server ? Boolean(c.sortField) : Boolean(c.sortValue);
+                      const activeDir = server
+                        ? (c.sortField && server.serverSort?.field === c.sortField ? server.serverSort.dir : null)
+                        : (sort?.key === c.key ? sort.dir : null);
+                      const onSortClick = () => {
+                        if (server) { if (c.sortField) server.onServerSort(c.sortField); }
+                        else if (c.sortValue) cycleSort(c.key);
+                      };
+                      return (
+                        <span className="dt-th">
+                          <span className={sortable ? "dt-sortable" : ""} onClick={onSortClick}>
+                            {c.header}{activeDir && <span className="dt-sortic">{activeDir === "asc" ? "▲" : "▼"}</span>}
+                          </span>
+                          {!server && c.filterable && (
+                            <button
+                              className={`dt-filter-btn${fActive ? " on" : ""}`}
+                              title="按此列筛选"
+                              onClick={(e) => { e.stopPropagation(); setOpenFilter((k) => (k === c.key ? null : c.key)); setFilterSearch(""); }}
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })()}
+                    {!server && c.filterable && openFilter === c.key && (
                       <div className="dt-filter-pop" onClick={(e) => e.stopPropagation()}>
                         <input className="search" autoFocus placeholder="搜索取值…" value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
                         <div className="dt-filter-list">
@@ -302,14 +330,14 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {sortedRows.length === 0 && (
+            {displayRows.length === 0 && (
               <tr>
                 <td className="dt-empty" colSpan={visibleCols.length + (selectable ? 1 : 0)}>
-                  {emptyState ?? "暂无匹配记录"}
+                  {server?.loading ? "加载中…" : (emptyState ?? "暂无匹配记录")}
                 </td>
               </tr>
             )}
-            {sortedRows.map((r, idx) => {
+            {displayRows.map((r, idx) => {
               const id = rowKey(r);
               const isSel = selected?.has(id);
               const expanded = expandedKey != null && expandedKey === id;
@@ -347,6 +375,25 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+
+      {server && (() => {
+        const pageCount = Math.max(1, Math.ceil(server.total / server.pageSize));
+        const from = server.total === 0 ? 0 : (server.page - 1) * server.pageSize + 1;
+        const to = Math.min(server.page * server.pageSize, server.total);
+        return (
+          <div className="dt-pager">
+            <span className="muted small">共 <b>{server.total.toLocaleString()}</b> 条 · 第 {from}–{to} 条{server.loading ? " · 加载中…" : ""}</span>
+            <div style={{ flex: 1 }} />
+            <div className="dt-pager-btns">
+              <button className="btn-ghost small" disabled={server.page <= 1} onClick={() => server.onPageChange(1)}>« 首页</button>
+              <button className="btn-ghost small" disabled={server.page <= 1} onClick={() => server.onPageChange(server.page - 1)}>‹ 上一页</button>
+              <span className="dt-pager-cur">{server.page} / {pageCount}</span>
+              <button className="btn-ghost small" disabled={server.page >= pageCount} onClick={() => server.onPageChange(server.page + 1)}>下一页 ›</button>
+              <button className="btn-ghost small" disabled={server.page >= pageCount} onClick={() => server.onPageChange(pageCount)}>末页 »</button>
+            </div>
+          </div>
+        );
+      })()}
 
       {ctxMenu && (
         <ul className="ctx-menu" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={(e) => e.stopPropagation()}>

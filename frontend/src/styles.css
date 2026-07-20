@@ -1001,7 +1001,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
   padding: 22px 24px; border: 1px solid var(--line);
 }
 .modal-title { font-weight: 650; font-size: 16px; margin-bottom: 10px; }
-.modal-body { color: var(--ink-2); line-height: 1.6; margin-bottom: 20px; }
+.modal-body { color: var(--ink-2); line-height: 1.6; margin-bottom: 20px; white-space: pre-line; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .btn-danger {
   padding: 8px 15px; border-radius: var(--radius-sm); border: 1px solid var(--red); cursor: pointer; font-weight: 550; line-height: 1.2;

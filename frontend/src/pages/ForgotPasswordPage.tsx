@@ -73,7 +73,7 @@ export function ForgotPasswordPage() {
             <div className="auth-form-sub">输入账号绑定的邮箱或手机号获取验证码</div>
             <label className="field">
               <span>邮箱 / 手机号</span>
-              <input value={identifier} autoFocus placeholder="you@company.com 或 138…" onChange={(e) => setIdentifier(e.target.value)} />
+              <input value={identifier} autoFocus placeholder="邮箱或手机号，如 138…" onChange={(e) => setIdentifier(e.target.value)} />
             </label>
             {error && <div className="login-error" role="alert">{error}</div>}
             <button className="btn-primary auth-submit" type="submit" disabled={busy}>{busy ? "发送中…" : "获取验证码"}</button>

@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { apiGet } from "../api/client";
+import { fmtMoney } from "../api/format";
 import type { FinanceCardData } from "../api/types";
 
-const yuan = (n: number) => `¥${Math.round(n).toLocaleString()}`;
+// 统一走 fmtMoney（两位小数 + 千分位），与对账页/订单页金额对齐到分
+const yuan = (n: number) => fmtMoney(n);
 
 // 单票财务卡：客户报价 / 承运商报价 / 其他费 / 毛利 + 是否可对账
 export function FinanceCard({ waybillNo }: { waybillNo: string }) {

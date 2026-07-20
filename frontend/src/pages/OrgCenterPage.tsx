@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useRef, useState } from "react";
 
 import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
+import { fmtDateTime } from "../api/format";
 import { confirmAction } from "../api/confirm";
 import { hasPerm, useAuth } from "../auth/auth";
 import { toast } from "../api/toast";
@@ -323,7 +324,15 @@ function EmployeesTab() {
   });
   const resetPwd = useMutation({
     mutationFn: (id: string) => apiPost<{ username: string; password: string }>(`/org/employees/${id}/reset-password`, {}),
-    onSuccess: (d) => toast.success(`新密码（请复制）：${d.username} / ${d.password}`),
+    // 明文凭证不能用自动消失的 toast（易错过），改用需手动确认的弹窗，并尝试写入剪贴板
+    onSuccess: (d) => {
+      navigator.clipboard?.writeText(`${d.username} / ${d.password}`).catch(() => {});
+      confirmAction({
+        title: "密码已重置",
+        message: `账号：${d.username}\n新密码：${d.password}\n\n已尝试复制到剪贴板，请立即转交本人并妥善保管（本弹窗关闭后不再显示）。`,
+        confirmText: "我已复制保存",
+      });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const handover = useMutation({
@@ -429,7 +438,7 @@ function EmployeesTab() {
                   <td className="mono">{h.moved_reports}</td><td className="mono">{h.moved_departments}</td>
                   <td>{h.disabled_account ? "是" : "否"}</td>
                   <td className="small">{h.reason || "-"}</td>
-                  <td className="small">{new Date(h.created_at).toLocaleString("zh-CN")}</td>
+                  <td className="small">{fmtDateTime(h.created_at)}</td>
                 </tr>
               ))}
             </tbody>
@@ -716,7 +725,7 @@ function LoginAuditTab() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td className="mono small">{new Date(r.created_at).toLocaleString("zh-CN")}</td>
+                <td className="mono small">{fmtDateTime(r.created_at)}</td>
                 <td>{r.username}</td>
                 <td><span className={`tag ${r.success ? "tag-low" : "tag-high"}`}>{r.result_label || (r.success ? "成功" : "失败")}</span></td>
                 <td className="mono small">{r.ip || "-"}</td>

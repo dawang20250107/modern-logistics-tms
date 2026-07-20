@@ -94,7 +94,7 @@ export function WaybillDetailPage() {
   const codAction = useMutation({
     mutationFn: (action: "collect-cod" | "remit-cod") => apiPost(`/waybills/${no}/${action}`, {}),
     onSuccess: (_d, action) => {
-      toast.success(action === "collect-cod" ? "已确认代收货款" : "已确认回款给货主");
+      toast.success(action === "collect-cod" ? "已确认代收货款" : "已确认回款给客户");
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["waybill", no, "collection"] });
     },
@@ -294,9 +294,9 @@ export function WaybillDetailPage() {
                 ETA 预测
               </div>
               <div className="kv" style={{ padding: "12px 16px" }}>
-                <div><span>预计到达</span><b>{eta.data.estimated_arrival ? new Date(eta.data.estimated_arrival).toLocaleString() : "-"}</b></div>
-                <div><span>剩余里程</span><b>{eta.data.remaining_km ?? "-"} km</b></div>
-                <div><span>当前均速</span><b>{eta.data.avg_speed_kmh ?? "-"} km/h</b></div>
+                <div><span>预计到达</span><b>{eta.data.estimated_arrival ? fmtDateTime(eta.data.estimated_arrival) : "—"}</b></div>
+                <div><span>剩余里程</span><b>{eta.data.remaining_km ?? "—"} 公里</b></div>
+                <div><span>当前均速</span><b>{eta.data.avg_speed_kmh ?? "—"} 公里/时</b></div>
                 <div>
                   <span>相对计划</span>
                   <b style={{ color: eta.data.eta_drift_minutes > 0 ? "var(--red)" : "var(--green)" }}>
@@ -319,7 +319,7 @@ export function WaybillDetailPage() {
             
             {w.stops && w.stops.length > 0 && (
               <table className="table" style={{ borderTop: "1px solid var(--line)" }}>
-                <thead><tr style={{ background: "var(--panel-2)" }}><th>提/送类型</th><th>地理围栏地址</th><th>计划ETA</th><th>打卡确认</th><th>围栏操作</th></tr></thead>
+                <thead><tr style={{ background: "var(--panel-2)" }}><th>提/送类型</th><th>地理围栏地址</th><th>计划到达时间</th><th>打卡确认</th><th>围栏操作</th></tr></thead>
                 <tbody>
                   {w.stops.map((s) => (
                     <tr key={s.id}>
@@ -473,7 +473,7 @@ export function WaybillDetailPage() {
                         {detail.data.cod_status === "collected" && (
                           <button className="btn-primary" style={{ padding: "4px 12px", fontSize: 12 }} disabled={codAction.isPending} onClick={() => codAction.mutate("remit-cod")}>财务确认回款</button>
                         )}
-                        {detail.data.cod_status === "remitted" && <span className="tag tag-low">已回款货主</span>}
+                        {detail.data.cod_status === "remitted" && <span className="tag tag-low">已回款客户</span>}
                       </div>
                     </div>
                   </div>

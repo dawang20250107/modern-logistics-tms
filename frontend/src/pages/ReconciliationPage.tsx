@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { useModalA11y } from "../api/useModalA11y";
-import { fmtMoney } from "../api/format";
+import { fmtDateTime, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type {
   AgingReport, Carrier, Customer, Paginated, Statement, StatementAuditResult,
@@ -22,7 +22,7 @@ const num = (v: unknown) => Number(v) || 0;
 const STMT_FILTER_FIELDS: FilterFieldDef[] = [
   { key: "no", label: "结算单号", type: "text", accessor: (s) => (s as Statement).statement_no },
   { key: "cp", label: "对手方", type: "text", accessor: (s) => (s as Statement).counterparty_name },
-  { key: "dir", label: "方向", type: "enum", options: [{ value: "receivable", label: "应收 AR" }, { value: "payable", label: "应付 AP" }], accessor: (s) => (s as Statement).direction },
+  { key: "dir", label: "方向", type: "enum", options: [{ value: "receivable", label: "应收(AR)" }, { value: "payable", label: "应付(AP)" }], accessor: (s) => (s as Statement).direction },
   { key: "status", label: "状态", type: "enum", options: Object.entries(STATEMENT_STATUS_LABEL).map(([value, label]) => ({ value, label })), accessor: (s) => (s as Statement).status },
   { key: "amt", label: "应结金额", type: "number", accessor: (s) => num((s as Statement).total_amount) },
   { key: "out", label: "未结余额", type: "number", accessor: (s) => num((s as Statement).outstanding) },
@@ -360,7 +360,7 @@ export function ReconciliationPage() {
 
   const stmtColumns: DataColumn<Statement>[] = [
     { key: "no", header: "系统结算单号", width: 190, alwaysVisible: true, sortField: "statement_no", sortValue: (s) => s.statement_no, exportValue: (s) => s.statement_no, render: (s) => <span className="mono" style={{ fontWeight: 700, color: "var(--accent)", fontSize: 13 }}>{expanded === s.id ? "▼" : "▶"} {s.statement_no}</span> },
-    { key: "dir", header: "方向", width: 90, filterable: true, filterValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), sortField: "direction", sortValue: (s) => s.direction, exportValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), render: (s) => <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "AR 应收" : "AP 应付"}</span> },
+    { key: "dir", header: "方向", width: 90, filterable: true, filterValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), sortField: "direction", sortValue: (s) => s.direction, exportValue: (s) => (s.direction === "receivable" ? "应收" : "应付"), render: (s) => <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "应收(AR)" : "应付(AP)"}</span> },
     { key: "cp", header: "对手方", width: 150, filterable: true, filterValue: (s) => s.counterparty_name, sortField: "counterparty_name", sortValue: (s) => s.counterparty_name, exportValue: (s) => s.counterparty_name, render: (s) => <span style={{ fontWeight: 600 }}>{s.counterparty_name}</span> },
     { key: "period", header: "账期 / 到期", width: 180, exportValue: (s) => `${s.period_start}~${s.period_end}${s.due_date ? ` 到期${s.due_date}` : ""}`, render: (s) => <span className="small muted mono">{s.period_start}~{s.period_end}{s.due_date ? <><br /><span style={{ color: "var(--amber)" }}>到期 {s.due_date}</span></> : ""}</span> },
     { key: "amt", header: "应结金额", width: 120, align: "right", sortField: "total_amount", sortValue: (s) => num(s.total_amount), exportValue: (s) => num(s.total_amount), render: (s) => <span style={{ fontWeight: 700 }}>{fmtMoney(s.total_amount)}</span> },
@@ -383,7 +383,7 @@ export function ReconciliationPage() {
         <div style={{ fontWeight: 700, fontSize: 14 }}>账单明细审计</div>
         <div className="cluster">
           <span className="muted small">
-            {detail.data?.audited_at ? `已审计 · ${new Date(detail.data.audited_at).toLocaleString()}` : "尚未审计"}
+            {detail.data?.audited_at ? `已审计 · ${fmtDateTime(detail.data.audited_at)}` : "尚未审计"}
             {" · "}共 {detail.data?.lines?.length || 0} 笔明细
           </span>
           {detail.data && (detail.data.status === "confirmed" || detail.data.status === "partial") && (
@@ -419,7 +419,7 @@ export function ReconciliationPage() {
                   <td className="mono link">{l.waybill_no}</td>
                   <td><span className="tag tag-none">{l.expense_item_code}</span></td>
                   <td style={{ fontWeight: 700, color: l.is_anomaly ? "var(--red)" : "inherit" }}>{fmtMoney(l.amount)}</td>
-                  <td className="muted mono">{l.occurred_at ? new Date(l.occurred_at).toLocaleString() : "-"}</td>
+                  <td className="muted mono">{l.occurred_at ? fmtDateTime(l.occurred_at) : "—"}</td>
                   <td>
                     {l.is_anomaly
                       ? <span style={{ color: "var(--red)", fontWeight: 700 }}>超历史均值 {fmtMoney(l.baseline_avg ?? "0")} {l.deviation_pct}%</span>

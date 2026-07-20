@@ -266,7 +266,7 @@ export function DispatchBoardPage() {
               order_no: o.order_no,
               weight_ton: orderW,
               volume_cbm: orderV,
-              customer_name: o.claimed_by_name || "B2B 货主"
+              customer_name: o.claimed_by_name || "散客"
             }
           ]
         };
@@ -689,7 +689,7 @@ export function DispatchBoardPage() {
                     </div>
 
                     <div className="muted small" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span>卡车：<strong>{trip.vehicle.plate_no}</strong> (核载{trip.vehicle.load_capacity_ton}t / {trip.vehicle.volume_capacity_cbm}方)</span>
+                      <span>卡车：<strong>{trip.vehicle.plate_no}</strong> (核载{trip.vehicle.load_capacity_ton}吨 / {trip.vehicle.volume_capacity_cbm}方)</span>
                       {trip.vehicle.compliance_ok === false && <span style={{ color: "var(--red)", display: "flex", alignItems: "center", gap: 4 }}><IconWarning size={14} className="icon-offset"/> 证件过期</span>}
                     </div>
 
@@ -719,7 +719,7 @@ export function DispatchBoardPage() {
                       <div>
                         <div style={{ display: "flex", justifyContent: "space-between" }}>
                           <span>重量利用率:</span>
-                          <b>{trip.total_weight_ton.toFixed(2)}t / {trip.vehicle.load_capacity_ton}t ({Math.round(weightPct)}%)</b>
+                          <b>{trip.total_weight_ton.toFixed(2)}吨 / {trip.vehicle.load_capacity_ton}吨 ({Math.round(weightPct)}%)</b>
                         </div>
                         <div style={{ width: "100%", height: 6, background: "var(--line)", borderRadius: 3, overflow: "hidden", marginTop: 4 }}>
                           <div style={{ width: `${weightPct}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
@@ -883,7 +883,7 @@ export function DispatchBoardPage() {
                         <div style={{ borderTop: "1px dashed var(--line-2)", paddingTop: 10, marginTop: 12, fontSize: 13 }}>
                           <span className="muted" style={{ fontSize: 11, marginRight: 8 }}>市场运价参比</span>
                           <strong style={{ color: "var(--accent)" }}>
-                            {suggestion.ymm_quote.avg != null ? `¥${suggestion.ymm_quote.low} ~ ¥${suggestion.ymm_quote.high}（中枢 ¥${suggestion.ymm_quote.avg}）` : "—"}
+                            {suggestion.ymm_quote.avg != null ? `${fmtMoney(suggestion.ymm_quote.low)} ~ ${fmtMoney(suggestion.ymm_quote.high)}（中枢 ${fmtMoney(suggestion.ymm_quote.avg)}）` : "—"}
                           </strong>
                           <span className="muted small" style={{ marginLeft: 8 }}>{suggestion.ymm_quote.note}</span>
                         </div>

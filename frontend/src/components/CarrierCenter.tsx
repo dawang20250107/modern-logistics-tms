@@ -79,7 +79,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                   <div><span>联系人</span><b>{c.contact_name || "—"} {c.contact_phone || ""}</b></div>
                   <div><span>结算方式</span><b>{c.settlement_type || "—"}</b></div>
                   <div><span>账期</span><b>{c.credit_days ?? "—"} 天 · 每月 {c.billing_day ?? "—"} 号出账</b></div>
-                  <div><span>授信额度</span><b>{Number(c.credit_limit) > 0 ? `¥${Number(c.credit_limit).toLocaleString()}` : "不限"}</b></div>
+                  <div><span>授信额度</span><b>{Number(c.credit_limit) > 0 ? fmtMoney(Number(c.credit_limit)) : "不限"}</b></div>
                   <div><span>营业执照</span><b className="mono small">{c.business_license_no || "—"}</b></div>
                   <div><span>道路运输许可</span><b className="mono small">{c.transport_license_no || "—"}</b></div>
                   <div><span>开票税号</span><b className="mono small">{c.tax_no || "—"}</b></div>
@@ -147,7 +147,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                           <td>{l.origin_city}→{l.dest_city}</td>
                           <td className="small">{l.vehicle_type || "—"}{l.vehicle_length_m ? ` ${l.vehicle_length_m}m` : ""}</td>
                           <td className="num">{fmtMoney(l.standard_price)}</td>
-                          <td className="num">{Number(l.last_deal_price) > 0 ? `¥${Number(l.last_deal_price).toLocaleString()}` : "—"}</td>
+                          <td className="num">{Number(l.last_deal_price) > 0 ? fmtMoney(Number(l.last_deal_price)) : "—"}</td>
                           <td>{l.is_recommended ? <span className="tag tag-low">推荐</span> : l.is_preferred ? <span className="tag tag-info">常用</span> : "—"}</td>
                         </tr>
                       ))}

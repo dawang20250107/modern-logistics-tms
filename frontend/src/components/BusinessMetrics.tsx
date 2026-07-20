@@ -6,7 +6,15 @@ import {
 } from "recharts";
 
 import { apiGet } from "../api/client";
+import { fmtMoney } from "../api/format";
 import { readCssVars, THEME_EVENT } from "../api/theme";
+
+// 金额轴标签用中文「万/亿」，避免英文 k 与全站中文体系割裂
+function wanLabel(val: number): string {
+  if (Math.abs(val) >= 1e8) return `¥${(val / 1e8).toFixed(1)}亿`;
+  if (Math.abs(val) >= 1e4) return `¥${(val / 1e4).toFixed(0)}万`;
+  return `¥${val}`;
+}
 import type { MetricCard } from "../api/types";
 import { METRIC_DOMAIN_LABEL } from "../api/types";
 import { Sparkline } from "./Sparkline";
@@ -34,7 +42,7 @@ type Trends = Record<string, Array<{ date: string; value: number }>>;
 
 function formatValue(m: MetricCard): string {
   if (m.unit === "%") return `${(m.value * 100).toFixed(1)}%`;
-  if (m.unit === "元") return `¥${m.value.toLocaleString()}`;
+  if (m.unit === "元") return fmtMoney(m.value);
   return `${m.value.toLocaleString()}${m.unit}`;
 }
 
@@ -82,7 +90,7 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
   const grouped = DOMAIN_ORDER
     .map((d) => ({ domain: d, items: metrics.filter((m) => m.domain === d) }))
     .filter((g) => g.items.length > 0);
-  const formatRmb = (val: number) => `¥${val.toLocaleString()}`;
+  const formatRmb = (val: number) => fmtMoney(val);
   const pieData: Array<{ name: string; value: number }> = financeMetrics.data?.cost_composition ?? [];
 
   return (
@@ -110,7 +118,7 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={c["--chart-grid"]} />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(val) => `¥${val / 1000}k`} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(val) => wanLabel(Number(val))} />
                 <Tooltip contentStyle={{ borderRadius: 10, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} formatter={(value) => formatRmb(Number(value))} />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
                 <Area type="monotone" name="主营收入" dataKey="revenue" fill="url(#colorRevenue)" stroke={c["--chart-revenue"]} strokeWidth={3} />

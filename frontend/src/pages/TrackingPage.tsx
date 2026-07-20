@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet } from "../api/client";
+import { fmtDateTime } from "../api/format";
 import { BUSINESS_TYPE_LABEL, ORDER_STATUS_LABEL, STATUS_LABEL } from "../api/types";
 
 interface TrackResult {
@@ -63,7 +64,7 @@ export function TrackingPage() {
                   <span className="dot" />
                   <div>
                     <div className="tl-type">{MILESTONE_LABEL[m.event] ?? m.event}</div>
-                    <div className="muted small">{new Date(m.time).toLocaleString()}</div>
+                    <div className="muted small">{fmtDateTime(m.time)}</div>
                   </div>
                 </li>
               ))}
@@ -72,7 +73,7 @@ export function TrackingPage() {
               <div className="kv" style={{ padding: 0 }}>
                 <div><span>运单</span><b className="mono">{r.shipment.waybill_no}</b></div>
                 <div><span>运输状态</span><b>{STATUS_LABEL[r.shipment.status] ?? r.shipment.status}</b></div>
-                {r.shipment.estimated_arrival && <div><span>预计到达</span><b>{new Date(r.shipment.estimated_arrival).toLocaleString()}</b></div>}
+                {r.shipment.estimated_arrival && <div><span>预计到达</span><b>{fmtDateTime(r.shipment.estimated_arrival)}</b></div>}
                 {r.shipment.position && <div><span>当前位置</span><b className="mono small">{r.shipment.position.lat.toFixed(3)}, {r.shipment.position.lng.toFixed(3)}</b></div>}
               </div>
             )}

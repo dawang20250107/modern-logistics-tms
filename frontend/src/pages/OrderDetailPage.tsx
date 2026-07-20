@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtMoney } from "../api/format";
+import { fmtDateTime, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { DocumentLineage } from "../components/DocumentLineage";
 import { CopyCode } from "../components/CopyCode";
@@ -24,7 +24,7 @@ import {
   SOURCE_TYPE_LABEL,
 } from "../api/types";
 
-const fmtDt = (s: string | null) => (s ? new Date(s).toLocaleString() : "-");
+const fmtDt = (s: string | null) => fmtDateTime(s);
 
 export function OrderDetailPage() {
   const { id = "" } = useParams();
@@ -186,7 +186,7 @@ export function OrderDetailPage() {
             <div className="panel-head">商务信息</div>
             <div className="kv">
               {kv("客户", o.customer_name)}
-              {kv("客户类型", SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type)}
+              {kv("客户分类", SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type)}
               {kv("业务类型", BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type)}
               {kv("优先级", editing
                 ? <select value={edit.priority} onChange={(e) => setEdit({ ...edit, priority: e.target.value })}>{Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
@@ -337,7 +337,7 @@ export function OrderDetailPage() {
                       <td><span className="tag tag-info">{ATTACHMENT_KIND_LABEL[a.kind] ?? a.kind}</span></td>
                       <td>{a.file_display ? <a className="link" href={a.file_display} target="_blank" rel="noreferrer">{a.name || "查看"}</a> : (a.name || "-")}</td>
                       <td className="small">{a.uploaded_by_name || "-"}</td>
-                      <td className="small">{new Date(a.created_at).toLocaleString()}</td>
+                      <td className="small">{fmtDateTime(a.created_at)}</td>
                       <td><button className="btn-ghost" disabled={delAtt.isPending} onClick={() => delAtt.mutate(a.id)}>删除</button></td>
                     </tr>
                   ))}
@@ -360,7 +360,7 @@ export function OrderDetailPage() {
                   <div>
                     <div className="tl-type">{ORDER_EVENT_LABEL[e.event_type] ?? e.event_type}</div>
                     <div className="muted small">
-                      {new Date(e.event_time).toLocaleString()} · {e.actor_name || e.source}
+                      {fmtDateTime(e.event_time)} · {e.actor_name || e.source}
                       {e.to_status && ` · → ${ORDER_STATUS_LABEL[e.to_status] ?? e.to_status}`}
                     </div>
                     {(() => {

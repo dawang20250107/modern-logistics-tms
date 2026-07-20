@@ -69,8 +69,8 @@ function ResourceTable<T>({
           columns={columns} rows={st.rows} rowKey={rowKey} viewKey={viewKey} exportName={exportName}
           stickyFirst server={st.server} fill hideExport
           emptyState={anyFilter
-            ? <StateView kind="empty" title="没有匹配的记录" hint="调整搜索/筛选条件再试。" />
-            : <StateView kind="empty" title="暂无数据" />}
+            ? <StateView kind="empty" title="没有匹配的记录" hint="调整搜索/筛选条件再试，或清空条件查看全部。" />
+            : <StateView kind="empty" title={`暂无${title}`} hint="通过右上「新增」建档后，将在此列出。" />}
           toolbarLeft={
             <>
               <span className="om-title" style={{ marginRight: 2 }}>{title}<span className="ai-pill">{st.total}</span></span>

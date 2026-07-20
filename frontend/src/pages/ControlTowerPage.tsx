@@ -35,11 +35,11 @@ const WB_PIPELINE: { key: string; color: string }[] = [
 ];
 const WB_ACTIVE = ["dispatched", "loaded", "departed", "in_transit", "arrived"];
 
-// 大额金额紧凑显示（万/亿），驾驶舱磁贴用
+// 大额金额紧凑显示（¥万/¥亿），驾驶舱磁贴用；带 ¥ 前缀与其它金额风格统一
 function fmtWan(v: number): string {
   const n = Math.abs(v);
-  if (n >= 1e8) return `${(v / 1e8).toFixed(2)}亿`;
-  if (n >= 1e4) return `${(v / 1e4).toFixed(1)}万`;
+  if (n >= 1e8) return `¥${(v / 1e8).toFixed(2)}亿`;
+  if (n >= 1e4) return `¥${(v / 1e4).toFixed(1)}万`;
   return fmtMoney(v);
 }
 

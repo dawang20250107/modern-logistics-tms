@@ -262,9 +262,21 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
   };
 
   const bulkRows = parseBulkLines();
+  const validBulkRows = bulkRows.filter((r) => r.valid);
+  const invalidBulkCount = bulkRows.length - validBulkRows.length;
+  // 剔除无效行：仅保留"始发+目的"齐全的行，回写文本框，让用户能一键清障后再导
+  const dropInvalidBulk = () => {
+    const kept = bulkText.split("\n").filter((l) => {
+      const p = l.trim().split(/[,，\t]/).map((s) => s.trim());
+      return l.trim() && p[0] && p[1];
+    });
+    setBulkText(kept.join("\n"));
+    toast.success(`已剔除 ${invalidBulkCount} 条无效行`);
+  };
   const bulkImportMut = useMutation({
     mutationFn: () => {
-      const rows = bulkRows.map((r) => ({
+      // 只导有效行，缺路线的行跳过（不再让一个坏行卡住整批）
+      const rows = validBulkRows.map((r) => ({
         origin: r.origin === "—" ? undefined : r.origin,
         destination: r.destination === "—" ? undefined : r.destination,
         cargo_weight_ton: r.weight || undefined,
@@ -442,14 +454,27 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                 value={bulkText}
                 onChange={(e) => setBulkText(e.target.value)}
               />
-              <button
-                className="btn-primary"
-                disabled={bulkRows.length === 0 || bulkImportMut.isPending || bulkRows.some(r => !r.valid)}
-                onClick={() => bulkImportMut.mutate()}
-                style={{ padding: 12 }}
-              >
-                {bulkImportMut.isPending ? "导入中…" : `导入 ${bulkRows.length} 张订单`}
-              </button>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button
+                  className="btn-primary"
+                  disabled={validBulkRows.length === 0 || bulkImportMut.isPending}
+                  onClick={() => bulkImportMut.mutate()}
+                  style={{ padding: 12, flex: 1 }}
+                >
+                  {bulkImportMut.isPending ? "导入中…" : validBulkRows.length === 0 ? "无有效订单可导入" : `导入 ${validBulkRows.length} 张有效订单`}
+                </button>
+                {invalidBulkCount > 0 && (
+                  <button className="btn-ghost" onClick={dropInvalidBulk} style={{ padding: 12, whiteSpace: "nowrap" }} title="移除缺失路线的行">
+                    剔除 {invalidBulkCount} 条无效行
+                  </button>
+                )}
+              </div>
+              {invalidBulkCount > 0 && (
+                <div className="small" style={{ color: "var(--amber)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <IconX size={12} className="icon-offset" />
+                  {invalidBulkCount} 条缺始发/目的将被跳过；仅导入 {validBulkRows.length} 条有效行
+                </div>
+              )}
             </div>
 
             <div className="stack" style={{ gap: 10, background: "var(--panel-2)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
@@ -463,7 +488,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   </thead>
                   <tbody>
                     {bulkRows.map((r) => (
-                      <tr key={r.id}>
+                      <tr key={r.id} style={r.valid ? undefined : { background: "var(--red-bg)" }}>
                         <td>{r.id + 1}</td>
                         <td>{r.origin}</td>
                         <td>{r.destination}</td>

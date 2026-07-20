@@ -10,6 +10,7 @@ import type {
 } from "../api/types";
 import { PAYMENT_METHOD_LABEL, STATEMENT_STATUS_LABEL } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { CopyCode } from "../components/CopyCode";
 import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { useServerTable } from "../api/useServerTable";
 import { StateView } from "../components/StateView";
@@ -541,7 +542,7 @@ export function ReconciliationPage() {
                     <div className="settle-item-main">
                       <div className="settle-item-head">
                         <span className={`tag ${s.direction === "receivable" ? "tag-low" : "tag-high"}`}>{s.direction === "receivable" ? "应收" : "应付"}</span>
-                        <span className="mono" style={{ fontWeight: 700, color: "var(--accent)" }}>{s.statement_no}</span>
+                        <span className="mono" style={{ fontWeight: 700, color: "var(--accent)" }}><CopyCode value={s.statement_no} /></span>
                         <span style={{ fontWeight: 600 }}>{s.counterparty_name}</span>
                         {statusTag(s)}
                         {overdue && <span className="tag tag-high">已逾期</span>}

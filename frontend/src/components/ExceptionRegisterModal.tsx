@@ -69,6 +69,7 @@ export function ExceptionRegisterModal({
           <div className="bd-field">
             <label>情况描述</label>
             <textarea
+              autoFocus
               value={desc} onChange={(e) => setDesc(e.target.value)} rows={4}
               placeholder="时间、地点、货物、责任方等（登记后订单打标，调度/订单管理同步可见）"
               style={{ padding: "8px 10px", border: "1px solid var(--line-2)", borderRadius: "var(--radius-sm)", fontSize: 13, resize: "vertical" }}

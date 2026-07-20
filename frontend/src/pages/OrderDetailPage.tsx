@@ -7,6 +7,7 @@ import { confirmAction } from "../api/confirm";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { DocumentLineage } from "../components/DocumentLineage";
+import { CopyCode } from "../components/CopyCode";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import type { Order, OrderEvent, OrderWorkflow } from "../api/types";
@@ -120,7 +121,7 @@ export function OrderDetailPage() {
         <div className="wb-head">
           <div>
             <div className="muted small">订单</div>
-            <div className="wb-no mono">{o.order_no}</div>
+            <div className="wb-no mono"><CopyCode value={o.order_no} /></div>
             <div className="muted small">{ORDER_CHANNEL_LABEL[o.channel]} · {SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type} · 建单 {o.created_by_name || "-"}</div>
           </div>
           <div className="wb-status">

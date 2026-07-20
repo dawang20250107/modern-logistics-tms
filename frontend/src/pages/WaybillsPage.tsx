@@ -10,6 +10,7 @@ import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
 import { useServerTable } from "../api/useServerTable";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { CopyCode } from "../components/CopyCode";
 import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { FinanceCard } from "../components/FinanceCard";
 import { ReplyCard } from "../components/ReplyCard";
@@ -439,7 +440,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
           <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="wb-drawer-head">
               <div>
-                <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}>{drawerWaybill.waybill_no}</div>
+                <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}><CopyCode value={drawerWaybill.waybill_no} /></div>
                 <div className="muted small" style={{ marginTop: 2 }}>{drawerWaybill.origin || "?"} → {drawerWaybill.destination || "?"}</div>
               </div>
               <button className="btn-ghost" onClick={() => setDrawerWaybill(null)}>关闭 [Esc]</button>

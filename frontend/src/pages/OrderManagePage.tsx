@@ -11,6 +11,7 @@ import {
   BATCH_STATUS_LABEL, BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_EVENT_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SETTLEMENT_LABEL, SLA_STATUS_LABEL, SOURCE_TYPE_LABEL,
 } from "../api/types";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { CopyCode } from "../components/CopyCode";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
 import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { useServerTable } from "../api/useServerTable";
@@ -316,7 +317,7 @@ function OrdersTab() {
         <div className="wb-drawer" onClick={(e) => e.stopPropagation()}>
           <div className="wb-drawer-head">
             <div>
-              <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}>{drawer.order_no}</div>
+              <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}><CopyCode value={drawer.order_no} /></div>
               <div className="muted small" style={{ marginTop: 2 }}>{drawer.origin || "?"} → {drawer.destination || "?"}</div>
             </div>
             <button className="btn-ghost" onClick={() => setDrawer(null)}>关闭 [Esc]</button>

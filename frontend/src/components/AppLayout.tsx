@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { hasPerm, useAuth } from "../auth/auth";
@@ -83,6 +83,22 @@ export function AppLayout() {
   const { pathname } = useLocation();
   const pageTitle = currentPageTitle(pathname);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("nav_collapsed") === "1");
+  const contentRef = useRef<HTMLElement>(null);
+
+  // 切页回到顶部：固定布局下主滚动容器是 .content，路由变化时复位，避免落在上一页的滚动位置
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [pathname]);
+
+  // 数字输入防误滚：聚焦 number 输入时滚轮不改数值（数据录入常见困扰），改为滚动页面
+  useEffect(() => {
+    const onWheel = () => {
+      const el = document.activeElement as HTMLElement | null;
+      if (el && el.tagName === "INPUT" && (el as HTMLInputElement).type === "number") el.blur();
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, []);
 
   const toggleCollapsed = () => {
     setCollapsed((v) => {
@@ -163,7 +179,7 @@ export function AppLayout() {
             </button>
           </div>
         </header>
-        <section className="content">
+        <section className="content" ref={contentRef}>
           <Outlet />
         </section>
       </main>

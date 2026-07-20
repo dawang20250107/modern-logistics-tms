@@ -7,6 +7,7 @@ import { fmtDateTime, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { COD_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
+import { CopyCode } from "../components/CopyCode";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
 const fmt = fmtDateTime;
@@ -229,7 +230,7 @@ export function WaybillDetailPage() {
         <div style={{ background: "linear-gradient(135deg, #1b1e25 0%, #16181d 100%)", color: "#fff", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
           <div className="stack" style={{ gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>{w.waybill_no}</span>
+              <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}><CopyCode value={w.waybill_no} /></span>
               <span className="tag" style={{ background: "rgba(255,255,255,0.12)", color: "#e4e4e7", border: "1px solid rgba(255,255,255,0.2)", fontWeight: 500 }}>
                 {STATUS_LABEL[w.status] ?? w.status}
               </span>

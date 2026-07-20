@@ -1607,3 +1607,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
   .gp-bar.on, .dt-loadbar.on { animation: none; }
   :root.theme-anim, :root.theme-anim * { transition: none !important; }
 }
+
+/* 单号一键复制：默认与文字同款，hover 露出复制图标与青色描边 */
+.copycode { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; border-radius: 5px; padding: 0 3px; margin: 0 -3px; transition: background var(--speed), color var(--speed); outline: none; }
+.copycode:hover { background: var(--accent-weak); color: var(--accent); }
+.copycode:focus-visible { box-shadow: var(--ring); }
+.copycode-ic { flex: none; opacity: 0; transform: translateX(-2px); transition: opacity var(--speed), transform var(--speed); }
+.copycode:hover .copycode-ic, .copycode:focus-visible .copycode-ic { opacity: 0.85; transform: translateX(0); }

@@ -772,6 +772,68 @@ export interface AgingReport {
   totals: { b0_30: number; b31_60: number; b61_90: number; b90: number; total: number };
 }
 
+// ── 单据血缘（订单 → 运单 → 对账单）──────────────────────
+export interface LineageStatement {
+  id: string;
+  statement_no: string;
+  direction: "receivable" | "payable";
+  counterparty_type: string;
+  counterparty_name: string;
+  status: string;
+  status_label: string;
+  total_amount: number;
+  settled_amount: number;
+  outstanding: number;
+  period_start: string;
+  period_end: string;
+}
+export interface LineageExpense {
+  direction: string;
+  expense_item_code: string;
+  amount: number;
+  payee_type: string;
+  payee_ref: string;
+  risk_status: string;
+}
+export interface LineageWaybill {
+  id: string;
+  waybill_no: string;
+  status: string;
+  status_label: string;
+  carrier_name: string;
+  dispatch_type: string;
+  batch_no: string;
+  receivable: number;
+  payable: number;
+  expenses: LineageExpense[];
+  statements: LineageStatement[];
+}
+export interface LineageBatch {
+  batch_no: string;
+  carrier_name: string;
+  status: string;
+  statement_no: string;
+  order_count: number;
+  total_payable: number;
+}
+export interface OrderLineage {
+  order: {
+    id: string;
+    order_no: string;
+    status: string;
+    status_label: string;
+    customer_name: string;
+    business_type: string;
+    quoted_amount: number;
+    created_at: string;
+  };
+  waybills: LineageWaybill[];
+  batches: LineageBatch[];
+  ar_statements: LineageStatement[];
+  ap_statements: LineageStatement[];
+  summary: { waybill_count: number; receivable_total: number; payable_total: number; gross: number; statement_count: number };
+}
+
 // ── 车队合规预警 ────────────────────────────────────────
 export type CredSeverity = "expired" | "critical" | "warning";
 export interface CredentialRow {

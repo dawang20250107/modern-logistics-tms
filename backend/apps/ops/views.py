@@ -510,6 +510,13 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     search_fields = ["order_no", "remark", "contact_phone", "origin", "destination"]
     ordering_fields = ["created_at", "order_no", "priority"]
 
+    @action(detail=True, methods=["get"], url_path="lineage")
+    def lineage(self, request, pk=None):
+        """单据血缘：订单(DD) → 运单(YD) → 对账单(ST) 全链路关系图（见 lineage.order_lineage）。"""
+        from .lineage import order_lineage
+
+        return Response(order_lineage(self.get_object()))
+
     @action(detail=False, methods=["get"], url_path="funnel")
     def funnel(self, request):
         """订单生命周期漏斗：按状态/渠道计数 + 今日建单数，供建单工作台"从哪来到哪去"管道。"""

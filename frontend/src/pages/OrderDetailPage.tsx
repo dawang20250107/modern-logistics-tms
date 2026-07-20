@@ -6,6 +6,7 @@ import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
+import { DocumentLineage } from "../components/DocumentLineage";
 import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 import type { Order, OrderEvent, OrderWorkflow } from "../api/types";
@@ -152,6 +153,8 @@ export function OrderDetailPage() {
           )}
         </div>
       </div>
+
+      <DocumentLineage orderId={id} />
 
       {o.approval_status !== "none" && (
         <div className="panel" style={{ borderLeft: `4px solid ${o.approval_status === "rejected" ? "var(--red)" : o.approval_status === "approved" ? "var(--green)" : "var(--amber, #e8a33d)"}` }}>

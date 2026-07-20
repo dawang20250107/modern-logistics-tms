@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
+from apps.core.filtering import FilterField, ServerFilterMixin
 from apps.iam.permissions import HasPermission
 
 from .models import B2BPartner, Carrier, CarrierLanePrice, Customer, Driver, Route, Vehicle
@@ -26,14 +27,24 @@ from .serializers import (
 _MD_PERMS = {"read": "masterdata.view", "write": "masterdata.manage"}
 
 
-class CustomerViewSet(viewsets.ModelViewSet):
+class CustomerViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
     permission_classes = [IsAuthenticated, HasPermission]
     required_permissions = _MD_PERMS
     search_fields = ["code", "name", "contact_phone"]
     filterset_fields = ["is_active"]
-    ordering_fields = ["code", "name", "created_at"]
+    ordering_fields = ["code", "name", "created_at", "level", "credit_limit", "credit_days", "contact_name"]
+    server_filter_fields = {
+        "name": FilterField("text", "name"),
+        "code": FilterField("text", "code"),
+        "contact": FilterField("text", "contact_name"),
+        "level": FilterField("enum", "level"),
+        "category": FilterField("enum", "category"),
+        "credit": FilterField("number", "credit_limit"),
+        "days": FilterField("number", "credit_days"),
+        "active": FilterField("bool", "is_active"),
+    }
 
     @action(detail=True, methods=["get"], url_path="context")
     def context(self, request, pk=None):
@@ -52,7 +63,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
         return Response(lane_suggest(self.get_object(), origin, destination))
 
 
-class CarrierViewSet(viewsets.ModelViewSet):
+class CarrierViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     """承运商主数据 + 风控：分级 / 黑名单 / 账期。写操作受 carrier.manage 权限约束。"""
 
     queryset = Carrier.objects.all()
@@ -66,7 +77,28 @@ class CarrierViewSet(viewsets.ModelViewSet):
     }
     search_fields = ["code", "name", "contact_phone", "city"]
     filterset_fields = ["is_active", "grade", "blacklisted", "carrier_type"]
-    ordering_fields = ["code", "name", "grade", "created_at"]
+    ordering_fields = ["code", "name", "grade", "created_at", "city", "credit_days", "carrier_type"]
+    server_filter_fields = {
+        "name": FilterField("text", "name"),
+        "code": FilterField("text", "code"),
+        "city": FilterField("text", "city"),
+        "grade": FilterField("enum", "grade"),
+        "type": FilterField("enum", "carrier_type"),
+        "credit_days": FilterField("number", "credit_days"),
+        "blocked": FilterField("bool", "blocked_i"),  # 派生：拉黑 / 停用 / 资质过期
+        "active": FilterField("bool", "is_active"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import BooleanField, Case, Q, Value, When
+
+        today = timezone.localdate()
+        return super().get_queryset().annotate(
+            blocked_i=Case(
+                When(Q(blacklisted=True) | Q(is_active=False) | Q(qualification_expiry__lt=today), then=Value(True)),
+                default=Value(False), output_field=BooleanField(),
+            ),
+        )
 
     @action(detail=True, methods=["get"], url_path="performance")
     def performance(self, request, pk=None):
@@ -94,7 +126,7 @@ class CarrierViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(carrier).data)
 
 
-class CarrierLanePriceViewSet(viewsets.ModelViewSet):
+class CarrierLanePriceViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     """线路承运商价库：起点→终点 找谁、多少钱。写受 carrier.manage 约束。"""
 
     queryset = CarrierLanePrice.objects.select_related("carrier").all()
@@ -107,27 +139,82 @@ class CarrierLanePriceViewSet(viewsets.ModelViewSet):
     }
     search_fields = ["origin_city", "dest_city", "carrier__name", "vehicle_type"]
     filterset_fields = ["origin_city", "dest_city", "carrier", "is_active", "is_recommended", "is_preferred"]
-    ordering_fields = ["origin_city", "dest_city", "standard_price", "created_at"]
+    ordering_fields = ["origin_city", "dest_city", "standard_price", "created_at", "last_deal_price", "carrier__name"]
+    server_filter_fields = {
+        "origin": FilterField("text", "origin_city"),
+        "dest": FilterField("text", "dest_city"),
+        "carrier": FilterField("text", "carrier__name"),
+        "vehicle": FilterField("text", "vehicle_type"),
+        "standard": FilterField("number", "standard_price"),
+        "last": FilterField("number", "last_deal_price"),
+        "flag": FilterField("enum", "flag_code"),  # 派生：recommended/preferred/none
+    }
+
+    def get_queryset(self):
+        from django.db.models import Case, CharField, Value, When
+
+        return super().get_queryset().annotate(
+            flag_code=Case(
+                When(is_recommended=True, then=Value("recommended")),
+                When(is_preferred=True, then=Value("preferred")),
+                default=Value("none"), output_field=CharField(),
+            ),
+        )
 
 
-class VehicleViewSet(viewsets.ModelViewSet):
+class VehicleViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     queryset = Vehicle.objects.select_related("carrier").all()
     serializer_class = VehicleSerializer
     permission_classes = [IsAuthenticated, HasPermission]
     required_permissions = _MD_PERMS
     search_fields = ["plate_no", "vehicle_type"]
     filterset_fields = ["is_active", "carrier", "vehicle_class", "dispatch_source"]
-    ordering_fields = ["plate_no", "created_at"]
+    ordering_fields = ["plate_no", "created_at", "load_capacity_ton", "volume_capacity_cbm"]
+    server_filter_fields = {
+        "plate": FilterField("text", "plate_no"),
+        "type": FilterField("text", "vehicle_type"),
+        "owner": FilterField("text", "owner_name"),  # 派生：承运商名 / 自有
+        "ton": FilterField("number", "load_capacity_ton"),
+        "cbm": FilterField("number", "volume_capacity_cbm"),
+        "active": FilterField("bool", "is_active"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import CharField, Value
+        from django.db.models.functions import Coalesce
+
+        return super().get_queryset().annotate(owner_name=Coalesce("carrier__name", Value("自有", output_field=CharField())))
 
 
-class DriverViewSet(viewsets.ModelViewSet):
+class DriverViewSet(ServerFilterMixin, viewsets.ModelViewSet):
     queryset = Driver.objects.select_related("carrier").all()
     serializer_class = DriverSerializer
     permission_classes = [IsAuthenticated, HasPermission]
     required_permissions = _MD_PERMS
     search_fields = ["name", "phone", "wechat"]
     filterset_fields = ["is_active", "carrier", "employment_type", "app_registered"]
-    ordering_fields = ["name", "created_at", "cumulative_waybills", "cumulative_freight"]
+    ordering_fields = [
+        "name", "created_at", "cumulative_waybills", "cumulative_freight",
+        "phone", "employment_type", "owner_name",
+    ]
+    server_filter_fields = {
+        "name": FilterField("text", "name"),
+        "phone": FilterField("text", "phone"),
+        "license": FilterField("text", "license_type"),
+        "emp": FilterField("enum", "employment_type"),
+        "owner": FilterField("text", "owner_name"),  # 派生：承运商名 / 自有
+        "waybills": FilterField("number", "cumulative_waybills"),
+        "freight": FilterField("number", "cumulative_freight"),
+        "active": FilterField("bool", "is_active"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import CharField, Value
+        from django.db.models.functions import Coalesce
+
+        return super().get_queryset().annotate(
+            owner_name=Coalesce("carrier__name", Value("自有", output_field=CharField())),
+        )
 
     @action(detail=True, methods=["post"], url_path="refresh-stats")
     def refresh_stats(self, request, pk=None):

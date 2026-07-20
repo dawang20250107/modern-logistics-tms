@@ -258,6 +258,7 @@ export function ReconciliationPage() {
   const [expanded, setExpanded] = useState<string>("");
   const [stmtModel, setStmtModel] = useState<FilterModel>(EMPTY_MODEL);
   const [showStmtFilter, setShowStmtFilter] = useState(false);
+  const [showGen, setShowGen] = useState(false);
   const [settleTarget, setSettleTarget] = useState<Statement | null>(null);
 
   const cpType = direction === "receivable" ? "customer" : "carrier";
@@ -432,48 +433,46 @@ export function ReconciliationPage() {
       {tab === "aging" && <AgingTab />}
 
       {tab === "statements" && (
-        <>
-          <div className="panel">
-            <div className="panel-head">生成对账单</div>
-            <div className="grid-form" style={{ padding: "16px 20px", gridTemplateColumns: "repeat(6, 1fr)" }}>
-              <div className="seg-tabs" style={{ gridColumn: "1 / -1", marginBottom: 4 }}>
+        <div className="panel om-panel" style={{ flex: 1 }}>
+          <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
+            <span>对账单台账<span className="ai-pill">{filteredStmts.length}</span></span>
+            <div style={{ flex: 1 }} />
+            <div style={{ position: "relative" }}>
+              <button className={`btn-ghost${stmtActiveCount > 0 || showStmtFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowStmtFilter((v) => !v); }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                  高级筛选{stmtActiveCount > 0 ? ` · ${stmtActiveCount}` : ""}
+                </span>
+              </button>
+              {showStmtFilter && <FilterBuilder fields={STMT_FILTER_FIELDS} model={stmtModel} onChange={setStmtModel} onClose={() => setShowStmtFilter(false)} />}
+            </div>
+            <button className="btn-ghost" disabled={auditAll.isPending || items.length === 0} onClick={() => auditAll.mutate()}>{auditAll.isPending ? "审计中…" : `批量审计（${items.length}）`}</button>
+            <button className={`btn-primary${showGen ? " is-on" : ""}`} onClick={() => setShowGen((v) => !v)}>{showGen ? "收起" : "+ 生成对账单"}</button>
+          </div>
+
+          {showGen && (
+            <div className="gen-bar">
+              <div className="seg-tabs">
                 <button className={direction === "receivable" ? "active" : ""} onClick={() => { setDirection("receivable"); setCounterpartyId(""); }}>应收（客户）</button>
                 <button className={direction === "payable" ? "active" : ""} onClick={() => { setDirection("payable"); setCounterpartyId(""); }}>应付（承运商）</button>
               </div>
-              <label style={{ gridColumn: "span 2" }}>对手方主体
+              <label>对手方
                 <select value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)}>
-                  <option value="">请选择 {cpType === "customer" ? "客户" : "承运商"}</option>
+                  <option value="">选择 {cpType === "customer" ? "客户" : "承运商"}</option>
                   {cps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </label>
               <label>账期开始<input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
               <label>账期结束<input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
-              <label>约定到期日<input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></label>
-              <label>对方金额(稽核)<input placeholder="0.00" value={externalTotal} onChange={(e) => setExternalTotal(e.target.value)} /></label>
-              <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-                <button className="btn-ghost" disabled={auditAll.isPending || items.length === 0} onClick={() => auditAll.mutate()}>{auditAll.isPending ? "审计中…" : `批量审计（${items.length} 张）`}</button>
-                <button className="btn-primary" style={{ padding: "9px 22px" }} disabled={!counterpartyId || generate.isPending} onClick={() => generate.mutate()}>
-                  {generate.isPending ? "生成中…" : `生成${direction === "receivable" ? "收款" : "付款"}对账单`}
-                </button>
-              </div>
+              <label>到期日<input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></label>
+              <label>对方金额<input placeholder="稽核用" value={externalTotal} onChange={(e) => setExternalTotal(e.target.value)} style={{ width: 90 }} /></label>
+              <button className="btn-primary" disabled={!counterpartyId || generate.isPending} onClick={() => generate.mutate()}>
+                {generate.isPending ? "生成中…" : "生成"}
+              </button>
             </div>
-          </div>
+          )}
 
-          <div className="panel" style={{ flex: 1 }}>
-            <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
-              <span>对账单台账<span className="ai-pill">{filteredStmts.length}</span></span>
-              <div style={{ flex: 1 }} />
-              <div style={{ position: "relative" }}>
-                <button className={`btn-ghost${stmtActiveCount > 0 || showStmtFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowStmtFilter((v) => !v); }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
-                    高级筛选{stmtActiveCount > 0 ? ` · ${stmtActiveCount}` : ""}
-                  </span>
-                </button>
-                {showStmtFilter && <FilterBuilder fields={STMT_FILTER_FIELDS} model={stmtModel} onChange={setStmtModel} onClose={() => setShowStmtFilter(false)} />}
-              </div>
-            </div>
-            {stmtActiveCount > 0 && (
+          {stmtActiveCount > 0 && (
               <div className="om-chips">
                 <span className="muted small">条件（{stmtModel.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
                 {stmtModel.conditions.map((c) => {
@@ -503,8 +502,7 @@ export function ReconciliationPage() {
                 toolbarLeft={<span className="muted small">共 {filteredStmts.length} 张 · 点行看明细/核销流水 · 表头 ⚟ 筛选/排序</span>}
               />
             )}
-          </div>
-        </>
+        </div>
       )}
 
       {tab === "settle" && (

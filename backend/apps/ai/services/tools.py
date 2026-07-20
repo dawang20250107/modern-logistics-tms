@@ -442,35 +442,85 @@ _EXCEPTION_SCHEMA = {
 
 @tool(
     "logistics.exception_handler",
-    "调阅轨迹与业务规则库，对突发异常（偏航、温控、油损等）进行诊断，输出处理建议与防范措施。",
+    "调阅该运单真实的车联网报警、轨迹与未闭环异常，对突发异常（偏航/温控/油损等）做数据回溯，并给出处置建议。",
     _EXCEPTION_SCHEMA,
 )
 def exception_handler(arguments):
-    waybill_no = arguments.get("waybill_no")
-    exc_type = arguments.get("exception_type")
-    
-    # 模拟 AI 对轨迹或车辆配置的检索
-    diagnosis = f"系统已对单号 {waybill_no} 的 {exc_type} 异常进行了深度回溯："
-    mitigation = ""
-    
-    if exc_type == "deviation":
-        diagnosis += "发现车辆偏离了主干道 G2 高速，进入了国道路段。"
-        mitigation = "1. 已验证该路段为非限行区域。\n2. 已下发微信通知询问司机绕行原因（避堵/加油等）。\n3. 建议调整该单 ETA 时间 +45 分钟以免违约。"
-    elif exc_type == "temperature":
-        diagnosis += "冷机数据帧显示后厢温度在过去 15 分钟内连续飙升 8℃。"
-        mitigation = "1. 货品属高危生鲜制剂，已触发一级警报！\n2. 建议立即致电司机（不要发短信），要求靠边停车检查冷机门缝是否闭合。\n3. 联系最近的服务站待命。"
-    elif exc_type == "fuel":
-        diagnosis += "液位传感器检出 5 分钟内油量急降 15%。"
-        mitigation = "1. 高度怀疑遭遇“油耗子”盗油或严重漏油。\n2. 请结合车辆 GPS 定位点，立刻让司机检查周围有无异常人员停留。\n3. 在系统中记录此次油损定损单。"
-    else:
-        diagnosis += "常规运行异常。"
-        mitigation = "请联系司机核实情况后跟进处理。"
+    """基于真实数据回溯异常。绝不编造传感器读数：无数据即如实说明，处置建议为 SOP 参考而非既成事实。"""
+    from apps.ops.models import Waybill
+    from apps.telematics.models import Alert
 
+    waybill_no = arguments.get("waybill_no")
+    exc_type = (arguments.get("exception_type") or "").strip()
+
+    waybill = (
+        Waybill.objects.select_related("vehicle", "driver").filter(waybill_no=waybill_no).first()
+        if waybill_no
+        else None
+    )
+    if waybill is None:
+        return {
+            "tool_name": "logistics.exception_handler",
+            "diagnosis": f"未找到运单 {waybill_no or '（未提供单号）'} 的可回溯数据，无法基于真实轨迹/设备做诊断。",
+            "mitigation_plan": "请补充有效运单号后重试，或转人工核实。",
+            "evidence": {"waybill_no": waybill_no, "exception_type": exc_type, "data_available": False},
+            "summary": "数据不足，未做诊断（不编造结论）。",
+        }
+
+    # 真实证据：按异常类型过滤该运单的车联网报警 + 轨迹 + ETA 偏移 + 未闭环异常
+    alert_qs = Alert.objects.filter(waybill=waybill).order_by("-triggered_at")
+    typed_qs = alert_qs.filter(alert_type=exc_type) if exc_type else alert_qs
+    typed = list(typed_qs[:5])
+    tracking_count = waybill.tracking_points.count()
+    latest = waybill.tracking_points.order_by("-reported_at").first()
+    open_exc = waybill.exceptions.exclude(status="closed").count()
+
+    findings = []
+    for a in typed:
+        piece = a.message or a.get_alert_type_display()
+        if a.value is not None and a.threshold is not None:
+            piece += f"（实测 {a.value}/阈值 {a.threshold}）"
+        findings.append(f"{a.triggered_at:%m-%d %H:%M} {piece}[{a.get_level_display()}]")
+
+    parts = [f"运单 {waybill.waybill_no}（{waybill.route_name}）异常回溯："]
+    if findings:
+        parts.append("车联网记录到以下真实报警——" + "；".join(findings) + "。")
+    else:
+        label = dict(Alert._meta.get_field("alert_type").choices).get(exc_type, exc_type or "该类")
+        parts.append(f"未在车联网报警库检索到「{label}」类型的报警记录。")
+    if latest is not None:
+        parts.append(f"最新轨迹点 {latest.reported_at:%m-%d %H:%M}（共 {tracking_count} 个点）。")
+    elif waybill.status == Waybill.STATUS_IN_TRANSIT:
+        parts.append("在途但暂无轨迹上报，疑似设备离线，请优先核实定位。")
+    if waybill.eta_drift_minutes:
+        parts.append(f"当前 ETA 偏移 {round(waybill.eta_drift_minutes / 60, 1)} 小时。")
+    if open_exc:
+        parts.append(f"另有 {open_exc} 个未闭环异常待处理。")
+
+    mitigation = (
+        "以下为处置 SOP 建议（尚未执行，需人工确认）：\n"
+        "1. 电话联系司机核实现场情况（勿仅发短信）。\n"
+        "2. 结合上述真实报警/定位判断责任与紧急度，必要时要求靠边停车检查。\n"
+        "3. 如影响时效，向客户同步最新 ETA；如涉及货损/油损，登记定损单留证。"
+    )
+    evidence = {
+        "waybill_no": waybill.waybill_no,
+        "exception_type": exc_type,
+        "data_available": True,
+        "matched_alerts": len(typed),
+        "tracking_points": tracking_count,
+        "eta_drift_minutes": waybill.eta_drift_minutes,
+        "open_exceptions": open_exc,
+    }
     return {
         "tool_name": "logistics.exception_handler",
-        "diagnosis": diagnosis,
+        "diagnosis": "".join(parts),
         "mitigation_plan": mitigation,
-        "summary": "AI 已完成异常环境诊断与核查，详见 mitigation_plan 字段。",
+        "evidence": evidence,
+        "summary": (
+            f"已基于真实数据回溯：命中 {len(typed)} 条{('「' + exc_type + '」') if exc_type else ''}报警、"
+            f"{tracking_count} 个轨迹点。处置建议见 mitigation_plan（未自动执行）。"
+        ),
     }
 
 
@@ -501,8 +551,8 @@ def intelligent_consolidation(arguments):
     res = consolidate_and_group_orders(orders)
 
     summary = (
-        f"AI 智能拼单配载引擎扫描了在池订单，成功生成 {res['consolidated_count']} 个拼载推荐，"
-        f"可实现大车同向合并，预计可节省总运费成本 {res['estimated_total_saving']} 元。"
+        f"拼单配载引擎扫描了在池订单，生成 {res['consolidated_count']} 个同向合并推荐；"
+        f"按运价估算模型测算，预计可节省运费约 {res['estimated_total_saving']} 元（估算值，以实际询价为准）。"
     )
 
     return {

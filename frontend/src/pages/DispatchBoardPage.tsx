@@ -59,6 +59,7 @@ interface PlanResult {
   unassigned: Array<{ order_id: string; order_no: string }>;
   consolidated_trips?: ConsolidatedTrip[];
   estimated_total_saving?: number;
+  manual_adjusted?: boolean; // 手工拖拽调整过：节省金额为自动排线原值，未重算
 }
 
 const RISK_TAG: Record<string, string> = { high: "high", medium: "medium", low: "low" };
@@ -255,12 +256,11 @@ export function DispatchBoardPage() {
 
       const updatedTrips = prev.consolidated_trips.map((t, i) => {
         if (i !== tripIdx) return t;
-        const addSaved = round(orderW * 150, 2); // 模拟拼单带来的分段降本增益
+        // 手工拖拽不臆造节省金额：装载量真实更新，降本金额保持自动排线原值，待确认派单时由后端重算
         return {
           ...t,
           total_weight_ton: newWeight,
           total_volume_cbm: newVolume,
-          money_saved: t.money_saved + addSaved,
           orders: [
             ...t.orders,
             {
@@ -287,15 +287,11 @@ export function DispatchBoardPage() {
         assigned_count: updatedAssignments.length,
         unassigned_count: updatedUnassigned.length,
         assignments: updatedAssignments,
-        estimated_total_saving: round((prev.estimated_total_saving ?? 0) + (orderW * 150), 2)
+        manual_adjusted: true, // 手工调整过，节省金额未重算
       };
     });
 
     toast.success(`订单 ${o.order_no} 已配载至 ${trip.vehicle.plate_no}`);
-  };
-
-  const round = (num: number, decimals: number) => {
-    return Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
   };
 
   const suggest = useMutation({
@@ -640,8 +636,8 @@ export function DispatchBoardPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}><IconTruck size={18} className="icon-offset"/> 拼单配载</span>
               {plan.estimated_total_saving && plan.estimated_total_saving > 0 && (
-                <span className="tag tag-low" style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
-                  <IconMoney size={14} className="icon-offset"/> 预计节省 {fmtMoney(plan.estimated_total_saving)}
+                <span className="tag tag-low" style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }} title={plan.manual_adjusted ? "自动排线的预估节省；手工拖拽调整未计入，确认派单后由后端重算" : "自动排线引擎的预估节省，确认派单后以实际询价为准"}>
+                  <IconMoney size={14} className="icon-offset"/> 预计节省 {fmtMoney(plan.estimated_total_saving)}{plan.manual_adjusted ? "（手工调整未重算）" : ""}
                 </span>
               )}
             </div>
@@ -741,9 +737,9 @@ export function DispatchBoardPage() {
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: 11, flexWrap: "wrap" }}>
                         <div className="tag tag-low" style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
-                          <IconCheckCircle size={12} className="icon-offset"/> 自营配载：{fmtMoney(trip.consolidated_cost)}
+                          <IconCheckCircle size={12} className="icon-offset"/> 配载成本：{fmtMoney(trip.consolidated_cost)}
                         </div>
-                        <div style={{ background: "var(--panel-3)", padding: "3px 8px", borderRadius: 4, color: "var(--muted)" }}>市场行情：{fmtMoney(Math.round(trip.consolidated_cost * 1.05))}</div>
+                        <div style={{ background: "var(--panel-3)", padding: "3px 8px", borderRadius: 4, color: "var(--muted)" }}>分单成本：{fmtMoney(trip.separate_cost)}</div>
                       </div>
                     </div>
 

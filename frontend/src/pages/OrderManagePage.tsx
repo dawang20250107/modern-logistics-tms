@@ -179,8 +179,8 @@ function OrdersTab() {
     { key: "amount", header: "报价", width: 110, align: "right", sortField: "quoted_amount", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
     { key: "priority", header: "优先级", width: 92, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortField: "priority", sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
     { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
-    { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortField: "sla_status", sortValue: (o) => o.sla_status, exportValue: (o) => o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
-    { key: "waybill", header: "关联运单 (YD)", width: 150, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 3 }}>{o.waybill_nos.map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}</span> : <span className="muted small">未生成</span> },
+    { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortField: "sla_status", sortValue: (o) => o.sla_status, exportValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
+    { key: "waybill", header: "关联运单 (YD)", width: 150, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, overflow: "hidden" }}>{o.waybill_nos.slice(0, 1).map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}{o.waybill_nos.length > 1 && <span className="tag tag-none small" title={o.waybill_nos.join("、")}>+{o.waybill_nos.length - 1}</span>}</span> : <span className="muted small">未生成</span> },
     { key: "creator", header: "建单人", width: 100, filterable: true, filterValue: (o) => o.created_by_name || "-", sortValue: (o) => o.created_by_name || "", exportValue: (o) => o.created_by_name || "", render: (o) => <span className="small muted">{o.created_by_name || "-"}</span> },
     { key: "created", header: "建单时间", width: 130, sortField: "created_at", sortValue: (o) => o.created_at, exportValue: (o) => fmtDateTime(o.created_at), render: (o) => <span className="small" title={fmtDateTime(o.created_at)}>{fmtRelative(o.created_at)}</span> },
     {
@@ -440,7 +440,7 @@ function BatchesTab() {
     { key: "weight", header: "总货量", width: 100, align: "right", sortField: "total_weight_ton", sortValue: (b) => Number(b.total_weight_ton), exportValue: (b) => b.total_weight_ton, render: (b) => <span className="num">{Number(b.total_weight_ton).toFixed(1)}吨</span> },
     { key: "payable", header: "总应付", width: 120, align: "right", sortField: "total_payable", sortValue: (b) => Number(b.total_payable), exportValue: (b) => Number(b.total_payable), render: (b) => <span className="num">{fmtMoney(b.total_payable)}</span> },
     { key: "alloc", header: "分摊", width: 90, sortValue: (b) => b.allocation, exportValue: (b) => b.allocation_label, render: (b) => <span className="small muted">{b.allocation_label}</span> },
-    { key: "status", header: "状态", width: 90, sortField: "status", sortValue: (b) => b.status, exportValue: (b) => b.status_label, render: (b) => <span className={`tag ${b.status === "cancelled" ? "tag-none" : b.status === "completed" ? "tag-low" : "tag-info"}`}>{b.status_label}</span> },
+    { key: "status", header: "状态", width: 90, sortField: "status", sortValue: (b) => b.status, exportValue: (b) => b.status_label, render: (b) => <StatusTag kind="batch" value={b.status} /> },
     { key: "creator", header: "建批人", width: 100, sortValue: (b) => b.created_by_name, exportValue: (b) => b.created_by_name, render: (b) => <span className="small muted">{b.created_by_name || "—"}</span> },
     { key: "created", header: "建批时间", width: 130, sortField: "created_at", sortValue: (b) => b.created_at, exportValue: (b) => fmtDateTime(b.created_at), render: (b) => <span className="small" title={fmtDateTime(b.created_at)}>{fmtRelative(b.created_at)}</span> },
   ];
@@ -526,7 +526,7 @@ function BatchesTab() {
                           <td className="small">{w.origin} → {w.destination}</td>
                           <td className="num small">{w.cargo_weight_ton}吨</td>
                           <td className="num">{w.payable != null ? fmtMoney(w.payable) : "—"}</td>
-                          <td><span className="tag tag-info small">{w.status_label}</span></td>
+                          <td><StatusTag kind="waybill" value={w.status} /></td>
                         </tr>
                       ))}
                     </tbody>

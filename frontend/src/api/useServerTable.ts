@@ -20,7 +20,7 @@ export interface ServerTableOptions {
 // 服务端分页/排序/筛选：把 FilterBuilder 模型 + 搜索 + 排序 + 页码翻成查询参数，
 // 全量数据在后端过滤+分页，前端只渲染当前页。筛选/搜索变化时自动回到第 1 页。
 export function useServerTable<T>(opts: ServerTableOptions) {
-  const pageSize = opts.pageSize ?? 50;
+  const [pageSize, setPageSize] = useState(opts.pageSize ?? 50);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<{ field: string; dir: "asc" | "desc" } | null>(opts.defaultSort ?? null);
 
@@ -71,6 +71,7 @@ export function useServerTable<T>(opts: ServerTableOptions) {
     pageSize,
     total: q.data?.total ?? 0,
     onPageChange: setPage,
+    onPageSizeChange: (n: number) => { setPageSize(n); setPage(1); },
     loading: q.isFetching,
   };
 

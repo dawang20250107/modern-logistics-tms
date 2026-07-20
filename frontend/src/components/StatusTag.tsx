@@ -1,4 +1,4 @@
-import { ORDER_STATUS_LABEL, SLA_STATUS_LABEL, STATUS_LABEL } from "../api/types";
+import { BATCH_STATUS_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL, STATUS_LABEL } from "../api/types";
 
 // 状态色规范 = 决策语言：状态 → 色彩 tone + 文案 label + 优先级 priority + 是否需要动作 needsAction。
 // 视觉不只是"好看"，而是让高频岗位一眼判断"这条要不要我处理、有多急"。
@@ -12,7 +12,7 @@ const TONE_CLASS: Record<Tone, string> = {
   danger: "tag-high",
 };
 
-export type StatusKind = "waybill" | "order" | "receipt" | "sla" | "channel";
+export type StatusKind = "waybill" | "order" | "receipt" | "sla" | "channel" | "batch";
 export interface StatusMeta { label: string; tone: Tone; priority: number; needsAction: boolean }
 
 // priority：数值越大越需优先关注（可用于列表排序 / 强调）；needsAction：该状态是否是一项待办任务。
@@ -57,12 +57,20 @@ const CHANNEL: Record<string, StatusMeta> = {
   外包: { label: "外包", tone: "info", priority: 1, needsAction: false },
   网货: { label: "网货", tone: "warning", priority: 2, needsAction: false },
 };
+// 派车批次状态
+const BATCH: Record<string, StatusMeta> = {
+  draft: { label: "草稿", tone: "neutral", priority: 2, needsAction: false },
+  dispatched: { label: "已派车", tone: "info", priority: 3, needsAction: false },
+  partial: { label: "部分完成", tone: "progress", priority: 3, needsAction: false },
+  completed: { label: "已完成", tone: "success", priority: 0, needsAction: false },
+  cancelled: { label: "已取消", tone: "neutral", priority: 0, needsAction: false },
+};
 
 const REGISTRY: Record<StatusKind, Record<string, StatusMeta>> = {
-  waybill: WAYBILL, order: ORDER, receipt: RECEIPT, sla: SLA, channel: CHANNEL,
+  waybill: WAYBILL, order: ORDER, receipt: RECEIPT, sla: SLA, channel: CHANNEL, batch: BATCH,
 };
 const FALLBACK_LABEL: Record<StatusKind, Record<string, string>> = {
-  waybill: STATUS_LABEL, order: ORDER_STATUS_LABEL, receipt: {}, sla: SLA_STATUS_LABEL, channel: {},
+  waybill: STATUS_LABEL, order: ORDER_STATUS_LABEL, receipt: {}, sla: SLA_STATUS_LABEL, channel: {}, batch: BATCH_STATUS_LABEL,
 };
 
 export function statusMeta(kind: StatusKind, value: string): StatusMeta {

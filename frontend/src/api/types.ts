@@ -1228,3 +1228,25 @@ export interface AuditLog {
   payload: Record<string, unknown>;
   created_at: string;
 }
+
+// 审计资源类型 → 中文业务名（未知回退原值）
+export const RESOURCE_TYPE_LABEL: Record<string, string> = {
+  waybill: "运单", order: "订单", statement: "对账单", user: "用户", customer: "客户",
+  carrier: "承运商", vehicle: "车辆", driver: "司机", b2bpartner: "业务伙伴",
+  pricingrule: "计价规则", laneprice: "线路价", role: "角色", org: "组织", employee: "员工",
+  template: "模板", credential: "资质证照", payment: "收付款", exception: "异常",
+};
+export const resourceTypeLabel = (t: string): string => RESOURCE_TYPE_LABEL[t] ?? (t || "—");
+
+// 审计动作 → 中文（常见 CRUD/账户动作；agent_tool:* 归为「AI 工具」；未知回退原值）
+const AUDIT_ACTION_LABEL: Record<string, string> = {
+  create: "新建", update: "更新", delete: "删除", read: "查看", list: "列表",
+  login: "登录", logout: "登出", export: "导出", import: "导入",
+  approve: "审批", reject: "驳回", cancel: "取消", void: "作废",
+  dispatch: "派单", transition: "状态流转", settle: "核销", sign: "签收",
+};
+export const auditActionLabel = (a: string): string => {
+  if (!a) return "—";
+  if (a.startsWith("agent_tool:")) return `AI 工具·${a.slice(11)}`;
+  return AUDIT_ACTION_LABEL[a] ?? a;
+};

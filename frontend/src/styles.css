@@ -112,6 +112,7 @@
 
   /* 三级文本（ink → ink-2 → ink-3 → muted → faint），此前 --ink-3 未定义致 4 处静默失效 */
   --ink-3: #52586a;
+  --dt-zebra: rgba(18, 20, 26, 0.024); /* 表格斑马纹（极低对比，密集行防串行）*/
 
   /* 深色门面（Hero/驾驶舱顶栏/司机端/对账头）统一渐变与前景，收敛 4+ 处重复深色串 */
   --hero-grad: linear-gradient(135deg, #1b1e25 0%, #16181d 100%);
@@ -167,6 +168,7 @@
   --ink: #e9edf5;
   --ink-2: #bcc4d2;
   --ink-3: #949cad;
+  --dt-zebra: rgba(255, 255, 255, 0.028);
   --muted: #8b93a3;
   --faint: #5f6675;
   --line: rgba(255, 255, 255, 0.09);
@@ -1043,6 +1045,8 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .batch-bar {
   display: flex; align-items: center; gap: 10px; padding: 10px 18px; flex-wrap: wrap;
   background: var(--accent-weak); border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 550; color: var(--ink-2);
+  position: sticky; top: 0; z-index: 4; /* 长表滚动时批量动作条常驻可见 */
+  backdrop-filter: var(--glass-blur);
 }
 
 /* ── 司机端布局（收敛内联样式，统一节奏） ───────────── */
@@ -1320,6 +1324,18 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 /* 只让字段名文本这一段收缩+省略号；筛选漏斗按钮 flex:none 永不被挤压截断（修复表头压缩截断） */
 .dt-th > span:first-child { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-sortic { font-size: 9px; color: var(--accent); }
+/* 可排序列常驻淡箭头（未激活也提示"可点排序"），hover 提亮 */
+.dt-sortic-idle { color: var(--faint); opacity: 0.4; margin-left: 1px; }
+.dt-sortable { cursor: pointer; }
+.dt-sortable:hover .dt-sortic-idle { opacity: 0.85; color: var(--accent); }
+/* 斑马纹：非 sticky 单元格上极淡底纹；hover / 选中 / 骨架行以 td 级覆盖胜出 */
+.dt-table tbody tr:nth-child(even):not(.dt-skrow):not(.dt-expandrow) td { background: var(--dt-zebra); }
+.dt-table tbody tr:nth-child(even):not(.dt-skrow):not(.dt-expandrow) .dt-sticky { background: color-mix(in srgb, var(--dt-zebra), var(--panel)); }
+.dt-table tbody tr:hover td { background: color-mix(in srgb, var(--accent-cyan) 8%, var(--surface-solid)); }
+.dt-table tbody tr:hover .dt-sticky { background: var(--panel-2); }
+.dt-table tbody tr.row-sel td { background: var(--accent-weak); }
+.dt-skrow td { height: 43px; }
+.dt-skrow:hover td { background: transparent; }
 .dt-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }
 .dt-resizer:hover { background: linear-gradient(90deg, transparent, var(--accent-weak-2)); }
 .dt-table td { overflow: hidden; text-overflow: ellipsis; }
@@ -1617,6 +1633,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .dt-pager-btns { display: flex; align-items: center; gap: 6px; }
 .dt-pager-cur { font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0 8px; font-weight: 600; }
 .dt-pager .btn-ghost.small:disabled { opacity: .4; cursor: default; }
+.dt-pager-size { display: inline-flex; align-items: center; gap: 5px; }
+.dt-pager-size select { padding: 3px 6px; border: 1px solid var(--line-2); border-radius: var(--radius-xs); background: var(--panel); color: var(--ink); font-size: 12px; }
+.dt-pager-jump input { width: 52px; padding: 3px 7px; border: 1px solid var(--line-2); border-radius: var(--radius-xs); background: var(--panel); color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; margin-left: 4px; }
+.dt-pager-jump input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 /* 固定高度表格页：表格面板撑满剩余视口，页脚贴近页面底部，页面不随行下滑 */
 .table-page { height: 100%; }
 .table-page > .om-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }

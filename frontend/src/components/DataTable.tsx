@@ -25,6 +25,8 @@ export interface ServerPage {
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  onPageSizeChange?: (size: number) => void; // 提供则渲染「每页条数」下拉 + 跳页
+  pageSizeOptions?: number[];
   loading?: boolean;
 }
 
@@ -201,6 +203,7 @@ export function DataTable<T>({
   };
 
   const allChecked = selectable && rows.length > 0 && selected && rows.every((r) => selected.has(rowKey(r)));
+  const someChecked = selectable && selected && rows.some((r) => selected.has(rowKey(r)));
   const stickyOffset = selectable ? 34 : 0;
   const activeFilterCount = Object.values(filters).filter((s) => s && s.size > 0).length;
 
@@ -269,7 +272,9 @@ export function DataTable<T>({
             <tr>
               {selectable && (
                 <th className="cell-check dt-sticky" style={{ left: 0 }}>
-                  <input type="checkbox" checked={Boolean(allChecked)} onChange={onToggleAll} aria-label="全选" />
+                  <input type="checkbox" checked={Boolean(allChecked)}
+                    ref={(el) => { if (el) el.indeterminate = Boolean(someChecked && !allChecked); }}
+                    onChange={onToggleAll} aria-label={allChecked ? "取消全选本页" : "全选本页"} title="全选/取消本页" />
                 </th>
               )}
               {visibleCols.map((c, i) => {
@@ -293,8 +298,10 @@ export function DataTable<T>({
                       };
                       return (
                         <span className="dt-th">
-                          <span className={sortable ? "dt-sortable" : ""} onClick={onSortClick}>
-                            {c.header}{activeDir && <span className="dt-sortic">{activeDir === "asc" ? "▲" : "▼"}</span>}
+                          <span className={sortable ? "dt-sortable" : ""} onClick={onSortClick} title={sortable ? "点击排序" : undefined}>
+                            {c.header}
+                            {activeDir ? <span className="dt-sortic">{activeDir === "asc" ? "▲" : "▼"}</span>
+                              : sortable ? <span className="dt-sortic dt-sortic-idle" aria-hidden>↕</span> : null}
                           </span>
                           {!server && c.filterable && (
                             <button
@@ -332,10 +339,23 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {displayRows.length === 0 && (
+            {/* 首屏加载：渲染骨架行而非单格「加载中…」，与 StateView 骨架屏体验一致 */}
+            {displayRows.length === 0 && server?.loading && (
+              Array.from({ length: 8 }).map((_, ri) => (
+                <tr key={`sk${ri}`} className="dt-skrow">
+                  {selectable && <td className="cell-check dt-sticky" style={{ left: 0 }}><span className="skeleton" style={{ height: 12, width: 12, borderRadius: 3 }} /></td>}
+                  {visibleCols.map((c, ci) => (
+                    <td key={c.key} className={stickyFirst && ci === 0 ? "dt-sticky" : ""} style={{ left: stickyFirst && ci === 0 ? stickyOffset : undefined }}>
+                      <span className="skeleton" style={{ height: 12, width: `${55 + ((ri + ci) % 4) * 10}%`, display: "block", borderRadius: 4 }} />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
+            {displayRows.length === 0 && !server?.loading && (
               <tr>
                 <td className="dt-empty" colSpan={visibleCols.length + (selectable ? 1 : 0)}>
-                  {server?.loading ? "加载中…" : (emptyState ?? "暂无匹配记录")}
+                  {emptyState ?? "暂无匹配记录"}
                 </td>
               </tr>
             )}
@@ -385,6 +405,13 @@ export function DataTable<T>({
         return (
           <div className="dt-pager">
             <span className="muted small">共 <b>{server.total.toLocaleString()}</b> 条 · 第 {from}–{to} 条{server.loading ? " · 加载中…" : ""}</span>
+            {server.onPageSizeChange && (
+              <label className="muted small dt-pager-size">每页
+                <select value={server.pageSize} onChange={(e) => server.onPageSizeChange!(Number(e.target.value))}>
+                  {(server.pageSizeOptions ?? [20, 50, 100]).map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+            )}
             <div style={{ flex: 1 }} />
             <div className="dt-pager-btns">
               <button className="btn-ghost small" disabled={server.page <= 1} onClick={() => server.onPageChange(1)}>« 首页</button>
@@ -392,10 +419,22 @@ export function DataTable<T>({
               <span className="dt-pager-cur">{server.page} / {pageCount}</span>
               <button className="btn-ghost small" disabled={server.page >= pageCount} onClick={() => server.onPageChange(server.page + 1)}>下一页 ›</button>
               <button className="btn-ghost small" disabled={server.page >= pageCount} onClick={() => server.onPageChange(pageCount)}>末页 »</button>
+              {pageCount > 5 && (
+                <form className="dt-pager-jump" onSubmit={(e) => { e.preventDefault(); const v = Number(new FormData(e.currentTarget).get("p")); if (v >= 1 && v <= pageCount) server.onPageChange(v); }}>
+                  <input name="p" inputMode="numeric" placeholder="跳页" aria-label="跳转到指定页" />
+                </form>
+              )}
             </div>
           </div>
         );
       })()}
+
+      {/* 客户端模式底部计数条，与服务端分页页脚视觉一致（长表滚到底也知道总量） */}
+      {!server && displayRows.length > 0 && (
+        <div className="dt-pager">
+          <span className="muted small">共 <b>{displayRows.length.toLocaleString()}</b> 条{activeFilterCount > 0 ? ` · 已按 ${activeFilterCount} 列筛选（原 ${rows.length.toLocaleString()} 条）` : ""}</span>
+        </div>
+      )}
 
       {ctxMenu && (
         <ul className="ctx-menu" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={(e) => e.stopPropagation()}>

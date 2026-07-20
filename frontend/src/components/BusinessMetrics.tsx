@@ -163,7 +163,7 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
                       <div className="kpi-foot" style={{ flexWrap: "wrap" }}>
                         {m.breakdown.slice(0, 4).map((b) => (
                           <span key={b.key} style={{ background: "var(--panel-3)", padding: "2px 7px", borderRadius: 4 }}>
-                            {b.key}: <b style={{ color: "var(--ink-2)" }}>{b.value}</b>
+                            {b.label ?? b.key}: <b style={{ color: "var(--ink-2)" }}>{b.value}</b>
                           </span>
                         ))}
                       </div>

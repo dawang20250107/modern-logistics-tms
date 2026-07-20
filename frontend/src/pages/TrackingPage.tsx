@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet } from "../api/client";
+import { BUSINESS_TYPE_LABEL, ORDER_STATUS_LABEL, STATUS_LABEL } from "../api/types";
 
 interface TrackResult {
   order_no: string;
@@ -52,9 +53,9 @@ export function TrackingPage() {
           <div className="stack" style={{ marginTop: 8 }}>
             <div className="kv" style={{ padding: 0 }}>
               <div><span>订单号</span><b className="mono">{r.order_no}</b></div>
-              <div><span>状态</span><b>{r.status}</b></div>
+              <div><span>状态</span><b>{ORDER_STATUS_LABEL[r.status] ?? r.status}</b></div>
               <div><span>线路</span><b>{r.origin} → {r.destination}</b></div>
-              <div><span>类型</span><b>{r.business_type}</b></div>
+              <div><span>类型</span><b>{BUSINESS_TYPE_LABEL[r.business_type] ?? r.business_type}</b></div>
             </div>
             <ul className="timeline">
               {r.milestones.map((m, i) => (
@@ -70,7 +71,7 @@ export function TrackingPage() {
             {r.shipment && (
               <div className="kv" style={{ padding: 0 }}>
                 <div><span>运单</span><b className="mono">{r.shipment.waybill_no}</b></div>
-                <div><span>运输状态</span><b>{r.shipment.status}</b></div>
+                <div><span>运输状态</span><b>{STATUS_LABEL[r.shipment.status] ?? r.shipment.status}</b></div>
                 {r.shipment.estimated_arrival && <div><span>预计到达</span><b>{new Date(r.shipment.estimated_arrival).toLocaleString()}</b></div>}
                 {r.shipment.position && <div><span>当前位置</span><b className="mono small">{r.shipment.position.lat.toFixed(3)}, {r.shipment.position.lng.toFixed(3)}</b></div>}
               </div>

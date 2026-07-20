@@ -15,7 +15,7 @@ import type {
   Carrier, CarrierLanePrice, CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
   ExpiringCredentials, Paginated, Vehicle,
 } from "../api/types";
-import { CRED_SEVERITY_LABEL, CRED_TYPE_LABEL } from "../api/types";
+import { CRED_SEVERITY_LABEL, CRED_TYPE_LABEL, OCR_STATUS_LABEL } from "../api/types";
 
 const SEVERITY_TAG: Record<CredSeverity, string> = {
   expired: "high", critical: "medium", warning: "low",
@@ -263,7 +263,7 @@ function CredentialLibrary() {
                   <td className="small">{c.holder_name || "-"}</td>
                   <td className="small">{c.cert_no || "-"}</td>
                   <td className="small">{c.expiry_date || "-"}</td>
-                  <td><span className={`tag${c.ocr_status === "done" ? " tag-low" : ""}`}>{c.ocr_status}</span></td>
+                  <td><span className={`tag${c.ocr_status === "done" ? " tag-low" : ""}`}>{OCR_STATUS_LABEL[c.ocr_status] ?? c.ocr_status}</span></td>
                   <td>{c.file_display ? <a className="link small" href={c.file_display} target="_blank" rel="noreferrer">查看</a> : "-"}</td>
                 </tr>
               ))}

@@ -40,8 +40,27 @@ def _rate(num, den):
     return round(num / den, 4) if den else 0.0
 
 
+def _dim_choices(model, dim) -> dict:
+    """维度取值 → 中文标签：优先字段绑定的 choices，回落到类级 <FIELD>_CHOICES
+    （部分字段如 Order.status 未把 choices 绑到字段，但类上有 STATUS_CHOICES）。"""
+    try:
+        field_choices = model._meta.get_field(dim).choices
+        if field_choices:
+            return dict(field_choices)
+    except Exception:  # noqa: BLE001 — 维度非普通字段时静默回落
+        pass
+    cls_choices = getattr(model, f"{dim.upper()}_CHOICES", None)
+    return dict(cls_choices) if cls_choices else {}
+
+
 def _breakdown(qs, dim):
-    return [{"key": row[dim] or "未知", "value": row["c"]} for row in qs.values(dim).annotate(c=Count("id")).order_by("-c")]
+    """构成占比，附带中文 label（前端直接展示，杜绝原始状态码外泄）。"""
+    labels = _dim_choices(qs.model, dim)
+    rows = qs.values(dim).annotate(c=Count("id")).order_by("-c")
+    return [
+        {"key": row[dim] or "未知", "label": labels.get(row[dim], row[dim] or "未知"), "value": row["c"]}
+        for row in rows
+    ]
 
 
 # ── 运单 / 履约 ─────────────────────────────────────────

@@ -972,7 +972,7 @@ export interface MetricCard {
   unit: string;
   domain: string;
   value: number;
-  breakdown?: Array<{ key: string; value: number }>;
+  breakdown?: Array<{ key: string; label?: string; value: number }>;
 }
 export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   ops: "运单 / 履约",
@@ -1021,6 +1021,9 @@ export interface DriverLookup {
 export const CRED_TYPE_LABEL: Record<string, string> = {
   vehicle_license: "车头行驶证", trailer_license: "车挂行驶证",
   driving_license: "驾驶证", transport_cert: "道路运输证", id_card: "身份证",
+};
+export const OCR_STATUS_LABEL: Record<string, string> = {
+  pending: "待识别", processing: "识别中", done: "已识别", failed: "识别失败", manual: "待人工",
 };
 
 // ── 通知 / 订单事件 ─────────────────────────────────────

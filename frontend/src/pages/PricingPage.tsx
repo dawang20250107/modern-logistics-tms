@@ -165,10 +165,12 @@ export function PricingPage() {
         </div>
         {rules.isLoading ? (
           <StateView kind="loading" compact />
+        ) : rules.isError ? (
+          <StateView kind="error" hint="合同价目录暂时无法加载。" onRetry={() => rules.refetch()} />
         ) : items.length === 0 ? (
           <StateView kind="empty" title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
         ) : (
-          <table className="table">
+          <div className="table-wrap"><table className="table pricing-table">
             <thead>
               <tr><th>合同规则名称</th><th>方向</th><th>计费方式</th><th>定向客户</th><th>定向承运商</th><th>线路路由</th><th>起步/固定价</th><th>阶梯价层数</th><th>重抛比</th><th>燃油金</th><th>启用</th><th>操作</th></tr>
             </thead>
@@ -200,7 +202,7 @@ export function PricingPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </div>

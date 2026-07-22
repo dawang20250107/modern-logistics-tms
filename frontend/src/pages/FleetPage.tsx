@@ -277,9 +277,9 @@ function CredentialLibrary() {
             <select value={side} onChange={(e) => setSide(e.target.value)}>
               <option value="main">主页/正面</option><option value="back">副页/反面</option>
             </select>
-            <label className="btn-ghost" style={{ cursor: "pointer" }}>
+            <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
               {upload.isPending ? "上传中…" : "上传证件"}
-              <input type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
+              <input className="file-input-accessible" type="file" accept="image/*,application/pdf" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
             </label>
           </div>
         </div>
@@ -322,7 +322,9 @@ function ComplianceTab() {
       </div>
 
       {q.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" hint="证件合规数据暂时无法加载。" onRetry={() => q.refetch()} compact />
       ) : (
         <div className="ct-grid">
           <CredTable title="车辆证件" rows={q.data?.vehicles ?? []} subjectLabel="车牌" />

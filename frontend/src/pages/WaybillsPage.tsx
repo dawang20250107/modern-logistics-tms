@@ -15,6 +15,7 @@ import { CopyCode } from "../components/CopyCode";
 import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { FinanceCard } from "../components/FinanceCard";
 import { ReplyCard } from "../components/ReplyCard";
+import { StateView } from "../components/StateView";
 import { StatusTag } from "../components/StatusTag";
 
 const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
@@ -312,7 +313,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
     { key: "receipt", header: "回单", width: 90, sortField: "receipt_status", sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <StatusTag kind="receipt" value={w.receipt_status} /> },
     { key: "status", header: "运单状态", width: 100, sortField: "status", sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <StatusTag kind="waybill" value={w.status} /> },
     {
-      key: "actions", header: "操作", width: 170, alwaysVisible: true,
+      key: "actions", header: "操作", width: 170, alwaysVisible: true, sticky: "right",
       render: (w) => (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>详情</button>
@@ -362,10 +363,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
         </div>
 
         {st.isError ? (
-          <div className="empty-state">
-            <div className="empty-title">加载失败</div>
-            <button className="btn-ghost" onClick={() => st.refetch()} style={{ marginTop: 10 }}>重试</button>
-          </div>
+          <StateView kind="error" hint="运单台账暂时无法加载。" onRetry={() => st.refetch()} />
         ) : (
           <DataTable<Waybill>
             columns={columns}
@@ -386,10 +384,13 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
             hideExport
             batchBar={batchBar}
             emptyState={
-              <div className="empty-state">
-                <div className="empty-title">未找到运单数据</div>
-                <div className="empty-hint muted small">{anyFilter ? "未查找到符合当前筛选组合的运单，可尝试清空筛选。" : "暂无运单。"}</div>
-              </div>
+              <StateView
+                kind="empty"
+                scene="waybill-empty"
+                title="未找到运单数据"
+                hint={anyFilter ? "未查找到符合当前筛选组合的运单，可尝试清空筛选。" : "暂无运单。"}
+                compact
+              />
             }
             toolbarLeft={
               <>
@@ -440,7 +441,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
       {/* 双击侧滑详情抽屉（Precision Graphite） */}
       {drawerWaybill && (
         <div className="wb-overlay" onClick={() => setDrawerWaybill(null)}>
-          <div ref={wbDrawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
+          <div ref={wbDrawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1} role="dialog" aria-modal="true" aria-label="运单详情">
             <div className="wb-drawer-head">
               <div>
                 <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}><CopyCode value={drawerWaybill.waybill_no} /></div>

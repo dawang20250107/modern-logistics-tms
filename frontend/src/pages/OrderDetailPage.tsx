@@ -86,7 +86,8 @@ export function OrderDetailPage() {
   const o = order.data;
   const events = timeline.data ?? [];
 
-  if (order.isLoading || !o) return <StateView kind="loading" />;
+  if (order.isLoading) return <StateView kind="loading" />;
+  if (order.isError || !o) return <StateView kind="error" title="订单无法打开" hint="订单不存在、无权访问或数据暂时不可用。" onRetry={() => order.refetch()} />;
 
   const startEdit = () => {
     setEdit({
@@ -320,9 +321,9 @@ export function OrderDetailPage() {
               <select value={attKind} onChange={(e) => setAttKind(e.target.value)}>
                 {Object.entries(ATTACHMENT_KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
-              <label className="btn-ghost" style={{ cursor: "pointer" }}>
+              <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
                 {upload.isPending ? "上传中…" : "选择文件上传"}
-                <input type="file" hidden disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
+                <input className="file-input-accessible" type="file" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
               </label>
             </div>
             {o.attachments.length === 0 ? (

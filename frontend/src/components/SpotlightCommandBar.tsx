@@ -62,6 +62,7 @@ export function SpotlightCommandBar() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const { pathname } = useLocation();
   // 上下文加权：当前所在页相关命令优先展示
@@ -163,7 +164,10 @@ export function SpotlightCommandBar() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setIsOpen((prev) => !prev);
+        setIsOpen((prev) => {
+          if (!prev) restoreFocusRef.current = document.activeElement as HTMLElement | null;
+          return !prev;
+        });
         return;
       }
       if (!isOpen) return;
@@ -201,6 +205,9 @@ export function SpotlightCommandBar() {
       setResponse(null);
       setSelectedIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
+    } else {
+      restoreFocusRef.current?.focus?.();
+      restoreFocusRef.current = null;
     }
   }, [isOpen]);
 
@@ -235,7 +242,7 @@ export function SpotlightCommandBar() {
 
   return (
     <div className="cmdk-overlay" onClick={() => setIsOpen(false)}>
-      <div className="cmdk-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="cmdk-panel" role="dialog" aria-modal="true" aria-label="全局搜索与命令" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSearchSubmit} className="cmdk-input-row">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ opacity: 0.55 }}>
             <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
@@ -244,12 +251,16 @@ export function SpotlightCommandBar() {
             ref={inputRef}
             type="text"
             className="cmdk-input"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="cmdk-results"
+            aria-activedescendant={results[selectedIndex] ? `cmdk-option-${selectedIndex}` : undefined}
             aria-label="全局搜索与命令：搜索页面、执行动作，或向 AI 提问"
             placeholder="搜索 单号/客户/承运商/车牌/电话，或页面与动作 —— ↑↓ 选择，Enter 直达"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          {query && <button type="button" className="cmdk-clear" onClick={() => setQuery("")}>×</button>}
+          {query && <button type="button" className="cmdk-clear" aria-label="清空搜索" onClick={() => setQuery("")}>×</button>}
         </form>
 
         <div className="cmdk-body">
@@ -270,7 +281,7 @@ export function SpotlightCommandBar() {
           )}
 
           {!loading && !response && (
-            <div className="cmdk-list">
+            <div id="cmdk-results" className="cmdk-list" role="listbox" aria-label="搜索与命令结果">
               {/* 富答案卡：搜索结果本身成为工作台 */}
               {hasAnswer && answer && (
                 <div className="cmdk-answercard">
@@ -289,7 +300,7 @@ export function SpotlightCommandBar() {
                 const active = selectedIndex === idx;
                 if (item.kind === "ai") {
                   return (
-                    <div key="ai" className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                    <div id={`cmdk-option-${idx}`} key="ai" role="option" aria-selected={active} className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
                       <span>用 AI 分析：“{query.trim()}”</span>
                       <span className="cmdk-kbd">Enter ↵</span>
                     </div>
@@ -301,7 +312,7 @@ export function SpotlightCommandBar() {
                   return (
                     <div key={`act-${item.act.label}`}>
                       {header && <div className="cmdk-section">操作</div>}
-                      <div className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
                         <span className="cmdk-item-main"><span className="cmdk-badge">直达</span><span className="cmdk-item-label">{item.act.label}</span></span>
                         <span className="cmdk-item-path">↵</span>
                       </div>
@@ -315,7 +326,7 @@ export function SpotlightCommandBar() {
                   return (
                     <div key={`hit-${h.kind}-${h.title}`}>
                       {header && <div className="cmdk-section">记录</div>}
-                      <div className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
                         <span className="cmdk-item-main">
                           <span className="cmdk-badge cmdk-badge-hit">{HIT_ICON[h.kind] ?? "•"}</span>
                           <span className="cmdk-item-label">{h.title}</span>
@@ -332,7 +343,7 @@ export function SpotlightCommandBar() {
                 return (
                   <div key={c.id}>
                     {header && <div className="cmdk-section">{header}</div>}
-                    <div className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                    <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
                       <span className="cmdk-item-main">
                         {c.kind === "action" && <span className="cmdk-badge">动作</span>}
                         <span className="cmdk-item-label">{c.label}</span>

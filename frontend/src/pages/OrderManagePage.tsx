@@ -184,7 +184,7 @@ function OrdersTab() {
     { key: "creator", header: "建单人", width: 100, filterable: true, filterValue: (o) => o.created_by_name || "-", sortValue: (o) => o.created_by_name || "", exportValue: (o) => o.created_by_name || "", render: (o) => <span className="small muted">{o.created_by_name || "-"}</span> },
     { key: "created", header: "建单时间", width: 130, sortField: "created_at", sortValue: (o) => o.created_at, exportValue: (o) => fmtDateTime(o.created_at), render: (o) => <span className="small" title={fmtDateTime(o.created_at)}>{fmtRelative(o.created_at)}</span> },
     {
-      key: "actions", header: "操作", width: 150, alwaysVisible: true,
+      key: "actions", header: "操作", width: 150, alwaysVisible: true, sticky: "right",
       render: (o) => (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           {(o.status === "draft" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "confirm", ids: [o.id] })}>确认</button>}
@@ -311,7 +311,7 @@ function OrdersTab() {
     {/* 订单详情抽屉 */}
     {drawer && (
       <div className="wb-overlay" onClick={() => setDrawer(null)}>
-        <div ref={drawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
+        <div ref={drawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1} role="dialog" aria-modal="true" aria-label="订单详情">
           <div className="wb-drawer-head">
             <div>
               <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}><CopyCode value={drawer.order_no} /></div>
@@ -344,10 +344,10 @@ function OrdersTab() {
 
               <div className="section-label">货物明细</div>
               {(drawer.cargo_items ?? []).length > 0 ? (
-                <table className="table" style={{ fontSize: 12.5 }}>
+                <div className="table-wrap"><table className="table" style={{ fontSize: 12.5 }}>
                   <thead><tr><th>品名</th><th className="num">件数</th><th className="num">重量(吨)</th><th className="num">体积(方)</th><th>包装</th></tr></thead>
                   <tbody>{drawer.cargo_items.map((c, i) => <tr key={i}><td>{c.name || "—"}</td><td className="num">{c.quantity}</td><td className="num">{c.weight_ton}</td><td className="num">{c.volume_cbm}</td><td className="small">{c.package_type || "—"}</td></tr>)}</tbody>
-                </table>
+                </table></div>
               ) : <div className="muted small">合计 {drawer.cargo_weight_ton}吨 / {drawer.cargo_quantity}件 / {drawer.cargo_volume_cbm}方 · {drawer.cargo_desc || "无明细"}</div>}
 
               {(drawer.waybill_nos ?? []).length > 0 && (
@@ -492,7 +492,7 @@ function BatchesTab() {
 
       {drawer && (
         <div className="wb-overlay" onClick={() => setDrawer(null)}>
-          <div ref={drawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1}>
+          <div ref={drawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1} role="dialog" aria-modal="true" aria-label="派车批次详情">
             <div className="wb-drawer-head">
               <div>
                 <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}>{detail.data?.batch_no ?? "批次"}</div>
@@ -515,7 +515,7 @@ function BatchesTab() {
                   </div>
                   {detail.data.note && <div className="muted small">备注：{detail.data.note}</div>}
                   <div className="section-label">批次内运单（各自独立回单/签收/对账）</div>
-                  <table className="table" style={{ fontSize: 12.5 }}>
+                  <div className="table-wrap"><table className="table" style={{ fontSize: 12.5 }}>
                     <thead><tr><th>运单号</th><th>订单号</th><th>客户</th><th>线路</th><th className="num">货量</th><th className="num">分摊应付</th><th>状态</th></tr></thead>
                     <tbody>
                       {detail.data.waybills.map((w) => (
@@ -530,7 +530,7 @@ function BatchesTab() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 </div>
               )}
             </div>

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { hasPerm, useAuth } from "../auth/auth";
 import { getTheme, toggleTheme, type Theme } from "../api/theme";
+import { useModalA11y } from "../api/useModalA11y";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
@@ -12,6 +13,7 @@ import {
 
 type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string };
 type NavGroup = { title: string; items: NavItem[] };
+const MOBILE_NAV_MEDIA = "(max-width: 900px)";
 
 // 工作流导向导航：驾驶舱纵览 → 客服接单 → 调度派单 → 订单流转，
 // 资源/计价/对账为支撑，管理后台聚合运营分析与系统管理等次级入口。
@@ -64,7 +66,7 @@ function ThemeToggle() {
   const flip = () => setThemeState(toggleTheme());
   const dark = theme === "dark";
   return (
-    <button className="theme-toggle" onClick={flip} title={dark ? "切换到亮色" : "切换到暗色"} aria-label="切换主题">
+    <button type="button" className="theme-toggle" onClick={flip} title={dark ? "切换到亮色" : "切换到暗色"} aria-label={dark ? "切换到亮色" : "切换到暗色"} aria-pressed={dark}>
       {dark ? (
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="4.2" /><path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" />
@@ -83,18 +85,48 @@ export function AppLayout() {
   const { pathname } = useLocation();
   const pageTitle = currentPageTitle(pathname);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("nav_collapsed") === "1");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(() => window.matchMedia(MOBILE_NAV_MEDIA).matches);
   const contentRef = useRef<HTMLElement>(null);
+  const sideRef = useRef<HTMLElement>(null);
+  const mobileToggleRef = useRef<HTMLButtonElement>(null);
+  const restoreMobileToggleRef = useRef(false);
+  const closeMobileNav = useCallback(() => {
+    restoreMobileToggleRef.current = true;
+    setMobileNavOpen(false);
+  }, []);
+
+  useModalA11y(mobileViewport && mobileNavOpen, sideRef, closeMobileNav);
+
+  useEffect(() => {
+    if (mobileNavOpen || !restoreMobileToggleRef.current) return;
+    restoreMobileToggleRef.current = false;
+    requestAnimationFrame(() => mobileToggleRef.current?.focus({ preventScroll: true }));
+  }, [mobileNavOpen]);
 
   // 切页回到顶部：固定布局下主滚动容器是 .content，路由变化时复位，避免落在上一页的滚动位置
   useEffect(() => {
+    restoreMobileToggleRef.current = false;
     contentRef.current?.scrollTo({ top: 0, left: 0 });
+    setMobileNavOpen(false);
+    contentRef.current?.focus({ preventScroll: true });
   }, [pathname]);
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_NAV_MEDIA);
+    const onChange = (event: MediaQueryListEvent) => {
+      setMobileViewport(event.matches);
+      if (!event.matches) setMobileNavOpen(false);
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
 
   // 数字输入防误滚：聚焦 number 输入时滚轮不改数值（数据录入常见困扰），改为滚动页面
   useEffect(() => {
-    const onWheel = () => {
-      const el = document.activeElement as HTMLElement | null;
-      if (el && el.tagName === "INPUT" && (el as HTMLInputElement).type === "number") el.blur();
+    const onWheel = (event: WheelEvent) => {
+      const el = event.target as HTMLInputElement | null;
+      if (el?.tagName === "INPUT" && el.type === "number" && document.activeElement === el) el.blur();
     };
     window.addEventListener("wheel", onWheel, { passive: true });
     return () => window.removeEventListener("wheel", onWheel);
@@ -108,6 +140,19 @@ export function AppLayout() {
     });
   };
 
+  const toggleNavigation = () => {
+    if (mobileViewport) {
+      setMobileNavOpen((open) => !open);
+      return;
+    }
+    toggleCollapsed();
+  };
+
+  const navigationExpanded = mobileViewport ? mobileNavOpen : !collapsed;
+  const navigationToggleLabel = mobileViewport
+    ? (mobileNavOpen ? "关闭主导航" : "打开主导航")
+    : (collapsed ? "展开导航" : "收起导航");
+
   const canSee = (item: NavItem) => {
     if (item.superOnly && !user?.is_superuser) return false;
     if (item.adminOnly && !(user?.is_staff || user?.is_superuser)) return false;
@@ -116,8 +161,16 @@ export function AppLayout() {
   };
 
   return (
-    <div className={`app${collapsed ? " nav-collapsed" : ""}`}>
-      <aside className="side">
+    <div className={`app${collapsed ? " nav-collapsed" : ""}${mobileNavOpen ? " mobile-nav-open" : ""}`}>
+      <aside
+        ref={sideRef}
+        id="app-navigation"
+        className="side"
+        aria-label="主导航"
+        role={mobileViewport ? "dialog" : undefined}
+        aria-modal={mobileViewport && mobileNavOpen ? true : undefined}
+        aria-hidden={mobileViewport && !mobileNavOpen ? true : undefined}
+      >
         <div className="brand">
           <span className="brand-mark">智</span>
           <span className="brand-text">智运 TMS<span className="brand-sub">运输管理系统</span></span>
@@ -136,6 +189,7 @@ export function AppLayout() {
                     end={item.end}
                     title={item.label}
                     className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+                    onClick={() => { restoreMobileToggleRef.current = false; setMobileNavOpen(false); }}
                   >
                     <span className="nav-icon">{item.icon}</span>
                     <span className="nav-label">{item.label}</span>
@@ -145,24 +199,35 @@ export function AppLayout() {
             );
           })}
         </nav>
-        <button className="nav-collapse-btn" onClick={toggleCollapsed} title={collapsed ? "展开导航" : "收起导航"}>
+        <button type="button" className="nav-collapse-btn" onClick={toggleNavigation} title={navigationToggleLabel} aria-controls="app-navigation" aria-expanded={navigationExpanded}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {collapsed ? <path d="M9 18l6-6-6-6" /> : <path d="M15 18l-6-6 6-6" />}
+            {navigationExpanded ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
           </svg>
-          <span className="nav-label">收起导航</span>
+          <span className="nav-label">{navigationExpanded ? "收起导航" : "展开导航"}</span>
         </button>
       </aside>
-      <main className="main">
+      {mobileNavOpen && (
+        <button type="button" className="nav-backdrop" aria-label="关闭主导航" onClick={closeMobileNav} />
+      )}
+      <main className="main" inert={mobileNavOpen ? true : undefined} aria-hidden={mobileNavOpen ? true : undefined}>
         <header className="topbar">
           <div className="topbar-main">
-            <button className="topbar-toggle" onClick={toggleCollapsed} aria-label="切换导航" title="切换导航">
+            <button
+              ref={mobileToggleRef}
+              type="button"
+              className="topbar-toggle"
+              onClick={toggleNavigation}
+              aria-label={navigationToggleLabel}
+              aria-controls="app-navigation"
+              aria-expanded={navigationExpanded}
+              title={navigationToggleLabel}
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             </button>
             <div className="topbar-title">
-              {/* 导航展开时侧栏已高亮当前页，此处不再重复页名（避免"重复词语"）；折叠态才显示页名 */}
-              {collapsed && <span className="topbar-title-text">{pageTitle}</span>}
+              <span className="topbar-title-text">{pageTitle}</span>
               <span className="sub">B2B 外协承运协同</span>
             </div>
             <span className="topbar-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd>查单 / 派单</span>
@@ -174,12 +239,12 @@ export function AppLayout() {
               <span className="topbar-avatar">{((user?.nickname || user?.username || "?").trim()[0] ?? "?").toUpperCase()}</span>
               <span className="topbar-account-name">{user?.nickname || user?.username}</span>
             </NavLink>
-            <button className="btn-ghost" onClick={logout}>
+            <button type="button" className="btn-ghost" onClick={logout}>
               退出
             </button>
           </div>
         </header>
-        <section className="content" ref={contentRef}>
+        <section className="content" ref={contentRef} tabIndex={-1}>
           <Outlet />
         </section>
       </main>

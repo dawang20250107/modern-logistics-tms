@@ -237,11 +237,11 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
       <div style={{ padding: 16 }}>
         {step ? (
           <>
-            <label style={{ display: "block" }}>
+            <label className="file-trigger" style={{ display: "block" }}>
               <div className="drv-main-btn">
                 {busy ? "上传中…" : `${step.label} · 拍照打卡`}
               </div>
-              <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+              <input className="file-input-accessible" type="file" accept="image/*" capture="environment" disabled={busy}
                      onChange={(e) => { const f = e.target.files?.[0]; if (f) checkin(f); e.target.value = ""; }} />
             </label>
             <button className="drv-sub-btn" disabled={busy} onClick={() => checkin()}>
@@ -296,9 +296,9 @@ function CredentialUpload({ token }: { token: string }) {
         <select value={side} onChange={(e) => setSide(e.target.value)}>
           <option value="main">主页/正面</option><option value="back">副页/反面</option>
         </select>
-        <label className="btn-ghost" style={{ cursor: "pointer" }}>
+        <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
           {busy ? "上传中…" : "选择照片"}
-          <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+          <input className="file-input-accessible" type="file" accept="image/*" capture="environment" disabled={busy}
                  onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
         </label>
       </div>

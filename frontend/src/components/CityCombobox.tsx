@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { ALL_CITIES } from "../data/regions";
 
@@ -21,6 +21,7 @@ export function CityCombobox({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -42,6 +43,12 @@ export function CityCombobox({
   return (
     <div className="combobox" ref={ref} style={{ position: "relative", ...style }}>
       <input
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-activedescendant={open && matches[active] ? `${listId}-${active}` : undefined}
+        aria-label={placeholder}
         value={value}
         placeholder={placeholder}
         onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(0); }}
@@ -56,10 +63,13 @@ export function CityCombobox({
         style={{ width: "100%" }}
       />
       {open && matches.length > 0 && (
-        <ul className="combobox-menu">
+        <ul id={listId} className="combobox-menu" role="listbox" aria-label="城市建议">
           {matches.map((c, i) => (
             <li
+              id={`${listId}-${i}`}
               key={c}
+              role="option"
+              aria-selected={i === active}
               className={i === active ? "active" : ""}
               onMouseDown={(e) => { e.preventDefault(); choose(c); }}
               onMouseEnter={() => setActive(i)}

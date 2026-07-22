@@ -150,6 +150,8 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
 
       {dash.isLoading ? (
         <StateView kind="loading" compact />
+      ) : dash.isError ? (
+        <StateView kind="error" hint="经营指标暂时无法加载。" onRetry={() => dash.refetch()} compact />
       ) : (
         grouped.map((g) => (
           <div key={g.domain} className="panel">

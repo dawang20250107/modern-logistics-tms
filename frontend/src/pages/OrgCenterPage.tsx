@@ -41,7 +41,8 @@ const PROPERTY_TAG: Record<string, string> = {
 function OverviewTab() {
   const q = useQuery({ queryKey: ["org-overview"], queryFn: () => apiGet<OrgOverview>("/org/overview") });
   const d = q.data;
-  if (!d) return <StateView kind="loading" />;
+  if (q.isLoading) return <StateView kind="loading" />;
+  if (q.isError || !d) return <StateView kind="error" hint="组织概览暂时无法加载。" onRetry={() => q.refetch()} />;
   return (
     <div className="stack">
       <div className="kv">
@@ -186,6 +187,8 @@ function OrgTab() {
       </div>
       {q.isLoading ? (
         <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" hint="组织架构暂时无法加载。" onRetry={() => q.refetch()} compact />
       ) : (q.data?.tree.length ?? 0) === 0 ? (
         <StateView kind="empty" title="暂无组织" />
       ) : (
@@ -379,9 +382,9 @@ function EmployeesTab() {
         <div className="panel-head">
           员工名录
           <div className="form-row" style={{ marginLeft: "auto", gap: 6 }}>
-            <label className="btn-ghost" style={{ cursor: "pointer" }}>
+            <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
               {importCsv.isPending ? "导入中…" : "导入 CSV"}
-              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv.mutate(f); e.target.value = ""; }} />
+              <input className="file-input-accessible" type="file" accept=".csv,text/csv" disabled={importCsv.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv.mutate(f); e.target.value = ""; }} />
             </label>
             <button className="btn-ghost" onClick={() => apiDownload("/org/employees/export", "employees.csv")}>导出 CSV</button>
           </div>
@@ -632,7 +635,8 @@ function RbacTab() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (!matrix) return <StateView kind="loading" />;
+  if (q.isLoading) return <StateView kind="loading" />;
+  if (q.isError || !matrix) return <StateView kind="error" hint="权限矩阵暂时无法加载。" onRetry={() => q.refetch()} />;
   if (matrix.roles.length === 0)
     return <StateView kind="empty" title="暂无角色" />;
 
@@ -716,6 +720,8 @@ function LoginAuditTab() {
       </div>
       {q.isLoading ? (
         <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" hint="登录记录暂时无法加载。" onRetry={() => q.refetch()} compact />
       ) : rows.length === 0 ? (
         <StateView kind="empty" title="暂无登录记录" />
       ) : (

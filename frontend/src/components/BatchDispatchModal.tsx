@@ -88,7 +88,7 @@ export function BatchDispatchModal({
       >
         <div className="bd-head">
           <div>
-            <div className="bd-title">批量派承运商</div>
+            <div className="bd-title" id="bd-title">批量派承运商</div>
             <div className="muted small" style={{ marginTop: 3 }}>
               {orders.length} 单 · {customers.length} 个客户（{customers.slice(0, 3).join("、")}{customers.length > 3 ? "…" : ""}） · 合计 {totalWeight.toFixed(2)} 吨
             </div>

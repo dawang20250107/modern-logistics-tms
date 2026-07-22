@@ -139,7 +139,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                 ) : (lanes.data?.items ?? []).length === 0 ? (
                   <StateView kind="empty" title="尚未维护线路价" hint="补充常跑线路价格后，调度推荐会优先引用价库。" compact />
                 ) : (
-                  <table className="table" style={{ fontSize: 12.5 }}>
+                  <div className="table-wrap"><table className="table" style={{ fontSize: 12.5 }}>
                     <thead><tr><th>线路</th><th>车型</th><th className="num">标准价</th><th className="num">最近成交</th><th>标记</th></tr></thead>
                     <tbody>
                       {(lanes.data?.items ?? []).map((l) => (
@@ -152,7 +152,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
               </div>
             </div>

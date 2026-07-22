@@ -417,6 +417,12 @@ export function DispatchBoardPage() {
   );
   const anyPoolFilter = Boolean(searchLc) || urgentOnly || filterActive > 0;
   const poolLoading = poolTab === "unassigned" ? poolFree.isLoading : poolTab === "dispatchable" ? poolMine.isLoading : dispatchedQ.isLoading;
+  const poolError = poolTab === "unassigned" ? poolFree.isError : poolTab === "dispatchable" ? poolMine.isError : dispatchedQ.isError;
+  const retryPool = () => {
+    if (poolTab === "unassigned") poolFree.refetch();
+    else if (poolTab === "dispatchable") poolMine.refetch();
+    else dispatchedQ.refetch();
+  };
   // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
   const activeGone = Boolean(active) && !poolMine.isLoading && !orders.some((o) => o.id === active?.id);
   const trackNo = active?.waybill_nos?.[0];
@@ -462,7 +468,7 @@ export function DispatchBoardPage() {
     ) },
     { key: "route", header: "线路", width: 138, filterable: true, filterValue: (o) => `${o.origin || ""}→${o.destination || ""}`, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin}→${o.destination}`, render: (o) => <span className="small"><b>{o.origin}</b> → <b>{o.destination}</b></span> },
     { key: "type", header: "类型", width: 96, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
-    { key: "priority", header: "优先级", width: 86, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
+    { key: "priority", header: "优先级", width: 102, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
     { key: "cargo", header: "货量", width: 106, align: "right", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_volume_cbm}方`, render: (o) => <span className="small">{o.cargo_weight_ton}吨/{o.cargo_volume_cbm}方</span> },
     { key: "amount", header: "应收", width: 94, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <>{o.quoted_amount ? fmtMoney(o.quoted_amount) : "—"}</> },
     { key: "audit", header: "状态 / 时间审计", width: 194, exportValue: (o) => o.lock_state || "", render: (o) => (
@@ -478,7 +484,7 @@ export function DispatchBoardPage() {
         </span>
       </div>
     ) },
-    { key: "act", header: "操作", width: 156, alwaysVisible: true, render: (o) => {
+    { key: "act", header: "操作", width: 156, alwaysVisible: true, sticky: "right", render: (o) => {
       const canDispatch = o.dispatchable !== false;
       return (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
@@ -524,7 +530,7 @@ export function DispatchBoardPage() {
             <div className="deck-tile-ic"><IconTruck size={16} /></div>
             <div className="deck-tile-body"><b>{wf.pending}</b><span>待派订单</span></div>
           </div>
-          <button className={`deck-tile deck-tile-hot deck-clickable${urgentOnly ? " on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} title="仅看紧急">
+          <button className={`deck-tile deck-tile-hot deck-clickable${urgentOnly ? " on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} title="仅看紧急" aria-pressed={urgentOnly}>
             <div className="deck-tile-ic"><IconZap size={16} /></div>
             <div className="deck-tile-body"><b className={wf.urgent ? "num-hot" : ""}>{wf.urgent}</b><span>紧急 {urgentOnly ? "· 已筛" : ""}</span></div>
             {wf.urgent > 0 && <span className="deck-pulse" aria-hidden />}
@@ -541,24 +547,25 @@ export function DispatchBoardPage() {
       </div>
       <div className="panel dispatch-board-panel">
         {/* 三池分区：待分配 → 可调派 → 已调派，全链路带时间审计 */}
-        <div className="pool-tabs">
-          <button className={`pool-tab${poolTab === "unassigned" ? " on" : ""}`} onClick={() => { setPoolTab("unassigned"); setPicked(new Set()); }}>
+        <div className="pool-tabs" role="tablist" aria-label="调度订单池">
+          <button role="tab" aria-selected={poolTab === "unassigned"} className={`pool-tab${poolTab === "unassigned" ? " on" : ""}`} onClick={() => { setPoolTab("unassigned"); setPicked(new Set()); }}>
             <span className="pool-tab-dot dot-amber" />待分配<span className="pool-tab-n">{poolCounts.unassigned}</span>
           </button>
-          <button className={`pool-tab${poolTab === "dispatchable" ? " on" : ""}`} onClick={() => { setPoolTab("dispatchable"); setPicked(new Set()); }}>
+          <button role="tab" aria-selected={poolTab === "dispatchable"} className={`pool-tab${poolTab === "dispatchable" ? " on" : ""}`} onClick={() => { setPoolTab("dispatchable"); setPicked(new Set()); }}>
             <span className="pool-tab-dot dot-blue" />可调派<span className="pool-tab-n">{poolCounts.dispatchable}</span>
           </button>
-          <button className={`pool-tab${poolTab === "dispatched" ? " on" : ""}`} onClick={() => { setPoolTab("dispatched"); setPicked(new Set()); }}>
+          <button role="tab" aria-selected={poolTab === "dispatched"} className={`pool-tab${poolTab === "dispatched" ? " on" : ""}`} onClick={() => { setPoolTab("dispatched"); setPicked(new Set()); }}>
             <span className="pool-tab-dot dot-green" />已调派<span className="pool-tab-n">{poolCounts.dispatched}</span>
           </button>
-          <div style={{ flex: 1 }} />
-          {canViewAll && poolTab !== "unassigned" && (
-            <div className="seg-toggle" style={{ marginRight: 4 }}>
-              <button className={`seg-btn${viewAll ? " on" : ""}`} onClick={() => setViewAll(true)} title="超管全局：查看全部">全部</button>
-              <button className={`seg-btn${!viewAll ? " on" : ""}`} onClick={() => setViewAll(false)} title="仅本人锁定/分派">仅我</button>
-            </div>
-          )}
-          <button className={`chip${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)}>仅看紧急</button>
+          <div className="pool-tabs-actions">
+            {canViewAll && poolTab !== "unassigned" && (
+              <div className="seg-toggle">
+                <button className={`seg-btn${viewAll ? " on" : ""}`} onClick={() => setViewAll(true)} title="超管全局：查看全部" aria-pressed={viewAll}>全部</button>
+                <button className={`seg-btn${!viewAll ? " on" : ""}`} onClick={() => setViewAll(false)} title="仅本人锁定/分派" aria-pressed={!viewAll}>仅我</button>
+              </div>
+            )}
+            <button className={`chip pool-urgent-tabs${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} aria-pressed={urgentOnly}>仅看紧急</button>
+          </div>
         </div>
         {filterActive > 0 && (
           <div className="om-chips">
@@ -593,6 +600,8 @@ export function DispatchBoardPage() {
         )}
         {poolLoading ? (
           <StateView kind="loading" compact />
+        ) : poolError ? (
+          <StateView kind="error" hint="当前订单池暂时无法同步，请重试。" onRetry={retryPool} compact />
         ) : (
           <DataTable<Order>
             columns={poolColumns} rows={rows} rowKey={(o) => o.id} viewKey={`dispatch-pool-${poolTab}`} exportName={`调度池-${poolTab}`}
@@ -623,6 +632,7 @@ export function DispatchBoardPage() {
                   </button>
                   {showBuilder && <FilterBuilder fields={DISPATCH_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
                 </div>
+                <button className={`chip pool-urgent-toolbar${urgentOnly ? " chip-on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} aria-pressed={urgentOnly}>仅看紧急</button>
               </>
             }
           />

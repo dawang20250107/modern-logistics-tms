@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiGet, apiPost } from "../api/client";
 import { fmtRelative } from "../api/format";
 import type { Notification, Paginated } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
+import { StateView } from "./StateView";
 
 export function NotificationBell() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
 
   // 点击面板外部自动关闭
   useEffect(() => {
@@ -19,8 +22,18 @@ export function NotificationBell() {
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
 
   const count = useQuery({
@@ -51,9 +64,14 @@ export function NotificationBell() {
   return (
     <div style={{ position: "relative" }} ref={ref}>
       <button
+        ref={triggerRef}
+        type="button"
         className="btn-ghost"
         onClick={() => setOpen((v) => !v)}
-        aria-label="通知"
+        aria-label={unread > 0 ? `通知，${unread} 条未读` : "通知"}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-haspopup="true"
         style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "7px 9px", color: "var(--ink-2)" }}
       >
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -68,14 +86,18 @@ export function NotificationBell() {
         )}
       </button>
       {open && (
-        <div className="panel" style={{ position: "absolute", right: 0, top: 42, width: 340, zIndex: 50, boxShadow: "var(--shadow-lg)" }}>
+        <div id={panelId} className="panel notification-panel" role="region" aria-label="通知列表">
           <div className="panel-head">
             通知
-            <button className="btn-ghost" onClick={() => readAll.mutate()}>全部已读</button>
+            <button type="button" className="btn-ghost" disabled={readAll.isPending || unread === 0} onClick={() => readAll.mutate()}>全部已读</button>
           </div>
-          <div style={{ maxHeight: 380, overflow: "auto" }}>
-            {items.length === 0 ? (
-              <div className="muted small" style={{ padding: 16 }}>暂无通知</div>
+          <div className="notification-list">
+            {list.isLoading ? (
+              <StateView kind="loading" compact />
+            ) : list.isError ? (
+              <StateView kind="error" compact onRetry={() => list.refetch()} />
+            ) : items.length === 0 ? (
+              <StateView kind="empty" title="暂无通知" hint="新消息会在这里汇总。" compact />
             ) : (
               items.map((n) => (
                 <button
@@ -85,11 +107,7 @@ export function NotificationBell() {
                     if (!n.is_read) readOne.mutate(n.id);
                     if (n.link_type === "order" && n.link_id) { setOpen(false); navigate(`/orders/${n.link_id}`); }
                   }}
-                  style={{
-                    display: "block", width: "100%", textAlign: "left", border: "none", font: "inherit", color: "inherit",
-                    padding: "10px 16px", borderBottom: "1px solid var(--line)", cursor: "pointer",
-                    background: n.is_read ? "transparent" : "var(--accent-weak)",
-                  }}
+                  className={`notification-item${n.is_read ? "" : " is-unread"}`}
                 >
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <span className={`tag tag-${n.level === "critical" ? "high" : n.level === "warning" ? "medium" : "low"}`}>

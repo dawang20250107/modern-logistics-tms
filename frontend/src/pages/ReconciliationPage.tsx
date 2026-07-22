@@ -57,11 +57,12 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div ref={cardRef} className="modal-card" onClick={(e) => e.stopPropagation()} tabIndex={-1}
+        role="dialog" aria-modal="true" aria-labelledby="settlement-modal-title"
         onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !invalid && !settle.isPending) { e.preventDefault(); settle.mutate(); } }}
       >
         <div className="modal-head">
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{isAR ? "登记收款核销" : "登记付款核销"}</div>
+            <div id="settlement-modal-title" style={{ fontWeight: 700, fontSize: 15 }}>{isAR ? "登记收款核销" : "登记付款核销"}</div>
             <div className="muted small" style={{ marginTop: 3 }}>{statement.statement_no} · {statement.counterparty_name}</div>
           </div>
           <button className="linkish" style={{ fontSize: 20, lineHeight: 1 }} onClick={onClose}>×</button>
@@ -167,7 +168,7 @@ function OverviewTab() {
         </div>
       </div>
 
-      <div className="ct-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="ct-grid recon-split">
         {([["应收 Top 对手方（未结）", d.top_receivable, "var(--green)"], ["应付 Top 对手方（未结）", d.top_payable, "var(--amber)"]] as const).map(([title, rows, color]) => (
           <div className="panel" key={title}>
             <div className="panel-head">{title}</div>
@@ -368,7 +369,7 @@ export function ReconciliationPage() {
     { key: "out", header: "未结余额", width: 120, align: "right", sortField: "outstanding_anno", sortValue: (s) => num(s.outstanding), exportValue: (s) => num(s.outstanding), render: (s) => num(s.outstanding) > 0.01 ? <span style={{ fontWeight: 700, color: "var(--accent)" }}>{fmtMoney(s.outstanding)}</span> : <span className="tag tag-low">已结清</span> },
     { key: "diff", header: "差异", width: 110, align: "right", sortField: "diff_anno", sortValue: (s) => Math.abs(num(s.diff)), exportValue: (s) => num(s.diff), render: (s) => num(s.diff) !== 0 && num(s.external_total) > 0 ? <span className="mono" style={{ color: "var(--red)", fontWeight: 700 }}>{fmtMoney(s.diff)}</span> : <span className="muted small">无差异</span> },
     { key: "status", header: "状态", width: 100, filterable: true, filterValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, sortField: "status", sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => statusTag(s) },
-    { key: "act", header: "财务操作", width: 110, alwaysVisible: true, render: (s) => (
+    { key: "act", header: "财务操作", width: 110, alwaysVisible: true, sticky: "right", render: (s) => (
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
         {s.status === "draft" ? <button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button>
           : (s.status === "confirmed" || s.status === "partial") ? <button className="btn-primary" onClick={() => setSettleTarget(s)}>核销</button>
@@ -541,6 +542,8 @@ export function ReconciliationPage() {
           </div>
           {settleQ.isLoading ? (
             <StateView kind="loading" compact />
+          ) : settleQ.isError ? (
+            <StateView kind="error" hint="待核销单据暂时无法加载。" onRetry={() => settleQ.refetch()} compact />
           ) : settleQueue.length === 0 ? (
             <StateView kind="empty" title="暂无待核销单据" hint="确认对账单后，会进入此队列等待收付款核销。" />
           ) : (

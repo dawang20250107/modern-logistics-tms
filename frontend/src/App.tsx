@@ -1,8 +1,9 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
 import { GlobalProgress } from "./components/GlobalProgress";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { StateView } from "./components/StateView";
 import { AuthProvider } from "./auth/auth";
 import { AdminHubPage } from "./pages/AdminHubPage";
 import { AuditPage } from "./pages/AuditPage";
@@ -51,6 +52,7 @@ export function App() {
               <Route path="org" element={<OrgCenterPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="audit" element={<AuditPage />} />
+              <Route path="*" element={<StateView kind="empty" title="页面不存在" hint="该地址已失效或从未创建。" action={<Link className="btn-primary" to="/" style={{ textDecoration: "none" }}>返回驾驶舱</Link>} />} />
             </Route>
           </Route>
         </Routes>

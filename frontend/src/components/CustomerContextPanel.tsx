@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { apiGet } from "../api/client";
 import { fmtMoney } from "../api/format";
 import type { CustomerContext } from "../api/types";
+import { StateView } from "./StateView";
 import { StatusTag } from "./StatusTag";
 
 // 客服工作台：选中客户即带出上下文（账期/授信/常用线路地址/未完成·异常·回单未返）
@@ -21,9 +22,10 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
       </div>
     );
   }
-  if (q.isLoading) return <div className="panel muted" style={{ padding: 16 }}>加载客户上下文…</div>;
+  if (q.isLoading) return <div className="panel"><StateView kind="loading" compact /></div>;
+  if (q.isError) return <div className="panel"><StateView kind="error" hint="客户上下文暂时无法加载。" onRetry={() => q.refetch()} compact /></div>;
   const c = q.data;
-  if (!c) return <div className="panel" style={{ padding: 16 }}>未取到客户上下文。</div>;
+  if (!c) return <div className="panel"><StateView kind="empty" title="未取到客户上下文" compact /></div>;
 
   const cr = c.credit;
   return (
@@ -82,7 +84,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
       {c.open_orders.length > 0 && (
         <div className="ctx-sec">
           <div className="section-label" style={{ marginBottom: 6 }}>未完成订单</div>
-          <table className="table" style={{ fontSize: 12.5 }}>
+          <div className="table-wrap"><table className="table" style={{ fontSize: 12.5 }}>
             <tbody>
               {c.open_orders.slice(0, 6).map((o) => (
                 <tr key={o.order_no}>
@@ -92,7 +94,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>

@@ -73,7 +73,7 @@ function CsOrderPool() {
     { key: "channel", header: "渠道", width: 100, sortField: "channel", exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small muted">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
     { key: "status", header: "订单状态", width: 116, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
     { key: "created_at", header: "建单", width: 108, sortField: "created_at", sortValue: (o) => o.created_at, exportValue: (o) => o.created_at, render: (o) => <span className="small muted" title={o.created_at}>{fmtRelative(o.created_at)}</span> },
-    { key: "act", header: "操作", width: 120, alwaysVisible: true, render: (o) => (
+    { key: "act", header: "操作", width: 120, alwaysVisible: true, sticky: "right", render: (o) => (
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
         <button onClick={() => setExcOrder(o)}>登记异常</button>
         <Link className="link small" to={`/orders/${o.id}`}>详情</Link>

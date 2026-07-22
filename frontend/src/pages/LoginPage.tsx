@@ -49,22 +49,58 @@ export function LoginPage() {
       <AuthHero />
       <main className="auth-form-wrap">
         <div className="auth-form">
+          <div className="auth-mobile-brand" aria-label="智运 TMS">
+            <span className="auth-mobile-mark" aria-hidden="true">智</span>
+            <span>智运 TMS</span>
+          </div>
           <div className="auth-form-brand">ZHIYUN TMS</div>
           <div className="auth-form-title">欢迎登录</div>
           <div className="auth-form-sub">请选择登录方式进入工作台</div>
 
-          <div className="auth-tabs">
-            <button type="button" className={`auth-tab${method === "password" ? " on" : ""}`} onClick={() => setMethod("password")}>账号密码</button>
-            <button type="button" className={`auth-tab${method === "wechat" ? " on" : ""}`} onClick={() => setMethod("wechat")}>微信扫码</button>
+          <div className="auth-tabs" role="tablist" aria-label="登录方式">
+            <button
+              id="login-tab-password"
+              type="button"
+              role="tab"
+              aria-selected={method === "password"}
+              aria-controls="login-panel-password"
+              className={`auth-tab${method === "password" ? " on" : ""}`}
+              onClick={() => setMethod("password")}
+            >账号密码</button>
+            <button
+              id="login-tab-wechat"
+              type="button"
+              role="tab"
+              aria-selected={method === "wechat"}
+              aria-controls="login-panel-wechat"
+              className={`auth-tab${method === "wechat" ? " on" : ""}`}
+              onClick={() => setMethod("wechat")}
+            >微信扫码</button>
           </div>
 
           {method === "password" ? (
-            <form className="stack" style={{ gap: 15 }} onSubmit={onSubmit}>
+            <form id="login-panel-password" className="stack" style={{ gap: 15 }} onSubmit={onSubmit} role="tabpanel" aria-labelledby="login-tab-password">
               <label className="field">
                 <span>用户名</span>
-                <input value={username} autoComplete="username" autoFocus onChange={(e) => setUsername(e.target.value)} />
+                <input
+                  id="login-username"
+                  value={username}
+                  autoComplete="username"
+                  autoFocus
+                  aria-invalid={Boolean(error) || undefined}
+                  aria-describedby={error ? "login-error" : undefined}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
               </label>
-              <PasswordField label="密码" value={password} onChange={setPassword} autoComplete="current-password" />
+              <PasswordField
+                id="login-password"
+                label="密码"
+                value={password}
+                onChange={setPassword}
+                autoComplete="current-password"
+                ariaInvalid={Boolean(error) || undefined}
+                ariaDescribedBy={error ? "login-error" : undefined}
+              />
               <div className="auth-row">
                 <label className="checkline">
                   <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
@@ -72,13 +108,13 @@ export function LoginPage() {
                 </label>
                 <Link className="link small" to="/forgot">忘记密码？</Link>
               </div>
-              {error && <div className="login-error" role="alert">{error}</div>}
+              {error && <div id="login-error" className="login-error" role="alert">{error}</div>}
               <button className="btn-primary auth-submit" type="submit" disabled={busy}>
                 {busy ? "登录中…" : "登 录"}
               </button>
             </form>
           ) : (
-            <div className="wechat-panel">
+            <div id="login-panel-wechat" className="wechat-panel" role="tabpanel" aria-labelledby="login-tab-wechat">
               <div className="wechat-qr" aria-hidden="true">
                 <svg width="120" height="120" viewBox="0 0 120 120" fill="none">
                   <rect x="0" y="0" width="120" height="120" rx="10" fill="var(--panel-2)" />

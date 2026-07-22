@@ -2,7 +2,7 @@ import { useState } from "react";
 
 // 带显隐切换的密码输入。视觉沿用 .field，切换按钮叠在右侧、可键盘聚焦。
 export function PasswordField({
-  label, value, onChange, autoComplete, autoFocus, placeholder, id,
+  label, value, onChange, autoComplete, autoFocus, placeholder, id, ariaInvalid, ariaDescribedBy,
 }: {
   label: string;
   value: string;
@@ -11,6 +11,8 @@ export function PasswordField({
   autoFocus?: boolean;
   placeholder?: string;
   id?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -24,6 +26,8 @@ export function PasswordField({
           autoComplete={autoComplete}
           autoFocus={autoFocus}
           placeholder={placeholder}
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
           onChange={(e) => onChange(e.target.value)}
         />
         <button

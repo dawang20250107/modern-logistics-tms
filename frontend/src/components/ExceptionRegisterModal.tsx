@@ -39,11 +39,12 @@ export function ExceptionRegisterModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div ref={cardRef} className="modal-card" style={{ width: "min(460px, 94vw)" }} onClick={(e) => e.stopPropagation()} tabIndex={-1}
+        role="dialog" aria-modal="true" aria-labelledby="exception-modal-title"
         onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && desc.trim() && !submit.isPending) { e.preventDefault(); submit.mutate(); } }}
       >
         <div className="bd-head">
           <div>
-            <div className="bd-title">登记异常</div>
+            <div className="bd-title" id="exception-modal-title">登记异常</div>
             <div className="muted small" style={{ marginTop: 3 }}>
               <span className="mono">{order.order_no}</span> · {order.customer_name || "散客"} · {order.origin} → {order.destination}
             </div>

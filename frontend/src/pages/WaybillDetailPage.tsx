@@ -217,7 +217,7 @@ export function WaybillDetailPage() {
   });
 
   if (detail.isLoading) return <StateView kind="loading" />;
-  if (detail.isError || !detail.data) return <div className="muted" style={{ padding: 40, textAlign: "center" }}>运单不存在或无权访问。</div>;
+  if (detail.isError || !detail.data) return <StateView kind="error" title="运单无法打开" hint="运单不存在、无权访问或数据暂时不可用。" onRetry={() => detail.refetch()} />;
   
   const w = detail.data;
   const editable = !["settled", "cancelled", "voided"].includes(w.status);
@@ -285,7 +285,7 @@ export function WaybillDetailPage() {
         </div>
       </div>
 
-      <div className="ct-grid" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
+      <div className="ct-grid detail-split">
         {/* 左侧：在途与运营 */}
         <div className="stack">
           {/* ETA 预测 */}
@@ -319,7 +319,7 @@ export function WaybillDetailPage() {
             )}
             
             {w.stops && w.stops.length > 0 && (
-              <table className="table" style={{ borderTop: "1px solid var(--line)" }}>
+              <div className="table-wrap"><table className="table" style={{ borderTop: "1px solid var(--line)" }}>
                 <thead><tr style={{ background: "var(--panel-2)" }}><th>提/送类型</th><th>地理围栏地址</th><th>计划到达时间</th><th>打卡确认</th><th>围栏操作</th></tr></thead>
                 <tbody>
                   {w.stops.map((s) => (
@@ -341,7 +341,7 @@ export function WaybillDetailPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
 
@@ -359,7 +359,7 @@ export function WaybillDetailPage() {
               <button className="btn-danger" disabled={reportExc.isPending || !excDesc.trim()} onClick={() => reportExc.mutate()}>紧急上报</button>
             </div>
             {(exceptions.data?.items?.length ?? 0) > 0 && (
-              <table className="table">
+              <div className="table-wrap"><table className="table">
                 <thead><tr><th>类型</th><th>级别</th><th>描述</th><th>状态</th></tr></thead>
                 <tbody>
                   {(exceptions.data?.items ?? []).map((ex) => (
@@ -371,7 +371,7 @@ export function WaybillDetailPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
 
@@ -392,7 +392,7 @@ export function WaybillDetailPage() {
               </div>
               <textarea className="search" style={{ width: "100%", minHeight: 70 }} placeholder="提醒下发内容（支持多行）" value={rmContent} onChange={(e) => setRmContent(e.target.value)} />
               {(reminders.data?.length ?? 0) > 0 && (
-                <table className="table">
+                <div className="table-wrap"><table className="table">
                   <thead><tr style={{ background: "var(--panel-2)" }}><th>标题</th><th>需确认</th><th>发送时间</th><th>状态</th></tr></thead>
                   <tbody>
                     {(reminders.data ?? []).map((r) => (
@@ -404,7 +404,7 @@ export function WaybillDetailPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
           </div>
@@ -506,7 +506,7 @@ export function WaybillDetailPage() {
                 </div>
                 
                 {(costs.data.payables.length > 0 || costs.data.receivables.length > 0) && (
-                  <table className="table" style={{ fontSize: 12 }}>
+                  <div className="table-wrap"><table className="table" style={{ fontSize: 12 }}>
                     <thead><tr style={{ background: "var(--panel-2)" }}><th>借贷</th><th>科目名</th><th>落账金额</th><th>业务主体</th></tr></thead>
                     <tbody>
                       {[...costs.data.receivables, ...costs.data.payables].map((e) => (
@@ -518,7 +518,7 @@ export function WaybillDetailPage() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                 )}
                 
                 {/* 增加费用明细录入入口 */}

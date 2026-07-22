@@ -68,6 +68,10 @@ export function ForgotPasswordPage() {
       <main className="auth-form-wrap">
         {step === 1 ? (
           <form className="auth-form" onSubmit={requestCode}>
+            <div className="auth-mobile-brand" aria-label="智运 TMS">
+              <span className="auth-mobile-mark" aria-hidden="true">智</span>
+              <span>智运 TMS</span>
+            </div>
             <div className="auth-form-brand">ZHIYUN TMS</div>
             <div className="auth-form-title">找回密码</div>
             <div className="auth-form-sub">输入账号绑定的邮箱或手机号获取验证码</div>
@@ -81,6 +85,10 @@ export function ForgotPasswordPage() {
           </form>
         ) : (
           <form className="auth-form" onSubmit={resetPwd}>
+            <div className="auth-mobile-brand" aria-label="智运 TMS">
+              <span className="auth-mobile-mark" aria-hidden="true">智</span>
+              <span>智运 TMS</span>
+            </div>
             <div className="auth-form-brand">ZHIYUN TMS</div>
             <div className="auth-form-title">重设密码</div>
             <div className="auth-form-sub">{ok || `验证码已发送${target ? `至 ${target}` : ""}`}</div>

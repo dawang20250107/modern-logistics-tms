@@ -9,6 +9,7 @@ import { ORDER_STATUS_LABEL, STATUS_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
 import { hasPerm, useAuth } from "../auth/auth";
 import { BusinessMetrics } from "../components/BusinessMetrics";
+import { StateView } from "../components/StateView";
 import {
   IconArrowRight, IconBox, IconMoney, IconReceipt, IconShield, IconTruck, IconWarning,
 } from "../components/Icons";
@@ -71,6 +72,18 @@ export function ControlTowerPage() {
     queryClient.invalidateQueries({ queryKey: ["orders"] });
   });
 
+  const primaryQueries = [stats, funnel, wb];
+  if (primaryQueries.some((q) => q.isLoading)) return <StateView kind="loading" />;
+  if (primaryQueries.some((q) => q.isError)) {
+    return (
+      <StateView
+        kind="error"
+        hint="驾驶舱核心数据暂时无法同步，请重试。"
+        onRetry={() => primaryQueries.forEach((q) => q.refetch())}
+      />
+    );
+  }
+
   const byStatus = stats.data?.by_status ?? {};
   const wbTotal = stats.data?.total ?? 0;
   const inTransit = WB_ACTIVE.reduce((s, k) => s + (byStatus[k] ?? 0), 0);
@@ -85,9 +98,9 @@ export function ControlTowerPage() {
     { key: "today", icon: <IconBox size={17} />, label: "今日建单", value: String(funnel.data?.today_created ?? 0), sub: `订单总量 ${funnel.data?.total ?? 0}`, tone: "", to: "/intake" },
     { key: "transit", icon: <IconTruck size={17} />, label: "在途运单", value: String(inTransit), sub: `运单总量 ${wbTotal}`, tone: "blue", to: "/waybills" },
     { key: "pool", icon: <IconArrowRight size={17} />, label: "池中待派", value: String(pooled), sub: pooled > 0 ? "去调度派单 →" : "暂无待派", tone: "amber", to: "/dispatch-board" },
-    { key: "ar", icon: <IconMoney size={17} />, label: "应收敞口", value: fmtWan(ov?.receivable.outstanding ?? 0), sub: `应收单据 ${ov?.receivable.count ?? 0} 张`, tone: "grad", to: "/reconciliation" },
-    { key: "overdue", icon: <IconWarning size={17} />, label: "逾期应收", value: fmtWan(ov?.overdue.receivable.amount ?? 0), sub: `${ov?.overdue.receivable.count ?? 0} 张逾期`, tone: (ov?.overdue.receivable.amount ?? 0) > 0 ? "red" : "", to: "/reconciliation" },
-    { key: "cred", icon: <IconShield size={17} />, label: "证件预警", value: String(credAlert), sub: credAlert > 0 ? `${credSum?.expired ?? 0} 过期 · ${credSum?.critical ?? 0} 紧急` : "30 天内无临期", tone: credAlert > 0 ? "red" : "", to: "/fleet" },
+    { key: "ar", icon: <IconMoney size={17} />, label: "应收敞口", value: fin.isLoading ? "…" : fin.isError ? "—" : fmtWan(ov?.receivable.outstanding ?? 0), sub: fin.isLoading ? "正在同步财务数据" : fin.isError ? "财务数据暂不可用" : `应收单据 ${ov?.receivable.count ?? 0} 张`, tone: "grad", to: "/reconciliation" },
+    { key: "overdue", icon: <IconWarning size={17} />, label: "逾期应收", value: fin.isLoading ? "…" : fin.isError ? "—" : fmtWan(ov?.overdue.receivable.amount ?? 0), sub: fin.isLoading ? "正在同步财务数据" : fin.isError ? "财务数据暂不可用" : `${ov?.overdue.receivable.count ?? 0} 张逾期`, tone: (ov?.overdue.receivable.amount ?? 0) > 0 ? "red" : "", to: "/reconciliation" },
+    { key: "cred", icon: <IconShield size={17} />, label: "证件预警", value: compliance.isLoading ? "…" : compliance.isError ? "—" : String(credAlert), sub: compliance.isLoading ? "正在同步证件数据" : compliance.isError ? "证件数据暂不可用" : credAlert > 0 ? `${credSum?.expired ?? 0} 过期 · ${credSum?.critical ?? 0} 紧急` : "30 天内无临期", tone: credAlert > 0 ? "red" : "", to: "/fleet" },
   ];
 
   // 运单状态分布分段
@@ -102,8 +115,9 @@ export function ControlTowerPage() {
     { label: "待对账", value: w.finance.draft_statements, to: "/reconciliation", tone: "" },
     { label: "我的异常", value: w.common.my_open_exceptions, to: "/dispatch-board", tone: "red" },
   ].filter((t) => t.value > 0) : [];
-  const pendingList = (w?.cs.recent_pending ?? []).slice(0, 4);
-  const poolList = (w?.dispatch.pool_top ?? []).slice(0, 4);
+  // 首屏待办共用 4 行预算，避免任务卡无限增长把财务敞口推出视口。
+  const pendingList = (w?.cs.recent_pending ?? []).slice(0, 3);
+  const poolList = (w?.dispatch.pool_top ?? []).slice(0, Math.max(0, 4 - pendingList.length));
 
   const credRows: CredentialRow[] = [
     ...(compliance.data?.vehicles ?? []),
@@ -223,7 +237,9 @@ export function ControlTowerPage() {
               <Link className="link small" to="/reconciliation">对账中心 →</Link>
             </div>
             <div className="ct-side-body">
-              <div className="ct-expo">
+              {fin.isLoading ? <StateView kind="loading" compact /> : fin.isError ? (
+                <StateView kind="error" hint="财务敞口暂时无法同步。" compact onRetry={() => fin.refetch()} />
+              ) : <><div className="ct-expo">
                 <div><span>应收未结</span><b className="num-grad">{fmtWan(ov?.receivable.outstanding ?? 0)}</b></div>
                 <div><span>应付未结</span><b>{fmtWan(ov?.payable.outstanding ?? 0)}</b></div>
                 <div><span>净头寸</span><b style={{ color: (ov?.net_position ?? 0) >= 0 ? "var(--green)" : "var(--red)" }}>{fmtWan(ov?.net_position ?? 0)}</b></div>
@@ -236,7 +252,7 @@ export function ControlTowerPage() {
                   <span className="ct-rank-bar"><span style={{ width: `${(t.outstanding / topArMax) * 100}%` }} /></span>
                   <span className="ct-rank-val num">{fmtWan(t.outstanding)}</span>
                 </div>
-              ))}
+              ))}</>}
             </div>
           </div>
 
@@ -247,7 +263,9 @@ export function ControlTowerPage() {
               <Link className="link small" to="/fleet">证件库 →</Link>
             </div>
             <div className="ct-side-body">
-              {credRows.length === 0 ? (
+              {compliance.isLoading ? <StateView kind="loading" compact /> : compliance.isError ? (
+                <StateView kind="error" hint="证件状态暂时无法同步。" compact onRetry={() => compliance.refetch()} />
+              ) : credRows.length === 0 ? (
                 <div className="muted small" style={{ padding: "6px 2px" }}>30 天内无临期/过期证件。</div>
               ) : (
                 credRows.map((r, i) => (

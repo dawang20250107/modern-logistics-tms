@@ -40,21 +40,26 @@ export function StateView({
   const p = { ...PRESET[kind], ...(s ?? {}) };
   if (kind === "loading") {
     return (
-      <div style={{ padding: compact ? "16px" : "28px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className={`state-loading${compact ? " state-compact" : ""}`} role="status" aria-live="polite" aria-label={title ?? p.title}>
+        <span className="sr-only">{title ?? p.title}</span>
         {[1, 0.75, 0.5, 0.3].slice(0, compact ? 2 : 4).map((o, i) => (
-          <div key={i} className="skeleton" style={{ width: "100%", height: 28, opacity: o }} />
+          <div key={i} className="skeleton" aria-hidden="true" style={{ width: "100%", height: 28, opacity: o }} />
         ))}
       </div>
     );
   }
   return (
-    <div className={`state-view state-${kind}`}>
-      <div className="state-icon">{p.icon}</div>
+    <div
+      className={`state-view state-${kind}${compact ? " state-compact" : ""}`}
+      role={kind === "error" ? "alert" : "status"}
+      aria-live={kind === "error" ? "assertive" : "polite"}
+    >
+      <div className="state-icon" aria-hidden="true">{p.icon}</div>
       <div className="state-title">{title ?? p.title}</div>
       <div className="state-hint muted small">{hint ?? p.hint}</div>
       {(onRetry || action) && (
         <div className="state-actions">
-          {onRetry && <button className="btn-ghost" onClick={onRetry}>重试</button>}
+          {onRetry && <button type="button" className="btn-ghost" onClick={onRetry}>重试</button>}
           {action}
         </div>
       )}

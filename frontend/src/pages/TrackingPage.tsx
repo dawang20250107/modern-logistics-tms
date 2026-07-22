@@ -37,17 +37,21 @@ export function TrackingPage() {
   const r = track.data;
 
   return (
-    <div className="center-screen" style={{ alignItems: "flex-start", paddingTop: 80 }}>
-      <div className="login-card" style={{ width: 460 }}>
+    <div className="public-page tracking-page">
+      <div className="public-card tracking-card">
         <div className="login-brand">订单<span className="accent">跟踪</span></div>
         <div className="login-sub">输入订单号与下单手机号，查询物流进度</div>
-        <input className="field" placeholder="订单号，如 DD20260617000001" value={orderNo}
-          onChange={(e) => setOrderNo(e.target.value)} style={{ padding: "11px 12px", border: "1px solid var(--line-strong)", borderRadius: 8 }} />
-        <input className="field" placeholder="下单手机号（或后四位）" value={phone}
-          onChange={(e) => setPhone(e.target.value)} style={{ padding: "11px 12px", border: "1px solid var(--line-strong)", borderRadius: 8 }} />
-        <button className="btn-primary" disabled={!orderNo || !phone || track.isPending} onClick={() => track.mutate()}>
-          {track.isPending ? "查询中…" : "查询"}
-        </button>
+        <form className="tracking-form" onSubmit={(e) => { e.preventDefault(); if (orderNo && phone && !track.isPending) track.mutate(); }}>
+          <label className="field">订单号
+            <input placeholder="如 DD20260617000001" value={orderNo} onChange={(e) => setOrderNo(e.target.value)} autoComplete="off" />
+          </label>
+          <label className="field">下单手机号
+            <input placeholder="手机号或后四位" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" />
+          </label>
+          <button type="submit" className="btn-primary" disabled={!orderNo || !phone || track.isPending}>
+            {track.isPending ? "查询中…" : "查询"}
+          </button>
+        </form>
         {track.isError && <div className="login-error">未找到匹配订单，请核对订单号与手机号。</div>}
 
         {r && (

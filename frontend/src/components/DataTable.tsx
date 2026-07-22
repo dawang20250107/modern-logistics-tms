@@ -16,6 +16,7 @@ export interface DataColumn<T> {
   align?: "left" | "right";
   defaultHidden?: boolean;
   alwaysVisible?: boolean;
+  sticky?: "right";
 }
 
 export interface ServerPage {
@@ -92,6 +93,8 @@ export function DataTable<T>({
   const [filterSearch, setFilterSearch] = useState("");
   // 行右键菜单
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: RowMenuItem[] } | null>(null);
+  const ctxMenuRef = useRef<HTMLDivElement>(null);
+  const ctxOpenerRef = useRef<HTMLElement | null>(null);
   // Shift 范围选锚点
   const anchorRef = useRef<number>(-1);
 
@@ -103,9 +106,24 @@ export function DataTable<T>({
 
   useEffect(() => {
     const close = () => { setColMenu(false); setOpenFilter(null); setCtxMenu(null); };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (ctxMenuRef.current?.contains(document.activeElement)) ctxOpenerRef.current?.focus();
+        close();
+      }
+    };
     window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    ctxMenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  }, [ctxMenu]);
 
   const visibleCols = columns.filter((c) => !hidden.has(c.key));
   const filterText = (c: DataColumn<T>, r: T): string =>
@@ -183,6 +201,15 @@ export function DataTable<T>({
     window.addEventListener("mouseup", onUp);
   };
 
+  const onResizeKeyDown = (e: React.KeyboardEvent, key: string, curW: number) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const col = columns.find((c) => c.key === key);
+    const min = col?.minWidth ?? 60;
+    const next = Math.max(min, curW + (e.key === "ArrowRight" ? 12 : -12));
+    setWidths((prev) => ({ ...prev, [key]: next }));
+  };
+
   const colWidth = (c: DataColumn<T>) => widths[c.key] ?? c.width ?? 140;
 
   const exportCsv = () => {
@@ -208,7 +235,7 @@ export function DataTable<T>({
   const activeFilterCount = Object.values(filters).filter((s) => s && s.size > 0).length;
 
   // 复选：支持 Shift 范围选（以上次点击行为锚点，整段设为目标态）
-  const handleCheck = (e: React.MouseEvent, idx: number, id: string) => {
+  const handleCheck = (e: Pick<React.MouseEvent | React.KeyboardEvent, "shiftKey">, idx: number, id: string) => {
     const target = !(selected?.has(id));
     if (e.shiftKey && anchorRef.current >= 0 && anchorRef.current !== idx) {
       const [lo, hi] = [Math.min(anchorRef.current, idx), Math.max(anchorRef.current, idx)];
@@ -225,9 +252,28 @@ export function DataTable<T>({
   const openRowMenu = (e: React.MouseEvent, row: T) => {
     if (rowMenu) {
       e.preventDefault();
-      setCtxMenu({ x: e.clientX, y: e.clientY, items: rowMenu(row) });
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      ctxOpenerRef.current = e.currentTarget as HTMLElement;
+      const x = e.clientX || rect.left + 24;
+      const y = e.clientY || rect.top + 24;
+      setCtxMenu({
+        x: Math.max(8, Math.min(x, window.innerWidth - 208)),
+        y: Math.max(8, Math.min(y, window.innerHeight - 220)),
+        items: rowMenu(row),
+      });
     }
     onRowContextMenu?.(e, row);
+  };
+
+  const openRowMenuFromKeyboard = (row: T, target: HTMLElement) => {
+    if (!rowMenu) return;
+    ctxOpenerRef.current = target;
+    const rect = target.getBoundingClientRect();
+    setCtxMenu({
+      x: Math.max(8, Math.min(rect.left + 24, window.innerWidth - 208)),
+      y: Math.max(8, Math.min(rect.top + rect.height, window.innerHeight - 220)),
+      items: rowMenu(row),
+    });
   };
 
   return (
@@ -237,12 +283,18 @@ export function DataTable<T>({
         <div className="dt-toolbar-actions">
           {toolbarRight}
           {activeFilterCount > 0 && (
-            <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setFilters({}); }} title="清除所有列筛选">清筛 {activeFilterCount}</button>
+            <button type="button" className="btn-ghost" onClick={(e) => { e.stopPropagation(); setFilters({}); }} title="清除所有列筛选">清筛 {activeFilterCount}</button>
           )}
-          {!hideExport && <button className="btn-ghost" onClick={exportCsv}>导出</button>}
-          <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setColMenu((v) => !v); }}>列</button>
+          {!hideExport && <button type="button" className="btn-ghost" onClick={exportCsv}>导出</button>}
+          <button
+            type="button"
+            className="btn-ghost"
+            aria-expanded={colMenu}
+            aria-controls={`${viewKey}-column-menu`}
+            onClick={(e) => { e.stopPropagation(); setColMenu((v) => !v); }}
+          >列</button>
           {colMenu && (
-            <div className="dt-colmenu" onClick={(e) => e.stopPropagation()}>
+            <div id={`${viewKey}-column-menu`} className="dt-colmenu" role="dialog" aria-label="显示列设置" onClick={(e) => e.stopPropagation()}>
               <div className="muted small" style={{ padding: "2px 8px 6px" }}>显示列</div>
               {columns.map((c) => (
                 <label key={c.key} className="dt-colitem">
@@ -256,7 +308,7 @@ export function DataTable<T>({
                 </label>
               ))}
               <div className="context-divider" />
-              <button className="dt-colreset" onClick={() => { setHidden(new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key))); setWidths({}); setSort(null); setFilters({}); }}>重置视图</button>
+              <button type="button" className="dt-colreset" onClick={() => { setHidden(new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key))); setWidths({}); setSort(null); setFilters({}); }}>重置视图</button>
             </div>
           )}
         </div>
@@ -267,7 +319,7 @@ export function DataTable<T>({
       {server && <div className={`dt-loadbar${server.loading ? " on" : ""}`} aria-hidden />}
 
       <div className={`dt-scroll${server?.loading ? " dt-busy" : ""}`}>
-        <table className="table dt-table">
+        <table className="table dt-table" aria-busy={server?.loading || undefined}>
           <thead>
             <tr>
               {selectable && (
@@ -279,45 +331,47 @@ export function DataTable<T>({
               )}
               {visibleCols.map((c, i) => {
                 const sticky = stickyFirst && i === 0;
+                const stickyRight = c.sticky === "right";
                 const left = sticky ? stickyOffset : undefined;
                 const fActive = (filters[c.key]?.size ?? 0) > 0;
+                const sortable = server ? Boolean(c.sortField) : Boolean(c.sortValue);
+                const activeDir = server
+                  ? (c.sortField && server.serverSort?.field === c.sortField ? server.serverSort.dir : null)
+                  : (sort?.key === c.key ? sort.dir : null);
+                const onSortClick = () => {
+                  if (server) { if (c.sortField) server.onServerSort(c.sortField); }
+                  else if (c.sortValue) cycleSort(c.key);
+                };
                 return (
                   <th
                     key={c.key}
-                    className={`${c.align === "right" ? "num" : ""} ${sticky ? "dt-sticky" : ""}`}
-                    style={{ width: colWidth(c), minWidth: colWidth(c), left }}
+                    className={`${c.align === "right" ? "num" : ""} ${sticky ? "dt-sticky" : ""}${stickyRight ? " dt-sticky-right" : ""}`}
+                    style={{ width: colWidth(c), minWidth: colWidth(c), left, right: stickyRight ? 0 : undefined }}
+                    aria-sort={sortable ? (activeDir === "asc" ? "ascending" : activeDir === "desc" ? "descending" : "none") : undefined}
                   >
-                    {(() => {
-                      const sortable = server ? Boolean(c.sortField) : Boolean(c.sortValue);
-                      const activeDir = server
-                        ? (c.sortField && server.serverSort?.field === c.sortField ? server.serverSort.dir : null)
-                        : (sort?.key === c.key ? sort.dir : null);
-                      const onSortClick = () => {
-                        if (server) { if (c.sortField) server.onServerSort(c.sortField); }
-                        else if (c.sortValue) cycleSort(c.key);
-                      };
-                      return (
-                        <span className="dt-th">
-                          <span className={sortable ? "dt-sortable" : ""} onClick={onSortClick} title={sortable ? "点击排序" : undefined}>
-                            {c.header}
-                            {activeDir ? <span className="dt-sortic">{activeDir === "asc" ? "▲" : "▼"}</span>
-                              : sortable ? <span className="dt-sortic dt-sortic-idle" aria-hidden>↕</span> : null}
-                          </span>
-                          {!server && c.filterable && (
-                            <button
-                              className={`dt-filter-btn${fActive ? " on" : ""}`}
-                              title="按此列筛选"
-                              onClick={(e) => { e.stopPropagation(); setOpenFilter((k) => (k === c.key ? null : c.key)); setFilterSearch(""); }}
-                            >
-                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
-                            </button>
-                          )}
-                        </span>
-                      );
-                    })()}
+                    <span className="dt-th">
+                      {sortable ? <button type="button" className="dt-sortable" onClick={onSortClick} title="点击排序">
+                        {c.header}
+                        {activeDir ? <span className="dt-sortic">{activeDir === "asc" ? "▲" : "▼"}</span>
+                          : <span className="dt-sortic dt-sortic-idle" aria-hidden>↕</span>}
+                      </button> : <span>{c.header}</span>}
+                      {!server && c.filterable && (
+                        <button
+                          type="button"
+                          className={`dt-filter-btn${fActive ? " on" : ""}`}
+                          title="按此列筛选"
+                          aria-label={`筛选${c.header}`}
+                          aria-expanded={openFilter === c.key}
+                          aria-controls={`${viewKey}-${c.key}-filter`}
+                          onClick={(e) => { e.stopPropagation(); setOpenFilter((k) => (k === c.key ? null : c.key)); setFilterSearch(""); }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                        </button>
+                      )}
+                    </span>
                     {!server && c.filterable && openFilter === c.key && (
-                      <div className="dt-filter-pop" onClick={(e) => e.stopPropagation()}>
-                        <input className="search" autoFocus placeholder="搜索取值…" value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
+                      <div id={`${viewKey}-${c.key}-filter`} className="dt-filter-pop" role="dialog" aria-label={`${c.header}筛选`} onClick={(e) => e.stopPropagation()}>
+                        <input className="search" autoFocus aria-label={`搜索${c.header}取值`} placeholder="搜索取值…" value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
                         <div className="dt-filter-list">
                           {distinctValues(c).filter((v) => !filterSearch || v.toLowerCase().includes(filterSearch.toLowerCase())).map((v) => (
                             <label key={v} className="dt-colitem">
@@ -327,12 +381,20 @@ export function DataTable<T>({
                           ))}
                         </div>
                         <div className="dt-filter-foot">
-                          <button className="linkish small" onClick={() => clearFilter(c.key)}>清空</button>
-                          <button className="btn-ghost small" onClick={() => setOpenFilter(null)}>完成</button>
+                          <button type="button" className="linkish small" onClick={() => clearFilter(c.key)}>清空</button>
+                          <button type="button" className="btn-ghost small" onClick={() => setOpenFilter(null)}>完成</button>
                         </div>
                       </div>
                     )}
-                    <span className="dt-resizer" onMouseDown={(e) => onResizeStart(e, c.key, colWidth(c))} />
+                    <span
+                      className="dt-resizer"
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label={`调整${c.header}列宽`}
+                      tabIndex={0}
+                      onKeyDown={(e) => onResizeKeyDown(e, c.key, colWidth(c))}
+                      onMouseDown={(e) => onResizeStart(e, c.key, colWidth(c))}
+                    />
                   </th>
                 );
               })}
@@ -345,7 +407,7 @@ export function DataTable<T>({
                 <tr key={`sk${ri}`} className="dt-skrow">
                   {selectable && <td className="cell-check dt-sticky" style={{ left: 0 }}><span className="skeleton" style={{ height: 12, width: 12, borderRadius: 3 }} /></td>}
                   {visibleCols.map((c, ci) => (
-                    <td key={c.key} className={stickyFirst && ci === 0 ? "dt-sticky" : ""} style={{ left: stickyFirst && ci === 0 ? stickyOffset : undefined }}>
+                    <td key={c.key} className={`${stickyFirst && ci === 0 ? "dt-sticky" : ""}${c.sticky === "right" ? " dt-sticky-right" : ""}`} style={{ left: stickyFirst && ci === 0 ? stickyOffset : undefined, right: c.sticky === "right" ? 0 : undefined }}>
                       <span className="skeleton" style={{ height: 12, width: `${55 + ((ri + ci) % 4) * 10}%`, display: "block", borderRadius: 4 }} />
                     </td>
                   ))}
@@ -367,20 +429,43 @@ export function DataTable<T>({
               return (
                 <Fragment key={id}>
                 <tr
-                  className={`${rowClassName?.(r) ?? ""} ${isSel ? "row-sel" : ""}${onRowClick ? " dt-clickable" : ""}`}
+                  className={`${rowClassName?.(r) ?? ""} ${isSel ? "row-sel" : ""}${onRowClick || onRowDoubleClick || rowMenu ? " dt-clickable" : ""}`}
+                  tabIndex={(onRowClick || onRowDoubleClick || rowMenu) ? 0 : undefined}
+                  aria-selected={selectable ? Boolean(isSel) : undefined}
                   onContextMenu={(rowMenu || onRowContextMenu) ? (e) => openRowMenu(e, r) : undefined}
                   onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(r) : undefined}
                   onClick={onRowClick ? () => onRowClick(r) : undefined}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (onRowClick) onRowClick(r);
+                      else onRowDoubleClick?.(r);
+                    } else if (e.key === " " && selectable) {
+                      e.preventDefault();
+                      handleCheck(e, idx, id);
+                    } else if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") {
+                      e.preventDefault();
+                      openRowMenuFromKeyboard(r, e.currentTarget);
+                    }
+                  }}
                 >
                   {selectable && (
-                    <td className="cell-check dt-sticky" style={{ left: 0 }} onClick={(e) => { e.stopPropagation(); handleCheck(e, idx, id); }}>
-                      <input type="checkbox" checked={Boolean(isSel)} readOnly tabIndex={-1} />
+                    <td className="cell-check dt-sticky" style={{ left: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(isSel)}
+                        readOnly
+                        aria-label={`选择第 ${idx + 1} 行`}
+                        onClick={(e) => { e.stopPropagation(); handleCheck(e, idx, id); }}
+                      />
                     </td>
                   )}
                   {visibleCols.map((c, i) => {
                     const sticky = stickyFirst && i === 0;
+                    const stickyRight = c.sticky === "right";
                     return (
-                      <td key={c.key} className={`${c.align === "right" ? "num" : ""} ${sticky ? "dt-sticky" : ""}`} style={{ left: sticky ? stickyOffset : undefined }}>
+                      <td key={c.key} className={`${c.align === "right" ? "num" : ""} ${sticky ? "dt-sticky" : ""}${stickyRight ? " dt-sticky-right" : ""}`} style={{ left: sticky ? stickyOffset : undefined, right: stickyRight ? 0 : undefined }}>
                         {c.render(r)}
                       </td>
                     );
@@ -414,11 +499,11 @@ export function DataTable<T>({
             )}
             <div style={{ flex: 1 }} />
             <div className="dt-pager-btns">
-              <button className="btn-ghost small" disabled={server.page <= 1} onClick={() => server.onPageChange(1)}>« 首页</button>
-              <button className="btn-ghost small" disabled={server.page <= 1} onClick={() => server.onPageChange(server.page - 1)}>‹ 上一页</button>
+              <button type="button" className="btn-ghost small dt-pager-edge" disabled={server.page <= 1} onClick={() => server.onPageChange(1)}>« 首页</button>
+              <button type="button" className="btn-ghost small" disabled={server.page <= 1} onClick={() => server.onPageChange(server.page - 1)}>‹ 上一页</button>
               <span className="dt-pager-cur">{server.page} / {pageCount}</span>
-              <button className="btn-ghost small" disabled={server.page >= pageCount} onClick={() => server.onPageChange(server.page + 1)}>下一页 ›</button>
-              <button className="btn-ghost small" disabled={server.page >= pageCount} onClick={() => server.onPageChange(pageCount)}>末页 »</button>
+              <button type="button" className="btn-ghost small" disabled={server.page >= pageCount} onClick={() => server.onPageChange(server.page + 1)}>下一页 ›</button>
+              <button type="button" className="btn-ghost small dt-pager-edge" disabled={server.page >= pageCount} onClick={() => server.onPageChange(pageCount)}>末页 »</button>
               {pageCount > 5 && (
                 <form className="dt-pager-jump" onSubmit={(e) => { e.preventDefault(); const v = Number(new FormData(e.currentTarget).get("p")); if (v >= 1 && v <= pageCount) server.onPageChange(v); }}>
                   <input name="p" inputMode="numeric" placeholder="跳页" aria-label="跳转到指定页" />
@@ -437,11 +522,18 @@ export function DataTable<T>({
       )}
 
       {ctxMenu && (
-        <ul className="ctx-menu" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={(e) => e.stopPropagation()}>
+        <div ref={ctxMenuRef} className="ctx-menu" role="menu" aria-label="行操作" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={(e) => e.stopPropagation()}>
           {ctxMenu.items.map((it, i) => (
-            <li key={i} className={`${it.danger ? "danger" : ""}${it.disabled ? " disabled" : ""}`} onClick={() => { if (!it.disabled) { it.onClick(); setCtxMenu(null); } }}>{it.label}</li>
+            <button
+              type="button"
+              role="menuitem"
+              key={i}
+              disabled={it.disabled}
+              className={it.danger ? "danger" : ""}
+              onClick={() => { it.onClick(); setCtxMenu(null); }}
+            >{it.label}</button>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );

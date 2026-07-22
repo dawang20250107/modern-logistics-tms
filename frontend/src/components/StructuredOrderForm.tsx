@@ -352,10 +352,10 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
 
       {/* 录入模式选择 */}
       <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <div className="seg-tabs">
-          <button className={activeMode === "standard" ? "active" : ""} onClick={() => setActiveMode("standard")}>标准录单</button>
-          <button className={activeMode === "ai" ? "active" : ""} onClick={() => setActiveMode("ai")}>文本解析</button>
-          <button className={activeMode === "batch" ? "active" : ""} onClick={() => setActiveMode("batch")}>批量导入</button>
+        <div className="seg-tabs" aria-label="录单方式">
+          <button type="button" aria-pressed={activeMode === "standard"} className={activeMode === "standard" ? "active" : ""} onClick={() => setActiveMode("standard")}>标准录单</button>
+          <button type="button" aria-pressed={activeMode === "ai"} className={activeMode === "ai" ? "active" : ""} onClick={() => setActiveMode("ai")}>文本解析</button>
+          <button type="button" aria-pressed={activeMode === "batch"} className={activeMode === "batch" ? "active" : ""} onClick={() => setActiveMode("batch")}>批量导入</button>
         </div>
         <span className="muted small">
           {activeMode === "standard" ? "逐项精准录入 B2B 细案订单"
@@ -366,7 +366,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
 
       {/* === 模式一：AI 协同智能速录 === */}
       {activeMode === "ai" && (
-        <div style={{ padding: "18px 18px 24px", display: "grid", gridTemplateColumns: "1.1fr 1.3fr", gap: 18, minHeight: 300 }}>
+        <div className="sof-mode-grid sof-ai-grid">
           {/* 左侧：输入框 */}
           <div className="stack" style={{ gap: 10 }}>
             <div className="section-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -398,7 +398,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
           </div>
 
           {/* 右侧：解析预览 */}
-          <div className="stack" style={{ gap: 10, background: "var(--panel-2)", padding: "18px 20px", borderRadius: 10, border: "1px solid var(--line)" }}>
+          <div className="stack sof-preview">
             <div className="section-label" style={{ color: "var(--brand)", fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><IconSparkles size={16} className="icon-offset" /> 解析结果</div>
             
             {aiParse.isPending ? (
@@ -409,7 +409,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
               </div>
             ) : (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", fontSize: 13, background: "var(--panel)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
+                <div className="sof-result-grid">
                   <div><span className="muted">始发城市：</span><strong style={{ fontSize: 15, color: "var(--brand)" }}>{form.origin || "—"}</strong></div>
                   <div><span className="muted">目的城市：</span><strong style={{ fontSize: 15, color: "var(--brand)" }}>{form.destination || "—"}</strong></div>
                   <div style={{ gridColumn: "1 / -1", height: 1, background: "var(--line)", margin: "4px 0" }}></div>
@@ -426,8 +426,8 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   <div className="muted small">
                     解析结果已填入标准录单，可直接建单，或进入标准表单补全货物明细与提送站点。
                   </div>
-                  <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
-                    <button className="btn-secondary" style={{ flex: 1, padding: 12 }} onClick={() => setActiveMode("standard")}>
+                  <div className="sof-mode-actions">
+                    <button className="btn-ghost" style={{ flex: 1, padding: 12 }} onClick={() => setActiveMode("standard")}>
                       进入标准表单进行微调
                     </button>
                     <button className="btn-primary" style={{ flex: 1.5, padding: 12, background: "var(--green)", borderColor: "var(--green)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} disabled={submit.isPending} onClick={() => trySubmit("pending_confirm")}>
@@ -443,8 +443,8 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
 
       {/* === 模式二：多行 / Excel 批量录入 === */}
       {activeMode === "batch" && (
-        <div style={{ padding: "18px 18px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        <div className="sof-batch-mode">
+          <div className="sof-mode-grid sof-batch-grid">
             <div className="stack" style={{ gap: 10 }}>
               <div className="section-label">粘贴多行文本（可从 Excel 复制）</div>
               <textarea
@@ -563,8 +563,8 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             <div className="section-label">线路与装卸网点</div>
             
             {/* 核心上下游实体快速对齐 */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, margin: "10px 0" }}>
-              <div style={{ background: "var(--panel-2)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
+            <div className="sof-partner-grid">
+              <div className="sof-partner-card">
                 <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择发货方 / 供应商</span>
                 <select 
                   style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
@@ -576,7 +576,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                 </select>
               </div>
 
-              <div style={{ background: "var(--panel-2)", padding: 12, borderRadius: 8, border: "1px solid var(--line)" }}>
+              <div className="sof-partner-card">
                 <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择收货方 / 仓储网点</span>
                 <select 
                   style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
@@ -607,8 +607,9 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             )}
 
             {stops.map((s, i) => (
-              <div key={i} className="line-row" style={{ marginTop: 8 }}>
-                <select value={s.stop_type} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, stop_type: e.target.value as "pickup" | "delivery" } : x))}>
+              <div key={i} className="line-row stop-line" style={{ marginTop: 8 }}>
+                <span className="line-row-index">第 {i + 1} 站</span>
+                <select aria-label={`第 ${i + 1} 站节点类型`} value={s.stop_type} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, stop_type: e.target.value as "pickup" | "delivery" } : x))}>
                   <option value="pickup">提货网点</option>
                   <option value="delivery">送货网点</option>
                 </select>
@@ -617,10 +618,10 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   value={{ province: s.province ?? "", city: s.city, district: s.district ?? "" }}
                   onChange={(v) => setStops((p) => p.map((x, j) => j === i ? { ...x, province: v.province, city: v.city.replace(/(市|地区|自治州|盟)$/, "") || v.city, district: v.district } : x))}
                 />
-                <input placeholder="详细提/送货物理地址（街道门牌）" style={{ flex: 2 }} value={s.address} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} />
-                <input placeholder="联系人" style={{ width: 90 }} value={s.contact_name} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_name: e.target.value } : x))} />
-                <input placeholder="电话" style={{ width: 130 }} value={s.contact_phone} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_phone: e.target.value } : x))} />
-                <button className="btn-ghost" onClick={() => setStops((p) => p.filter((_, j) => j !== i))} disabled={stops.length <= 1}>×</button>
+                <input aria-label={`第 ${i + 1} 站详细地址`} placeholder="详细提/送货物理地址（街道门牌）" style={{ flex: 2 }} value={s.address} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} />
+                <input aria-label={`第 ${i + 1} 站联系人`} placeholder="联系人" style={{ width: 90 }} value={s.contact_name} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_name: e.target.value } : x))} />
+                <input aria-label={`第 ${i + 1} 站联系电话`} placeholder="电话" style={{ width: 130 }} value={s.contact_phone} onChange={(e) => setStops((p) => p.map((x, j) => j === i ? { ...x, contact_phone: e.target.value } : x))} />
+                <button type="button" className="btn-ghost line-row-remove" aria-label={`删除第 ${i + 1} 站`} onClick={() => setStops((p) => p.filter((_, j) => j !== i))} disabled={stops.length <= 1}>×</button>
               </div>
             ))}
             <button className="btn-ghost" style={{ marginTop: 6 }} onClick={() => setStops((p) => [...p, emptyStop("delivery")])}>+ 增加提送货网点</button>
@@ -634,14 +635,15 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
               {volumetric > totalWeight && <span className="tag tag-medium">抛重 {chargeable.toFixed(2)} 吨 计费</span>}
             </div>
             {cargo.map((c, i) => (
-              <div key={i} className="line-row" style={{ marginTop: 8 }}>
-                <input placeholder="货品名称 *" className={showErrors && errs.cargo && i === 0 ? "input-err" : ""} style={{ flex: 2 }} value={c.name} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
-                <input placeholder="件数" style={{ width: 70 }} value={c.quantity} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
-                <input placeholder="重量(吨)" style={{ width: 70 }} value={c.weight_ton} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, weight_ton: e.target.value } : x))} />
-                <input placeholder="体积(方)" style={{ width: 70 }} value={c.volume_cbm} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, volume_cbm: e.target.value } : x))} />
-                <input placeholder="包装" style={{ width: 80 }} value={c.package_type} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, package_type: e.target.value } : x))} />
-                <input placeholder="冷链温区" style={{ width: 90 }} value={c.temperature_range} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, temperature_range: e.target.value } : x))} />
-                <button className="btn-ghost" onClick={() => setCargo((p) => p.filter((_, j) => j !== i))} disabled={cargo.length <= 1}>×</button>
+              <div key={i} className="line-row cargo-line" style={{ marginTop: 8 }}>
+                <span className="line-row-index">第 {i + 1} 项</span>
+                <input aria-label={`第 ${i + 1} 项货品名称`} placeholder="货品名称 *" className={showErrors && errs.cargo && i === 0 ? "input-err" : ""} style={{ flex: 2 }} value={c.name} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
+                <input aria-label={`第 ${i + 1} 项件数`} placeholder="件数" inputMode="numeric" style={{ width: 70 }} value={c.quantity} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))} />
+                <input aria-label={`第 ${i + 1} 项重量`} placeholder="重量(吨)" inputMode="decimal" style={{ width: 70 }} value={c.weight_ton} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, weight_ton: e.target.value } : x))} />
+                <input aria-label={`第 ${i + 1} 项体积`} placeholder="体积(方)" inputMode="decimal" style={{ width: 70 }} value={c.volume_cbm} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, volume_cbm: e.target.value } : x))} />
+                <input aria-label={`第 ${i + 1} 项包装`} placeholder="包装" style={{ width: 80 }} value={c.package_type} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, package_type: e.target.value } : x))} />
+                <input aria-label={`第 ${i + 1} 项冷链温区`} placeholder="冷链温区" style={{ width: 90 }} value={c.temperature_range} onChange={(e) => setCargo((p) => p.map((x, j) => j === i ? { ...x, temperature_range: e.target.value } : x))} />
+                <button type="button" className="btn-ghost line-row-remove" aria-label={`删除第 ${i + 1} 项货物`} onClick={() => setCargo((p) => p.filter((_, j) => j !== i))} disabled={cargo.length <= 1}>×</button>
               </div>
             ))}
             <button className="btn-ghost" style={{ marginTop: 6 }} onClick={() => setCargo((p) => [...p, emptyCargo()])}>+ 增加货物细项</button>
@@ -654,7 +656,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             {/* 4.1 时效红线 (SLA) */}
             <div style={{ background: "var(--panel-2)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>时效要求</div>
-              <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div className="grid-form sof-grid-2">
                 <label>
                   期望提货窗口
                   <DateTimeField value={form.expected_pickup_at} onChange={(v) => set("expected_pickup_at", v)} />
@@ -669,7 +671,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             {/* 4.2 财务核价 (Financial) */}
             <div style={{ background: "var(--panel)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>运费与货值</div>
-              <div className="grid-form" style={{ gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+              <div className="grid-form sof-grid-finance">
                 <label>
                   <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span>合同/预估运费 (¥)</span>
@@ -689,7 +691,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   <input className="search" placeholder="0.00" value={form.cargo_value} onChange={(e) => set("cargo_value", e.target.value)} />
                 </label>
               </div>
-              <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginTop: 12 }}>
+              <div className="grid-form sof-grid-3">
                 <label>
                   运费付款方式
                   <select className="search" value={form.freight_term} onChange={(e) => set("freight_term", e.target.value)}>
@@ -717,7 +719,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             {/* 4.3 特种保障 (Special Care) */}
             <div style={{ background: "var(--panel)", padding: "14px 16px", borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
               <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>特种运输要求</div>
-              <div className="grid-form" style={{ gridTemplateColumns: "1fr 1fr auto", gap: 16, alignItems: "end" }}>
+              <div className="grid-form sof-grid-special">
                 <label>
                   包装标准
                   <input className="search" placeholder="例: 托盘 / 木箱 / 裸装" value={form.package_type} onChange={(e) => set("package_type", e.target.value)} />

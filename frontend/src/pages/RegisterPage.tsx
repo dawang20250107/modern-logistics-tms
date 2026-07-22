@@ -51,6 +51,10 @@ export function RegisterPage() {
       <AuthHero />
       <main className="auth-form-wrap">
         <form className="auth-form" onSubmit={onSubmit}>
+          <div className="auth-mobile-brand" aria-label="智运 TMS">
+            <span className="auth-mobile-mark" aria-hidden="true">智</span>
+            <span>智运 TMS</span>
+          </div>
           <div className="auth-form-brand">ZHIYUN TMS</div>
           <div className="auth-form-title">注册新账号</div>
           <div className="auth-form-sub">创建账号后等待管理员分配组织与角色</div>

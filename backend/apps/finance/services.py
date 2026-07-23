@@ -5,6 +5,16 @@ from decimal import Decimal
 from .models import ExpenseRecord, PricingRule, Webhook, WebhookDelivery
 
 
+def gen_statement_no() -> str:
+    """对账单号 ST + 日期 + 原子日序号，保证并发/同秒唯一（复用 ops 单号计数器）。"""
+    from django.utils import timezone
+
+    from apps.ops.numbering import next_sequence
+
+    day = timezone.now().strftime("%Y%m%d")
+    return f"ST{day}{next_sequence(f'statement:{day}'):06d}"
+
+
 def _match_rules(waybill, price_type) -> list[PricingRule]:
     vehicle_type = waybill.vehicle.vehicle_type if waybill.vehicle else ""
     matched = []
@@ -68,6 +78,38 @@ def estimate_order_quote(*, customer_id=None, route_name="", weight_ton=0, volum
     }
 
 
+def _rule_snapshot(rule, quote_result, *, weight, volume, qty, distance) -> dict:
+    """费用规则快照：把当时命中的规则、匹配条件、计费输入与计算明细固化到费用记录，
+    使得后续即便规则/价库被修改，历史对账仍可完整解释「这笔为什么这么算」。"""
+    def _num(v):
+        return float(v) if isinstance(v, (int, float, Decimal)) else v
+
+    conditions = [
+        f"客户:{rule.customer.name}" if rule.customer_id else "",
+        f"承运商:{rule.carrier.name}" if rule.carrier_id else "",
+        f"线路:{rule.route_name}" if rule.route_name else "",
+        f"车型:{rule.vehicle_type}" if rule.vehicle_type else "",
+    ]
+    return {
+        "price_source": "rule",
+        "pricing_rule_id": str(rule.id),
+        "pricing_rule_name": rule.name,
+        "charge_method": rule.charge_method,
+        "matched_condition": " / ".join(c for c in conditions if c) or "通配",
+        "input_snapshot": {
+            "weight_ton": float(weight or 0), "volume_cbm": float(volume or 0),
+            "quantity": int(qty or 0), "distance_km": float(distance or 0),
+        },
+        "calculation_detail": {k: _num(v) for k, v in quote_result.items()},
+        "rule_snapshot": {
+            "base_price": float(rule.base_price), "unit_price": float(rule.unit_price),
+            "min_price": float(rule.min_price), "min_charge_qty": float(rule.min_charge_qty),
+            "tier_prices": rule.tier_prices, "volumetric_factor": float(rule.volumetric_factor),
+            "fuel_surcharge_pct": float(rule.fuel_surcharge_pct),
+        },
+    }
+
+
 def generate_costs(waybill) -> dict:
     """业财结算核心引擎：按报价规则生成运单应收/应付，并支持主副驾智能运费切分（Payee-Split）。"""
     waybill.expenses.filter(source_system="pricing").delete()
@@ -90,6 +132,7 @@ def generate_costs(waybill) -> dict:
             payee_type="customer",
             payee_ref=waybill.customer.name if waybill.customer_id else "",
             source_system="pricing",
+            **_rule_snapshot(rule, quote_result, weight=weight, volume=volume, qty=qty, distance=distance),
         )
         result["receivable"] = 1
 
@@ -110,6 +153,7 @@ def generate_costs(waybill) -> dict:
                 payee_type="carrier",
                 payee_ref=waybill.carrier.name,
                 source_system="pricing",
+                **_rule_snapshot(rule, quote_result, weight=weight, volume=volume, qty=qty, distance=distance),
             )
             result["payable"] += 1
             
@@ -181,6 +225,11 @@ def generate_costs(waybill) -> dict:
                     )
                     result["payable"] += 1
 
+    # 回填发生时间：以运单建单时间为费用发生时点，使对账（按账期归集）与账龄可正确纳入本批费用。
+    waybill.expenses.filter(source_system="pricing", occurred_at__isnull=True).update(
+        occurred_at=waybill.created_at
+    )
+
     emit_event("cost.generated", {"waybill_no": waybill.waybill_no, "generated": result})
     return result
 
@@ -212,11 +261,9 @@ def emit_event(event_type: str, payload: dict) -> int:
     return count
 
 
-def generate_statement(*, direction, counterparty_type, counterparty_id, start, end, external_total=0):
+def generate_statement(*, direction, counterparty_type, counterparty_id, start, end, external_total=0, due_date=None):
     """按客户(应收)/承运商(应付)在账期内归集费用，生成对账单与明细。"""
-    import random
 
-    from django.utils import timezone
 
     from .models import ExpenseRecord, Statement, StatementLine
 
@@ -232,13 +279,14 @@ def generate_statement(*, direction, counterparty_type, counterparty_id, start, 
 
     name = _counterparty_name(counterparty_type, counterparty_id)
     statement = Statement.objects.create(
-        statement_no=f"ST{timezone.now():%Y%m%d%H%M%S}{random.randint(100, 999)}",
+        statement_no=gen_statement_no(),
         direction=direction,
         counterparty_type=counterparty_type,
         counterparty_id=str(counterparty_id),
         counterparty_name=name,
         period_start=start,
         period_end=end,
+        due_date=due_date or None,
         total_amount=total,
         item_count=len(records),
         external_total=external_total or 0,
@@ -254,6 +302,62 @@ def generate_statement(*, direction, counterparty_type, counterparty_id, start, 
         )
         for r in records
     ])
+    return statement
+
+
+def generate_statement_for_batch(batch, *, external_total=0):
+    """按派车批次一键生成承运商应付对账单：归集该批次各运单的应付流水为一张对账单。
+
+    批次 = 一次委托同一承运商的商务归集，天然对应一个承运商应付分组；
+    对账口径直接取派单时落下的议定应付快照（price_source=batch），可解释、可追溯。
+    幂等：批次已生成对账单则直接返回原单，避免重复归集。
+    """
+
+
+    from apps.core.exceptions import AppError
+
+    from .models import ExpenseRecord, Statement, StatementLine
+
+    if batch.carrier_id is None:
+        raise AppError("BATCH_NO_CARRIER", "网货平台批次无承运商，暂不支持一键对账。", status=400)
+    if batch.statement_no:
+        existing = Statement.objects.filter(statement_no=batch.statement_no).first()
+        if existing:
+            return existing
+
+    records = list(
+        ExpenseRecord.objects.select_related("waybill")
+        .filter(direction=Statement.DIRECTION_PAYABLE, waybill__batch_id=batch.id)
+        .order_by("occurred_at")
+    )
+    total = sum((r.amount for r in records), Decimal("0"))
+    dates = [r.occurred_at.date() for r in records if r.occurred_at] or [batch.created_at.date()]
+
+    statement = Statement.objects.create(
+        statement_no=gen_statement_no(),
+        direction=Statement.DIRECTION_PAYABLE,
+        counterparty_type=Statement.CP_CARRIER,
+        counterparty_id=str(batch.carrier_id),
+        counterparty_name=batch.carrier.name if batch.carrier else "",
+        period_start=min(dates),
+        period_end=max(dates),
+        total_amount=total,
+        item_count=len(records),
+        external_total=external_total or 0,
+    )
+    StatementLine.objects.bulk_create([
+        StatementLine(
+            statement=statement,
+            expense_record=r,
+            waybill_no=r.waybill.waybill_no if r.waybill else "",
+            expense_item_code=r.expense_item_code,
+            amount=r.amount,
+            occurred_at=r.occurred_at,
+        )
+        for r in records
+    ])
+    batch.statement_no = statement.statement_no
+    batch.save(update_fields=["statement_no", "updated_at"])
     return statement
 
 
@@ -337,6 +441,130 @@ def confirm_statement(statement, *, operator=None):
     return statement
 
 
+def settle_statement(statement, *, amount, method="bank", paid_at=None, reference_no="", remark="", operator=None):
+    """收付款核销：对已确认/部分结算的对账单登记一笔实际收/付款。
+
+    支持分次部分核销：累加至 settled_amount，并驱动单据状态
+    confirmed → partial（未结清） → settled（已结清，settled_amount ≥ total_amount）。
+    金额需 >0 且不超过未结余额（留 0.01 容差防浮点）。调用方需在事务内 select_for_update 锁行。
+    """
+    from django.utils import timezone
+
+    from apps.core.exceptions import AppError
+
+    from .models import Statement, StatementPayment
+
+    if statement.status not in (Statement.STATUS_CONFIRMED, Statement.STATUS_PARTIAL):
+        raise AppError("INVALID_STATEMENT_STATUS", "仅已确认或部分结算的对账单可登记收付款。", status=409)
+    amt = Decimal(str(amount or 0))
+    if amt <= 0:
+        raise AppError("INVALID_AMOUNT", "核销金额需大于 0。", status=400)
+    outstanding = statement.total_amount - statement.settled_amount
+    if amt > outstanding + Decimal("0.01"):
+        raise AppError("AMOUNT_EXCEEDS_OUTSTANDING", f"核销金额 {amt} 超过未结余额 {outstanding}。", status=400)
+
+    payment = StatementPayment.objects.create(
+        statement=statement,
+        amount=amt,
+        method=method or "bank",
+        paid_at=paid_at or timezone.localdate(),
+        reference_no=reference_no or "",
+        remark=remark or "",
+        created_by=operator if operator and getattr(operator, "is_authenticated", False) else None,
+    )
+    statement.settled_amount = statement.settled_amount + amt
+    fields = ["settled_amount", "status", "updated_at"]
+    if statement.settled_amount >= statement.total_amount - Decimal("0.01"):
+        statement.status = Statement.STATUS_SETTLED
+        statement.settled_at = timezone.now()
+        fields.append("settled_at")
+    else:
+        statement.status = Statement.STATUS_PARTIAL
+    statement.save(update_fields=fields)
+    emit_event("statement.settled", {
+        "statement_no": statement.statement_no, "amount": float(amt),
+        "settled_amount": float(statement.settled_amount), "status": statement.status,
+    })
+    return payment
+
+
+def statement_overview() -> dict:
+    """对账总览看板：应收/应付的应结·已核销·未结、单据状态分布、逾期敞口、本期新增、Top 对手方。"""
+    from django.db.models import Count, Sum
+    from django.utils import timezone
+
+    from .models import Statement
+
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+
+    def _dir_summary(direction):
+        qs = Statement.objects.filter(direction=direction)
+        agg = qs.aggregate(total=Sum("total_amount"), settled=Sum("settled_amount"), n=Count("id"))
+        total = agg["total"] or Decimal("0")
+        settled = agg["settled"] or Decimal("0")
+        by_status = {row["status"]: row["c"] for row in qs.values("status").annotate(c=Count("id"))}
+        return {
+            "total": float(total),
+            "settled": float(settled),
+            "outstanding": float(total - settled),
+            "count": agg["n"] or 0,
+            "draft": by_status.get(Statement.STATUS_DRAFT, 0),
+            "confirmed": by_status.get(Statement.STATUS_CONFIRMED, 0),
+            "partial": by_status.get(Statement.STATUS_PARTIAL, 0),
+            "settled_count": by_status.get(Statement.STATUS_SETTLED, 0),
+        }
+
+    ar = _dir_summary(Statement.DIRECTION_RECEIVABLE)
+    ap = _dir_summary(Statement.DIRECTION_PAYABLE)
+
+    # 逾期敞口：到期日已过且未结清（含未确认）
+    def _overdue(direction):
+        rows = Statement.objects.filter(
+            direction=direction, due_date__lt=today
+        ).exclude(status=Statement.STATUS_SETTLED)
+        amt = sum((s.total_amount - s.settled_amount for s in rows), Decimal("0"))
+        return {"amount": float(amt), "count": rows.count()}
+
+    overdue = {"receivable": _overdue("receivable"), "payable": _overdue("payable")}
+
+    # 本期（当月）新增
+    this_period = Statement.objects.filter(created_at__date__gte=month_start)
+    period = {
+        "label": today.strftime("%Y-%m"),
+        "count": this_period.count(),
+        "receivable": float(this_period.filter(direction="receivable").aggregate(s=Sum("total_amount"))["s"] or 0),
+        "payable": float(this_period.filter(direction="payable").aggregate(s=Sum("total_amount"))["s"] or 0),
+    }
+
+    # Top 对手方（按未结余额归集，跨账单合并）
+    def _top(direction):
+        rows: dict = {}
+        for s in Statement.objects.filter(direction=direction).exclude(status=Statement.STATUS_SETTLED):
+            out = s.total_amount - s.settled_amount
+            if out <= 0:
+                continue
+            r = rows.setdefault(s.counterparty_id, {"name": s.counterparty_name, "outstanding": Decimal("0"), "count": 0})
+            r["outstanding"] += out
+            r["count"] += 1
+        result = [
+            {"counterparty_id": k, "counterparty_name": v["name"], "outstanding": float(v["outstanding"]), "count": v["count"]}
+            for k, v in rows.items()
+        ]
+        result.sort(key=lambda x: x["outstanding"], reverse=True)
+        return result[:6]
+
+    return {
+        "receivable": ar,
+        "payable": ap,
+        "overdue": overdue,
+        "period": period,
+        "top_receivable": _top("receivable"),
+        "top_payable": _top("payable"),
+        "net_position": round(ar["outstanding"] - ap["outstanding"], 2),
+    }
+
+
 def aging_report(direction: str) -> dict:
     """应收(客户)/应付(承运商)账龄：按对手方 + 账龄桶(0-30/31-60/61-90/90+)汇总。"""
     from django.utils import timezone
@@ -377,3 +605,58 @@ def aging_report(direction: str) -> dict:
         result.append(item)
     result.sort(key=lambda x: x["total"], reverse=True)
     return {"direction": direction, "rows": result, "totals": totals}
+
+
+def waybill_finance_card(waybill) -> dict:
+    """单票财务卡：客户报价 / 承运商报价 / 平台服务费 / 预计·实际毛利 /
+    是否可对账（回单满足付款条件、无未决异常扣款）。
+
+    - 应收（客户报价）= 该运单应收费用合计
+    - 应付（承运商报价）= 该运单应付费用合计
+    - 其他（平台服务费/杂费）= 外部费用合计
+    - 毛利 = 应收 − 应付 − 其他
+    - 异常扣款 = 该运单未结异常的责任金额
+    - 可对账 = 回单已回收/核销 且 无未决异常
+    """
+    from django.db.models import Sum
+
+    from apps.ops.models import ExceptionRecord
+
+    def _sum(direction):
+        return float(
+            ExpenseRecord.objects.filter(waybill=waybill, direction=direction)
+            .aggregate(s=Sum("amount")).get("s") or 0
+        )
+
+    receivable = _sum("receivable")
+    payable = _sum("payable")
+    other = _sum("external")
+    gross = round(receivable - payable - other, 2)
+
+    open_exc = ExceptionRecord.objects.filter(waybill=waybill).exclude(status="resolved")
+    exception_deduction = float(open_exc.aggregate(s=Sum("amount")).get("s") or 0)
+    has_open_exception = open_exc.exists()
+
+    receipt_ok = waybill.receipt_status in ("returned", "audited")
+    reconcilable = receipt_ok and not has_open_exception
+
+    blockers = []
+    if not receipt_ok:
+        blockers.append("回单未回收")
+    if has_open_exception:
+        blockers.append("存在未决异常")
+
+    return {
+        "waybill_no": waybill.waybill_no,
+        "customer_name": waybill.customer.name if waybill.customer_id else "散客",
+        "carrier_name": waybill.carrier.name if waybill.carrier_id else "",
+        "receivable": receivable,
+        "payable": payable,
+        "other_fee": other,
+        "gross_margin": gross,
+        "margin_pct": round(gross / receivable, 3) if receivable else None,
+        "exception_deduction": exception_deduction,
+        "receipt_ok": receipt_ok,
+        "reconcilable": reconcilable,
+        "blockers": blockers,
+    }

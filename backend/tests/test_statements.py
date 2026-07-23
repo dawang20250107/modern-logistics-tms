@@ -8,8 +8,14 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.finance.models import ExpenseRecord, Statement
-from apps.finance.services import audit_statement, confirm_statement, generate_statement
+from apps.finance.models import ExpenseRecord, Statement, StatementPayment
+from apps.finance.services import (
+    audit_statement,
+    confirm_statement,
+    generate_statement,
+    settle_statement,
+    statement_overview,
+)
 from apps.masterdata.models import Customer
 from apps.ops.models import Waybill
 
@@ -188,3 +194,108 @@ def test_statement_generate_and_confirm_endpoints(admin_client):
     resp = admin_client.post(f"/api/v1/finance/statements/{sid}/confirm")
     assert resp.status_code == 200, resp.content
     assert resp.json()["data"]["status"] == "confirmed"
+
+
+def _confirmed_statement(code="CS1", name="核销客户", amount="1000"):
+    cust = Customer.objects.create(code=code, name=name)
+    wb = Waybill.objects.create(waybill_no=f"W{code}", route_name="r", customer=cust)
+    ExpenseRecord.objects.create(
+        waybill=wb, direction=ExpenseRecord.DIRECTION_RECEIVABLE,
+        expense_item_code="FREIGHT", amount=Decimal(amount), occurred_at=_dt(2026, 6, 15),
+    )
+    st = generate_statement(
+        direction=Statement.DIRECTION_RECEIVABLE, counterparty_type=Statement.CP_CUSTOMER,
+        counterparty_id=str(cust.id), start=date(2026, 6, 1), end=date(2026, 6, 30),
+    )
+    return confirm_statement(st)
+
+
+@pytest.mark.django_db
+def test_settle_partial_then_full():
+    st = _confirmed_statement(amount="1000")
+    # 首次部分核销 400 → partial
+    settle_statement(st, amount=Decimal("400"), method="bank", paid_at=date(2026, 7, 1))
+    st.refresh_from_db()
+    assert st.status == Statement.STATUS_PARTIAL
+    assert st.settled_amount == Decimal("400")
+    assert st.outstanding == Decimal("600")
+    # 再核销剩余 600 → settled
+    settle_statement(st, amount=Decimal("600"), method="cash", paid_at=date(2026, 7, 5))
+    st.refresh_from_db()
+    assert st.status == Statement.STATUS_SETTLED
+    assert st.settled_amount == Decimal("1000")
+    assert st.outstanding == Decimal("0")
+    assert st.settled_at is not None
+    assert StatementPayment.objects.filter(statement=st).count() == 2
+
+
+@pytest.mark.django_db
+def test_settle_rejects_overpay():
+    from apps.core.exceptions import AppError
+
+    st = _confirmed_statement(code="CS2", amount="500")
+    with pytest.raises(AppError):
+        settle_statement(st, amount=Decimal("600"))
+
+
+@pytest.mark.django_db
+def test_settle_requires_confirmed():
+    """草稿单据不可核销。"""
+    from apps.core.exceptions import AppError
+
+    cust = Customer.objects.create(code="CS3", name="草稿客户")
+    st = generate_statement(
+        direction=Statement.DIRECTION_RECEIVABLE, counterparty_type=Statement.CP_CUSTOMER,
+        counterparty_id=str(cust.id), start=date(2026, 6, 1), end=date(2026, 6, 30),
+    )
+    assert st.status == Statement.STATUS_DRAFT
+    with pytest.raises(AppError):
+        settle_statement(st, amount=Decimal("1"))
+
+
+@pytest.mark.django_db
+def test_settle_endpoint_and_payments(admin_client):
+    st = _confirmed_statement(code="CS4", amount="800")
+    resp = admin_client.post(
+        f"/api/v1/finance/statements/{st.id}/settle",
+        {"amount": "300", "method": "bank", "paid_at": "2026-07-02", "reference_no": "BANK-001"},
+        format="json",
+    )
+    assert resp.status_code == 201, resp.content
+    data = resp.json()["data"]
+    assert data["statement"]["status"] == "partial"
+    assert data["statement"]["settled_amount"] == "300.00"
+    assert data["statement"]["outstanding"] == "500.00"
+
+    resp = admin_client.get(f"/api/v1/finance/statements/{st.id}/payments")
+    assert resp.status_code == 200, resp.content
+    payments = resp.json()["data"]
+    assert len(payments) == 1
+    assert payments[0]["amount"] == "300.00"
+    assert payments[0]["reference_no"] == "BANK-001"
+
+
+@pytest.mark.django_db
+def test_statement_overview_endpoint(admin_client):
+    st = _confirmed_statement(code="OV1", amount="1000")
+    settle_statement(st, amount=Decimal("400"), paid_at=date(2026, 7, 1))
+
+    resp = admin_client.get("/api/v1/finance/statement-overview")
+    assert resp.status_code == 200, resp.content
+    ov = resp.json()["data"]
+    assert ov["receivable"]["total"] == 1000.0
+    assert ov["receivable"]["settled"] == 400.0
+    assert ov["receivable"]["outstanding"] == 600.0
+    assert ov["receivable"]["partial"] == 1
+    # net_position = AR未结 - AP未结
+    assert ov["net_position"] == 600.0
+    top = {r["counterparty_name"]: r["outstanding"] for r in ov["top_receivable"]}
+    assert top.get("核销客户") == 600.0
+
+
+@pytest.mark.django_db
+def test_overview_service_direct():
+    _confirmed_statement(code="OV2", amount="500")
+    ov = statement_overview()
+    assert ov["receivable"]["confirmed"] == 1
+    assert ov["receivable"]["outstanding"] == 500.0

@@ -1,129 +1,142 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { apiGet, apiPatch, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
+import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
-import { STATUS_LABEL } from "../api/types";
+import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
+import { useModalA11y } from "../api/useModalA11y";
+import { useServerTable } from "../api/useServerTable";
+import { DataTable, type DataColumn, type RowMenuItem } from "../components/DataTable";
+import { CopyCode } from "../components/CopyCode";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { FinanceCard } from "../components/FinanceCard";
+import { ReplyCard } from "../components/ReplyCard";
+import { StateView } from "../components/StateView";
+import { StatusTag } from "../components/StatusTag";
 
-const RISK_LABEL: Record<string, string> = { high: "高风险", medium: "中风险", low: "低风险", none: "无风险" };
 const STATUS_CHIPS = ["pending_dispatch", "dispatched", "in_transit", "arrived", "signed", "delivered", "settled"];
+const FILTER_KEY = "waybills.filters.v1";
 
-interface ContextMenuState {
-  x: number;
-  y: number;
-  waybill: Waybill;
+const RECEIPT_OPTS = [{ value: "pending", label: "待追回" }, { value: "returned", label: "已回收" }, { value: "audited", label: "已核销" }];
+const CHANNEL_OPTS = [{ value: "自营", label: "自营" }, { value: "外包", label: "外包" }, { value: "网货", label: "网货" }];
+// 运单高级筛选字段
+const WAYBILL_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "waybill_no", label: "运单号", type: "text", accessor: (w) => (w as Waybill).waybill_no },
+  { key: "customer", label: "客户", type: "text", accessor: (w) => (w as Waybill).customer_name || "" },
+  { key: "route", label: "线路", type: "text", accessor: (w) => `${(w as Waybill).origin || ""}→${(w as Waybill).destination || ""}` },
+  { key: "vehicle", label: "车牌", type: "text", accessor: (w) => (w as Waybill).vehicle_plate || "" },
+  { key: "status", label: "运单状态", type: "enum", options: Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label })), accessor: (w) => (w as Waybill).status },
+  { key: "channel", label: "承运通道", type: "enum", options: CHANNEL_OPTS, accessor: (w) => (w as Waybill).channel || "" },
+  { key: "receipt", label: "回单状态", type: "enum", options: RECEIPT_OPTS, accessor: (w) => (w as Waybill).receipt_status },
+  { key: "receivable", label: "应收(元)", type: "number", accessor: (w) => Number((w as Waybill).receivable_amount) || 0 },
+  { key: "payable", label: "应付(元)", type: "number", accessor: (w) => Number((w as Waybill).payable_amount) || 0 },
+  { key: "cod", label: "代收货款(元)", type: "number", accessor: (w) => Number((w as Waybill).cod_amount) || 0 },
+];
+
+interface PersistedFilters {
+  filter: string;
+  statusFilter: string;
 }
 
-export function WaybillsPage() {
+function loadFilters(): PersistedFilters {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    if (raw) return { filter: "", statusFilter: "", ...JSON.parse(raw) };
+  } catch {
+    /* ignore */
+  }
+  return { filter: "", statusFilter: "" };
+}
+
+const RECEIPT_LABEL: Record<string, string> = { returned: "已回收", audited: "已核销", pending: "待追回" };
+
+export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // === 多维度查询状态 ===
-  const [filter, setFilter] = useState(""); // 全局全局模糊
-  const [statusFilter, setStatusFilter] = useState(""); // 快速状态
-  const [searchNo, setSearchNo] = useState(""); // 运单号
-  const [searchCustomer, setSearchCustomer] = useState(""); // 客户
-  const [searchVehicle, setSearchVehicle] = useState(""); // 车牌
-  const [searchRoute, setSearchRoute] = useState(""); // 线路
-  const [searchRisk, setSearchRisk] = useState(""); // 风险级别
-  const [searchReceipt, setSearchReceipt] = useState(""); // 回单状态
-  
-  // === 展开的高级筛选栏折叠状态 ===
+  const persisted = useMemo(loadFilters, []);
+
+  // === 多维度查询状态（记忆上次筛选） ===
+  const [filter, setFilter] = useState(persisted.filter);
+  const [statusFilter, setStatusFilter] = useState(persisted.statusFilter);
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const wbActiveCount = activeConditionCount(model, WAYBILL_FILTER_FIELDS);
 
-  // === 右键菜单状态 ===
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-
-  // === 双击侧滑详情抽屉状态 ===
   const [drawerWaybill, setDrawerWaybill] = useState<Waybill | null>(null);
+  const wbDrawerRef = useRef<HTMLDivElement>(null);
+  useModalA11y(Boolean(drawerWaybill), wbDrawerRef, () => setDrawerWaybill(null));
 
-  const query = useQuery({
+  // === 批量选择状态 ===
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // 服务端筛选 + 分页 + 排序（高级筛选/搜索/状态药丸全部下沉后端，对全量生效）
+  const st = useServerTable<Waybill>({
     queryKey: ["waybills", "table"],
-    queryFn: () => apiGet<Paginated<Waybill>>("/waybills?page_size=200"),
+    path: "/waybills",
+    pageSize: 50,
+    defaultSort: { field: "eta_drift_minutes", dir: "desc" },
+    model,
+    search: filter,
+    extraParams: { status: statusFilter || undefined },
   });
+  // 状态药丸计数（服务端全量聚合，不受分页/筛选影响）
+  const statsQ = useQuery({
+    queryKey: ["waybills", "stats"],
+    queryFn: () => apiGet<{ by_status: Record<string, number>; total: number }>("/waybills/stats"),
+    refetchInterval: 30000,
+  });
+  const statusCount = (s: string) => statsQ.data?.by_status?.[s] ?? 0;
+  const totalCount = statsQ.data?.total ?? 0;
 
-  // 全局点击自动关闭右键菜单及 Esc 键绑定
+  // 记忆快速筛选
   useEffect(() => {
-    const handleCloseMenu = () => setContextMenu(null);
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setContextMenu(null);
-        setDrawerWaybill(null);
-      }
-    };
-    window.addEventListener("click", handleCloseMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("click", handleCloseMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, []);
+    try {
+      localStorage.setItem(FILTER_KEY, JSON.stringify({ filter, statusFilter }));
+    } catch {
+      /* ignore */
+    }
+  }, [filter, statusFilter]);
 
-  const items = query.data?.items ?? [];
+  const rows = st.rows;
 
-  // === 多维度自适应复合过滤 (Advanced Composite Filtering) ===
-  const filteredRows = useMemo(() => {
-    return items.filter((w) => {
-      // 1. 快速状态药丸过滤
-      if (statusFilter && w.status !== statusFilter) return false;
+  // 选择集随当前页收敛（批量操作作用于当前页选中项）
+  const selectedRows = useMemo(() => rows.filter((w) => selected.has(w.id)), [rows, selected]);
 
-      // 2. 全局搜索框模糊过滤
-      if (filter) {
-        const queryLower = filter.toLowerCase();
-        const matchesGlobal = 
-          w.waybill_no.toLowerCase().includes(queryLower) ||
-          (w.route_name ?? "").toLowerCase().includes(queryLower) ||
-          (w.customer_name ?? "").toLowerCase().includes(queryLower) ||
-          (w.vehicle_plate ?? "").toLowerCase().includes(queryLower);
-        if (!matchesGlobal) return false;
-      }
-
-      // 3. 高级精准维度过滤
-      if (searchNo && !w.waybill_no.toLowerCase().includes(searchNo.toLowerCase().trim())) return false;
-      if (searchCustomer && !(w.customer_name ?? "").toLowerCase().includes(searchCustomer.toLowerCase().trim())) return false;
-      if (searchVehicle && !(w.vehicle_plate ?? "").toLowerCase().includes(searchVehicle.toLowerCase().trim())) return false;
-      if (searchRoute && !(w.route_name ?? "").toLowerCase().includes(searchRoute.toLowerCase().trim())) return false;
-      if (searchRisk && w.risk_level !== searchRisk) return false;
-      if (searchReceipt && w.receipt_status !== searchReceipt) return false;
-
-      return true;
-    });
-  }, [items, filter, statusFilter, searchNo, searchCustomer, searchVehicle, searchRoute, searchRisk, searchReceipt]);
-
-  // === 右键操作事件处理器 ===
-  const handleRowContextMenu = (e: React.MouseEvent, w: Waybill) => {
-    e.preventDefault();
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      waybill: w
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
+  const toggleAll = () => {
+    setSelected((prev) => {
+      if (rows.length > 0 && rows.every((w) => prev.has(w.id))) {
+        const next = new Set(prev);
+        rows.forEach((w) => next.delete(w.id));
+        return next;
+      }
+      const next = new Set(prev);
+      rows.forEach((w) => next.add(w.id));
+      return next;
+    });
+  };
+  const clearSelection = () => setSelected(new Set());
 
   const invalidateWaybills = () => queryClient.invalidateQueries({ queryKey: ["waybills"] });
 
   const openContract = useMutation({
     mutationFn: (no: string) => apiGet<Contract | null>(`/waybills/${no}/contract`),
     onSuccess: (c, no) => {
-      if (c?.pdf_url) {
-        window.open(c.pdf_url, "_blank");
-      } else {
-        toast.info(`运单 ${no} 暂无可下载的合同/回单文件，请先在运单详情页生成承运合同。`);
-      }
+      if (c?.pdf_url) window.open(c.pdf_url, "_blank");
+      else toast.info(`运单 ${no} 暂无可下载的合同/回单文件，请先在运单详情页生成承运合同。`);
     },
-  });
-
-  const markRisk = useMutation({
-    mutationFn: ({ no, level }: { no: string; level: string }) =>
-      apiPatch<Waybill>(`/waybills/${no}`, { risk_level: level }),
-    onSuccess: (_w, v) => {
-      toast.success(v.level === "high" ? `运单 ${v.no} 已标记为高风险` : `运单 ${v.no} 风险标记已清除`);
-      invalidateWaybills();
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   const voidWaybill = useMutation({
@@ -136,16 +149,10 @@ export function WaybillsPage() {
   });
 
   const handleAction = async (action: string, w: Waybill) => {
-    setContextMenu(null);
-    if (action === "view") {
-      navigate(`/waybills/${w.waybill_no}`);
-    } else if (action === "track") {
-      navigate(`/monitor?waybill=${w.waybill_no}`);
-    } else if (action === "print") {
-      openContract.mutate(w.waybill_no);
-    } else if (action === "risk") {
-      markRisk.mutate({ no: w.waybill_no, level: w.risk_level === "high" ? "none" : "high" });
-    } else if (action === "cancel") {
+    if (action === "view") navigate(`/waybills/${w.waybill_no}`);
+    else if (action === "track") navigate(`/waybills/${w.waybill_no}`);
+    else if (action === "print") openContract.mutate(w.waybill_no);
+    else if (action === "cancel") {
       const ok = await confirmAction({
         title: "废弃运单",
         message: `确定要废弃运单 ${w.waybill_no} 吗？关联车辆/司机运力将被释放，此操作不可恢复。`,
@@ -156,305 +163,311 @@ export function WaybillsPage() {
     }
   };
 
-  const handleRowDoubleClick = (w: Waybill) => {
-    setDrawerWaybill(w);
-    
+  const waybillRowMenu = (w: Waybill): RowMenuItem[] => [
+    { label: "查看详情", onClick: () => void handleAction("view", w) },
+    { label: "在途追踪", onClick: () => void handleAction("track", w) },
+    { label: "查看合同 / 回单 PDF", disabled: openContract.isPending, onClick: () => void handleAction("print", w) },
+    { label: "作废运单", danger: true, disabled: voidWaybill.isPending, onClick: () => void handleAction("cancel", w) },
+  ];
+
+  const openMoreMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const row = event.currentTarget.closest("tr");
+    if (!row) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.right,
+      clientY: rect.bottom,
+    }));
+  };
+
+  // === 批量操作 ===
+  const [batchBusy, setBatchBusy] = useState(false);
+
+  const exportCsv = () => {
+    const exportRows = selectedRows.length ? selectedRows : rows;
+    if (!exportRows.length) return;
+    const head = ["运单号", "客户", "起点", "终点", "通道", "车牌", "司机", "应收", "应付/成本", "代收货款", "回单", "状态"];
+    const esc = (v: string | number) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = exportRows.map((w) =>
+      [
+        w.waybill_no,
+        w.customer_name || "散客",
+        w.origin || "",
+        w.destination || "",
+        w.channel || "",
+        w.vehicle_plate || w.carrier_name || w.platform_name || "",
+        w.driver_name || "",
+        w.receivable_amount || 0,
+        w.payable_amount || 0,
+        Number(w.cod_amount) || 0,
+        RECEIPT_LABEL[w.receipt_status] ?? w.receipt_status,
+        STATUS_LABEL[w.status] ?? w.status,
+      ].map(esc).join(","),
+    );
+    const csv = "﻿" + [head.map(esc).join(","), ...lines].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `运单导出_${exportRows.length}条.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`已导出 ${exportRows.length} 条运单为 CSV`);
+  };
+
+  const batchMarkReceipt = async () => {
+    if (!selectedRows.length) return;
+    const targets = selectedRows.filter((w) => w.receipt_status !== "returned" && w.receipt_status !== "audited");
+    if (!targets.length) {
+      toast.info("所选运单回单均已回收，无需处理。");
+      return;
+    }
+    setBatchBusy(true);
+    let ok = 0;
+    for (const w of targets) {
+      try {
+        await apiPatch(`/waybills/${w.waybill_no}`, { receipt_status: "returned" });
+        ok += 1;
+      } catch {
+        /* 单条失败不阻断整批 */
+      }
+    }
+    setBatchBusy(false);
+    toast.success(`已标记 ${ok}/${targets.length} 条运单回单为「已回收」`);
+    clearSelection();
+    invalidateWaybills();
+  };
+
+  const batchVoid = async () => {
+    if (!selectedRows.length) return;
+    const okConfirm = await confirmAction({
+      title: "批量废弃运单",
+      message: `确定要废弃选中的 ${selectedRows.length} 条运单吗？关联运力将被释放，此操作不可恢复。`,
+      tone: "danger",
+      confirmText: `废弃 ${selectedRows.length} 条`,
+    });
+    if (!okConfirm) return;
+    setBatchBusy(true);
+    let ok = 0;
+    for (const w of selectedRows) {
+      try {
+        await apiPost(`/waybills/${w.waybill_no}/transition`, { to_status: "voided", remark: "批量作废" });
+        ok += 1;
+      } catch {
+        /* 忽略单条失败（状态不允许作废等） */
+      }
+    }
+    setBatchBusy(false);
+    toast.success(`已作废 ${ok}/${selectedRows.length} 条运单`);
+    clearSelection();
+    invalidateWaybills();
   };
 
   const handleClearFilters = () => {
-    setSearchNo("");
-    setSearchCustomer("");
-    setSearchVehicle("");
-    setSearchRoute("");
-    setSearchRisk("");
-    setSearchReceipt("");
     setFilter("");
     setStatusFilter("");
-    
+    setModel(EMPTY_MODEL);
   };
 
-  return (
-    <div className="stack" style={{ position: "relative" }}>
-      <div className="panel" style={{ borderRadius: "var(--radius)", border: "1px solid var(--line)", overflow: "visible" }}>
-        
-        {/* 顶部标题 + 快速全局模糊查询 */}
-        <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>运单管理</span>
-            
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="btn-primary" onClick={() => navigate("/intake")} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-              新建订单
-            </button>
-            <input
-              className="search"
-              placeholder="搜索单号/线路/车牌/客户"
-              style={{ width: 280 }}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-            <button 
-              className="btn-ghost" 
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              style={{ padding: "8px 12px", background: showAdvanced ? "var(--line)" : "transparent" }}
-            >
-              {showAdvanced ? "收起筛选" : "高级筛选"}
-            </button>
-            <button className="btn-ghost" onClick={handleClearFilters}>重置</button>
-          </div>
+  const columns: DataColumn<Waybill>[] = [
+    {
+      key: "waybill_no", header: "运单号", width: 150, alwaysVisible: true,
+      sortField: "waybill_no", sortValue: (w) => w.waybill_no, exportValue: (w) => w.waybill_no,
+      render: (w) => <Link className="link mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>,
+    },
+    { key: "customer", header: "客户", width: 130, sortField: "customer__name", sortValue: (w) => w.customer_name || "散客", exportValue: (w) => w.customer_name || "散客", render: (w) => <span title={w.customer_name}>{w.customer_name || "散客"}</span> },
+    { key: "route", header: "线路", width: 150, sortValue: (w) => `${w.origin}${w.destination}`, exportValue: (w) => `${w.origin || "?"}→${w.destination || "?"}`, render: (w) => <>{w.origin || "?"} → {w.destination || "?"}</> },
+    {
+      key: "cargo", header: "货物", width: 130, exportValue: (w) => `${w.cargo.weight_ton || 0}吨`,
+      render: (w) => <span className="small">{w.cargo.quantity ? `${w.cargo.quantity}件 ` : ""}{w.cargo.weight_ton || 0}吨{w.cargo.volume_cbm ? ` / ${w.cargo.volume_cbm}方` : ""}</span>,
+    },
+    {
+      key: "vehicle", header: "车辆 / 司机", width: 150, exportValue: (w) => w.vehicle_plate || w.carrier_name || w.platform_name || "",
+      render: (w) => (
+        <span className="small">
+          {w.vehicle_plate ? <span className="mono">{w.vehicle_plate}</span> : w.carrier_name || (w.channel === "网货" ? (w.platform_name || "平台") : "—")}
+          {w.driver_name && <div className="muted" style={{ fontSize: 11 }}>{w.driver_name} {w.driver_phone}</div>}
+        </span>
+      ),
+    },
+    {
+      key: "channel", header: "通道", width: 100, filterable: true, filterValue: (w) => w.channel || "", sortValue: (w) => w.channel || "", exportValue: (w) => w.channel || "",
+      render: (w) => w.channel ? <StatusTag kind="channel" value={w.channel} title={w.dispatch_type_label} suffix={w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""} /> : <span className="muted">—</span>,
+    },
+    { key: "receivable", header: "应收", width: 100, align: "right", sortField: "receivable_total", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{w.receivable_amount ? fmtMoney(w.receivable_amount) : "—"}</> },
+    { key: "payable", header: "应付/成本", width: 110, align: "right", sortField: "payable_total", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{w.payable_amount ? fmtMoney(w.payable_amount) : "—"}</> },
+    { key: "cod", header: "代收货款", width: 110, align: "right", sortField: "cod_amount", sortValue: (w) => Number(w.cod_amount) || 0, exportValue: (w) => Number(w.cod_amount) || 0, render: (w) => { const cod = Number(w.cod_amount) || 0; return cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>{fmtMoney(cod)}</span> : <>—</>; } },
+    { key: "receipt", header: "回单", width: 90, sortField: "receipt_status", sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <StatusTag kind="receipt" value={w.receipt_status} /> },
+    { key: "status", header: "运单状态", width: 100, sortField: "status", sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <StatusTag kind="waybill" value={w.status} /> },
+    {
+      key: "actions", header: "操作", width: 170, alwaysVisible: true, sticky: "right",
+      render: (w) => (
+        <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>详情</button>
+          <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>追踪</button>
+          <button onClick={openMoreMenu} aria-label="更多操作" aria-haspopup="menu">⋯</button>
         </div>
+      ),
+    },
+  ];
 
-        {/* === 高级多维度检索 Ribbon 区 === */}
-        {showAdvanced && (
-          <div style={{ 
-            padding: "14px 18px", background: "rgba(0,0,0,0.01)", borderBottom: "1px solid var(--line)",
-            display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12
-          }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: "bold" }}>
-              运单单号
-              <input value={searchNo} onChange={(e) => setSearchNo(e.target.value)} placeholder="例: AG2026..." style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: "bold" }}>
-              签约客户
-              <input value={searchCustomer} onChange={(e) => setSearchCustomer(e.target.value)} placeholder="如 阿斯利康" style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: "bold" }}>
-              车牌号码
-              <input value={searchVehicle} onChange={(e) => setSearchVehicle(e.target.value)} placeholder="如 苏B" style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: "bold" }}>
-              线路/城市
-              <input value={searchRoute} onChange={(e) => setSearchRoute(e.target.value)} placeholder="如 无锡" style={{ padding: "6px 8px" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: "bold" }}>
-              风险级别
-              <select value={searchRisk} onChange={(e) => setSearchRisk(e.target.value)} style={{ padding: "6px 8px" }}>
-                <option value="">全部风险</option>
-                <option value="high">高风险</option>
-                <option value="medium">中风险</option>
-                <option value="low">低风险</option>
-                <option value="none">⚪ 无风险</option>
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: "bold" }}>
-              纸质/电子回单
-              <select value={searchReceipt} onChange={(e) => setSearchReceipt(e.target.value)} style={{ padding: "6px 8px" }}>
-                <option value="">全部状态</option>
-                <option value="pending">待收回</option>
-                <option value="returned">已回收</option>
-                <option value="audited">已核销审计</option>
-              </select>
-            </label>
+  const batchBar = selectedRows.length > 0 ? (
+    <div className="batch-bar">
+      <span>已选 <b style={{ color: "var(--accent)" }}>{selectedRows.length}</b> 条</span>
+      <div style={{ flex: 1 }} />
+      <button className="btn-ghost" disabled={batchBusy} onClick={exportCsv}>导出选中</button>
+      <button className="btn-ghost" disabled={batchBusy} onClick={batchMarkReceipt}>标记回单已回收</button>
+      <button className="btn-danger-ghost" disabled={batchBusy} onClick={batchVoid}>批量作废</button>
+      <button className="btn-ghost" disabled={batchBusy} onClick={clearSelection}>取消选择</button>
+    </div>
+  ) : null;
+
+  const anyFilter = Boolean(filter) || Boolean(statusFilter) || wbActiveCount > 0;
+
+  const body = (
+    <>
+      <div className="panel om-panel" style={{ overflow: "visible" }}>
+        {wbActiveCount > 0 && (
+          <div className="om-chips">
+            <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+            {model.conditions.map((c) => {
+              const label = describeCondition(c, WAYBILL_FILTER_FIELDS);
+              if (!label) return null;
+              return <span key={c.id} className="filter-chip"><span className="filter-chip-label" title={label}>{label}</span><button type="button" aria-label={`删除条件：${label}`} onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+            })}
+            <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
           </div>
         )}
 
-        {/* 快速状态分类药丸栏 */}
-        <div className="form-row" style={{ flexWrap: "wrap", gap: 8, padding: "12px 18px", borderBottom: "1px solid var(--line)", background: "var(--input-bg)" }}>
-          <button className={`chip${statusFilter === "" ? " chip-on" : ""}`} onClick={() => setStatusFilter("")}>全部在单 ({items.length})</button>
-          {STATUS_CHIPS.map((s) => {
-            const count = items.filter(w => w.status === s).length;
-            return (
-              <button key={s} className={`chip${statusFilter === s ? " chip-on" : ""}`} onClick={() => setStatusFilter(s)}>
-                {STATUS_LABEL[s] ?? s} ({count})
-              </button>
-            );
-          })}
+        {/* 快速状态药丸栏（服务端全量计数与过滤）*/}
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--line)", background: "var(--input-bg)" }}>
+          <button className={`chip${statusFilter === "" ? " chip-on" : ""}`} onClick={() => setStatusFilter("")}>全部在单 ({totalCount})</button>
+          {STATUS_CHIPS.map((s) => (
+            <button key={s} className={`chip${statusFilter === s ? " chip-on" : ""}`} onClick={() => setStatusFilter(statusFilter === s ? "" : s)}>
+              {STATUS_LABEL[s] ?? s} ({statusCount(s)})
+            </button>
+          ))}
         </div>
 
-        {/* 数据工作台表格 */}
-        {query.isLoading ? (
-          <div style={{ padding: "24px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="skeleton" style={{ width: "100%", height: 32 }}></div>
-            <div className="skeleton" style={{ width: "100%", height: 32, opacity: 0.8 }}></div>
-            <div className="skeleton" style={{ width: "100%", height: 32, opacity: 0.6 }}></div>
-            <div className="skeleton" style={{ width: "100%", height: 32, opacity: 0.4 }}></div>
-            <div className="skeleton" style={{ width: "100%", height: 32, opacity: 0.2 }}></div>
-          </div>
-        ) : filteredRows.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon"></div>
-            <div className="empty-title">未找到运单数据</div>
-            <div className="empty-hint muted small">未查找到符合当前多维筛选组合的运单。您可以尝试清空筛选维度。</div>
-          </div>
+        {st.isError ? (
+          <StateView kind="error" hint="运单台账暂时无法加载。" onRetry={() => st.refetch()} />
         ) : (
-          <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "var(--line)" }}>
-                <th style={{ padding: "10px 12px", textAlign: "left" }}>运单号</th>
-                <th>线路</th>
-                <th>在途状态</th>
-                <th>风险级别</th>
-                <th>ETA 偏差</th>
-                <th>回单状态</th>
-                <th>客户</th>
-                <th>车牌</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((w) => {
-                const isSelected = drawerWaybill?.id === w.id;
-                return (
-                  <tr 
-                    key={w.id} 
-                    onContextMenu={(e) => handleRowContextMenu(e, w)}
-                    onDoubleClick={() => handleRowDoubleClick(w)}
-                    style={{ 
-                      cursor: "context-menu", 
-                      transition: "all 0.15s ease",
-                      background: isSelected ? "var(--brand-light)" : "transparent",
-                      borderLeft: isSelected ? "3px solid var(--brand)" : "3px solid transparent"
-                    }}
-                    className="waybill-tr"
-                    
-                  >
-                    <td style={{ padding: "12px", fontWeight: "bold" }}>
-                      <Link className="link mono interactive-text" to={`/waybills/${w.waybill_no}`}>
-                        {w.waybill_no}
-                      </Link>
-                    </td>
-                    <td className="interactive-text" title={w.route_name || "未知"}>{w.route_name ? w.route_name.substring(0, 10) + (w.route_name.length > 10 ? "..." : "") : "未知"}</td>
-                    <td>
-                      <span className={`tag`} style={{ background: "var(--bg)", border: "1px solid var(--line-strong)" }}>
-                        {STATUS_LABEL[w.status] ?? w.status}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`tag tag-${w.risk_level}`}>
-                        {RISK_LABEL[w.risk_level] ?? w.risk_level}
-                      </span>
-                    </td>
-                    <td className="mono" style={{ color: Number(w.eta_drift_minutes) > 30 ? "var(--red)" : "inherit" }}>
-                      {w.eta_drift_minutes ? `⏱️ 偏离 ${w.eta_drift_minutes} 分` : "⏱️ 无偏移"}
-                    </td>
-                    <td>
-                      <span className={`tag tag-${w.receipt_status === "returned" || w.receipt_status === "audited" ? "low" : "none"}`}>
-                        {w.receipt_status === "returned" ? "已回收" : w.receipt_status === "audited" ? "已审计核销" : "待追回"}
-                      </span>
-                    </td>
-                    <td className="interactive-text" title={w.customer_name || "散客货主"}>{w.customer_name ? w.customer_name.substring(0, 8) + (w.customer_name.length > 8 ? "..." : "") : "散客货主"}</td>
-                    <td className="mono interactive-text" style={{ fontWeight: "bold" }}>{w.vehicle_plate || "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable<Waybill>
+            columns={columns}
+            rows={rows}
+            rowKey={(w) => w.id}
+            viewKey="waybills"
+            exportName="运单"
+            selectable
+            selected={selected}
+            onToggle={toggleOne}
+            onToggleAll={toggleAll}
+            rowMenu={waybillRowMenu}
+            onRowDoubleClick={setDrawerWaybill}
+            rowClassName={() => "waybill-tr"}
+            stickyFirst
+            server={st.server}
+            fill
+            hideExport
+            batchBar={batchBar}
+            emptyState={
+              <StateView
+                kind="empty"
+                scene="waybill-empty"
+                title="未找到运单数据"
+                hint={anyFilter ? "未查找到符合当前筛选组合的运单，可尝试清空筛选。" : "暂无运单。"}
+                compact
+              />
+            }
+            toolbarLeft={
+              <>
+                <span className="om-title" style={{ marginRight: 2 }}>运单<span className="ai-pill">{st.total}</span></span>
+                <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 280 }} placeholder="搜索单号/线路/车牌/客户" value={filter} onChange={(e) => setFilter(e.target.value)} />
+                <div style={{ position: "relative" }}>
+                  <button className={`btn-ghost${wbActiveCount > 0 || showAdvanced ? " on-accent" : ""}`} onClick={() => setShowAdvanced((v) => !v)}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                      高级筛选{wbActiveCount > 0 ? ` · ${wbActiveCount}` : ""}
+                    </span>
+                  </button>
+                  {showAdvanced && <FilterBuilder fields={WAYBILL_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowAdvanced(false)} />}
+                </div>
+              </>
+            }
+            toolbarRight={
+              <>
+                {anyFilter && <button className="linkish small" onClick={handleClearFilters}>重置</button>}
+                <button className="btn-ghost" onClick={() => navigate("/intake")}>+ 新建订单</button>
+              </>
+            }
+          />
         )}
-
-        {/* 底部台账条目统计 */}
-        <div className="muted small" style={{ padding: "10px 14px", borderTop: "1px solid var(--line)" }}>
-          共 {filteredRows.length} 条运单
-        </div>
       </div>
 
-      {/* === 1. 浮动右键自定义快捷菜单 (Absolute Context Menu) === */}
-      {contextMenu && (
-        <div
-          className="context-menu-wrapper"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ padding: "4px 8px 8px", fontSize: 11, fontWeight: "bold", color: "var(--muted)" }}>
-            运单 {contextMenu.waybill.waybill_no}
-          </div>
-          <button onClick={() => handleAction("view", contextMenu.waybill)}>
-            <span>查看详情</span> <span className="hotkey">↵</span>
-          </button>
-          <button onClick={() => handleAction("track", contextMenu.waybill)}>
-            <span>在途追踪</span>
-          </button>
-          <div className="context-divider"></div>
-          <button disabled={openContract.isPending} onClick={() => handleAction("print", contextMenu.waybill)}>
-            <span>🖨️</span> 查看合同/回单 PDF
-          </button>
-          <button disabled={markRisk.isPending} onClick={() => handleAction("risk", contextMenu.waybill)} style={{ color: "var(--amber)" }}>
-            {contextMenu.waybill.risk_level === "high" ? "清除风险标记" : "标记为高风险"}
-          </button>
-          <div className="context-divider"></div>
-          <button disabled={voidWaybill.isPending} onClick={() => handleAction("cancel", contextMenu.waybill)} style={{ color: "var(--red)" }}>
-            <span>作废运单</span> <span className="hotkey">⌫</span>
-          </button>
-        </div>
-      )}
-
-      {/* === 2. 双击滑出高保真玻璃态侧边详情滑层 (Double-Click Sliding Side Drawer) === */}
+      {/* 双击侧滑详情抽屉（Precision Graphite） */}
       {drawerWaybill && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: 440,
-            background: "rgba(20, 30, 45, 0.95)",
-            borderLeft: "1px solid rgba(255,255,255,0.1)",
-            boxShadow: "-12px 0 48px rgba(0,0,0,0.5)",
-            backdropFilter: "blur(24px)",
-            zIndex: 99999,
-            padding: 24,
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-            transition: "all 0.3s ease",
-            color: "#fff"
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.1)", paddingBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}>
-              运单详情
-            </h3>
-            <button 
-              className="btn-ghost" 
-              onClick={() => setDrawerWaybill(null)}
-              style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", padding: "6px 12px", borderRadius: 6, cursor: "pointer" }}
-            >
-              关闭 [Esc]
-            </button>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}>
-            <div className="kv" style={{ padding: 0, gap: "10px 16px" }}>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>运单号码</span><strong className="mono" style={{ color: "var(--brand-2)" }}>{drawerWaybill.waybill_no}</strong></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>线路</span><b>{drawerWaybill.route_name || "未填写"}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>运单状态</span><b>{STATUS_LABEL[drawerWaybill.status] ?? drawerWaybill.status}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>风险级别</span><b>{RISK_LABEL[drawerWaybill.risk_level] ?? drawerWaybill.risk_level}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>ETA 飘移</span><b style={{ color: drawerWaybill.eta_drift_minutes ? "var(--red)" : "inherit" }}>{drawerWaybill.eta_drift_minutes ? `偏离 ${drawerWaybill.eta_drift_minutes} 分钟` : "正常"}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>回单回收状态</span><b style={{ color: drawerWaybill.receipt_status === "returned" ? "var(--green)" : "inherit" }}>{drawerWaybill.receipt_status === "returned" ? "已回收" : drawerWaybill.receipt_status === "audited" ? "已审计核销" : "等待中"}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>签约货主</span><b>{drawerWaybill.customer_name || "自营散客"}</b></div>
-              <div style={{ borderBottom: "1px dashed rgba(255,255,255,0.15)" }}><span style={{ color: "rgba(255,255,255,0.5)" }}>承运卡车</span><b className="mono">{drawerWaybill.vehicle_plate || "自营外协"}</b></div>
+        <div className="wb-overlay" onClick={() => setDrawerWaybill(null)}>
+          <div ref={wbDrawerRef} className="wb-drawer" onClick={(e) => e.stopPropagation()} tabIndex={-1} role="dialog" aria-modal="true" aria-label="运单详情">
+            <div className="wb-drawer-head">
+              <div>
+                <div className="mono" style={{ fontSize: 15, fontWeight: 650 }}><CopyCode value={drawerWaybill.waybill_no} /></div>
+                <div className="muted small" style={{ marginTop: 2 }}>{drawerWaybill.origin || "?"} → {drawerWaybill.destination || "?"}</div>
+              </div>
+              <button className="btn-ghost" onClick={() => setDrawerWaybill(null)}>关闭 [Esc]</button>
             </div>
+            <div className="wb-drawer-body">
+              <div className="stack" style={{ gap: 14 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <StatusTag kind="waybill" value={drawerWaybill.status} />
+                  {drawerWaybill.channel && (
+                    <span className={`tag ${CHANNEL_TAG[drawerWaybill.channel] ?? "tag-none"}`}>
+                      {drawerWaybill.channel}{drawerWaybill.channel === "网货" && drawerWaybill.platform_name ? `·${drawerWaybill.platform_name}` : ""}
+                    </span>
+                  )}
+                  <span className={`tag tag-${drawerWaybill.receipt_status === "returned" || drawerWaybill.receipt_status === "audited" ? "low" : "none"}`}>
+                    回单{RECEIPT_LABEL[drawerWaybill.receipt_status] ?? "待追回"}
+                  </span>
+                </div>
 
-            {/* 车辆车联网设备实时数据反馈 */}
-            <div style={{ background: "rgba(255,255,255,0.06)", padding: 16, borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "rgba(255,255,255,0.6)" }}>关联车联网传感器实时心跳</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12 }}>
-                <div>车厢温度: <strong style={{ color: "#3498db" }}>-18.4 ℃ (正常)</strong></div>
-                <div>油箱余量: <strong style={{ color: "#2ecc71" }}>85%</strong></div>
-                <div>瞬时速度: <strong>65 km/h</strong></div>
-                <div>更新时间: <span style={{ color: "rgba(255,255,255,0.4)" }}>{new Date().toLocaleTimeString()}</span></div>
+                <div className="kv">
+                  <div><span>签约客户</span><b>{drawerWaybill.customer_name || "散客"}</b></div>
+                  <div><span>承运方式</span><b>{drawerWaybill.dispatch_type_label || "—"}</b></div>
+                  <div><span>车辆车牌</span><b className="mono">{drawerWaybill.vehicle_plate || "—"}</b></div>
+                  <div><span>司机</span><b>{drawerWaybill.driver_name ? `${drawerWaybill.driver_name} ${drawerWaybill.driver_phone}` : "—"}</b></div>
+                  <div><span>货物</span><b>{drawerWaybill.cargo.quantity ? `${drawerWaybill.cargo.quantity}件 ` : ""}{drawerWaybill.cargo.weight_ton || 0}吨{drawerWaybill.cargo.volume_cbm ? ` / ${drawerWaybill.cargo.volume_cbm}方` : ""}</b></div>
+                </div>
+
+                <div className="section-label">费用</div>
+                <div className="kv">
+                  <div><span>应收</span><b className="num">{drawerWaybill.receivable_amount ? fmtMoney(drawerWaybill.receivable_amount) : "—"}</b></div>
+                  <div><span>应付 / 成本</span><b className="num">{drawerWaybill.payable_amount ? fmtMoney(drawerWaybill.payable_amount) : "—"}</b></div>
+                  <div><span>代收货款</span><b className="num" style={{ color: Number(drawerWaybill.cod_amount) > 0 ? "var(--amber)" : undefined }}>{Number(drawerWaybill.cod_amount) > 0 ? fmtMoney(drawerWaybill.cod_amount) : "—"}</b></div>
+                </div>
+
+                <div className="section-label">单票财务卡</div>
+                <FinanceCard waybillNo={drawerWaybill.waybill_no} />
+
+                <div className="section-label">客户回复</div>
+                <ReplyCard waybillNo={drawerWaybill.waybill_no} />
               </div>
             </div>
-          </div>
-
-          <div style={{ marginTop: "auto", display: "flex", gap: 12 }}>
-            <button 
-              className="btn-primary" 
-              style={{ flex: 1, padding: 14, fontSize: 13, background: "var(--brand)", border: "none" }} 
-              onClick={() => { setDrawerWaybill(null); navigate(`/waybills/${drawerWaybill.waybill_no}`); }}
-            >
-              查看完整详情
-            </button>
-            <button 
-              className="btn-ghost" 
-              style={{ flex: 1, padding: 14, fontSize: 13, background: "rgba(255,255,255,0.1)", border: "none", color: "#fff" }} 
-              onClick={() => { setDrawerWaybill(null); navigate(`/monitor?waybill=${drawerWaybill.waybill_no}`); }}
-            >
-              在途追踪
-            </button>
+            <div style={{ display: "flex", gap: 10, padding: "14px 18px", borderTop: "1px solid var(--line)" }}>
+              <button className="btn-primary" style={{ flex: 1 }} onClick={() => { setDrawerWaybill(null); navigate(`/waybills/${drawerWaybill.waybill_no}`); }}>
+                查看完整详情
+              </button>
+              <button className="btn-ghost" style={{ flex: 1 }} onClick={() => { setDrawerWaybill(null); navigate(`/waybills/${drawerWaybill.waybill_no}`); }}>
+                在途追踪
+              </button>
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
+
+  // 嵌入订单管理时由父级 stack.table-page 提供固定布局；独立路由自带固定布局外壳
+  return embedded ? body : <div className="stack table-page" style={{ position: "relative" }}>{body}</div>;
 }

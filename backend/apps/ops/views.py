@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import AppError
+from apps.core.filtering import FilterField, ServerFilterMixin
 from apps.core.redis import get_redis
 from apps.finance.models import ExpenseRecord
 from apps.finance.services import generate_costs
@@ -36,6 +37,15 @@ from .tasks import TRACKING_QUEUE, flush_tracking_points, process_receipt_ocr
 def _current_user_or_none(request):
     user = request.user
     return user if isinstance(user, get_user_model()) else None
+
+
+def _can_view_all(user) -> bool:
+    """全局数据范围：超管，或被授予 data_scope=all 的角色——可越过"仅本人"看全量。"""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if user.is_superuser:
+        return True
+    return user.role_assignments.filter(role__data_scope="all").exists()
 
 
 def _valid_coord(value) -> bool:
@@ -65,10 +75,15 @@ def _expense_payload(item):
     }
 
 
-class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+class WaybillViewSet(ServerFilterMixin, OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = (
         Waybill.objects.select_related("customer", "carrier", "vehicle", "trailer", "driver")
         .prefetch_related("driver_assignments__driver")  # 消除列表 drivers 的 N+1
+        # 应收/应付按运单条件聚合，零 N+1，供运单列表直呈"钱"这条主线
+        .annotate(
+            receivable_total=Sum("expenses__amount", filter=Q(expenses__direction="receivable")),
+            payable_total=Sum("expenses__amount", filter=Q(expenses__direction="payable")),
+        )
         .all()
     )
     permission_classes = [IsAuthenticated, HasPermission]
@@ -99,10 +114,46 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     }
     lookup_field = "waybill_no"
     lookup_value_regex = "[^/]+"
-    search_fields = ["waybill_no", "route_name", "customer__name", "vehicle__plate_no"]
+    search_fields = ["waybill_no", "route_name", "customer__name", "vehicle__plate_no", "origin", "destination"]
     filterset_fields = ["status", "risk_level", "receipt_status"]
-    ordering_fields = ["eta_drift_minutes", "created_at", "waybill_no"]
+    ordering_fields = [
+        "eta_drift_minutes", "created_at", "waybill_no", "customer__name", "status",
+        "receipt_status", "receivable_total", "payable_total", "cod_amount",
+    ]
     ordering = ["-eta_drift_minutes", "risk_level", "waybill_no"]
+    server_filter_fields = {
+        "waybill_no": FilterField("text", "waybill_no"),
+        "customer": FilterField("text", "customer__name"),
+        "route": FilterField("text", paths=["origin", "destination"]),
+        "vehicle": FilterField("text", "vehicle__plate_no"),
+        "status": FilterField("enum", "status"),
+        "channel": FilterField("enum", "channel_code"),  # 派生列（get_queryset 注解 自营/外包/网货）
+        "receipt": FilterField("enum", "receipt_status"),
+        "receivable": FilterField("number", "receivable_total"),
+        "payable": FilterField("number", "payable_total"),
+        "cod": FilterField("number", "cod_amount"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import Case, CharField, Value, When
+
+        return super().get_queryset().annotate(
+            channel_code=Case(
+                When(dispatch_type__in=["own_vehicle", "fleet"], then=Value("自营")),
+                When(dispatch_type="third_party", then=Value("外包")),
+                When(dispatch_type="platform", then=Value("网货")),
+                default=Value(""), output_field=CharField(),
+            ),
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """运单状态计数（服务端全量聚合），供运单台账快速状态药丸。"""
+        from django.db.models import Count
+
+        qs = self.get_queryset()
+        by_status = {r["status"]: r["n"] for r in qs.values("status").annotate(n=Count("id"))}
+        return Response({"by_status": by_status, "total": qs.count()})
 
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
@@ -446,6 +497,20 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         waybill = self.get_object()
         return Response(recommend_dispatch(waybill))
 
+    @action(detail=True, methods=["get"], url_path="reply-card")
+    def reply_card(self, request, waybill_no=None):
+        """客服回复卡：状态/司机/车牌/最近节点/ETA/异常/回单 + 可复制文案。"""
+        from .customer_ctx import reply_card
+
+        return Response(reply_card(self.get_object()))
+
+    @action(detail=True, methods=["get"], url_path="finance-card")
+    def finance_card(self, request, waybill_no=None):
+        """单票财务卡：客户报价/承运商报价/其他费/毛利/异常扣款/是否可对账。"""
+        from apps.finance.services import waybill_finance_card
+
+        return Response(waybill_finance_card(self.get_object()))
+
     @action(detail=False, methods=["post"], url_path="dispatch-plan")
     def dispatch_plan(self, request):
         from .dispatch import plan_dispatch
@@ -469,18 +534,73 @@ class WaybillViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         return Response(WaybillSerializer(merged).data, status=201)
 
 
-class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
+class OrderViewSet(ServerFilterMixin, OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     # 订单本身无组织外键，按建单人所属组织归属其数据范围（组织子树可见）
     org_field = "created_by__organization"
     queryset = (
-        Order.objects.select_related("customer", "created_by", "claimed_by")
-        .prefetch_related("waybills", "cargo_items", "stops", "attachments")
+        Order.objects.select_related("customer", "created_by", "claimed_by", "assigned_to", "assigned_by")
+        .prefetch_related("waybills", "cargo_items", "stops", "attachments", "exceptions")
         .all()
     )
     serializer_class = OrderSerializer
     filterset_fields = ["status", "channel", "source_type", "business_type", "priority"]
-    search_fields = ["order_no", "remark", "contact_phone", "origin", "destination"]
-    ordering_fields = ["created_at", "order_no", "priority"]
+    search_fields = ["order_no", "remark", "contact_phone", "origin", "destination", "customer__name"]
+    ordering_fields = [
+        "created_at", "order_no", "priority", "status", "sla_status", "channel",
+        "business_type", "quoted_amount", "cargo_weight_ton", "customer__name",
+    ]
+    # 服务端筛选字段映射（前端 FilterBuilder → ORM 路径）
+    server_filter_fields = {
+        "order_no": FilterField("text", "order_no"),
+        "customer": FilterField("text", "customer__name"),
+        "route": FilterField("text", paths=["origin", "destination"]),
+        "creator": FilterField("text", paths=["created_by__username", "created_by__nickname"]),
+        "status": FilterField("enum", "status"),
+        "channel": FilterField("enum", "channel"),
+        "business_type": FilterField("enum", "business_type"),
+        "priority": FilterField("enum", "priority"),
+        "settlement": FilterField("enum", "settlement_type"),
+        "level": FilterField("enum", "customer__level"),
+        "sla": FilterField("enum", "sla_status"),
+        "exception": FilterField("enum", "has_open_exc"),  # 派生列（get_queryset 注解 0/1）
+        "amount": FilterField("number", "quoted_amount"),
+        "weight": FilterField("number", "cargo_weight_ton"),
+        "created_at": FilterField("date", "created_at"),
+    }
+
+    def get_queryset(self):
+        from django.db.models import Case, Exists, IntegerField, OuterRef, Value, When
+
+        from apps.ops.models import ExceptionRecord
+
+        qs = super().get_queryset()
+        open_exc = ExceptionRecord.objects.filter(order=OuterRef("pk")).exclude(status__in=["closed", "rejected"])
+        return qs.annotate(
+            has_open_exc=Case(When(Exists(open_exc), then=Value(1)), default=Value(0), output_field=IntegerField()),
+        )
+
+    @action(detail=True, methods=["get"], url_path="lineage")
+    def lineage(self, request, pk=None):
+        """单据血缘：订单(DD) → 运单(YD) → 对账单(ST) 全链路关系图（见 lineage.order_lineage）。"""
+        from .lineage import order_lineage
+
+        return Response(order_lineage(self.get_object()))
+
+    @action(detail=False, methods=["get"], url_path="funnel")
+    def funnel(self, request):
+        """订单生命周期漏斗：按状态/渠道计数 + 今日建单数，供建单工作台"从哪来到哪去"管道。"""
+        from django.db.models import Count
+        from django.utils import timezone
+
+        qs = self.get_queryset()
+        by_status = {r["status"]: r["n"] for r in qs.values("status").annotate(n=Count("id"))}
+        by_channel = {r["channel"]: r["n"] for r in qs.values("channel").annotate(n=Count("id"))}
+        return Response({
+            "by_status": by_status,
+            "by_channel": by_channel,
+            "today_created": qs.filter(created_at__date=timezone.localdate()).count(),
+            "total": qs.count(),
+        })
 
     @action(detail=False, methods=["post"], url_path="intake")
     def intake(self, request):
@@ -498,11 +618,15 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
             from apps.masterdata.models import Customer
 
             customer = Customer.objects.filter(id=fields.get("customer")).first()
+        # 来源标识由系统账号确立（组织·姓名），不接受前端手工填写，杜绝伪造/口径不一
+        op = request.user
+        op_org = getattr(op.organization, "name", "") if getattr(op, "organization_id", None) else ""
+        auto_source = "·".join(x for x in [op_org, (op.nickname or op.username)] if x)
         order = create_order_from_intake(
             text=text,
             fields=fields,
             channel=request.data.get("channel", Order.CHANNEL_CS),
-            source=request.data.get("source", ""),
+            source=auto_source,
             customer=customer,
             operator=request.user,
             cargo_items=cargo_items,
@@ -690,19 +814,60 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
             raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
         return Response(batch_orders(action_name, ids, operator=request.user))
 
+    @action(detail=False, methods=["post"], url_path="batch-update")
+    def batch_update(self, request):
+        """批量改字段：{field: priority|settlement_type, value, ids: [...]}。"""
+        from .intake import batch_update_orders
+
+        field = request.data.get("field")
+        value = request.data.get("value")
+        ids = request.data.get("ids") or []
+        if not ids:
+            raise AppError("IDS_REQUIRED", "ids 必填。", status=400)
+        return Response(batch_update_orders(field, value, ids, operator=request.user))
+
     @action(detail=False, methods=["get"], url_path="pool")
     def pool_list(self, request):
         """订单池：在池待派(POOLED) + 调度中(DISPATCHING，已认领)订单，按优先级与进池时间排序。
 
-        包含已认领订单，避免认领后从看板消失；?mine=1 仅看自己认领的。
+        scope=free  待分配（未锁定/未分派，所有调度可见，供分派/锁定）
+        scope=mine  可调派（本人锁定或被分派给本人）——普通调度仅看本人权限内数据
+        scope=all   全量（仅超管/全局数据范围可用，其余降级为 mine）
+        默认（无 scope）：全部在池+调度中（兼容旧行为）。?mine=1 等价于 scope=mine。
         """
+        from django.db.models import Q
+
         qs = self.get_queryset().filter(
             status__in=[Order.STATUS_POOLED, Order.STATUS_DISPATCHING]
         ).order_by("-priority", "pooled_at")
-        if request.query_params.get("mine") in ("1", "true"):
-            qs = qs.filter(claimed_by=_current_user_or_none(request))
+        scope = request.query_params.get("scope")
+        if scope == "free":
+            qs = qs.filter(claimed_by__isnull=True, assigned_to__isnull=True)
+        elif scope == "all" and _can_view_all(request.user):
+            pass  # 超管/全局数据范围：看全量可调派池
+        elif scope in ("mine", "all") or request.query_params.get("mine") in ("1", "true"):
+            me = _current_user_or_none(request)
+            qs = qs.filter(Q(claimed_by=me) | Q(assigned_to=me))
         page = self.paginate_queryset(qs)
-        ser = OrderSerializer(page if page is not None else qs, many=True)
+        ctx = {"request": request}
+        ser = OrderSerializer(page if page is not None else qs, many=True, context=ctx)
+        return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
+
+    @action(detail=False, methods=["get"], url_path="dispatched")
+    def dispatched_list(self, request):
+        """已调派池：已转运单(CONVERTED)的订单。scope=mine 仅本人；scope=all 超管看全量。"""
+        from django.db.models import Q
+
+        qs = self.get_queryset().filter(status=Order.STATUS_CONVERTED).order_by("-created_at")
+        scope = request.query_params.get("scope")
+        if scope == "all" and _can_view_all(request.user):
+            pass
+        elif scope in ("mine", "all") or request.query_params.get("mine") in ("1", "true"):
+            me = _current_user_or_none(request)
+            qs = qs.filter(Q(claimed_by=me) | Q(assigned_to=me))
+        page = self.paginate_queryset(qs)
+        ctx = {"request": request}
+        ser = OrderSerializer(page if page is not None else qs, many=True, context=ctx)
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
 
     @action(detail=True, methods=["post"], url_path="claim")
@@ -718,6 +883,81 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         from .order_dispatch import release_order
 
         return Response(OrderSerializer(release_order(self.get_object(), request.user)).data)
+
+    @action(detail=False, methods=["post"], url_path="assign")
+    def assign_pool(self, request):
+        """总调度分单：{ids:[...], dispatcher:<user_id>} → 把订单指派给某调度。"""
+        from .order_dispatch import assign_orders
+
+        result = assign_orders(request.data.get("ids") or [], request.data.get("dispatcher"), request.user)
+        return Response(result)
+
+    @action(detail=True, methods=["post"], url_path="unassign")
+    def unassign(self, request, pk=None):
+        """总调度撤销分单。"""
+        from .order_dispatch import unassign_order
+
+        return Response(OrderSerializer(unassign_order(self.get_object(), request.user)).data)
+
+    @action(detail=True, methods=["post"], url_path="report-exception")
+    def report_exception(self, request, pk=None):
+        """在订单池对某订单登记异常：挂到订单，同步调度与订单管理（并给订单打标记）。"""
+        order = self.get_object()
+        exc_type = request.data.get("exception_type") or "other"
+        level = request.data.get("level") or "medium"
+        desc = (request.data.get("description") or "").strip()
+        if exc_type not in dict(ExceptionRecord.EXCEPTION_TYPE_CHOICES):
+            raise AppError("INVALID_EXCEPTION_TYPE", "异常类型非法。", status=400)
+        rec = ExceptionRecord.objects.create(
+            order=order,
+            waybill=order.waybills.first(),
+            exception_type=exc_type, level=level, description=desc,
+            source="manual", reported_by=request.user if request.user.is_authenticated else None,
+        )
+        from .intake import record_order_event
+
+        record_order_event(order, "exception_reported", actor=request.user, source="exception",
+                           note=f"登记异常：{dict(ExceptionRecord.EXCEPTION_TYPE_CHOICES).get(exc_type, exc_type)}")
+        return Response({"id": str(rec.id), "order_no": order.order_no, "exception_type": exc_type, "level": level}, status=201)
+
+    @action(detail=False, methods=["post"], url_path="batch-dispatch")
+    def batch_dispatch(self, request):
+        """批量派承运商：{ids, dispatch_type, carrier, platform_name, total_payable, allocation, note}
+        → 生成派车批次 + N 张独立运单（同/跨客户多单一次委托同一承运商）。"""
+        from .order_dispatch import batch_dispatch_orders
+
+        d = request.data
+        result = batch_dispatch_orders(
+            d.get("ids") or [],
+            carrier_id=d.get("carrier") or None,
+            dispatch_type=d.get("dispatch_type") or "third_party",
+            platform_name=d.get("platform_name") or "",
+            total_payable=d.get("total_payable") or 0,
+            allocation=d.get("allocation") or "by_weight",
+            manual_payables=d.get("manual_payables") or None,
+            note=d.get("note") or "",
+            operator=request.user,
+        )
+        return Response(result, status=201)
+
+    @action(detail=False, methods=["get"], url_path="dispatchers")
+    def dispatchers(self, request):
+        """可分派的调度成员（供总调度分单选择）+ 当前用户是否总调度。"""
+        from django.contrib.auth import get_user_model
+
+        from .order_dispatch import is_chief_dispatcher
+
+        User = get_user_model()
+        members = User.objects.filter(is_active=True).order_by("nickname", "username")
+        me = request.user
+        return Response({
+            "is_chief": is_chief_dispatcher(me),
+            "me": {"id": str(me.id), "name": me.nickname or me.username},
+            "dispatchers": [
+                {"id": str(u.id), "name": u.nickname or u.username, "username": u.username}
+                for u in members[:200]
+            ],
+        })
 
     @action(detail=True, methods=["get"], url_path="dispatch-suggestion")
     def dispatch_suggestion(self, request, pk=None):
@@ -765,9 +1005,17 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         trailer = Vehicle.objects.filter(id=data["trailer"]).first() if data.get("trailer") else None
         co_ids = data.get("co_drivers") or []
         co_drivers = list(Driver.objects.filter(id__in=co_ids)) if co_ids else []
+        agreed = data.get("agreed_payable_amount")
         waybill = dispatch_order(
             order, dispatch_type=data.get("dispatch_type", ""), carrier=carrier,
-            vehicle=vehicle, driver=driver, trailer=trailer, co_drivers=co_drivers, operator=request.user,
+            vehicle=vehicle, driver=driver, trailer=trailer, co_drivers=co_drivers,
+            platform_name=(data.get("platform_name") or "").strip(),
+            platform_order_no=(data.get("platform_order_no") or "").strip(),
+            agreed_payable_amount=agreed if agreed not in (None, "") else None,
+            price_source=(data.get("price_source") or "").strip(),
+            quote_id=(data.get("quote_id") or "").strip(),
+            price_remark=(data.get("price_remark") or "").strip(),
+            operator=request.user,
         )
         return Response(WaybillSerializer(waybill).data, status=201)
 
@@ -827,6 +1075,63 @@ class OrderViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
 
         waybill = convert_order_to_waybill(self.get_object(), operator=request.user)
         return Response(WaybillSerializer(waybill).data, status=201)
+
+
+class DispatchBatchViewSet(ServerFilterMixin, OrgScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+    """派车批次台账：多单一次委托同一承运商的商务归集，展开为各票独立运单。"""
+
+    permission_classes = [IsAuthenticated]
+    search_fields = ["batch_no", "carrier__name", "platform_name"]
+    ordering_fields = [
+        "created_at", "batch_no", "status", "dispatch_type", "total_payable",
+        "order_count", "total_weight_ton", "carrier__name",
+    ]
+    ordering = ["-created_at"]
+    server_filter_fields = {
+        "batch_no": FilterField("text", "batch_no"),
+        "carrier": FilterField("text", "carrier__name"),
+        "channel": FilterField("enum", "dispatch_type"),
+        "status": FilterField("enum", "status"),
+        "allocation": FilterField("enum", "allocation"),
+        "payable": FilterField("number", "total_payable"),
+        "count": FilterField("number", "order_count"),
+        "weight": FilterField("number", "total_weight_ton"),
+        "created_at": FilterField("date", "created_at"),
+    }
+
+    def get_queryset(self):
+        from .models import DispatchBatch
+
+        qs = DispatchBatch.objects.select_related("carrier", "created_by").prefetch_related(
+            "waybills__customer", "waybills__order__customer", "waybills__expenses",
+        ).order_by("-created_at")
+        status = self.request.query_params.get("status")
+        if status:
+            qs = qs.filter(status=status)
+        carrier = self.request.query_params.get("carrier")
+        if carrier:
+            qs = qs.filter(carrier_id=carrier)
+        return qs
+
+    def get_serializer_class(self):
+        from .serializers import DispatchBatchDetailSerializer, DispatchBatchSerializer
+
+        return DispatchBatchDetailSerializer if self.action == "retrieve" else DispatchBatchSerializer
+
+    @action(detail=True, methods=["post"], url_path="statement")
+    def statement(self, request, pk=None):
+        """一键生成该批次的承运商应付对账单（归集批次内各运单应付流水）。"""
+        from apps.finance.serializers import StatementSerializer
+        from apps.finance.services import generate_statement_for_batch
+
+        batch = self.get_object()
+        already = bool(batch.statement_no)
+        stmt = generate_statement_for_batch(batch, external_total=request.data.get("external_total") or 0)
+        return Response({
+            "statement_no": stmt.statement_no,
+            "reused": already,
+            "statement": StatementSerializer(stmt).data,
+        }, status=201)
 
 
 class OrderTemplateViewSet(viewsets.ModelViewSet):
@@ -983,48 +1288,6 @@ class ExceptionViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
         )
         return Response(ExceptionSerializer(exc).data)
 
-    @action(detail=True, methods=["post"], url_path="ai-resolve")
-    def ai_resolve(self, request, pk=None):
-        """AI 自动化排查与异常预案生成：根据当前异常信息调用底层 LangGraph 大脑进行核验并建议。"""
-        from apps.ai.services.agent_runner import run_agent
-
-        from .services import record_exception_event
-
-        exc = self.get_object()
-        from_status = exc.status
-
-        # 将异常交由 AI 处理，使用结构化系统 Prompt 引导
-        prompt = (
-            f"请作为资深物流安全调度主管，审查并处理以下运输异常：\n"
-            f"异常类型: {exc.get_exception_type_display()} (级别: {exc.get_level_display()})\n"
-            f"运单关联: {exc.waybill.waybill_no if exc.waybill else '无'}\n"
-            f"详细描述: {exc.description}\n\n"
-            f"请执行以下动作：\n"
-            f"1. 调用相关工具查阅该运单的时效或详情（若适用）。\n"
-            f"2. 给出具体的业务定损建议、后续人工操作要求，以及降低该类风险的根本措施。\n"
-            f"3. 必须输出 '风险阻断' 的确认方案。"
-        )
-
-        # 调用核心 AI Agent 服务（固定 thread_id，复诊同一异常时可续接上下文）
-        agent_result = run_agent(prompt, thread_id=f"exception_{exc.id}")
-
-        # 回写 AI 的判断报告至异常工单的备忘录，并且推进状态到处理中
-        exc.resolution = f"🤖 [AI 智能诊断与预案]\n{agent_result['answer']}\n\n[原有处理]: {exc.resolution}"
-        if exc.status == ExceptionRecord.STATUS_PENDING:
-            exc.status = ExceptionRecord.STATUS_HANDLING
-        exc.save(update_fields=["resolution", "status", "updated_at"])
-        record_exception_event(
-            exc, "ai_resolve", actor=request.user, from_status=from_status, to_status=exc.status,
-            note=agent_result["answer"], tool_calls=agent_result.get("tool_calls"),
-        )
-
-        return Response({
-            "status": exc.status,
-            "ai_resolution": agent_result["answer"],
-            "tool_calls": agent_result["tool_calls"]
-        })
-
-
 class ReceiptViewSet(OrgScopedQuerysetMixin, viewsets.ModelViewSet):
     # 回单挂在运单上，按运单组织归属其数据范围
     org_field = "waybill__organization"
@@ -1147,6 +1410,15 @@ class IntegrationStatusView(APIView):
         return Response(integration_status())
 
 
+class LookupView(APIView):
+    """全局工作台检索：输入车牌/电话/单号/客户/承运商，返回精确答案卡 + 跨实体可跳转结果列表。"""
+
+    def get(self, request):
+        from .lookup import global_search
+
+        return Response(global_search(request.query_params.get("q", "")))
+
+
 class WorkbenchView(APIView):
     """个人工作台「我的待办」：按角色聚合当前用户最该处理的事项。"""
 
@@ -1160,11 +1432,11 @@ class WorkbenchView(APIView):
         today = timezone.localdate()
         open_exc = ~Q(status__in=[ExceptionRecord.STATUS_CLOSED, ExceptionRecord.STATUS_REJECTED])
 
-        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
+        my_pending = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments", "exceptions").filter(
             created_by=user, status=Order.STATUS_PENDING_CONFIRM
         )
         pool = Order.objects.filter(status=Order.STATUS_POOLED)
-        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments").filter(
+        pool_serialized = Order.objects.select_related("customer", "created_by", "claimed_by").prefetch_related("waybills", "cargo_items", "stops", "attachments", "exceptions").filter(
             status=Order.STATUS_POOLED
         ).order_by("-priority", "pooled_at")[:5]
         return Response({

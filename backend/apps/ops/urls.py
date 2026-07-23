@@ -2,9 +2,11 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    DispatchBatchViewSet,
     DriverReminderViewSet,
     ExceptionViewSet,
     IntegrationStatusView,
+    LookupView,
     OrderTemplateViewSet,
     OrderViewSet,
     PublicOrderIntakeView,
@@ -24,6 +26,7 @@ router.register("exceptions", ExceptionViewSet, basename="exception")
 router.register("reminder-templates", ReminderTemplateViewSet, basename="reminder-template")
 router.register("reminders", DriverReminderViewSet, basename="driver-reminder")
 router.register("receipts", ReceiptViewSet, basename="receipt")
+router.register("dispatch-batches", DispatchBatchViewSet, basename="dispatch-batch")
 
 def _driver_portal_urls():
     from .driver_portal import (
@@ -49,6 +52,7 @@ urlpatterns = [
     path("track", PublicTrackingView.as_view(), name="public-track"),
     path("public/orders", PublicOrderIntakeView.as_view(), name="public-order-intake"),
     path("workbench", WorkbenchView.as_view(), name="workbench"),
+    path("lookup", LookupView.as_view(), name="lookup"),
     path("integrations/status", IntegrationStatusView.as_view(), name="integration-status"),
     *_driver_portal_urls(),
 ]

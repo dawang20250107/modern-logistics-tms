@@ -7,7 +7,7 @@ import { fmtMoney, fmtNum } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
 import { PRICE_TYPE_LABEL } from "../api/types";
-import { EmptyState } from "../components/EmptyState";
+import { StateView } from "../components/StateView";
 
 const CHARGE_METHOD_LABEL: Record<string, string> = {
   tiered_weight: "按重量阶梯", flat: "整车一口价", per_volume: "按方计费",
@@ -72,8 +72,8 @@ export function PricingPage() {
   });
   const patch = useMutation({
     mutationFn: (v: { id: string; is_active: boolean }) => apiPatch(`/finance/pricing-rules/${v.id}`, { is_active: v.is_active }),
-    onSuccess: invalidate,
-    meta: { silent: true },
+    onSuccess: (_d, v) => { invalidate(); toast.success(v.is_active ? "规则已启用" : "规则已停用"); },
+    onError: (e: Error) => toast.error(e.message || "切换失败，请重试"),
   });
   const remove = useMutation({
     mutationFn: (id: string) => apiDelete(`/finance/pricing-rules/${id}`),
@@ -149,7 +149,7 @@ export function PricingPage() {
           </div>
         </div>
         <div className="form-actions">
-          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
+          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
             {editing ? "保存修改" : "新增规则"}
           </button>
           {editing && <button className="btn-ghost" onClick={reset}>取消编辑</button>}
@@ -164,11 +164,13 @@ export function PricingPage() {
           <button className={`chip${typeFilter === "cost" ? " chip-on" : ""}`} onClick={() => setTypeFilter("cost")}>支出价</button>
         </div>
         {rules.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
+          <StateView kind="loading" compact />
+        ) : rules.isError ? (
+          <StateView kind="error" hint="合同价目录暂时无法加载。" onRetry={() => rules.refetch()} />
         ) : items.length === 0 ? (
-          <EmptyState title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
+          <StateView kind="empty" title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
         ) : (
-          <table className="table">
+          <div className="table-wrap"><table className="table pricing-table">
             <thead>
               <tr><th>合同规则名称</th><th>方向</th><th>计费方式</th><th>定向客户</th><th>定向承运商</th><th>线路路由</th><th>起步/固定价</th><th>阶梯价层数</th><th>重抛比</th><th>燃油金</th><th>启用</th><th>操作</th></tr>
             </thead>
@@ -177,12 +179,12 @@ export function PricingPage() {
                 <tr key={r.id} style={editing === r.id ? { background: "var(--brand-light)" } : {}}>
                   <td style={{ fontWeight: "bold" }}>{r.name}</td>
                   <td><span className={`tag tag-${r.price_type === "income" ? "low" : "medium"}`}>{r.price_type === "income" ? "应收" : "应付"}</span></td>
-                  <td><span className="tag" style={{ background: "rgba(37,99,235,0.08)", color: "var(--brand)" }}>{CHARGE_METHOD_LABEL[r.charge_method] ?? r.charge_method}</span></td>
+                  <td><span className="tag tag-info">{CHARGE_METHOD_LABEL[r.charge_method] ?? r.charge_method}</span></td>
                   <td>{r.customer_name || "全局通用"}</td>
                   <td>{r.carrier_name || "全局通用"}</td>
                   <td>{r.route_name || "全局通用"}</td>
                   <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{fmtMoney(r.base_price)}</td>
-                  <td>{r.tier_prices && r.tier_prices.length > 0 ? <span className="tag" style={{ background: "rgba(0,0,0,0.05)" }}>{r.tier_prices.length} 级</span> : "—"}</td>
+                  <td>{r.tier_prices && r.tier_prices.length > 0 ? <span className="tag tag-none">{r.tier_prices.length} 级</span> : "—"}</td>
                   <td>{r.volumetric_factor}</td>
                   <td>{Number(r.fuel_surcharge_pct) > 0 ? <span className="tag tag-high">+{fmtNum(Number(r.fuel_surcharge_pct) * 100, 1)}%</span> : "—"}</td>
                   <td>
@@ -200,7 +202,7 @@ export function PricingPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </div>

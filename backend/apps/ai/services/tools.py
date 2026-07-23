@@ -431,49 +431,6 @@ def query_metric(arguments):
     }
 
 
-_EXCEPTION_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "waybill_no": {"type": "string", "description": "关联运单号（若有）"},
-        "exception_type": {"type": "string", "description": "异常类型，如 'deviation', 'temperature', 'fuel'"}
-    }
-}
-
-
-@tool(
-    "logistics.exception_handler",
-    "调阅轨迹与业务规则库，对突发异常（偏航、温控、油损等）进行诊断，输出处理建议与防范措施。",
-    _EXCEPTION_SCHEMA,
-)
-def exception_handler(arguments):
-    waybill_no = arguments.get("waybill_no")
-    exc_type = arguments.get("exception_type")
-    
-    # 模拟 AI 对轨迹或车辆配置的检索
-    diagnosis = f"系统已对单号 {waybill_no} 的 {exc_type} 异常进行了深度回溯："
-    mitigation = ""
-    
-    if exc_type == "deviation":
-        diagnosis += "发现车辆偏离了主干道 G2 高速，进入了国道路段。"
-        mitigation = "1. 已验证该路段为非限行区域。\n2. 已下发微信通知询问司机绕行原因（避堵/加油等）。\n3. 建议调整该单 ETA 时间 +45 分钟以免违约。"
-    elif exc_type == "temperature":
-        diagnosis += "冷机数据帧显示后厢温度在过去 15 分钟内连续飙升 8℃。"
-        mitigation = "1. 货品属高危生鲜制剂，已触发一级警报！\n2. 建议立即致电司机（不要发短信），要求靠边停车检查冷机门缝是否闭合。\n3. 联系最近的服务站待命。"
-    elif exc_type == "fuel":
-        diagnosis += "液位传感器检出 5 分钟内油量急降 15%。"
-        mitigation = "1. 高度怀疑遭遇“油耗子”盗油或严重漏油。\n2. 请结合车辆 GPS 定位点，立刻让司机检查周围有无异常人员停留。\n3. 在系统中记录此次油损定损单。"
-    else:
-        diagnosis += "常规运行异常。"
-        mitigation = "请联系司机核实情况后跟进处理。"
-
-    return {
-        "tool_name": "logistics.exception_handler",
-        "diagnosis": diagnosis,
-        "mitigation_plan": mitigation,
-        "summary": "AI 已完成异常环境诊断与核查，详见 mitigation_plan 字段。",
-    }
-
-
 _CONSOLIDATION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -501,8 +458,8 @@ def intelligent_consolidation(arguments):
     res = consolidate_and_group_orders(orders)
 
     summary = (
-        f"AI 智能拼单配载引擎扫描了在池订单，成功生成 {res['consolidated_count']} 个拼载推荐，"
-        f"可实现大车同向合并，预计可节省总运费成本 {res['estimated_total_saving']} 元。"
+        f"拼单配载引擎扫描了在池订单，生成 {res['consolidated_count']} 个同向合并推荐；"
+        f"按运价估算模型测算，预计可节省运费约 {res['estimated_total_saving']} 元（估算值，以实际询价为准）。"
     )
 
     return {

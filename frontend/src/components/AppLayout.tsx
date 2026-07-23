@@ -1,55 +1,136 @@
-import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { hasPerm, useAuth } from "../auth/auth";
+import { getTheme, toggleTheme, type Theme } from "../api/theme";
+import { useModalA11y } from "../api/useModalA11y";
 import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
-  IconTower, IconGrid, IconDatabase, IconMapPin, IconTruck, IconAlert,
-  IconGitBranch, IconReceipt, IconCreditCard, IconShield, IconBox, IconMoney,
+  IconTower, IconGrid, IconDatabase, IconTruck,
+  IconReceipt, IconCreditCard, IconShield, IconFileText,
 } from "./Icons";
 
-type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; perm?: string };
+type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string };
 type NavGroup = { title: string; items: NavItem[] };
+const MOBILE_NAV_MEDIA = "(max-width: 900px)";
 
+// 工作流导向导航：驾驶舱纵览 → 客服接单 → 调度派单 → 订单流转，
+// 资源/计价/对账为支撑，管理后台聚合运营分析与系统管理等次级入口。
 const NAV_GROUPS: NavGroup[] = [
   {
-    title: "运营",
+    title: "工作台",
     items: [
-      { to: "/", label: "运营总览", icon: <IconTower size={18} />, end: true },
-      { to: "/dispatch-board", label: "调度台", icon: <IconGrid size={18} /> },
-      { to: "/waybills", label: "运单管理", icon: <IconDatabase size={18} /> },
-      { to: "/dashboard", label: "经营看板", icon: <IconMoney size={18} />, perm: "analytics.view" },
+      { to: "/", label: "运输驾驶舱", icon: <IconTower size={18} />, end: true },
+      { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} /> },
+      { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} /> },
+      { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} /> },
     ],
   },
   {
-    title: "资源与合规",
+    title: "资源与结算",
     items: [
       { to: "/fleet", label: "资源库", icon: <IconTruck size={18} /> },
       { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} /> },
-      { to: "/monitor", label: "在途监控", icon: <IconMapPin size={18} />, perm: "telematics.view" },
-      { to: "/alerts", label: "安全预警", icon: <IconAlert size={18} />, perm: "telematics.view" },
-      { to: "/exceptions", label: "异常处置", icon: <IconGitBranch size={18} /> },
-    ],
-  },
-  {
-    title: "结算",
-    items: [
       { to: "/reconciliation", label: "对账中心", icon: <IconReceipt size={18} /> },
     ],
   },
   {
+    // 组织 / 用户 / 权限 / 审计——仅超级管理员可见可进
     title: "系统",
     items: [
-      { to: "/org", label: "组织与权限", icon: <IconBox size={18} />, perm: "org.view" },
-      { to: "/audit", label: "审计日志", icon: <IconShield size={18} />, adminOnly: true },
+      { to: "/admin", label: "管理后台", icon: <IconShield size={18} />, superOnly: true },
     ],
   },
 ];
 
+
+// 管理后台内的页面 + 个人中心：不在侧栏，但需要正确的顶栏标题
+const SUB_TITLES: Record<string, string> = {
+  "/org": "组织与权限", "/audit": "审计日志", "/profile": "个人中心",
+};
+
+function currentPageTitle(pathname: string) {
+  const flat = NAV_GROUPS.flatMap((group) => group.items);
+  const exact = flat.find((item) => item.to === pathname || (item.end && pathname === "/"));
+  if (exact) return exact.label;
+  if (SUB_TITLES[pathname]) return SUB_TITLES[pathname];
+  if (pathname.startsWith("/orders/")) return "订单详情";
+  if (pathname.startsWith("/waybills/")) return "运单详情";
+  return "运输驾驶舱";
+}
+
+// 日/夜主题切换（亮为主 + 暗可切换）
+function ThemeToggle() {
+  const [theme, setThemeState] = useState<Theme>(() => getTheme());
+  const flip = () => setThemeState(toggleTheme());
+  const dark = theme === "dark";
+  return (
+    <button type="button" className="theme-toggle" onClick={flip} title={dark ? "切换到亮色" : "切换到暗色"} aria-label={dark ? "切换到亮色" : "切换到暗色"} aria-pressed={dark}>
+      {dark ? (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="4.2" /><path d="M12 2v2.4M12 19.6V22M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2 12h2.4M19.6 12H22M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" />
+        </svg>
+      ) : (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 export function AppLayout() {
   const { user, logout } = useAuth();
+  const { pathname } = useLocation();
+  const pageTitle = currentPageTitle(pathname);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("nav_collapsed") === "1");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(() => window.matchMedia(MOBILE_NAV_MEDIA).matches);
+  const contentRef = useRef<HTMLElement>(null);
+  const sideRef = useRef<HTMLElement>(null);
+  const mobileToggleRef = useRef<HTMLButtonElement>(null);
+  const restoreMobileToggleRef = useRef(false);
+  const closeMobileNav = useCallback(() => {
+    restoreMobileToggleRef.current = true;
+    setMobileNavOpen(false);
+  }, []);
+
+  useModalA11y(mobileViewport && mobileNavOpen, sideRef, closeMobileNav);
+
+  useEffect(() => {
+    if (mobileNavOpen || !restoreMobileToggleRef.current) return;
+    restoreMobileToggleRef.current = false;
+    requestAnimationFrame(() => mobileToggleRef.current?.focus({ preventScroll: true }));
+  }, [mobileNavOpen]);
+
+  // 切页回到顶部：固定布局下主滚动容器是 .content，路由变化时复位，避免落在上一页的滚动位置
+  useEffect(() => {
+    restoreMobileToggleRef.current = false;
+    contentRef.current?.scrollTo({ top: 0, left: 0 });
+    setMobileNavOpen(false);
+    contentRef.current?.focus({ preventScroll: true });
+  }, [pathname]);
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_NAV_MEDIA);
+    const onChange = (event: MediaQueryListEvent) => {
+      setMobileViewport(event.matches);
+      if (!event.matches) setMobileNavOpen(false);
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  // 数字输入防误滚：聚焦 number 输入时滚轮不改数值（数据录入常见困扰），改为滚动页面
+  useEffect(() => {
+    const onWheel = (event: WheelEvent) => {
+      const el = event.target as HTMLInputElement | null;
+      if (el?.tagName === "INPUT" && el.type === "number" && document.activeElement === el) el.blur();
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, []);
 
   const toggleCollapsed = () => {
     setCollapsed((v) => {
@@ -59,15 +140,37 @@ export function AppLayout() {
     });
   };
 
+  const toggleNavigation = () => {
+    if (mobileViewport) {
+      setMobileNavOpen((open) => !open);
+      return;
+    }
+    toggleCollapsed();
+  };
+
+  const navigationExpanded = mobileViewport ? mobileNavOpen : !collapsed;
+  const navigationToggleLabel = mobileViewport
+    ? (mobileNavOpen ? "关闭主导航" : "打开主导航")
+    : (collapsed ? "展开导航" : "收起导航");
+
   const canSee = (item: NavItem) => {
+    if (item.superOnly && !user?.is_superuser) return false;
     if (item.adminOnly && !(user?.is_staff || user?.is_superuser)) return false;
     if (item.perm && !hasPerm(user, item.perm)) return false;
     return true;
   };
 
   return (
-    <div className={`app${collapsed ? " nav-collapsed" : ""}`}>
-      <aside className="side">
+    <div className={`app${collapsed ? " nav-collapsed" : ""}${mobileNavOpen ? " mobile-nav-open" : ""}`}>
+      <aside
+        ref={sideRef}
+        id="app-navigation"
+        className="side"
+        aria-label="主导航"
+        role={mobileViewport ? "dialog" : undefined}
+        aria-modal={mobileViewport && mobileNavOpen ? true : undefined}
+        aria-hidden={mobileViewport && !mobileNavOpen ? true : undefined}
+      >
         <div className="brand">
           <span className="brand-mark">智</span>
           <span className="brand-text">智运 TMS<span className="brand-sub">运输管理系统</span></span>
@@ -86,6 +189,7 @@ export function AppLayout() {
                     end={item.end}
                     title={item.label}
                     className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+                    onClick={() => { restoreMobileToggleRef.current = false; setMobileNavOpen(false); }}
                   >
                     <span className="nav-icon">{item.icon}</span>
                     <span className="nav-label">{item.label}</span>
@@ -95,29 +199,52 @@ export function AppLayout() {
             );
           })}
         </nav>
-        <button className="nav-collapse-btn" onClick={toggleCollapsed} title={collapsed ? "展开导航" : "收起导航"}>
+        <button type="button" className="nav-collapse-btn" onClick={toggleNavigation} title={navigationToggleLabel} aria-controls="app-navigation" aria-expanded={navigationExpanded}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {collapsed ? <path d="M9 18l6-6-6-6" /> : <path d="M15 18l-6-6 6-6" />}
+            {navigationExpanded ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
           </svg>
-          <span className="nav-label">收起导航</span>
+          <span className="nav-label">{navigationExpanded ? "收起导航" : "展开导航"}</span>
         </button>
       </aside>
-      <main className="main">
+      {mobileNavOpen && (
+        <button type="button" className="nav-backdrop" aria-label="关闭主导航" onClick={closeMobileNav} />
+      )}
+      <main className="main" inert={mobileNavOpen ? true : undefined} aria-hidden={mobileNavOpen ? true : undefined}>
         <header className="topbar">
-          <button className="topbar-toggle" onClick={toggleCollapsed} aria-label="切换导航" title="切换导航">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
+          <div className="topbar-main">
+            <button
+              ref={mobileToggleRef}
+              type="button"
+              className="topbar-toggle"
+              onClick={toggleNavigation}
+              aria-label={navigationToggleLabel}
+              aria-controls="app-navigation"
+              aria-expanded={navigationExpanded}
+              title={navigationToggleLabel}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+            <div className="topbar-title">
+              <span className="topbar-title-text">{pageTitle}</span>
+              <span className="sub">B2B 外协承运协同</span>
+            </div>
+            <span className="topbar-shortcut"><kbd>Ctrl</kbd><kbd>K</kbd>查单 / 派单</span>
+          </div>
           <div className="topbar-user">
+            <ThemeToggle />
             <NotificationBell />
-            <span>{user?.nickname || user?.username}</span>
-            <button className="btn-ghost" onClick={logout}>
+            <NavLink to="/profile" className="topbar-account" title="个人中心">
+              <span className="topbar-avatar">{((user?.nickname || user?.username || "?").trim()[0] ?? "?").toUpperCase()}</span>
+              <span className="topbar-account-name">{user?.nickname || user?.username}</span>
+            </NavLink>
+            <button type="button" className="btn-ghost" onClick={logout}>
               退出
             </button>
           </div>
         </header>
-        <section className="content">
+        <section className="content" ref={contentRef} tabIndex={-1}>
           <Outlet />
         </section>
       </main>

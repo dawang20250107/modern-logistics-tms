@@ -1,12 +1,31 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { apiGet, apiPost, clearTokens, hasToken, setTokens } from "../api/client";
-import type { CurrentUser } from "../api/types";
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, clearTokens, hasToken, setTokens } from "../api/client";
+import type { CurrentUser, UserPreferences } from "../api/types";
+
+export interface RegisterInput {
+  username: string;
+  nickname?: string;
+  phone?: string;
+  password: string;
+}
+export interface ProfileInput {
+  nickname?: string;
+  phone?: string;
+  email?: string;
+  preferences?: UserPreferences;
+}
 
 interface AuthState {
   user: CurrentUser | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<CurrentUser>;
+  register: (input: RegisterInput) => Promise<CurrentUser>;
+  updateProfile: (input: ProfileInput) => Promise<void>;
+  changePassword: (oldPassword: string, newPassword: string) => Promise<void>;
+  uploadAvatar: (file: File) => Promise<void>;
+  removeAvatar: () => Promise<void>;
+  refreshMe: () => Promise<void>;
   logout: () => void;
 }
 
@@ -38,12 +57,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  async function login(username: string, password: string): Promise<void> {
+  async function login(username: string, password: string): Promise<CurrentUser> {
     const tokens = await apiPost<{ access: string; refresh: string }>("/auth/token", {
       username,
       password,
     });
     setTokens(tokens.access, tokens.refresh);
+    const me = await apiGet<CurrentUser>("/auth/me");
+    setUser(me);
+    return me;
+  }
+
+  async function register(input: RegisterInput): Promise<CurrentUser> {
+    const tokens = await apiPost<{ access: string; refresh: string }>("/auth/register", input);
+    setTokens(tokens.access, tokens.refresh);
+    const me = await apiGet<CurrentUser>("/auth/me");
+    setUser(me);
+    return me;
+  }
+
+  async function uploadAvatar(file: File): Promise<void> {
+    const fd = new FormData();
+    fd.append("avatar", file);
+    await apiUpload("/auth/me/avatar", fd);
+    await refreshMe();
+  }
+
+  async function removeAvatar(): Promise<void> {
+    await apiDelete("/auth/me/avatar");
+    await refreshMe();
+  }
+
+  async function updateProfile(input: ProfileInput): Promise<void> {
+    const me = await apiPatch<CurrentUser>("/auth/me", input);
+    setUser(me);
+  }
+
+  async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    await apiPost("/auth/change-password", { old_password: oldPassword, new_password: newPassword });
+  }
+
+  async function refreshMe(): Promise<void> {
     const me = await apiGet<CurrentUser>("/auth/me");
     setUser(me);
   }
@@ -53,7 +107,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  const value = useMemo<AuthState>(() => ({ user, loading, login, logout }), [user, loading]);
+  const value = useMemo<AuthState>(
+    () => ({ user, loading, login, register, updateProfile, changePassword, uploadAvatar, removeAvatar, refreshMe, logout }),
+    [user, loading],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

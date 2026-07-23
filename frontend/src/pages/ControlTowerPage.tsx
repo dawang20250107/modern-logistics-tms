@@ -1,218 +1,284 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { apiGet, apiPost } from "../api/client";
-import type { ExpiringCredentials, Paginated, QueryWaybillResult, Waybill } from "../api/types";
+import { apiGet } from "../api/client";
+import { fmtMoney } from "../api/format";
+import type { CredentialRow, ExpiringCredentials, Order, StatementOverview } from "../api/types";
+import { ORDER_STATUS_LABEL, STATUS_LABEL } from "../api/types";
 import { useEventStream } from "../api/useEventStream";
-import { IconSparkles, IconTerminal, IconSearch } from "../components/Icons";
+import { hasPerm, useAuth } from "../auth/auth";
+import { BusinessMetrics } from "../components/BusinessMetrics";
+import { StateView } from "../components/StateView";
+import {
+  IconArrowRight, IconBox, IconMoney, IconReceipt, IconShield, IconTruck, IconWarning,
+} from "../components/Icons";
 
-const RISK_LABEL: Record<string, string> = { high: "高", medium: "中", low: "低", none: "无" };
+// 驾驶舱日期联动：驱动经营指标仪表（近 N 天）
+const CT_PERIODS: { days: number; label: string }[] = [
+  { days: 7, label: "近7天" },
+  { days: 30, label: "近30天" },
+  { days: 90, label: "近90天" },
+  { days: 365, label: "近1年" },
+];
 
-const EVT_LABEL: Record<string, string> = {
-  risk: "风险", alert: "报警", order_pooled: "进池", order_claimed: "认领",
-  order_dispatched: "派单", waybill_status: "运单", waybill_split: "拆单", waybill_merge: "合单",
-  receipt_ocr: "回单", agent_suggestions: "智能建议", notification: "通知", order_sla: "时效",
+// 运单生命周期分段（顺序 + 配色），用于「运单状态分布」条
+const WB_PIPELINE: { key: string; color: string }[] = [
+  { key: "pending_dispatch", color: "var(--muted)" },
+  { key: "dispatched", color: "var(--blue)" },
+  { key: "loaded", color: "var(--blue)" },
+  { key: "departed", color: "var(--accent)" },
+  { key: "in_transit", color: "var(--accent-2)" },
+  { key: "arrived", color: "var(--accent-cyan)" },
+  { key: "signed", color: "var(--green)" },
+  { key: "delivered", color: "var(--green)" },
+  { key: "settled", color: "var(--green)" },
+];
+const WB_ACTIVE = ["dispatched", "loaded", "departed", "in_transit", "arrived"];
+
+// 大额金额紧凑显示（¥万/¥亿），驾驶舱磁贴用；带 ¥ 前缀与其它金额风格统一
+function fmtWan(v: number): string {
+  const n = Math.abs(v);
+  if (n >= 1e8) return `¥${(v / 1e8).toFixed(2)}亿`;
+  if (n >= 1e4) return `¥${(v / 1e4).toFixed(1)}万`;
+  return fmtMoney(v);
+}
+
+type WbStats = { by_status: Record<string, number>; total: number };
+type Funnel = { by_status: Record<string, number>; by_channel: Record<string, number>; today_created: number; total: number };
+type Workbench = {
+  common: { unread_notifications: number; my_open_exceptions: number };
+  cs: { my_orders_pending_confirm: number; my_orders_today: number; recent_pending: Order[] };
+  dispatch: { pool_count: number; my_claimed: number; pool_top: Order[] };
+  finance: { draft_statements: number };
 };
-function evtText(e: { data?: Record<string, unknown> }): string {
-  const d = (e.data ?? {}) as Record<string, string | number>;
-  if (d.waybill_no) return `运单 ${d.waybill_no}${d.risk_level ? " 风险变化" : ""}`;
-  if (d.order_no) return `订单 ${d.order_no}`;
-  return "有新动态";
-}
 
-function Kpi({ label, value, tone }: { label: string; value: number; tone?: string }) {
-  return (
-    <div className={`kpi${tone ? ` kpi-${tone}` : ""}`}>
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-label">{label}</div>
-    </div>
-  );
-}
+const SEV_TONE: Record<string, string> = { expired: "high", critical: "medium", warning: "low" };
 
 export function ControlTowerPage() {
   const queryClient = useQueryClient();
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
+  const { user } = useAuth();
+  const [days, setDays] = useState(30);
 
-  const waybills = useQuery({
-    queryKey: ["waybills", "all"],
-    queryFn: () => apiGet<Paginated<Waybill>>("/waybills?page_size=100"),
-  });
+  const stats = useQuery({ queryKey: ["waybills", "stats"], queryFn: () => apiGet<WbStats>("/waybills/stats"), refetchInterval: 30000 });
+  const funnel = useQuery({ queryKey: ["orders", "funnel"], queryFn: () => apiGet<Funnel>("/orders/funnel"), refetchInterval: 30000 });
+  const wb = useQuery({ queryKey: ["workbench"], queryFn: () => apiGet<Workbench>("/workbench"), refetchInterval: 30000 });
+  const fin = useQuery({ queryKey: ["statement-overview"], queryFn: () => apiGet<StatementOverview>("/finance/statement-overview"), refetchInterval: 60000 });
+  const compliance = useQuery({ queryKey: ["compliance-mini"], queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30"), refetchInterval: 60000 });
 
   // 实时事件：到达即刷新看板
-  const events = useEventStream(() => queryClient.invalidateQueries({ queryKey: ["waybills"] }));
-
-  const ask = useMutation({
-    mutationFn: (q: string) => apiPost<QueryWaybillResult>("/ai/query-waybill", { query: q }),
-    onSuccess: (data) => setAnswer(data.answer),
+  useEventStream(() => {
+    queryClient.invalidateQueries({ queryKey: ["waybills"] });
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
   });
 
-  const wb = useQuery({
-    queryKey: ["workbench"],
-    queryFn: () => apiGet<{
-      common: { unread_notifications: number; my_open_exceptions: number };
-      cs: { my_orders_pending_confirm: number; my_orders_today: number };
-      dispatch: { pool_count: number; my_claimed: number };
-      finance: { draft_statements: number };
-    }>("/workbench"),
-    refetchInterval: 30000,
-  });
+  const primaryQueries = [stats, funnel, wb];
+  if (primaryQueries.some((q) => q.isLoading)) return <StateView kind="loading" />;
+  if (primaryQueries.some((q) => q.isError)) {
+    return (
+      <StateView
+        kind="error"
+        hint="驾驶舱核心数据暂时无法同步，请重试。"
+        onRetry={() => primaryQueries.forEach((q) => q.refetch())}
+      />
+    );
+  }
 
-  const compliance = useQuery({
-    queryKey: ["compliance-mini"],
-    queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30"),
-    refetchInterval: 60000,
-  });
+  const byStatus = stats.data?.by_status ?? {};
+  const wbTotal = stats.data?.total ?? 0;
+  const inTransit = WB_ACTIVE.reduce((s, k) => s + (byStatus[k] ?? 0), 0);
+  const fb = funnel.data?.by_status ?? {};
+  const pooled = (fb.pooled ?? 0) + (fb.dispatching ?? 0);
+  const ov = fin.data;
+  const credSum = compliance.data?.summary;
+  const credAlert = (credSum?.expired ?? 0) + (credSum?.critical ?? 0);
 
-  const items = waybills.data?.items ?? [];
-  const risky = items.filter((w) => w.risk_level === "high" || w.risk_level === "medium");
-  const pendingReceipt = items.filter((w) => w.receipt_status === "pending");
-  const inTransit = items.filter((w) => w.status === "in_transit");
+  // 顶部指挥磁贴（全部真实服务端聚合，点击直达对应工作台）
+  const hero = [
+    { key: "today", icon: <IconBox size={17} />, label: "今日建单", value: String(funnel.data?.today_created ?? 0), sub: `订单总量 ${funnel.data?.total ?? 0}`, tone: "", to: "/intake" },
+    { key: "transit", icon: <IconTruck size={17} />, label: "在途运单", value: String(inTransit), sub: `运单总量 ${wbTotal}`, tone: "blue", to: "/waybills" },
+    { key: "pool", icon: <IconArrowRight size={17} />, label: "池中待派", value: String(pooled), sub: pooled > 0 ? "去调度派单 →" : "暂无待派", tone: "amber", to: "/dispatch-board" },
+    { key: "ar", icon: <IconMoney size={17} />, label: "应收敞口", value: fin.isLoading ? "…" : fin.isError ? "—" : fmtWan(ov?.receivable.outstanding ?? 0), sub: fin.isLoading ? "正在同步财务数据" : fin.isError ? "财务数据暂不可用" : `应收单据 ${ov?.receivable.count ?? 0} 张`, tone: "grad", to: "/reconciliation" },
+    { key: "overdue", icon: <IconWarning size={17} />, label: "逾期应收", value: fin.isLoading ? "…" : fin.isError ? "—" : fmtWan(ov?.overdue.receivable.amount ?? 0), sub: fin.isLoading ? "正在同步财务数据" : fin.isError ? "财务数据暂不可用" : `${ov?.overdue.receivable.count ?? 0} 张逾期`, tone: (ov?.overdue.receivable.amount ?? 0) > 0 ? "red" : "", to: "/reconciliation" },
+    { key: "cred", icon: <IconShield size={17} />, label: "证件预警", value: compliance.isLoading ? "…" : compliance.isError ? "—" : String(credAlert), sub: compliance.isLoading ? "正在同步证件数据" : compliance.isError ? "证件数据暂不可用" : credAlert > 0 ? `${credSum?.expired ?? 0} 过期 · ${credSum?.critical ?? 0} 紧急` : "30 天内无临期", tone: credAlert > 0 ? "red" : "", to: "/fleet" },
+  ];
+
+  // 运单状态分布分段
+  const segTotal = WB_PIPELINE.reduce((s, p) => s + (byStatus[p.key] ?? 0), 0) || 1;
+  const segments = WB_PIPELINE.filter((p) => (byStatus[p.key] ?? 0) > 0);
+
+  // 我的待办（可操作清单）：先计数快捷，再列最近待确认订单直达
   const w = wb.data;
-  const todos = w ? [
-    { label: "待确认订单", value: w.cs.my_orders_pending_confirm, to: "/intake", tone: "amber" },
-    { label: "订单池待派", value: w.dispatch.pool_count, to: "/dispatch-board", tone: "blue" },
-    { label: "我认领的", value: w.dispatch.my_claimed, to: "/dispatch-board", tone: "" },
+  const todoChips = w ? [
+    { label: "待确认", value: w.cs.my_orders_pending_confirm, to: "/intake", tone: "amber" },
+    { label: "我认领", value: w.dispatch.my_claimed, to: "/dispatch-board", tone: "blue" },
     { label: "待对账", value: w.finance.draft_statements, to: "/reconciliation", tone: "" },
-    { label: "我的异常", value: w.common.my_open_exceptions, to: "/exceptions", tone: "red" },
-    { label: "证件预警", value: (compliance.data?.summary.expired ?? 0) + (compliance.data?.summary.critical ?? 0), to: "/fleet", tone: "red" },
+    { label: "我的异常", value: w.common.my_open_exceptions, to: "/dispatch-board", tone: "red" },
   ].filter((t) => t.value > 0) : [];
+  // 首屏待办共用 4 行预算，避免任务卡无限增长把财务敞口推出视口。
+  const pendingList = (w?.cs.recent_pending ?? []).slice(0, 3);
+  const poolList = (w?.dispatch.pool_top ?? []).slice(0, Math.max(0, 4 - pendingList.length));
+
+  const credRows: CredentialRow[] = [
+    ...(compliance.data?.vehicles ?? []),
+    ...(compliance.data?.drivers ?? []),
+  ].sort((a, b) => a.days_left - b.days_left).slice(0, 5);
+
+  const topAr = (ov?.top_receivable ?? []).slice(0, 4);
+  const topArMax = Math.max(1, ...topAr.map((t) => t.outstanding));
 
   return (
-    <div className="stack">
-      {todos.length > 0 && (
-        <div className="panel">
-          <div className="panel-head">我的待办</div>
-          <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: `repeat(${Math.min(todos.length, 6)}, 1fr)` }}>
-            {todos.map((t) => (
-              <Link key={t.label} to={t.to} className={`kpi${t.tone ? ` kpi-${t.tone}` : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
-                <div className="kpi-value">{t.value}</div>
-                <div className="kpi-label">{t.label} →</div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="kpi-row">
-        <Kpi label="运单总数" value={items.length} />
-        <Kpi label="运输中" value={inTransit.length} tone="blue" />
-        <Kpi label="风险运单" value={risky.length} tone="red" />
-        <Kpi label="待回单" value={pendingReceipt.length} tone="amber" />
+    <div className="stack ctower">
+      {/* 指挥磁贴带 */}
+      <div className="ct-hero">
+        {hero.map((h) => (
+          <Link key={h.key} to={h.to} className={`kpi ct-tile${h.tone && h.tone !== "grad" ? ` kpi-${h.tone}` : ""}`}>
+            <div className="ct-tile-top">
+              <span className="ct-tile-ic">{h.icon}</span>
+              <span className="kpi-label">{h.label}</span>
+            </div>
+            <div className={`kpi-value${h.tone === "grad" ? "" : ""}`}>{h.value}</div>
+            <div className="ct-tile-sub">{h.sub}</div>
+          </Link>
+        ))}
       </div>
 
       <div className="ct-grid">
-        <div className="panel">
-          <div className="panel-head">
-            在途运单
-            <Link to="/monitor" className="link small">在途监控 →</Link>
+        {/* 主列 */}
+        <div className="stack" style={{ minWidth: 0 }}>
+          {/* 运单状态分布 */}
+          <div className="panel">
+            <div className="panel-head">
+              运单状态分布
+              <Link className="link small" to="/waybills">全部运单 →</Link>
+            </div>
+            <div className="ct-dist">
+              {wbTotal === 0 ? (
+                <div className="muted small" style={{ padding: "10px 2px" }}>暂无在册运单。</div>
+              ) : (
+                <>
+                  <div className="ct-bar" role="img" aria-label="运单状态分布">
+                    {segments.map((p) => {
+                      const n = byStatus[p.key] ?? 0;
+                      return <span key={p.key} className="ct-bar-seg" style={{ width: `${(n / segTotal) * 100}%`, background: p.color }} title={`${STATUS_LABEL[p.key] ?? p.key} ${n}`} />;
+                    })}
+                  </div>
+                  <div className="ct-legend">
+                    {segments.map((p) => (
+                      <span key={p.key} className="ct-legend-item">
+                        <span className="ct-dot" style={{ background: p.color }} />
+                        {STATUS_LABEL[p.key] ?? p.key}
+                        <b>{byStatus[p.key] ?? 0}</b>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-          {inTransit.length === 0 ? (
-            <div className="muted small" style={{ padding: 16 }}>暂无在途运单。</div>
-          ) : (
-            <table className="table">
-              <thead><tr><th>运单号</th><th>线路</th><th>风险</th><th className="num">ETA 偏移</th></tr></thead>
-              <tbody>
-                {inTransit.slice(0, 10).map((wb2) => (
-                  <tr key={wb2.id}>
-                    <td><Link className="link mono" to={`/waybills/${wb2.waybill_no}`}>{wb2.waybill_no}</Link></td>
-                    <td>{wb2.origin} → {wb2.destination}</td>
-                    <td><span className={`tag tag-${wb2.risk_level}`}>{RISK_LABEL[wb2.risk_level]}</span></td>
-                    <td className="num" style={{ color: wb2.eta_drift_minutes > 0 ? "var(--red)" : "var(--muted)" }}>
-                      {wb2.eta_drift_minutes > 0 ? `+${wb2.eta_drift_minutes}` : wb2.eta_drift_minutes} 分
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+          {/* 经营指标（有权限才显示） */}
+          {hasPerm(user, "analytics.view") && (
+            <>
+              <div className="section-label ct-metrics-head">
+                经营指标
+                <div className="seg-toggle ct-period">
+                  {CT_PERIODS.map((p) => (
+                    <button key={p.days} className={`seg-btn${days === p.days ? " on" : ""}`} onClick={() => setDays(p.days)}>{p.label}</button>
+                  ))}
+                </div>
+              </div>
+              <BusinessMetrics days={days} />
+            </>
           )}
         </div>
 
-        <div className="panel">
-          <div className="panel-head">最近动态</div>
-          {events.length === 0 ? (
-            <div className="muted small" style={{ padding: 16 }}>已连接，暂无新动态。</div>
-          ) : (
-            <ul className="event-feed">
-              {events.slice(0, 12).map((e, i) => (
-                <li key={`${e.t}-${i}`}>
-                  <span className={`evt evt-${e.type}`}>{EVT_LABEL[e.type] ?? "动态"}</span>
-                  <span className="small">{evtText(e)}</span>
-                </li>
+        {/* 侧列 */}
+        <div className="stack ct-side">
+          {/* 我的待办 */}
+          <div className="panel">
+            <div className="panel-head">我的待办</div>
+            <div className="ct-side-body">
+              {todoChips.length > 0 && (
+                <div className="ct-chips">
+                  {todoChips.map((t) => (
+                    <Link key={t.label} to={t.to} className={`ct-chip${t.tone ? ` ct-chip-${t.tone}` : ""}`}>
+                      {t.label}<b>{t.value}</b>
+                    </Link>
+                  ))}
+                </div>
+              )}
+              {pendingList.length > 0 && <div className="ct-sub-label">待我确认订单</div>}
+              {pendingList.map((o) => (
+                <Link key={o.id} to={`/orders/${o.id}`} className="ct-row">
+                  <span className="mono small ct-row-no">{o.order_no}</span>
+                  <span className="ct-row-main">{o.customer_name || "散客"} · {o.origin || "?"}→{o.destination || "?"}</span>
+                  <IconArrowRight size={13} className="ct-row-go" />
+                </Link>
               ))}
-            </ul>
-          )}
-        </div>
-      </div>
-
-      
-      <div 
-        className="panel" 
-        style={{ 
-          background: "linear-gradient(135deg, rgba(75,88,240,0.03) 0%, rgba(75,88,240,0.08) 100%)", 
-          border: "1px solid rgba(75,88,240,0.15)",
-          cursor: "pointer",
-          transition: "all 0.2s"
-        }}
-        onClick={() => {
-          const e = new KeyboardEvent("keydown", { ctrlKey: true, key: "k" });
-          window.dispatchEvent(e);
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.background = "rgba(75,88,240,0.06)"}
-        onMouseLeave={(e) => e.currentTarget.style.background = "linear-gradient(135deg, rgba(75,88,240,0.03) 0%, rgba(75,88,240,0.08) 100%)"}
-      >
-        <div style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ fontSize: 14, fontWeight: "600", color: "var(--brand)", display: "flex", alignItems: "center", gap: 8 }}>
-              <IconSparkles size={20} className="icon-offset" /> AI 助手
-            </div>
-            <div className="muted small" style={{ color: "var(--ink-2)" }}>
-              使用自然语言查询运单、拼单或利润测算。
+              {poolList.length > 0 && <div className="ct-sub-label">池中待派（优先）</div>}
+              {poolList.map((o) => (
+                <Link key={o.id} to="/dispatch-board" className="ct-row">
+                  <span className="mono small ct-row-no">{o.order_no}</span>
+                  <span className="ct-row-main">{o.customer_name || "散客"} · {ORDER_STATUS_LABEL[o.status] ?? o.status}</span>
+                  <IconArrowRight size={13} className="ct-row-go" />
+                </Link>
+              ))}
+              {todoChips.length === 0 && pendingList.length === 0 && poolList.length === 0 && (
+                <div className="muted small" style={{ padding: "6px 2px" }}>当前没有待办，保持在线。</div>
+              )}
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}><IconTerminal size={14} className="icon-offset" /> 快捷键</span>
-            <span style={{ background: "var(--panel)", color: "var(--ink)", padding: "4px 8px", borderRadius: 4, fontWeight: "500", fontFamily: "var(--font-mono)", fontSize: 12, border: "1px solid var(--line)" }}>
-              Ctrl K
-            </span>
+
+          {/* 财务敞口 */}
+          <div className="panel">
+            <div className="panel-head">
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><IconReceipt size={15} />财务敞口</span>
+              <Link className="link small" to="/reconciliation">对账中心 →</Link>
+            </div>
+            <div className="ct-side-body">
+              {fin.isLoading ? <StateView kind="loading" compact /> : fin.isError ? (
+                <StateView kind="error" hint="财务敞口暂时无法同步。" compact onRetry={() => fin.refetch()} />
+              ) : <><div className="ct-expo">
+                <div><span>应收未结</span><b className="num-grad">{fmtWan(ov?.receivable.outstanding ?? 0)}</b></div>
+                <div><span>应付未结</span><b>{fmtWan(ov?.payable.outstanding ?? 0)}</b></div>
+                <div><span>净头寸</span><b style={{ color: (ov?.net_position ?? 0) >= 0 ? "var(--green)" : "var(--red)" }}>{fmtWan(ov?.net_position ?? 0)}</b></div>
+                <div><span>逾期应收</span><b style={{ color: (ov?.overdue.receivable.amount ?? 0) > 0 ? "var(--red)" : undefined }}>{fmtWan(ov?.overdue.receivable.amount ?? 0)}</b></div>
+              </div>
+              {topAr.length > 0 && <div className="ct-sub-label">应收 Top 对手方</div>}
+              {topAr.map((t) => (
+                <div key={t.counterparty_id} className="ct-rank">
+                  <span className="ct-rank-name">{t.counterparty_name}</span>
+                  <span className="ct-rank-bar"><span style={{ width: `${(t.outstanding / topArMax) * 100}%` }} /></span>
+                  <span className="ct-rank-val num">{fmtWan(t.outstanding)}</span>
+                </div>
+              ))}</>}
+            </div>
+          </div>
+
+          {/* 证件预警 */}
+          <div className="panel">
+            <div className="panel-head">
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><IconShield size={15} />证件合规预警</span>
+              <Link className="link small" to="/fleet">证件库 →</Link>
+            </div>
+            <div className="ct-side-body">
+              {compliance.isLoading ? <StateView kind="loading" compact /> : compliance.isError ? (
+                <StateView kind="error" hint="证件状态暂时无法同步。" compact onRetry={() => compliance.refetch()} />
+              ) : credRows.length === 0 ? (
+                <div className="muted small" style={{ padding: "6px 2px" }}>30 天内无临期/过期证件。</div>
+              ) : (
+                credRows.map((r, i) => (
+                  <div key={i} className="ct-cred">
+                    <span className={`tag tag-${SEV_TONE[r.severity]}`}>{r.days_left < 0 ? `逾期${-r.days_left}天` : `${r.days_left}天`}</span>
+                    <span className="ct-cred-main">{r.subject} · {r.credential}</span>
+                    <span className="muted small">{r.expiry}</span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-head">风险与异常</div>
-        {waybills.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
-        ) : risky.length === 0 ? (
-          <div className="muted" style={{ padding: 16 }}>暂无风险运单。</div>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>运单号</th>
-                <th>线路</th>
-                <th>风险等级</th>
-                <th>ETA 偏移(分钟)</th>
-                <th>回单状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              {risky.map((w) => (
-                <tr key={w.id}>
-                  <td>
-                    <Link className="link mono interactive-text" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>
-                  </td>
-                  <td><span title={`起讫：${w.origin} → ${w.destination}`}>{w.route_name}</span></td>
-                  <td>
-                    <span className={`tag tag-${w.risk_level}`}>{RISK_LABEL[w.risk_level]}</span>
-                  </td>
-                  <td className="mono" style={{ color: "var(--red)" }}>+{w.eta_drift_minutes} 分钟</td>
-                  <td>{w.receipt_status === "returned" ? "已回收" : w.receipt_status === "pending" ? "待回收" : w.receipt_status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </div>
     </div>
   );

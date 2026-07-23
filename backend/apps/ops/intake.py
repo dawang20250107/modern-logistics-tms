@@ -218,7 +218,7 @@ def standardize_and_enrich_addresses(data: dict) -> None:
     """
     # 常用大中城市字典（用来从详细地址中模糊检索）
     _CITIES = [
-        "北京", "上海", "广州", "深圳", "天津", "重庆", "杭州", "南京", "物理", "苏州", "无锡", "常州",
+        "北京", "上海", "广州", "深圳", "天津", "重庆", "杭州", "南京", "苏州", "无锡", "常州",
         "宁波", "合肥", "福州", "厦门", "南昌", "济南", "青岛", "郑州", "武汉", "长沙", "成都",
         "西安", "昆明", "贵阳", "南宁", "海口", "石家庄", "太原", "沈阳", "大连", "长春", "哈尔滨",
         "温州", "金华", "绍兴", "台州", "嘉兴", "泉州", "东莞", "佛山", "中山", "珠海", "惠州",
@@ -701,9 +701,43 @@ def batch_orders(action: str, ids: list, *, operator=None) -> dict:
     return {"action": action, "ok": ok, "failed": failed, "ok_count": len(ok)}
 
 
+# 批量可改字段白名单：字段名 -> 合法取值集合（取自模型 choices，避免脏值）。
+_BATCH_FIELD_CHOICES = {
+    "priority": {c[0] for c in Order.PRIORITY_CHOICES},
+    "settlement_type": {c[0] for c in Order.SETTLEMENT_CHOICES},
+}
+
+
+def batch_update_orders(field: str, value: str, ids: list, *, operator=None) -> dict:
+    """批量改字段：仅允许白名单字段（priority/settlement_type），值须在模型 choices 内。
+
+    已派单/完成/取消的订单跳过（避免改动执行中/已归档订单的商务口径）。
+    """
+    if field not in _BATCH_FIELD_CHOICES:
+        raise AppError("INVALID_BATCH_FIELD", f"不支持批量修改字段：{field}", status=400)
+    if value not in _BATCH_FIELD_CHOICES[field]:
+        raise AppError("INVALID_FIELD_VALUE", f"字段 {field} 的取值非法：{value}", status=400)
+    if len(ids) > MAX_BATCH_SIZE:
+        raise AppError("BATCH_TOO_LARGE", f"单次最多操作 {MAX_BATCH_SIZE} 单，请分批。", status=400)
+    locked = {Order.STATUS_CONVERTED, Order.STATUS_COMPLETED, Order.STATUS_CANCELLED}
+    ok, failed = [], []
+    for order in Order.objects.filter(id__in=ids):
+        if order.status in locked:
+            failed.append({"order_no": order.order_no, "error": "订单已派单/完成/取消，不可批量改。"})
+            continue
+        setattr(order, field, value)
+        order.save(update_fields=[field, "updated_at"] if hasattr(order, "updated_at") else [field])
+        ok.append(order.order_no)
+    return {"field": field, "value": value, "ok": ok, "failed": failed, "ok_count": len(ok)}
+
+
 def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver=None,
-                             trailer=None, co_drivers=None, dispatch_type="", operator=None) -> Waybill:
-    """订单转运单（人工确认/派单后）。可带承运商/牵引车/挂车/主副驾与派单类型，回写订单为已派单。"""
+                             trailer=None, co_drivers=None, dispatch_type="",
+                             platform_name="", platform_order_no="", operator=None) -> Waybill:
+    """订单转运单（人工确认/派单后）。可带承运商/牵引车/挂车/主副驾与派单类型，回写订单为已派单。
+
+    网货平台通道（dispatch_type=platform）带入平台名称与平台侧单号。
+    """
     from .models import WaybillDriver, WaybillStop
 
     if order.status in (Order.STATUS_CONVERTED, Order.STATUS_COMPLETED):
@@ -721,6 +755,8 @@ def convert_order_to_waybill(order: Order, *, carrier=None, vehicle=None, driver
         driver=driver,
         trailer=trailer,
         dispatch_type=dispatch_type,
+        platform_name=platform_name,
+        platform_order_no=platform_order_no,
         ai_conversation_id=order.ai_conversation_id,
         route_name=route_name,
         origin=order.origin,

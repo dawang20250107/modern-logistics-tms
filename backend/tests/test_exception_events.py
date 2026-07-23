@@ -1,4 +1,4 @@
-"""异常处置事件溯源（ExceptionEvent）+ ai-resolve 修复验证。"""
+"""异常处置事件溯源（ExceptionEvent）验证。"""
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -58,37 +58,3 @@ def test_create_assign_handle_close_recorded_as_events(admin_client):
     assert timeline.status_code == 200
     types = [e["event_type"] for e in timeline.json()["data"]]
     assert types == ["create", "assign", "handle", "close"]
-
-
-@pytest.mark.django_db
-def test_ai_resolve_works_on_freshly_created_pending_exception(admin_client, monkeypatch):
-    """回归测试：此前 ai-resolve 因引用不存在的 execute_agent_sync 与错误的状态常量
-    （STATUS_PENDING_HANDLE 不存在，应为 STATUS_PENDING）而对刚创建的异常 100% 报错。"""
-
-    def fake_run_agent(prompt, thread_id=None):
-        assert "运输异常" in prompt
-        return {"answer": "建议：立即联系司机核实路况，30 分钟内回传定位。", "tool_calls": [], "suggestions": []}
-
-    monkeypatch.setattr(
-        "apps.ai.services.agent_runner.run_agent", fake_run_agent
-    )
-
-    wb = Waybill.objects.create(waybill_no="EXEV2", route_name="r")
-    exc = ExceptionRecord.objects.create(
-        waybill=wb, exception_type="transit_delay", level="high", description="超时未到",
-        status=ExceptionRecord.STATUS_PENDING,
-    )
-    assert exc.status == "pending_handle"
-
-    resp = admin_client.post(f"/api/v1/exceptions/{exc.id}/ai-resolve")
-    assert resp.status_code == 200, resp.content
-    body = resp.json()["data"]
-    assert body["status"] == "handling"
-    assert "立即联系司机" in body["ai_resolution"]
-
-    exc.refresh_from_db()
-    assert exc.status == ExceptionRecord.STATUS_HANDLING
-    assert "立即联系司机" in exc.resolution
-    evt = ExceptionEvent.objects.get(exception=exc, event_type="ai_resolve")
-    assert evt.from_status == "pending_handle"
-    assert evt.to_status == "handling"

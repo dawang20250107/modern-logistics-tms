@@ -108,7 +108,7 @@ def freight_quote(origin: str, destination: str, *, weight_ton=0, volume_cbm=0, 
     if not market_quote:
         market_quote = _offline_estimate(origin, destination, weight_ton, volume_cbm)
 
-    # 2. 查询本地历史 90 天内该线路已完成订单的平均成交价（AI 数据对齐）
+    # 2. 查询本地历史 90 天内该线路已完成订单的平均成交价
     hist_avg = None
     try:
         past_days = timezone.now() - timedelta(days=90)
@@ -123,17 +123,21 @@ def freight_quote(origin: str, destination: str, *, weight_ton=0, volume_cbm=0, 
     except Exception as exc:  # noqa: BLE001 — 容错，不阻断主链路
         logger.warning("Failed to query historical freight average: %s", exc)
 
-    # 3. AI 智能价格混合插值算法 (α * historical + β * market)
+    # 3. 混合加权估值 (α * 历史成交价 + β * 市场参考价)
     market_avg = float(market_quote.get("avg") or 0)
-    
+    src = market_quote.get("source", "")
+
     if hist_avg is not None and market_avg > 0:
         hist_avg = float(hist_avg)
         # 混合加权：60% 历史自营合同价 + 40% 满帮公网即时行情价
-        ai_avg = round(0.6 * hist_avg + 0.4 * market_avg, 2)
-        market_quote["avg"] = ai_avg
-        market_quote["low"] = round(ai_avg * 0.9, 2)
-        market_quote["high"] = round(ai_avg * 1.12, 2)
-        market_quote["note"] = f"AI 智能混合估值（结合历史成交价 {hist_avg}元 与市场比价）"
+        blended = round(0.6 * hist_avg + 0.4 * market_avg, 2)
+        market_quote["avg"] = blended
+        market_quote["low"] = round(blended * 0.9, 2)
+        market_quote["high"] = round(blended * 1.12, 2)
+        market_quote["note"] = (
+            f"混合估值：历史成交价 {hist_avg}元×0.6 + "
+            f"{'满帮行情' if src != 'offline' else '离线参考价'} {market_avg}元×0.4"
+        )
     else:
         market_quote["note"] = market_quote.get("note", "") + " (无本地历史数据，纯市场估值)"
 

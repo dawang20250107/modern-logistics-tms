@@ -85,10 +85,33 @@ class DriverLoginView(_DriverPublic):
         })
 
 
+# 司机极简流：按运单状态给出唯一"下一步动作"（司机只点一个主按钮，不选节点）
+_NEXT_STEP = {
+    Waybill.STATUS_PENDING_DISPATCH: {"node": "loading", "label": "确认装货", "kind": "checkin"},
+    Waybill.STATUS_DISPATCHED: {"node": "loading", "label": "确认装货", "kind": "checkin"},
+    Waybill.STATUS_LOADED: {"node": "depart_loaded", "label": "发车", "kind": "checkin"},
+    Waybill.STATUS_DEPARTED: {"node": "in_transit", "label": "在途打卡", "kind": "checkin"},
+    Waybill.STATUS_IN_TRANSIT: {"node": "arrive_delivery", "label": "到达卸货地", "kind": "checkin"},
+    Waybill.STATUS_ARRIVED: {"node": "receipt", "label": "上传回单", "kind": "receipt"},
+}
+
+
+def driver_next_step(wb) -> dict | None:
+    """当前运单对司机而言的唯一下一步动作；已签收/结算等无后续则返回 None。"""
+    return _NEXT_STEP.get(wb.status)
+
+
 def _waybill_brief(wb) -> dict:
     return {
         "waybill_no": wb.waybill_no, "route_name": wb.route_name,
         "origin": wb.origin, "destination": wb.destination, "status": wb.status,
+        "status_label": dict(Waybill.STATUS_CHOICES).get(wb.status, wb.status),
+        "pickup_address": getattr(wb.order, "pickup_address", "") if wb.order_id else "",
+        "delivery_address": getattr(wb.order, "delivery_address", "") if wb.order_id else "",
+        "pickup_contact_phone": getattr(wb.order, "pickup_contact_phone", "") if wb.order_id else "",
+        "delivery_contact_phone": getattr(wb.order, "delivery_contact_phone", "") if wb.order_id else "",
+        "next_step": driver_next_step(wb),
+        "cod_amount": float(getattr(wb, "cod_amount", 0) or 0),
     }
 
 
@@ -97,7 +120,7 @@ class DriverTasksView(_DriverPublic):
 
     def get(self, request):
         driver = _driver_from_token(request)
-        waybills = Waybill.objects.filter(driver=driver, status__in=_ACTIVE_WB)
+        waybills = Waybill.objects.filter(driver=driver, status__in=_ACTIVE_WB).select_related("order")
         reminders = DriverReminder.objects.filter(
             driver=driver, status=DriverReminder.STATUS_PENDING,
         ).select_related("waybill")
@@ -105,7 +128,7 @@ class DriverTasksView(_DriverPublic):
             "driver": {"name": driver.name, "phone": driver.phone},
             "waybills": [_waybill_brief(w) for w in waybills],
             "pending_reminders": [
-                {"id": str(r.id), "title": r.title, "content": r.content,
+                {"id": str(r.id), "title": r.title, "content": r.content, "level": r.level,
                  "ack_required": r.ack_required, "waybill_no": r.waybill.waybill_no if r.waybill_id else ""}
                 for r in reminders
             ],

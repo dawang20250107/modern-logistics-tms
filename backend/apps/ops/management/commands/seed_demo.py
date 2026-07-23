@@ -37,12 +37,12 @@ class Command(BaseCommand):
         PricingRule.objects.update_or_create(
             name="默认收入价",
             defaults={"price_type": "income", "expense_item_code": "TRANSPORT_INCOME",
-                      "base_price": "5000", "price_per_ton": "120", "priority": 1},
+                      "base_price": "5000", "unit_price": "120", "priority": 1},
         )
         PricingRule.objects.update_or_create(
             name="默认支出价",
             defaults={"price_type": "cost", "expense_item_code": "TRANSPORT_COST",
-                      "base_price": "3500", "price_per_ton": "90", "priority": 1},
+                      "base_price": "3500", "unit_price": "90", "priority": 1},
         )
 
         self._seed_rbac()

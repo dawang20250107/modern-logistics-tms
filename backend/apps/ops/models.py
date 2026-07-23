@@ -44,7 +44,7 @@ class Order(BaseModel, SoftDeleteModel):
     SOURCE_ENTERPRISE = "enterprise"
     SOURCE_GOVERNMENT = "government"
     SOURCE_TYPE_CHOICES = [
-        (SOURCE_INDIVIDUAL, "个人"),
+        (SOURCE_INDIVIDUAL, "个体"),
         (SOURCE_ENTERPRISE, "企业"),
         (SOURCE_GOVERNMENT, "政府"),
     ]
@@ -54,11 +54,13 @@ class Order(BaseModel, SoftDeleteModel):
     BIZ_LTL = "ltl"
     BIZ_EXPRESS = "express"
     BIZ_COLDCHAIN = "coldchain"
+    BIZ_HAZMAT = "hazmat"
     BUSINESS_TYPE_CHOICES = [
         (BIZ_FTL, "整车"),
         (BIZ_LTL, "零担"),
         (BIZ_EXPRESS, "快递"),
         (BIZ_COLDCHAIN, "冷链"),
+        (BIZ_HAZMAT, "危化"),
     ]
 
     PRIORITY_CHOICES = [("normal", "普通"), ("urgent", "加急"), ("vip", "VIP")]
@@ -200,12 +202,20 @@ class Order(BaseModel, SoftDeleteModel):
     )
     approved_at = models.DateTimeField(null=True, blank=True)
 
-    # 调度池认领（多调度并发，乐观+悲观锁保护）
+    # 调度池认领/锁定（多调度并发，行锁防抢；claimed_by 即锁定人）
     claimed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="claimed_orders"
     )
     claimed_at = models.DateTimeField(null=True, blank=True)
     pooled_at = models.DateTimeField(null=True, blank=True)
+    # 总调度分单：把池中订单指派给某个调度，仅被指派人（或总调度）可锁定/调派
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_orders"
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_out_orders"
+    )
+    assigned_at = models.DateTimeField(null=True, blank=True)
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_orders"
@@ -360,6 +370,70 @@ class OrderEvent(BaseModel):
         return f"{self.order_id}:{self.event_type}"
 
 
+class DispatchBatch(BaseModel, OrgScopedModel):
+    """派车批次：一次委托、同一承运商、统一议定应付的商务归集层。
+
+    一批 → N 张独立运单（每票货各自回单/签收/对账），批次只做商务分组与应付归集，
+    不合并运输。支持同客户多单、跨客户多单批量派给同一承运商/网货平台。
+    """
+
+    STATUS_DRAFT = "draft"
+    STATUS_DISPATCHED = "dispatched"
+    STATUS_PARTIAL = "partial"
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "草稿"),
+        (STATUS_DISPATCHED, "已派车"),
+        (STATUS_PARTIAL, "部分完成"),
+        (STATUS_COMPLETED, "已完成"),
+        (STATUS_CANCELLED, "已取消"),
+    ]
+
+    ALLOC_BY_WEIGHT = "by_weight"
+    ALLOC_EVEN = "even"
+    ALLOC_MANUAL = "manual"
+    ALLOC_CHOICES = [
+        (ALLOC_BY_WEIGHT, "按吨占比"),
+        (ALLOC_EVEN, "均摊"),
+        (ALLOC_MANUAL, "逐单指定"),
+    ]
+
+    # 承运通道：批次以外包承运商 / 网货平台为主（自营逐单车辆不同，不走批次）
+    DISPATCH_TYPE_CHOICES = [("third_party", "外包承运商"), ("platform", "网货平台")]
+
+    batch_no = models.CharField(max_length=40, unique=True)
+    dispatch_type = models.CharField(max_length=16, choices=DISPATCH_TYPE_CHOICES, default="third_party")
+    carrier = models.ForeignKey(
+        "masterdata.Carrier", null=True, blank=True, on_delete=models.SET_NULL, related_name="dispatch_batches"
+    )
+    platform_name = models.CharField(max_length=64, blank=True, help_text="网货平台名称，如 满帮/路歌")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DISPATCHED, db_index=True)
+    allocation = models.CharField(max_length=16, choices=ALLOC_CHOICES, default=ALLOC_BY_WEIGHT)
+    total_payable = models.DecimalField(max_digits=14, decimal_places=2, default=0, help_text="批次总议定应付")
+    order_count = models.IntegerField(default=0)
+    total_weight_ton = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    note = models.CharField(max_length=200, blank=True)
+    # 已生成的承运商应付对账单号（批次一键对账后回填，防重复生成）
+    statement_no = models.CharField(max_length=40, blank=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_batches"
+    )
+
+    class Meta:
+        db_table = "ops_dispatch_batch"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["carrier", "status"]),
+        ]
+        verbose_name = "派车批次"
+        verbose_name_plural = "派车批次"
+
+    def __str__(self) -> str:
+        return self.batch_no
+
+
 class Waybill(BaseModel, OrgScopedModel):
     # 运单状态机
     STATUS_DRAFT = "draft"
@@ -400,17 +474,28 @@ class Waybill(BaseModel, OrgScopedModel):
     RISK_CHOICES = [(RISK_HIGH, "高"), (RISK_MEDIUM, "中"), (RISK_LOW, "低"), (RISK_NONE, "无")]
 
     # 派单类型：自有单车 / 自有车队 / 三方承运商
+    # 承运三通道：自营（自有单车/车队）、外包承运商、网货平台（接第三方平台）
     DISPATCH_OWN = "own_vehicle"
     DISPATCH_FLEET = "fleet"
     DISPATCH_THIRD_PARTY = "third_party"
+    DISPATCH_PLATFORM = "platform"
     DISPATCH_TYPE_CHOICES = [
-        (DISPATCH_OWN, "自有单车"),
-        (DISPATCH_FLEET, "自有车队"),
-        (DISPATCH_THIRD_PARTY, "三方承运商"),
+        (DISPATCH_OWN, "自营单车"),
+        (DISPATCH_FLEET, "自营车队"),
+        (DISPATCH_THIRD_PARTY, "外包承运商"),
+        (DISPATCH_PLATFORM, "网货平台"),
     ]
+    # 承运通道大类（自营 / 外包 / 网货），便于分通道对账与利润
+    CHANNEL_LABELS = {
+        DISPATCH_OWN: "自营", DISPATCH_FLEET: "自营",
+        DISPATCH_THIRD_PARTY: "外包", DISPATCH_PLATFORM: "网货",
+    }
 
     waybill_no = models.CharField(max_length=40, unique=True)
     dispatch_type = models.CharField(max_length=16, choices=DISPATCH_TYPE_CHOICES, blank=True)
+    # 网货平台通道：对接第三方平台（满帮/路歌等），合规由平台承担，我方只记录对接信息
+    platform_name = models.CharField(max_length=64, blank=True, help_text="网货平台名称，如 满帮/路歌")
+    platform_order_no = models.CharField(max_length=64, blank=True, help_text="平台侧运单/订单号")
     order = models.ForeignKey(
         Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )
@@ -419,6 +504,10 @@ class Waybill(BaseModel, OrgScopedModel):
     )
     carrier = models.ForeignKey(
         "masterdata.Carrier", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
+    )
+    # 派车批次：多单一次委托同一承运商时归集（批次层做统一应付/对账分组）
+    batch = models.ForeignKey(
+        DispatchBatch, null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
     )
     vehicle = models.ForeignKey(
         "masterdata.Vehicle", null=True, blank=True, on_delete=models.SET_NULL, related_name="waybills"
@@ -679,6 +768,13 @@ class ExceptionRecord(BaseModel):
     waybill = models.ForeignKey(
         Waybill, null=True, blank=True, on_delete=models.SET_NULL, related_name="exceptions"
     )
+    # 订单级异常：客服/调度在订单池对某订单登记异常（同步调度与订单管理）
+    order = models.ForeignKey(
+        Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="exceptions"
+    )
+    reported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="reported_exceptions"
+    )
     exception_type = models.CharField(max_length=64, choices=EXCEPTION_TYPE_CHOICES)
     level = models.CharField(max_length=16, choices=LEVEL_CHOICES, default="medium")
     source = models.CharField(max_length=32, default="manual", help_text="manual/track/ocr/customer")
@@ -795,6 +891,15 @@ class DriverReminder(BaseModel):
     STATUS_PENDING = "pending"
     STATUS_ACKNOWLEDGED = "acknowledged"
 
+    LEVEL_NORMAL = "normal"
+    LEVEL_IMPORTANT = "important"
+    LEVEL_URGENT = "urgent"
+    LEVEL_CHOICES = [
+        (LEVEL_NORMAL, "普通"),
+        (LEVEL_IMPORTANT, "重要"),
+        (LEVEL_URGENT, "紧急"),
+    ]
+
     waybill = models.ForeignKey(Waybill, null=True, blank=True, on_delete=models.CASCADE, related_name="reminders")
     driver = models.ForeignKey(
         "masterdata.Driver", null=True, blank=True, on_delete=models.SET_NULL, related_name="reminders"
@@ -804,6 +909,7 @@ class DriverReminder(BaseModel):
     )
     title = models.CharField(max_length=120, default="作业提醒")
     content = models.TextField()
+    level = models.CharField(max_length=16, choices=LEVEL_CHOICES, default=LEVEL_IMPORTANT, help_text="普通/重要/紧急")
     ack_required = models.BooleanField(default=True, help_text="是否强制确认")
     status = models.CharField(max_length=16, default=STATUS_PENDING, db_index=True)
     sent_at = models.DateTimeField(default=timezone.now)

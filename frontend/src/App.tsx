@@ -1,37 +1,39 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
+import { GlobalProgress } from "./components/GlobalProgress";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { StateView } from "./components/StateView";
 import { AuthProvider } from "./auth/auth";
-import { AiWorkbenchPage } from "./pages/AiWorkbenchPage";
-import { AlertsPage } from "./pages/AlertsPage";
+import { AdminHubPage } from "./pages/AdminHubPage";
 import { AuditPage } from "./pages/AuditPage";
-import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { CustomerOrderPage } from "./pages/CustomerOrderPage";
 import { DriverPortalPage } from "./pages/DriverPortalPage";
 import { ControlTowerPage } from "./pages/ControlTowerPage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { DataCatalogPage } from "./pages/DataCatalogPage";
 import { DispatchBoardPage } from "./pages/DispatchBoardPage";
-import { ExceptionsPage } from "./pages/ExceptionsPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { FleetPage } from "./pages/FleetPage";
 import { LoginPage } from "./pages/LoginPage";
-import { MonitorPage } from "./pages/MonitorPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderIntakePage } from "./pages/OrderIntakePage";
+import { OrderManagePage } from "./pages/OrderManagePage";
 import { PricingPage } from "./pages/PricingPage";
 import { OrgCenterPage } from "./pages/OrgCenterPage";
+import { ProfilePage } from "./pages/ProfilePage";
 import { ReconciliationPage } from "./pages/ReconciliationPage";
+import { RegisterPage } from "./pages/RegisterPage";
 import { TrackingPage } from "./pages/TrackingPage";
 import { WaybillDetailPage } from "./pages/WaybillDetailPage";
-import { WaybillsPage } from "./pages/WaybillsPage";
 
 export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <GlobalProgress />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot" element={<ForgotPasswordPage />} />
           <Route path="/track" element={<TrackingPage />} />
           <Route path="/submit" element={<CustomerOrderPage />} />
           <Route path="/driver" element={<DriverPortalPage />} />
@@ -41,20 +43,16 @@ export function App() {
               <Route path="intake" element={<OrderIntakePage />} />
               <Route path="orders/:id" element={<OrderDetailPage />} />
               <Route path="dispatch-board" element={<DispatchBoardPage />} />
-              <Route path="waybills" element={<WaybillsPage />} />
+              <Route path="waybills" element={<OrderManagePage />} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
-              <Route path="command" element={<CommandCenterPage />} />
-              <Route path="monitor" element={<MonitorPage />} />
               <Route path="fleet" element={<FleetPage />} />
-              <Route path="alerts" element={<AlertsPage />} />
-              <Route path="exceptions" element={<ExceptionsPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />
               <Route path="pricing" element={<PricingPage />} />
-              <Route path="dashboard" element={<DashboardPage />} />
-              <Route path="catalog" element={<DataCatalogPage />} />
+              <Route path="admin" element={<AdminHubPage />} />
               <Route path="org" element={<OrgCenterPage />} />
+              <Route path="profile" element={<ProfilePage />} />
               <Route path="audit" element={<AuditPage />} />
-              <Route path="ai" element={<AiWorkbenchPage />} />
+              <Route path="*" element={<StateView kind="empty" title="页面不存在" hint="该地址已失效或从未创建。" action={<Link className="btn-primary" to="/" style={{ textDecoration: "none" }}>返回驾驶舱</Link>} />} />
             </Route>
           </Route>
         </Routes>

@@ -4,8 +4,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtMoney } from "../api/format";
+import { fmtDateTime, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
+import { DocumentLineage } from "../components/DocumentLineage";
+import { CopyCode } from "../components/CopyCode";
+import { StateView } from "../components/StateView";
+import { StatusTag } from "../components/StatusTag";
 import type { Order, OrderEvent, OrderWorkflow } from "../api/types";
 import {
   APPROVAL_STATUS_LABEL,
@@ -20,7 +24,7 @@ import {
   SOURCE_TYPE_LABEL,
 } from "../api/types";
 
-const fmtDt = (s: string | null) => (s ? new Date(s).toLocaleString() : "-");
+const fmtDt = (s: string | null) => fmtDateTime(s);
 
 export function OrderDetailPage() {
   const { id = "" } = useParams();
@@ -82,7 +86,8 @@ export function OrderDetailPage() {
   const o = order.data;
   const events = timeline.data ?? [];
 
-  if (order.isLoading || !o) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
+  if (order.isLoading) return <StateView kind="loading" />;
+  if (order.isError || !o) return <StateView kind="error" title="订单无法打开" hint="订单不存在、无权访问或数据暂时不可用。" onRetry={() => order.refetch()} />;
 
   const startEdit = () => {
     setEdit({
@@ -117,13 +122,13 @@ export function OrderDetailPage() {
         <div className="wb-head">
           <div>
             <div className="muted small">订单</div>
-            <div className="wb-no mono">{o.order_no}</div>
+            <div className="wb-no mono"><CopyCode value={o.order_no} /></div>
             <div className="muted small">{ORDER_CHANNEL_LABEL[o.channel]} · {SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type} · 建单 {o.created_by_name || "-"}</div>
           </div>
           <div className="wb-status">
-            <span className="status-pill">{ORDER_STATUS_LABEL[o.status] ?? o.status}</span>
+            <StatusTag kind="order" value={o.status} />
             {o.sla_status && o.sla_status !== "pending" && (
-              <span className={`tag tag-sla_${o.sla_status}`}>{SLA_STATUS_LABEL[o.sla_status]}</span>
+              <StatusTag kind="sla" value={o.sla_status} />
             )}
           </div>
         </div>
@@ -151,8 +156,10 @@ export function OrderDetailPage() {
         </div>
       </div>
 
+      <DocumentLineage orderId={id} />
+
       {o.approval_status !== "none" && (
-        <div className="panel" style={{ borderLeft: `4px solid ${o.approval_status === "rejected" ? "var(--red)" : o.approval_status === "approved" ? "var(--green)" : "var(--amber, #e8a33d)"}` }}>
+        <div className="panel" style={{ borderLeft: `4px solid ${o.approval_status === "rejected" ? "var(--red)" : o.approval_status === "approved" ? "var(--green)" : "var(--amber)"}` }}>
           <div className="form-actions" style={{ borderBottom: "none" }}>
             <span className={`tag tag-${o.approval_status === "approved" ? "low" : o.approval_status === "rejected" ? "high" : "medium"}`}>
               审批：{APPROVAL_STATUS_LABEL[o.approval_status]}
@@ -180,7 +187,7 @@ export function OrderDetailPage() {
             <div className="panel-head">商务信息</div>
             <div className="kv">
               {kv("客户", o.customer_name)}
-              {kv("客户类型", SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type)}
+              {kv("客户分类", SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type)}
               {kv("业务类型", BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type)}
               {kv("优先级", editing
                 ? <select value={edit.priority} onChange={(e) => setEdit({ ...edit, priority: e.target.value })}>{Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
@@ -220,9 +227,9 @@ export function OrderDetailPage() {
             ) : (
               <div className="kv">
                 {kv("线路", `${o.origin} → ${o.destination}`)}
-                {kv("提货地址", o.pickup_address)}
-                {kv("送货地址", o.delivery_address)}
-                {kv("发货联系", `${o.contact_name} ${o.contact_phone}`)}
+                {kv("提货地址", o.pickup_address ? <CopyCode value={o.pickup_address} /> : "—")}
+                {kv("送货地址", o.delivery_address ? <CopyCode value={o.delivery_address} /> : "—")}
+                {kv("发货联系", <span>{o.contact_name} {o.contact_phone ? <CopyCode value={o.contact_phone} /> : ""}</span>)}
               </div>
             )}
           </div>
@@ -236,6 +243,7 @@ export function OrderDetailPage() {
               )}
             </div>
             {o.cargo_items.length > 0 ? (
+              <div className="table-wrap">
               <table className="table">
                 <thead><tr><th>品名</th><th>件数</th><th>吨</th><th>方</th><th>包装</th><th>温区</th>{splitMode && <th>拆分组</th>}</tr></thead>
                 <tbody>
@@ -254,6 +262,7 @@ export function OrderDetailPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="kv">
                 {kv("货物", o.cargo_desc)}
@@ -312,14 +321,15 @@ export function OrderDetailPage() {
               <select value={attKind} onChange={(e) => setAttKind(e.target.value)}>
                 {Object.entries(ATTACHMENT_KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
-              <label className="btn-ghost" style={{ cursor: "pointer" }}>
+              <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
                 {upload.isPending ? "上传中…" : "选择文件上传"}
-                <input type="file" hidden disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
+                <input className="file-input-accessible" type="file" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
               </label>
             </div>
             {o.attachments.length === 0 ? (
-              <div className="muted small" style={{ padding: 16 }}>暂无附件</div>
+              <StateView kind="empty" title="暂无附件" hint="上传合同 / 磅单 / 回单等文件后在此查看。" compact />
             ) : (
+              <div className="table-wrap">
               <table className="table">
                 <thead><tr><th>类型</th><th>名称</th><th>上传人</th><th>时间</th><th>操作</th></tr></thead>
                 <tbody>
@@ -328,12 +338,13 @@ export function OrderDetailPage() {
                       <td><span className="tag tag-info">{ATTACHMENT_KIND_LABEL[a.kind] ?? a.kind}</span></td>
                       <td>{a.file_display ? <a className="link" href={a.file_display} target="_blank" rel="noreferrer">{a.name || "查看"}</a> : (a.name || "-")}</td>
                       <td className="small">{a.uploaded_by_name || "-"}</td>
-                      <td className="small">{new Date(a.created_at).toLocaleString()}</td>
+                      <td className="small">{fmtDateTime(a.created_at)}</td>
                       <td><button className="btn-ghost" disabled={delAtt.isPending} onClick={() => delAtt.mutate(a.id)}>删除</button></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>
@@ -341,7 +352,7 @@ export function OrderDetailPage() {
         <div className="panel">
           <div className="panel-head">全生命周期</div>
           {timeline.isLoading ? (
-            <div className="muted" style={{ padding: 16 }}>加载中…</div>
+            <StateView kind="loading" compact />
           ) : (
             <ul className="timeline">
               {events.map((e) => (
@@ -350,7 +361,7 @@ export function OrderDetailPage() {
                   <div>
                     <div className="tl-type">{ORDER_EVENT_LABEL[e.event_type] ?? e.event_type}</div>
                     <div className="muted small">
-                      {new Date(e.event_time).toLocaleString()} · {e.actor_name || e.source}
+                      {fmtDateTime(e.event_time)} · {e.actor_name || e.source}
                       {e.to_status && ` · → ${ORDER_STATUS_LABEL[e.to_status] ?? e.to_status}`}
                     </div>
                     {(() => {

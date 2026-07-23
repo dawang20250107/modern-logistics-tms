@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     Contract,
+    DispatchBatch,
     ExceptionEvent,
     ExceptionRecord,
     Order,
@@ -101,19 +102,36 @@ class WaybillSerializer(serializers.ModelSerializer):
     freight_term_label = serializers.CharField(source="get_freight_term_display", read_only=True)
     freight_payer_label = serializers.CharField(source="get_freight_payer_display", read_only=True)
     cod_status_label = serializers.CharField(source="get_cod_status_display", read_only=True)
+    dispatch_type_label = serializers.CharField(source="get_dispatch_type_display", read_only=True, default="")
+    channel = serializers.SerializerMethodField()
+    receivable_amount = serializers.SerializerMethodField()
+    payable_amount = serializers.SerializerMethodField()
+    batch_no = serializers.CharField(source="batch.batch_no", read_only=True, default="")
 
     class Meta:
         model = Waybill
         fields = [
-            "id", "waybill_no", "customer_name", "carrier_name", "vehicle_plate", "trailer_plate",
+            "id", "waybill_no", "batch_no", "customer_name", "carrier_name", "vehicle_plate", "trailer_plate",
             "driver_name", "driver_phone", "driver_employment", "drivers",
             "route_name", "ai_conversation_id", "origin", "destination", "status", "dispatch_status", "risk_level",
+            "dispatch_type", "dispatch_type_label", "channel", "platform_name", "platform_order_no",
             "receipt_status", "eta_drift_minutes", "planned_arrival", "estimated_arrival",
             "loaded_at", "departed_at", "arrived_at", "signed_at",
             "freight_term", "freight_term_label", "freight_payer", "freight_payer_label",
             "cod_amount", "cod_status", "cod_status_label", "cod_collected_at", "cod_remitted_at",
+            "receivable_amount", "payable_amount",
             "cargo", "created_at",
         ]
+
+    def get_channel(self, obj):
+        return Waybill.CHANNEL_LABELS.get(obj.dispatch_type, "")
+
+    def get_receivable_amount(self, obj):
+        # 由视图 annotate 注入；未聚合时回退 0，避免列表 N+1
+        return float(getattr(obj, "receivable_total", 0) or 0)
+
+    def get_payable_amount(self, obj):
+        return float(getattr(obj, "payable_total", 0) or 0)
 
     def get_drivers(self, obj):
         return [
@@ -243,9 +261,72 @@ class ReceiptSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
+    customer_level = serializers.CharField(source="customer.level", read_only=True, default="")
     created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
-    claimed_by_name = serializers.CharField(source="claimed_by.username", read_only=True, default="")
+    claimed_by_name = serializers.SerializerMethodField()
+    assigned_to_name = serializers.SerializerMethodField()
+    assigned_by_name = serializers.CharField(source="assigned_by.username", read_only=True, default="")
+    dispatchable = serializers.SerializerMethodField()
+    lock_state = serializers.SerializerMethodField()
     waybill_nos = serializers.SerializerMethodField()
+    dispatched_at = serializers.SerializerMethodField()
+    exception_count = serializers.SerializerMethodField()
+    exception_level = serializers.SerializerMethodField()
+
+    def get_dispatched_at(self, obj):
+        # 已调派时间：取关联运单最早创建时间（依赖视图 prefetch_related("waybills")）
+        times = [w.created_at for w in obj.waybills.all() if w.created_at]
+        return min(times).isoformat() if times else None
+
+    def _open_exceptions(self, obj):
+        # 未闭环异常（依赖视图 prefetch_related("exceptions")）
+        return [e for e in obj.exceptions.all() if e.status not in ("closed", "rejected")]
+
+    def get_exception_count(self, obj) -> int:
+        return len(self._open_exceptions(obj))
+
+    def get_exception_level(self, obj) -> str:
+        # 取最高等级作为标记颜色依据
+        levels = {e.level for e in self._open_exceptions(obj)}
+        for lv in ("high", "medium", "low"):
+            if lv in levels:
+                return lv
+        return ""
+
+    @staticmethod
+    def _uname(u):
+        return (getattr(u, "nickname", "") or getattr(u, "username", "")) if u else ""
+
+    def get_claimed_by_name(self, obj):
+        return self._uname(obj.claimed_by)
+
+    def get_assigned_to_name(self, obj):
+        return self._uname(obj.assigned_to)
+
+    def _current_user(self):
+        req = self.context.get("request")
+        u = getattr(req, "user", None)
+        return u if u and getattr(u, "is_authenticated", False) else None
+
+    def get_dispatchable(self, obj) -> bool:
+        user = self._current_user()
+        if user is None:
+            return False
+        from .order_dispatch import is_chief_dispatcher
+
+        if is_chief_dispatcher(user):
+            return True
+        return user.id in {obj.claimed_by_id, obj.assigned_to_id}
+
+    def get_lock_state(self, obj) -> str:
+        """未锁定 free / 我锁定 mine / 他人锁定 locked / 分派给我 assigned_mine / 分派他人 assigned_other。"""
+        user = self._current_user()
+        uid = getattr(user, "id", None)
+        if obj.claimed_by_id:
+            return "mine" if obj.claimed_by_id == uid else "locked"
+        if obj.assigned_to_id:
+            return "assigned_mine" if obj.assigned_to_id == uid else "assigned_other"
+        return "free"
     cargo_items = OrderCargoItemSerializer(many=True, read_only=True)
     stops = OrderStopSerializer(many=True, read_only=True)
     attachments = OrderAttachmentSerializer(many=True, read_only=True)
@@ -259,7 +340,7 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            "id", "order_no", "customer", "customer_name", "channel", "source",
+            "id", "order_no", "customer", "customer_name", "customer_level", "channel", "source",
             "source_type", "business_type", "priority", "settlement_type", "status",
             "freight_term", "freight_term_label", "freight_payer", "freight_payer_label",
             "cod_amount", "cod_status",
@@ -270,6 +351,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "cargo_value", "package_type", "is_hazardous", "temperature_range", "quoted_amount",
             "expected_pickup_at", "expected_delivery_at", "sla_status", "delivered_at",
             "claimed_by", "claimed_by_name", "claimed_at", "pooled_at",
+            "assigned_to", "assigned_to_name", "assigned_by_name", "assigned_at",
+            "dispatchable", "lock_state", "dispatched_at", "exception_count", "exception_level",
             "created_by", "created_by_name", "raw_text", "ai_conversation_id", "parse_meta", "remark", "created_at",
             "waybill_nos", "cargo_items", "stops", "attachments",
             "approval_status", "approval_remark", "approved_at",
@@ -297,3 +380,66 @@ class DriverReminderSerializer(serializers.ModelSerializer):
             "id", "waybill", "waybill_no", "driver", "driver_name", "template", "title", "content",
             "ack_required", "status", "sent_at", "acknowledged_at",
         ]
+
+
+class BatchWaybillSerializer(serializers.ModelSerializer):
+    """批次内运单精简视图：保留订单/客户/线路/应付粒度，供批次详情展开。"""
+
+    customer_name = serializers.CharField(source="customer.name", read_only=True, default="")
+    order_no = serializers.CharField(source="order.order_no", read_only=True, default="")
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    payable = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Waybill
+        fields = [
+            "id", "waybill_no", "order_no", "customer_name", "origin", "destination",
+            "cargo_weight_ton", "cargo_quantity", "status", "status_label", "payable",
+        ]
+
+    def get_payable(self, obj):
+        # 该运单派单议定应付快照（对账口径）
+        exp = obj.expenses.filter(direction="payable", expense_item_code="freight").first()
+        return float(exp.amount) if exp else None
+
+
+class DispatchBatchSerializer(serializers.ModelSerializer):
+    carrier_name = serializers.CharField(source="carrier.name", read_only=True, default="")
+    dispatch_type_label = serializers.CharField(source="get_dispatch_type_display", read_only=True)
+    status_label = serializers.CharField(source="get_status_display", read_only=True)
+    allocation_label = serializers.CharField(source="get_allocation_display", read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    customer_summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DispatchBatch
+        fields = [
+            "id", "batch_no", "dispatch_type", "dispatch_type_label", "carrier", "carrier_name",
+            "platform_name", "status", "status_label", "allocation", "allocation_label",
+            "total_payable", "order_count", "total_weight_ton", "note", "statement_no",
+            "created_by_name", "customer_summary", "created_at",
+        ]
+
+    def get_created_by_name(self, obj):
+        u = obj.created_by
+        return (u.nickname or u.username) if u else ""
+
+    def get_customer_summary(self, obj):
+        # 批次涉及的客户（去重）：区分同客户批 / 跨客户批
+        names = []
+        for wb in obj.waybills.all():
+            n = ""
+            if wb.customer_id:
+                n = wb.customer.name
+            elif wb.order_id and wb.order.customer_id:
+                n = wb.order.customer.name
+            if n and n not in names:
+                names.append(n)
+        return names
+
+
+class DispatchBatchDetailSerializer(DispatchBatchSerializer):
+    waybills = BatchWaybillSerializer(many=True, read_only=True)
+
+    class Meta(DispatchBatchSerializer.Meta):
+        fields = DispatchBatchSerializer.Meta.fields + ["waybills"]

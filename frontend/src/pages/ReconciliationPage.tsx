@@ -465,7 +465,7 @@ export function ReconciliationPage() {
             <span>对账单台账<span className="ai-pill">{st.total}</span></span>
             <div style={{ flex: 1 }} />
             <div style={{ position: "relative" }}>
-              <button className={`btn-ghost${stmtActiveCount > 0 || showStmtFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowStmtFilter((v) => !v); }}>
+              <button className={`btn-ghost${stmtActiveCount > 0 || showStmtFilter ? " on-accent" : ""}`} onClick={() => setShowStmtFilter((v) => !v)}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
                   高级筛选{stmtActiveCount > 0 ? ` · ${stmtActiveCount}` : ""}
@@ -507,7 +507,7 @@ export function ReconciliationPage() {
                 {stmtModel.conditions.map((c) => {
                   const label = describeCondition(c, STMT_FILTER_FIELDS);
                   if (!label) return null;
-                  return <span key={c.id} className="filter-chip">{label}<button onClick={() => setStmtModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+                  return <span key={c.id} className="filter-chip"><span className="filter-chip-label" title={label}>{label}</span><button type="button" aria-label={`删除条件：${label}`} onClick={() => setStmtModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
                 })}
                 <button className="linkish small" onClick={() => setStmtModel(EMPTY_MODEL)}>清空条件</button>
               </div>

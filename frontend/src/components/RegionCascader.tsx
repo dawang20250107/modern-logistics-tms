@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { PROVINCES, citiesOf, districtsOf } from "../data/regions";
+import { FloatingLayer, anchor } from "./FloatingLayer";
 
 export interface RegionValue { province: string; city: string; district: string }
 
@@ -23,7 +24,10 @@ export function RegionCascader({
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !popRef.current?.contains(target)) setOpen(false);
+    };
     popRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); triggerRef.current?.focus(); } };
     document.addEventListener("mousedown", onDown);
@@ -51,12 +55,13 @@ export function RegionCascader({
         aria-controls={popId}
         aria-haspopup="dialog"
         onClick={() => setOpen((v) => !v)}
+        title={label || placeholder}
       >
         <span className={label ? "" : "muted"}>{label || placeholder}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>
       </button>
-      {open && (
-        <div ref={popRef} id={popId} className="region-pop" role="dialog" aria-label="选择省市区">
+      {open && triggerRef.current && (
+        <FloatingLayer ref={popRef} origin={anchor(triggerRef.current, "start")} id={popId} className="region-pop" role="dialog" aria-label="选择省市区">
           <div className="region-cols">
             <ul className="region-col" aria-label="省份">
               {PROVINCES.map((p) => (
@@ -81,7 +86,7 @@ export function RegionCascader({
           <div className="region-foot">
             <button type="button" className="linkish" onClick={() => { onChange({ province: "", city: "", district: "" }); setProv(""); setCity(""); }}>清空</button>
           </div>
-        </div>
+        </FloatingLayer>
       )}
     </div>
   );

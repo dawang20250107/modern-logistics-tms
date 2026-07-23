@@ -228,27 +228,27 @@ export function WaybillDetailPage() {
     <div className="stack" style={{ gap: 16 }}>
       {/* 运单头部 */}
       <div className="panel" style={{ overflow: "visible" }}>
-        <div style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
-          <div className="stack" style={{ gap: 6 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="waybill-hero" style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", padding: "20px 24px", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
+          <div className="stack waybill-hero-info" style={{ gap: 6 }}>
+            <div className="waybill-hero-title">
               <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}><CopyCode value={w.waybill_no} /></span>
               <span className="tag" style={{ background: "var(--hero-line)", color: "var(--hero-ink)", border: "1px solid var(--hero-line)", fontWeight: 500 }}>
                 {STATUS_LABEL[w.status] ?? w.status}
               </span>
               {w.receipt_status === "returned" && <span className="tag tag-low">回单已核验</span>}
             </div>
-            <div style={{ color: "var(--hero-sub)", fontSize: 13, display: "flex", gap: 16, fontWeight: 400 }}>
+            <div className="waybill-hero-meta" style={{ color: "var(--hero-sub)", fontSize: 13, fontWeight: 400 }}>
               <span>{w.route_name} ({w.origin} → {w.destination})</span>
               <span>{w.customer_name || "散客"}</span>
               <span>{w.vehicle_plate || "自营/待指派"}</span>
             </div>
           </div>
 
-          <div className="stack" style={{ alignItems: "flex-end", gap: 8 }}>
+          <div className="stack waybill-hero-actions" style={{ gap: 8 }}>
             <span className={`tag tag-${w.risk_level === 'high' ? 'high' : w.risk_level === 'medium' ? 'medium' : 'low'}`} style={{ fontSize: 12, padding: "4px 10px" }}>
               风险 {RISK_LABEL[w.risk_level]}
             </span>
-            <div className="row-actions">
+            <div className="row-actions waybill-hero-buttons">
               <button className="btn-ghost" style={{ color: "var(--hero-ink)", border: "1px solid var(--hero-line)", background: "transparent" }} disabled={analyze.isPending} onClick={() => analyze.mutate()}>
                 风险分析
               </button>

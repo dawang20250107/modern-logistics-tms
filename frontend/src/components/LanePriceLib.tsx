@@ -89,7 +89,7 @@ export function LanePriceLib() {
           {model.conditions.map((c) => {
             const label = describeCondition(c, LANE_FILTER_FIELDS);
             if (!label) return null;
-            return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+            return <span key={c.id} className="filter-chip"><span className="filter-chip-label" title={label}>{label}</span><button type="button" aria-label={`删除条件：${label}`} onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
           })}
           <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
         </div>
@@ -140,7 +140,7 @@ export function LanePriceLib() {
               <span className="om-title" style={{ marginRight: 2 }}>线路承运商价库<span className="ai-pill">{st.total}</span></span>
               <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 260 }} placeholder="搜索线路 / 承运商 / 车型" value={search} onChange={(e) => setSearch(e.target.value)} />
               <div style={{ position: "relative" }}>
-                <button className={`btn-ghost${laneActiveCount > 0 || showFilter ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowFilter((v) => !v); }}>
+                <button className={`btn-ghost${laneActiveCount > 0 || showFilter ? " on-accent" : ""}`} onClick={() => setShowFilter((v) => !v)}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
                     高级筛选{laneActiveCount > 0 ? ` · ${laneActiveCount}` : ""}

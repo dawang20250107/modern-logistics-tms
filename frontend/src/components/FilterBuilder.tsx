@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { FloatingLayer, anchor, point } from "./FloatingLayer";
+
 // 多条件高级筛选器：字段类型 文本/枚举/数值/日期，条件间 AND / OR 组合。
 export type FieldType = "text" | "enum" | "number" | "date";
 
@@ -144,13 +146,35 @@ export function FilterBuilder({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
+  const close = (restoreFocus = false) => {
+    onClose();
+    if (restoreFocus) requestAnimationFrame(() => openerRef.current?.focus());
+  };
   useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !openerRef.current?.contains(target)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close(true);
+      }
+    };
     document.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
   }, [onClose]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      ref.current?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   const setCond = (id: string, patch: Partial<FilterCondition>) =>
     onChange({ ...model, conditions: model.conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
@@ -164,12 +188,19 @@ export function FilterBuilder({
   };
 
   return (
-    <div className="fb-pop" ref={ref} onClick={(e) => e.stopPropagation()}>
+    <FloatingLayer
+      className="fb-pop"
+      ref={ref}
+      origin={openerRef.current ? anchor(openerRef.current, "start") : point({ x: 10, y: 10 })}
+      role="dialog"
+      aria-label="高级筛选"
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="fb-head">
         <span>高级筛选</span>
         <div className="fb-comb">
-          <button className={model.combinator === "and" ? "on" : ""} onClick={() => onChange({ ...model, combinator: "and" })}>满足全部 AND</button>
-          <button className={model.combinator === "or" ? "on" : ""} onClick={() => onChange({ ...model, combinator: "or" })}>满足任一 OR</button>
+          <button type="button" className={model.combinator === "and" ? "on" : ""} onClick={() => onChange({ ...model, combinator: "and" })}>满足全部 AND</button>
+          <button type="button" className={model.combinator === "or" ? "on" : ""} onClick={() => onChange({ ...model, combinator: "or" })}>满足任一 OR</button>
         </div>
       </div>
       <div className="fb-body">
@@ -193,7 +224,7 @@ export function FilterBuilder({
                       {(f.options ?? []).map((o) => {
                         const arr = (c.value as string[]) || [];
                         const on = arr.includes(o.value);
-                        return <button key={o.value} className={`chip${on ? " chip-on" : ""}`} onClick={() => setCond(c.id, { value: on ? arr.filter((v) => v !== o.value) : [...arr, o.value] })}>{o.label}</button>;
+                        return <button type="button" key={o.value} className={`chip${on ? " chip-on" : ""}`} onClick={() => setCond(c.id, { value: on ? arr.filter((v) => v !== o.value) : [...arr, o.value] })}>{o.label}</button>;
                       })}
                     </div>
                   ) : c.op === "between" ? (
@@ -206,17 +237,17 @@ export function FilterBuilder({
                     <input className="search" type={f.type === "date" ? "date" : f.type === "number" ? "number" : "text"} value={String(c.value ?? "")} placeholder="取值" onChange={(e) => setCond(c.id, { value: e.target.value })} />
                   )}
               </div>
-              <button className="fb-del" title="删除条件" onClick={() => removeCond(c.id)}>×</button>
+              <button type="button" className="fb-del" title="删除条件" onClick={() => removeCond(c.id)}>×</button>
             </div>
           );
         })}
       </div>
       <div className="fb-foot">
-        <button className="linkish small" onClick={addCond}>+ 添加条件</button>
+        <button type="button" className="linkish small" onClick={addCond}>+ 添加条件</button>
         <div style={{ flex: 1 }} />
-        <button className="linkish small" onClick={() => onChange(EMPTY_MODEL)}>清空</button>
-        <button className="btn-ghost small" onClick={onClose}>完成</button>
+        <button type="button" className="linkish small" onClick={() => onChange(EMPTY_MODEL)}>清空</button>
+        <button type="button" className="btn-ghost small" onClick={() => close(true)}>完成</button>
       </div>
-    </div>
+    </FloatingLayer>
   );
 }

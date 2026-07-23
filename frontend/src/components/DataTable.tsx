@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
+import { FloatingLayer, anchor, point, type FloatingOrigin } from "./FloatingLayer";
+
 // 顶尖 SaaS 表格：列显隐 / 列宽拖拽 / 固定首列 / 多字段排序 / 列内字段筛选 /
 // 保存视图 / 批量 / Shift 范围选 / 行右键菜单 / 行内 / 导出
 export interface DataColumn<T> {
@@ -40,6 +42,13 @@ export interface RowMenuItem {
 
 interface SortState { key: string; dir: "asc" | "desc" }
 interface ViewState { hidden: string[]; widths: Record<string, number>; sort: SortState | null }
+
+const INTERACTIVE_TARGETS = "button,a,input,select,textarea,label,summary,[contenteditable]:not([contenteditable='false']),[role='button'],[role='menuitem']";
+
+function isInteractiveChild(event: React.SyntheticEvent<HTMLElement>): boolean {
+  const target = event.target;
+  return target instanceof Element && target !== event.currentTarget && Boolean(target.closest(INTERACTIVE_TARGETS));
+}
 
 function loadView(viewKey: string): ViewState | null {
   try {
@@ -89,12 +98,16 @@ export function DataTable<T>({
   const [colMenu, setColMenu] = useState(false);
   // 列内字段筛选：colKey -> 选中值集合（空/缺省 = 不筛）
   const [filters, setFilters] = useState<Record<string, Set<string>>>({});
-  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [openFilter, setOpenFilter] = useState<{ key: string; target: HTMLElement } | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
   // 行右键菜单
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: RowMenuItem[] } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ origin: FloatingOrigin; items: RowMenuItem[] } | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
   const ctxOpenerRef = useRef<HTMLElement | null>(null);
+  const colMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const colMenuRef = useRef<HTMLDivElement>(null);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
+  const activeLayerOpenerRef = useRef<HTMLElement | null>(null);
   // Shift 范围选锚点
   const anchorRef = useRef<number>(-1);
 
@@ -107,9 +120,12 @@ export function DataTable<T>({
   useEffect(() => {
     const close = () => { setColMenu(false); setOpenFilter(null); setCtxMenu(null); };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        if (ctxMenuRef.current?.contains(document.activeElement)) ctxOpenerRef.current?.focus();
+      if (event.key === "Escape" && (colMenu || openFilter || ctxMenu)) {
+        const opener = ctxMenuRef.current?.contains(document.activeElement)
+          ? ctxOpenerRef.current
+          : activeLayerOpenerRef.current;
         close();
+        requestAnimationFrame(() => opener?.focus());
       }
     };
     window.addEventListener("click", close);
@@ -118,12 +134,24 @@ export function DataTable<T>({
       window.removeEventListener("click", close);
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, []);
+  }, [colMenu, openFilter, ctxMenu]);
 
   useEffect(() => {
     if (!ctxMenu) return;
-    ctxMenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    const frame = window.requestAnimationFrame(() => {
+      ctxMenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [ctxMenu]);
+
+  useEffect(() => {
+    if (!colMenu && !openFilter) return;
+    const frame = window.requestAnimationFrame(() => {
+      const layer = colMenu ? colMenuRef.current : filterMenuRef.current;
+      layer?.querySelector<HTMLElement>('input:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [colMenu, openFilter]);
 
   const visibleCols = columns.filter((c) => !hidden.has(c.key));
   const filterText = (c: DataColumn<T>, r: T): string =>
@@ -253,12 +281,16 @@ export function DataTable<T>({
     if (rowMenu) {
       e.preventDefault();
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      ctxOpenerRef.current = e.currentTarget as HTMLElement;
+      const active = document.activeElement;
+      ctxOpenerRef.current = active instanceof HTMLElement && e.currentTarget.contains(active)
+        ? active
+        : e.currentTarget as HTMLElement;
       const x = e.clientX || rect.left + 24;
       const y = e.clientY || rect.top + 24;
+      setColMenu(false);
+      setOpenFilter(null);
       setCtxMenu({
-        x: Math.max(8, Math.min(x, window.innerWidth - 208)),
-        y: Math.max(8, Math.min(y, window.innerHeight - 220)),
+        origin: point({ x, y }),
         items: rowMenu(row),
       });
     }
@@ -268,10 +300,10 @@ export function DataTable<T>({
   const openRowMenuFromKeyboard = (row: T, target: HTMLElement) => {
     if (!rowMenu) return;
     ctxOpenerRef.current = target;
-    const rect = target.getBoundingClientRect();
+    setColMenu(false);
+    setOpenFilter(null);
     setCtxMenu({
-      x: Math.max(8, Math.min(rect.left + 24, window.innerWidth - 208)),
-      y: Math.max(8, Math.min(rect.top + rect.height, window.innerHeight - 220)),
+      origin: anchor(target, "start"),
       items: rowMenu(row),
     });
   };
@@ -287,14 +319,21 @@ export function DataTable<T>({
           )}
           {!hideExport && <button type="button" className="btn-ghost" onClick={exportCsv}>导出</button>}
           <button
+            ref={colMenuButtonRef}
             type="button"
             className="btn-ghost"
             aria-expanded={colMenu}
             aria-controls={`${viewKey}-column-menu`}
-            onClick={(e) => { e.stopPropagation(); setColMenu((v) => !v); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              activeLayerOpenerRef.current = e.currentTarget;
+              setOpenFilter(null);
+              setCtxMenu(null);
+              setColMenu((v) => !v);
+            }}
           >列</button>
-          {colMenu && (
-            <div id={`${viewKey}-column-menu`} className="dt-colmenu" role="dialog" aria-label="显示列设置" onClick={(e) => e.stopPropagation()}>
+          {colMenu && colMenuButtonRef.current && (
+            <FloatingLayer ref={colMenuRef} origin={anchor(colMenuButtonRef.current, "end")} id={`${viewKey}-column-menu`} className="dt-colmenu" role="dialog" aria-label="显示列设置" onClick={(e) => e.stopPropagation()}>
               <div className="muted small" style={{ padding: "2px 8px 6px" }}>显示列</div>
               {columns.map((c) => (
                 <label key={c.key} className="dt-colitem">
@@ -309,7 +348,7 @@ export function DataTable<T>({
               ))}
               <div className="context-divider" />
               <button type="button" className="dt-colreset" onClick={() => { setHidden(new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key))); setWidths({}); setSort(null); setFilters({}); }}>重置视图</button>
-            </div>
+            </FloatingLayer>
           )}
         </div>
       </div>
@@ -361,16 +400,24 @@ export function DataTable<T>({
                           className={`dt-filter-btn${fActive ? " on" : ""}`}
                           title="按此列筛选"
                           aria-label={`筛选${c.header}`}
-                          aria-expanded={openFilter === c.key}
+                          aria-expanded={openFilter?.key === c.key}
                           aria-controls={`${viewKey}-${c.key}-filter`}
-                          onClick={(e) => { e.stopPropagation(); setOpenFilter((k) => (k === c.key ? null : c.key)); setFilterSearch(""); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const target = e.currentTarget;
+                            activeLayerOpenerRef.current = target;
+                            setColMenu(false);
+                            setCtxMenu(null);
+                            setOpenFilter((current) => current?.key === c.key ? null : { key: c.key, target });
+                            setFilterSearch("");
+                          }}
                         >
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
                         </button>
                       )}
                     </span>
-                    {!server && c.filterable && openFilter === c.key && (
-                      <div id={`${viewKey}-${c.key}-filter`} className="dt-filter-pop" role="dialog" aria-label={`${c.header}筛选`} onClick={(e) => e.stopPropagation()}>
+                    {!server && c.filterable && openFilter?.key === c.key && (
+                      <FloatingLayer ref={filterMenuRef} origin={anchor(openFilter.target, "start")} id={`${viewKey}-${c.key}-filter`} className="dt-filter-pop" role="dialog" aria-label={`${c.header}筛选`} onClick={(e) => e.stopPropagation()}>
                         <input className="search" autoFocus aria-label={`搜索${c.header}取值`} placeholder="搜索取值…" value={filterSearch} onChange={(e) => setFilterSearch(e.target.value)} style={{ width: "100%", marginBottom: 6 }} />
                         <div className="dt-filter-list">
                           {distinctValues(c).filter((v) => !filterSearch || v.toLowerCase().includes(filterSearch.toLowerCase())).map((v) => (
@@ -382,9 +429,13 @@ export function DataTable<T>({
                         </div>
                         <div className="dt-filter-foot">
                           <button type="button" className="linkish small" onClick={() => clearFilter(c.key)}>清空</button>
-                          <button type="button" className="btn-ghost small" onClick={() => setOpenFilter(null)}>完成</button>
+                          <button type="button" className="btn-ghost small" onClick={() => {
+                            const opener = openFilter.target;
+                            setOpenFilter(null);
+                            requestAnimationFrame(() => opener.focus());
+                          }}>完成</button>
                         </div>
-                      </div>
+                      </FloatingLayer>
                     )}
                     <span
                       className="dt-resizer"
@@ -432,9 +483,15 @@ export function DataTable<T>({
                   className={`${rowClassName?.(r) ?? ""} ${isSel ? "row-sel" : ""}${onRowClick || onRowDoubleClick || rowMenu ? " dt-clickable" : ""}`}
                   tabIndex={(onRowClick || onRowDoubleClick || rowMenu) ? 0 : undefined}
                   aria-selected={selectable ? Boolean(isSel) : undefined}
-                  onContextMenu={(rowMenu || onRowContextMenu) ? (e) => openRowMenu(e, r) : undefined}
-                  onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(r) : undefined}
-                  onClick={onRowClick ? () => onRowClick(r) : undefined}
+                  onContextMenu={(rowMenu || onRowContextMenu) ? (e) => {
+                    if (!isInteractiveChild(e)) openRowMenu(e, r);
+                  } : undefined}
+                  onDoubleClick={onRowDoubleClick ? (e) => {
+                    if (!isInteractiveChild(e)) onRowDoubleClick(r);
+                  } : undefined}
+                  onClick={onRowClick ? (e) => {
+                    if (!isInteractiveChild(e)) onRowClick(r);
+                  } : undefined}
                   onKeyDown={(e) => {
                     if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter") {
@@ -522,7 +579,27 @@ export function DataTable<T>({
       )}
 
       {ctxMenu && (
-        <div ref={ctxMenuRef} className="ctx-menu" role="menu" aria-label="行操作" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={(e) => e.stopPropagation()}>
+        <FloatingLayer
+          ref={ctxMenuRef}
+          origin={ctxMenu.origin}
+          className="ctx-menu"
+          role="menu"
+          aria-label="行操作"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+            if (items.length === 0) return;
+            const index = items.indexOf(document.activeElement as HTMLButtonElement);
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              const delta = e.key === "ArrowDown" ? 1 : -1;
+              items[(index + delta + items.length) % items.length]?.focus();
+            } else if (e.key === "Home" || e.key === "End") {
+              e.preventDefault();
+              items[e.key === "Home" ? 0 : items.length - 1]?.focus();
+            }
+          }}
+        >
           {ctxMenu.items.map((it, i) => (
             <button
               type="button"
@@ -530,10 +607,17 @@ export function DataTable<T>({
               key={i}
               disabled={it.disabled}
               className={it.danger ? "danger" : ""}
-              onClick={() => { it.onClick(); setCtxMenu(null); }}
+              onClick={() => {
+                ctxOpenerRef.current?.focus();
+                it.onClick();
+                setCtxMenu(null);
+                requestAnimationFrame(() => {
+                  if (!document.querySelector('[aria-modal="true"]')) ctxOpenerRef.current?.focus();
+                });
+              }}
             >{it.label}</button>
           ))}
-        </div>
+        </FloatingLayer>
       )}
     </div>
   );

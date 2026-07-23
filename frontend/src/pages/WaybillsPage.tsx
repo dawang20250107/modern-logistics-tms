@@ -10,7 +10,7 @@ import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
 import { useModalA11y } from "../api/useModalA11y";
 import { useServerTable } from "../api/useServerTable";
-import { DataTable, type DataColumn } from "../components/DataTable";
+import { DataTable, type DataColumn, type RowMenuItem } from "../components/DataTable";
 import { CopyCode } from "../components/CopyCode";
 import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { FinanceCard } from "../components/FinanceCard";
@@ -36,12 +36,6 @@ const WAYBILL_FILTER_FIELDS: FilterFieldDef[] = [
   { key: "payable", label: "应付(元)", type: "number", accessor: (w) => Number((w as Waybill).payable_amount) || 0 },
   { key: "cod", label: "代收货款(元)", type: "number", accessor: (w) => Number((w as Waybill).cod_amount) || 0 },
 ];
-
-interface ContextMenuState {
-  x: number;
-  y: number;
-  waybill: Waybill;
-}
 
 interface PersistedFilters {
   filter: string;
@@ -73,7 +67,6 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const wbActiveCount = activeConditionCount(model, WAYBILL_FILTER_FIELDS);
 
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [drawerWaybill, setDrawerWaybill] = useState<Waybill | null>(null);
   const wbDrawerRef = useRef<HTMLDivElement>(null);
   useModalA11y(Boolean(drawerWaybill), wbDrawerRef, () => setDrawerWaybill(null));
@@ -109,23 +102,6 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
     }
   }, [filter, statusFilter]);
 
-  // 全局点击关闭右键菜单 + Esc
-  useEffect(() => {
-    const handleCloseMenu = () => setContextMenu(null);
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setContextMenu(null);
-        setDrawerWaybill(null);
-      }
-    };
-    window.addEventListener("click", handleCloseMenu);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("click", handleCloseMenu);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, []);
-
   const rows = st.rows;
 
   // 选择集随当前页收敛（批量操作作用于当前页选中项）
@@ -155,11 +131,6 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
 
   const invalidateWaybills = () => queryClient.invalidateQueries({ queryKey: ["waybills"] });
 
-  const handleRowContextMenu = (e: React.MouseEvent, w: Waybill) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, waybill: w });
-  };
-
   const openContract = useMutation({
     mutationFn: (no: string) => apiGet<Contract | null>(`/waybills/${no}/contract`),
     onSuccess: (c, no) => {
@@ -178,7 +149,6 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
   });
 
   const handleAction = async (action: string, w: Waybill) => {
-    setContextMenu(null);
     if (action === "view") navigate(`/waybills/${w.waybill_no}`);
     else if (action === "track") navigate(`/waybills/${w.waybill_no}`);
     else if (action === "print") openContract.mutate(w.waybill_no);
@@ -191,6 +161,26 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
       });
       if (ok) voidWaybill.mutate(w.waybill_no);
     }
+  };
+
+  const waybillRowMenu = (w: Waybill): RowMenuItem[] => [
+    { label: "查看详情", onClick: () => void handleAction("view", w) },
+    { label: "在途追踪", onClick: () => void handleAction("track", w) },
+    { label: "查看合同 / 回单 PDF", disabled: openContract.isPending, onClick: () => void handleAction("print", w) },
+    { label: "作废运单", danger: true, disabled: voidWaybill.isPending, onClick: () => void handleAction("cancel", w) },
+  ];
+
+  const openMoreMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const row = event.currentTarget.closest("tr");
+    if (!row) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.right,
+      clientY: rect.bottom,
+    }));
   };
 
   // === 批量操作 ===
@@ -318,7 +308,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>详情</button>
           <button onClick={() => navigate(`/waybills/${w.waybill_no}`)}>追踪</button>
-          <button onClick={(e) => handleRowContextMenu(e, w)} aria-label="更多操作">⋯</button>
+          <button onClick={openMoreMenu} aria-label="更多操作" aria-haspopup="menu">⋯</button>
         </div>
       ),
     },
@@ -346,7 +336,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
             {model.conditions.map((c) => {
               const label = describeCondition(c, WAYBILL_FILTER_FIELDS);
               if (!label) return null;
-              return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+              return <span key={c.id} className="filter-chip"><span className="filter-chip-label" title={label}>{label}</span><button type="button" aria-label={`删除条件：${label}`} onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
             })}
             <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
           </div>
@@ -375,7 +365,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
             selected={selected}
             onToggle={toggleOne}
             onToggleAll={toggleAll}
-            onRowContextMenu={handleRowContextMenu}
+            rowMenu={waybillRowMenu}
             onRowDoubleClick={setDrawerWaybill}
             rowClassName={() => "waybill-tr"}
             stickyFirst
@@ -397,7 +387,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
                 <span className="om-title" style={{ marginRight: 2 }}>运单<span className="ai-pill">{st.total}</span></span>
                 <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 280 }} placeholder="搜索单号/线路/车牌/客户" value={filter} onChange={(e) => setFilter(e.target.value)} />
                 <div style={{ position: "relative" }}>
-                  <button className={`btn-ghost${wbActiveCount > 0 || showAdvanced ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowAdvanced((v) => !v); }}>
+                  <button className={`btn-ghost${wbActiveCount > 0 || showAdvanced ? " on-accent" : ""}`} onClick={() => setShowAdvanced((v) => !v)}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
                       高级筛选{wbActiveCount > 0 ? ` · ${wbActiveCount}` : ""}
@@ -416,27 +406,6 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
           />
         )}
       </div>
-
-      {/* 右键快捷菜单 */}
-      {contextMenu && (
-        <div className="context-menu-wrapper" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ padding: "4px 8px 8px", fontSize: 11, fontWeight: "bold", color: "var(--muted)" }}>
-            运单 {contextMenu.waybill.waybill_no}
-          </div>
-          <button onClick={() => handleAction("view", contextMenu.waybill)}>
-            <span>查看详情</span> <span className="hotkey">↵</span>
-          </button>
-          <button onClick={() => handleAction("track", contextMenu.waybill)}><span>在途追踪</span></button>
-          <div className="context-divider"></div>
-          <button disabled={openContract.isPending} onClick={() => handleAction("print", contextMenu.waybill)}>
-            <span>查看合同/回单 PDF</span>
-          </button>
-          <div className="context-divider"></div>
-          <button disabled={voidWaybill.isPending} onClick={() => handleAction("cancel", contextMenu.waybill)} style={{ color: "var(--red)" }}>
-            <span>作废运单</span> <span className="hotkey">⌫</span>
-          </button>
-        </div>
-      )}
 
       {/* 双击侧滑详情抽屉（Precision Graphite） */}
       {drawerWaybill && (

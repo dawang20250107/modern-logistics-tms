@@ -69,6 +69,14 @@ type DrawerTab = "dispatch" | "track";
 
 const CUST_LEVEL_TONE: Record<string, string> = { S: "tag-info", A: "tag-low", B: "tag-info", C: "tag-medium", D: "tag-none" };
 
+const KEYBOARD_NAV_EXCLUSION_SELECTOR = [
+  "button", "a", "input", "select", "textarea", "summary",
+  "[contenteditable]:not([contenteditable='false'])",
+  "[tabindex]:not([tabindex='-1'])",
+  "[role='button']", "[role='menu']", "[role='menuitem']", "[role='menuitemcheckbox']", "[role='menuitemradio']",
+  "[role='dialog']", "[role='listbox']", "[role='option']", "[role='combobox']", "[role='textbox']", "[role='spinbutton']",
+].join(",");
+
 // 时间审计渲染：三池各自的关键时间戳 + 操作人，全链路可追溯
 function renderAudit(o: Order, tab: "unassigned" | "dispatchable" | "dispatched") {
   if (tab === "unassigned") {
@@ -439,8 +447,9 @@ export function DispatchBoardPage() {
   useEffect(() => {
     if (active || rows.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest(KEYBOARD_NAV_EXCLUSION_SELECTOR)) return;
       if (e.key === "ArrowDown") { e.preventDefault(); setFocusIdx((i) => Math.min(i + 1, rows.length - 1)); }
       else if (e.key === "ArrowUp") { e.preventDefault(); setFocusIdx((i) => Math.max(i <= 0 ? 0 : i - 1, 0)); }
       else if (e.key === "Enter" && poolTab === "dispatchable" && focusIdx >= 0 && focusIdx < rows.length) { e.preventDefault(); openWb(rows[focusIdx]); }
@@ -484,7 +493,7 @@ export function DispatchBoardPage() {
         </span>
       </div>
     ) },
-    { key: "act", header: "操作", width: 156, alwaysVisible: true, sticky: "right", render: (o) => {
+    { key: "act", header: "操作", width: 204, minWidth: 204, alwaysVisible: true, sticky: "right", render: (o) => {
       const canDispatch = o.dispatchable !== false;
       return (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
@@ -573,7 +582,7 @@ export function DispatchBoardPage() {
             {model.conditions.map((c) => {
               const label = describeCondition(c, DISPATCH_FILTER_FIELDS);
               if (!label) return null;
-              return <span key={c.id} className="filter-chip">{label}<button onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+              return <span key={c.id} className="filter-chip"><span className="filter-chip-label" title={label}>{label}</span><button type="button" aria-label={`删除条件：${label}`} onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
             })}
             <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
           </div>
@@ -624,7 +633,7 @@ export function DispatchBoardPage() {
                 <span className="muted small">共 {rows.length} 单{picked.size ? ` · 已选 ${picked.size}` : ""}</span>
                 <input className="search" style={{ minWidth: 170, flex: 1, maxWidth: 280 }} placeholder="搜索 订单号 / 客户 / 线路" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} />
                 <div style={{ position: "relative" }}>
-                  <button className={`btn-ghost${filterActive > 0 || showBuilder ? " on-accent" : ""}`} onClick={(e) => { e.stopPropagation(); setShowBuilder((v) => !v); }}>
+                  <button className={`btn-ghost${filterActive > 0 || showBuilder ? " on-accent" : ""}`} onClick={() => setShowBuilder((v) => !v)}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
                       高级筛选{filterActive > 0 ? ` · ${filterActive}` : ""}
@@ -929,13 +938,20 @@ export function DispatchBoardPage() {
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                         <span className="muted small" style={{ width: "100%", fontWeight: 700 }}>自营车兜底运力（仅特殊场景使用）：</span>
                         {suggestion.vehicle_candidates.map((v) => (
-                          <span key={v.plate_no} className={`tag tag-${v.compliance_ok === false ? "high" : "low"}`} style={{ cursor: "pointer" }} onClick={() => { setDispatchType("own_vehicle"); setVehicleId(v.vehicle_id || ""); }}>
+                          <button
+                            type="button"
+                            key={v.plate_no}
+                            className={`tag tag-${v.compliance_ok === false ? "high" : "low"}`}
+                            style={{ cursor: "pointer" }}
+                            aria-pressed={dispatchType === "own_vehicle" && vehicleId === (v.vehicle_id || "")}
+                            onClick={() => { setDispatchType("own_vehicle"); setVehicleId(v.vehicle_id || ""); }}
+                          >
                             {v.plate_no}
                             {v.vehicle_length_m ? ` ${v.vehicle_length_m}m` : ""}
                             {v.body_type ? ` ${BODY_TYPE_LABEL[v.body_type] ?? v.body_type}` : ""}
                             {` (装载率 ${Math.round(v.utilization * 100)}%)`}
                             {v.compliance_ok === false && `${v.compliance?.join("/")}过期`}
-                          </span>
+                          </button>
                         ))}
                       </div>
                     )}

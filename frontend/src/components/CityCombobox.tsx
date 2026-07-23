@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { ALL_CITIES } from "../data/regions";
+import { FloatingLayer, anchor } from "./FloatingLayer";
 
 // 城市库以全国行政区（省/市/区）派生的完整市级列表为准，补全此前"城市库不全"。
 const CITIES = ALL_CITIES;
@@ -21,16 +22,25 @@ export function CityCombobox({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !listRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const option = listRef.current?.children[active] as HTMLElement | undefined;
+    option?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
 
   const matches = useMemo(() => {
     const q = value.trim();
@@ -43,6 +53,7 @@ export function CityCombobox({
   return (
     <div className="combobox" ref={ref} style={{ position: "relative", ...style }}>
       <input
+        ref={inputRef}
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={open}
@@ -62,10 +73,18 @@ export function CityCombobox({
         }}
         style={{ width: "100%" }}
       />
-      {open && matches.length > 0 && (
-        <ul id={listId} className="combobox-menu" role="listbox" aria-label="城市建议">
+      {open && matches.length > 0 && inputRef.current && (
+        <FloatingLayer
+          ref={listRef}
+          origin={anchor(inputRef.current, "start")}
+          id={listId}
+          className="combobox-menu"
+          role="listbox"
+          aria-label="城市建议"
+          style={{ width: inputRef.current.getBoundingClientRect().width }}
+        >
           {matches.map((c, i) => (
-            <li
+            <div
               id={`${listId}-${i}`}
               key={c}
               role="option"
@@ -75,9 +94,9 @@ export function CityCombobox({
               onMouseEnter={() => setActive(i)}
             >
               {c}
-            </li>
+            </div>
           ))}
-        </ul>
+        </FloatingLayer>
       )}
     </div>
   );

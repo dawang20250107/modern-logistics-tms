@@ -83,12 +83,14 @@ export function StatusTag({
   kind, value, title, suffix, showAction = true,
 }: { kind: StatusKind; value: string; title?: string; suffix?: string; showAction?: boolean }) {
   const m = statusMeta(kind, value);
+  const label = `${m.label}${suffix ?? ""}`;
+  const fullTitle = title ? `${label} · ${title}` : m.needsAction ? `${label} · 需处理` : label;
   return (
     <span
       className={`tag ${TONE_CLASS[m.tone]}${m.needsAction && showAction ? " tag-act" : ""}`}
-      title={title ?? (m.needsAction ? `${m.label} · 需处理` : m.label)}
+      title={fullTitle}
     >
-      {m.label}{suffix ?? ""}
+      <span className="tag-label">{label}</span>
     </span>
   );
 }

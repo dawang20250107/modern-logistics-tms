@@ -7,6 +7,15 @@ const FOCUSABLE =
 // Esc 关闭，关闭后把焦点还给打开前的元素。传入 active + 容器 ref + onClose 即可。
 export function useModalA11y(active: boolean, ref: RefObject<HTMLElement | null>, onClose: () => void) {
   const closeRef = useRef(onClose);
+  const wasActiveRef = useRef(false);
+  const restoreRef = useRef<HTMLElement | null>(null);
+
+  // Capture before the active render commits. React autoFocus runs during commit,
+  // which is earlier than effects and would otherwise replace the real opener.
+  if (active && !wasActiveRef.current && typeof document !== "undefined") {
+    restoreRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  wasActiveRef.current = active;
 
   useEffect(() => {
     closeRef.current = onClose;
@@ -14,7 +23,7 @@ export function useModalA11y(active: boolean, ref: RefObject<HTMLElement | null>
 
   useEffect(() => {
     if (!active) return;
-    const restore = document.activeElement as HTMLElement | null;
+    const restore = restoreRef.current;
     const node = ref.current;
     const focusables = () =>
       node ? Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((e) => e.offsetParent !== null) : [];

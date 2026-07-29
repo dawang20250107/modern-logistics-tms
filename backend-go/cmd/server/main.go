@@ -22,6 +22,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/orders"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/org"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/proxy"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
 )
@@ -50,6 +51,7 @@ func main() {
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
 	finH := &finance.Handler{DB: pool}
 	anaH := &analytics.Handler{DB: pool, Svc: authSvc}
+	orgH := &org.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	django := proxy.New(cfg.DjangoUpstream)
 
 	r := chi.NewRouter()
@@ -98,6 +100,26 @@ func main() {
 		p.Get("/api/v1/credentials/expiring", mdH.ExpiringCredentials)
 		p.Get("/api/v1/finance/dashboard-metrics", finH.DashboardMetrics)
 		p.Get("/api/v1/workbench", orderH.Workbench)
+		p.Get("/api/v1/org/overview", orgH.Overview)
+		p.Get("/api/v1/org/organizations", orgH.Organizations)
+		p.Post("/api/v1/org/organizations", orgH.CreateOrganization)
+		p.Get("/api/v1/org/organizations/tree", orgH.Tree)
+		p.Get("/api/v1/org/roles", orgH.Roles)
+		p.Post("/api/v1/org/roles/{id}/set-permissions", orgH.SetRolePermissions)
+		p.Get("/api/v1/org/rbac/matrix", orgH.RbacMatrix)
+		p.Get("/api/v1/org/service-areas", orgH.ServiceAreas)
+		p.Post("/api/v1/org/service-areas", orgH.CreateServiceArea)
+		p.Get("/api/v1/org/employees", orgH.Employees)
+		p.Post("/api/v1/org/employees", orgH.CreateEmployee)
+		p.Get("/api/v1/org/employees/{id}/roles", orgH.EmployeeRoles)
+		p.Post("/api/v1/org/employees/{id}/roles", orgH.EmployeeRoles)
+		p.Post("/api/v1/org/employees/{id}/enable", orgH.ToggleEmployee(true))
+		p.Post("/api/v1/org/employees/{id}/disable", orgH.ToggleEmployee(false))
+		p.Post("/api/v1/org/employees/{id}/reset-password", orgH.ResetPassword)
+		p.Post("/api/v1/org/employees/{id}/handover", orgH.Handover)
+		p.Get("/api/v1/org/handovers", orgH.Handovers)
+		p.Get("/api/v1/org/login-audit", orgH.LoginAudit)
+		p.Get("/api/v1/org/route-resolve", orgH.RouteResolve)
 	})
 
 	// ── 其余全部：绞杀者代理回 Django ──

@@ -4,6 +4,7 @@
 package masterdata
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -228,6 +229,20 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request, cfg ResourceCfg) 
 		"items": items, "total": total, "page": page, "page_size": pageSize,
 		"pages": int(math.Max(1, math.Ceil(float64(total)/float64(pageSize)))),
 	})
+}
+
+// One 用资源配置回读单行（写路径回显复用列表列面）；未命中返回 nil
+func (h *Handler) One(ctx context.Context, cfg ResourceCfg, where string, args ...any) (map[string]any, error) {
+	rows, err := h.DB.Query(ctx, cfg.SelectSQL+" "+cfg.FromClause+" WHERE "+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items, err := rowsToMaps(rows)
+	if err != nil || len(items) == 0 {
+		return nil, err
+	}
+	return items[0], nil
 }
 
 // rowsToMaps 泛化扫描：列别名即 JSON 键；time.Time 走 RFC3339Nano 由 encoding/json 处理

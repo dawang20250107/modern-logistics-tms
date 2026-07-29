@@ -30,3 +30,10 @@ func Err(w http.ResponseWriter, status int, code, message string) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(Envelope{Success: false, Data: nil, Error: &ErrorBody{Code: code, Message: message}})
 }
+
+// ErrDetails 带 details 的错误信封（对齐 DRF 校验失败的 {field: [messages]} 形态）
+func ErrDetails(w http.ResponseWriter, status int, code, message string, details any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(Envelope{Success: false, Data: nil, Error: &ErrorBody{Code: code, Message: message, Details: details}})
+}

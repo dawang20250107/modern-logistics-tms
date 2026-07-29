@@ -18,6 +18,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/audit"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/exceptions"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/finance"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
@@ -52,6 +53,7 @@ func main() {
 	finH := &finance.Handler{DB: pool}
 	anaH := &analytics.Handler{DB: pool, Svc: authSvc}
 	orgH := &org.Handler{DB: pool, Svc: authSvc, MD: mdH}
+	excH := &exceptions.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	django := proxy.New(cfg.DjangoUpstream)
 
 	r := chi.NewRouter()
@@ -80,6 +82,9 @@ func main() {
 		p.Post("/api/v1/orders/{id}/release", orderH.Release)
 		p.Post("/api/v1/orders/{id}/unassign", orderH.Unassign)
 		p.Post("/api/v1/orders/{id}/dispatch", orderH.Dispatch)
+		p.Post("/api/v1/orders/{id}/report-exception", excH.ReportForOrder)
+		p.Get("/api/v1/exceptions", excH.List)
+		p.Post("/api/v1/exceptions", excH.Create)
 		p.Get("/api/v1/orders/{id}", orderH.Detail)
 		p.Get("/api/v1/orders/{id}/timeline", orderH.Timeline)
 		p.Get("/api/v1/waybills", waybillH.List)

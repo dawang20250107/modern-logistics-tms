@@ -25,6 +25,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/finance"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/migrate"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/notifications"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/orders"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/org"
@@ -47,6 +48,12 @@ func main() {
 	}
 	if err := pool.Ping(ctx); err != nil {
 		slog.Error("db ping", "err", err)
+		os.Exit(1)
+	}
+
+	// Go 侧自有 schema 由内嵌迁移器管（收官时 Django 表所有权也移交到这里）
+	if err := migrate.Run(ctx, pool); err != nil {
+		slog.Error("schema migrate", "err", err)
 		os.Exit(1)
 	}
 
@@ -218,6 +225,8 @@ func main() {
 			rt.Post("/{id}/pay", resH.ReimbursementPay)
 		})
 		p.Post("/api/v1/finance/payment-results", resH.PaymentResult)
+		p.Route("/api/v1/finance/contracts", mdH.CRUD(resources.ContractsCfg, resources.ContractWrite))
+		p.Post("/api/v1/waybills/{no}/generate-costs", finH.GenerateCosts)
 		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
 		p.Get("/api/v1/finance/aging", finH.Aging)

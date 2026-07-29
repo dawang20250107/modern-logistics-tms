@@ -110,6 +110,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
 | 组织中台-读 | GET /org/{overview·organizations·organizations/tree·roles·rbac/matrix·service-areas·employees·handovers·login-audit·route-resolve}（列表复用通用引擎，树/矩阵/区划仲裁定制） | ✅ 十端点双栈 diff 全一致（含子树人头累加、覆盖排他+优先级仲裁） |
 | 单单派车 | POST /orders/{id}/dispatch（own_vehicle/fleet/third_party/platform：状态/锁定/归属门禁 → 承运商风控 → 车辆司机行锁占用 → 核载/车厢/证件资质合规 → 转运单+承运状态+应付快照+双事件+承运合同 HT 取号，单事务） | ✅ 全校验链实测（ORDER_NOT_LOCKED/CARRIER_REQUIRED/VEHICLE_BUSY 等）；Django 读回运单/合同/费用/订单全对；合同为文本版（PDF 留 Django 的 try/except 语义，见差异清单） |
+| 财务-合同计价 | 新增 fin_contract（长期/短期/临时/仅协议）+ 计价规则挂合同 + 费用留合同快照；POST /waybills/{}/generate-costs；/finance/contracts 全套 CRUD | ✅ 计价矩阵 30 组算例与 Django PricingRule.quote 逐分一致（含银行家舍入）；合同规则 10 条业务断言全绿（类型优先级/生效期/终止/无合同回落/应付走承运商合同/单运单单条应付/已入账拒绝重算） |
 | 车联网 + 轨迹 | POST /telematics/ingest + /tracking/points（削峰异步落库）；GET /telematics/{vehicles/live, waybills/{}/trajectory, command-center/summary} + /waybills/{}/tracking；规则报警引擎（超速/温度/油量/设备事件/围栏进出/偏航/掉线） | ✅ 10 个读端点双栈 diff 全一致；规则矩阵 11 组输入与 Django evaluate_telemetry 逐字段对拍一致；上报链路 13 项端到端实测（设备心跳/实时状态/轨迹续点/四类报警/高危转异常工单/去重窗口/围栏首见不报与跳变才报/脏点丢弃/超量 413/掉线扫描） |
 | 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
@@ -228,6 +229,21 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 - **代理响应带 `X-Upstream: django` 头**：迁移收尾靠它盘点「还剩哪些路由没被接管」。
   数路由表里的字符串不可靠——CRUD 子路由是挂载式的，不体现在字面量里。
   注意按此盘点时要对 POST-only 端点用 POST 探测，否则 GET 会落到代理面被误判。
+
+- **财务是「重新设计」而非「等价移植」，因此不做双栈 diff**。Django 的旧实现有三处
+  会直接算错钱，照搬等于把 bug 固化：（1）`generate_statement` 归集费用时不排除
+  已进过其他对账单的记录，账期重叠或重跑即重复计费；（2）`generate_costs` 每次重算
+  先 `delete()` 全部计价费用，而 `StatementLine.expense_record` 是 SET_NULL——对已出
+  对账单的运单重算会把明细打成悬空引用，新生成的费用下期再被收一遍；（3）计价规则
+  没有生效期，调价会把历史运单重算成新价。Go 版逐条改掉，验证方式改为业务规则断言 +
+  与旧实现的**计价数学**对拍（数学部分必须逐分一致，业务规则部分有意不同）。
+- **价格挂到运输合同下**：合同分长期/短期/临时/仅协议四档，多份同时生效时
+  临时 > 仅协议 > 短期 > 长期，同档取生效日期最新的一份。无生效合同时回落
+  `contract_id IS NULL` 的全局兜底价，保证「没签合同也能报价」这条真实路径不断。
+- **删除主副驾拆账**：业务上不存在主副驾，实际形态是「一个订单多辆车、每车一个司机」，
+  这已由「一张订单派生多张运单」表达，每张运单各自计价，运单内部不再拆分。
+- **Go 侧 schema 由内嵌迁移器接管**（`internal/migrate`）：新表新列不再走 Django
+  migrations，收官时 Django 表的所有权一并移交到这里。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

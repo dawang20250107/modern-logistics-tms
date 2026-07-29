@@ -648,3 +648,64 @@ const waybillStatusLabel = `(CASE w.status
     WHEN 'arrived' THEN '已到达' WHEN 'partially_signed' THEN '部分签收' WHEN 'rejected' THEN '已拒收'
     WHEN 'signed' THEN '已签收' WHEN 'delivered' THEN '已送达' WHEN 'settled' THEN '已结算'
     WHEN 'cancelled' THEN '已取消' WHEN 'voided' THEN '已作废' ELSE w.status END)`
+
+// ─────────────────────────── finance：运输合同（商务/价格合同）───────────────────────────
+
+// ContractsCfg /api/v1/finance/contracts —— 一客一价/一商一价的载体
+var ContractsCfg = cfg{
+	SelectSQL: `
+SELECT ct.id::text AS id, ct.contract_no, ct.name, ct.contract_type,
+       (CASE ct.contract_type WHEN 'long_term' THEN '长期合同' WHEN 'short_term' THEN '短期合同'
+                              WHEN 'temporary' THEN '临时合同' WHEN 'agreement' THEN '仅协议'
+                              ELSE ct.contract_type END) AS contract_type_label,
+       ct.party_type,
+       (CASE ct.party_type WHEN 'customer' THEN '客户' WHEN 'carrier' THEN '承运商'
+                           ELSE ct.party_type END) AS party_type_label,
+       ct.party_id::text AS party, ct.party_name,
+       ct.effective_from::text AS effective_from, ct.effective_to::text AS effective_to,
+       ct.signed_at::text AS signed_at, ct.status,
+       (CASE ct.status WHEN 'draft' THEN '草稿' WHEN 'active' THEN '生效中' WHEN 'suspended' THEN '已暂停'
+                       WHEN 'expired' THEN '已到期' WHEN 'terminated' THEN '已终止'
+                       ELSE ct.status END) AS status_label,
+       ct.settlement_type, ct.credit_days, ct.billing_day, ct.file_url, ct.remark, ct.created_at,
+       (SELECT count(*)::int FROM fin_pricing_rule pr
+        WHERE pr.contract_id = ct.id AND pr.is_active) AS rule_count,
+       -- 到期预警：30 天内到期的生效合同，续签窗口靠它提醒
+       (ct.status='active' AND ct.effective_to IS NOT NULL
+        AND ct.effective_to <= (now() AT TIME ZONE 'Asia/Shanghai')::date + 30) AS expiring_soon`,
+	FromClause: "FROM fin_contract ct",
+	SearchCols: []string{"ct.contract_no", "ct.name", "ct.party_name"},
+	OrderingCols: map[string]string{
+		"contract_no": "ct.contract_no", "effective_from": "ct.effective_from",
+		"effective_to": "ct.effective_to", "created_at": "ct.created_at",
+	},
+	DirectParams: map[string]string{
+		"party_type": "ct.party_type", "party": "ct.party_id::text",
+		"contract_type": "ct.contract_type", "status": "ct.status",
+	},
+	DefaultOrder:  "ORDER BY ct.effective_from DESC, ct.contract_no, ct.id",
+	SoftDeleteCol: "ct.is_deleted",
+}
+
+var ContractWrite = wcf{
+	Table: "fin_contract", Model: "Contract", Alias: "ct", SoftDelete: true,
+	Fields: map[string]fld{
+		"contract_no": {Kind: fText, Required: true, Unique: true, Label: "合同编号"},
+		"name":        {Kind: fText},
+		"contract_type": {Kind: fEnum, Default: "long_term",
+			Choices: []string{"long_term", "short_term", "temporary", "agreement"}},
+		"party_type":      {Kind: fEnum, Required: true, Choices: []string{"customer", "carrier"}},
+		"party":           {Kind: fUUID, Required: true, Column: "party_id"},
+		"party_name":      {Kind: fText},
+		"effective_from":  {Kind: fDate, Required: true},
+		"effective_to":    {Kind: fDate},
+		"signed_at":       {Kind: fDate},
+		"status":          {Kind: fEnum, Default: "active", Choices: []string{"draft", "active", "suspended", "expired", "terminated"}},
+		"settlement_type": {Kind: fText, Default: "monthly"},
+		"credit_days":     {Kind: fInt, Default: int64(30)},
+		"billing_day":     {Kind: fInt, Default: int64(1)},
+		"file_url":        {Kind: fURL},
+		"remark":          {Kind: fText},
+	},
+	AfterWrite: snapshotPartyName, // 落对手方名称快照，列表与对账单免 JOIN
+}

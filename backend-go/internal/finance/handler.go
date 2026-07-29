@@ -12,7 +12,10 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
 
+	"errors"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 type Handler struct{ DB *pgxpool.Pool }
@@ -227,4 +230,22 @@ func (h *Handler) Aging(w http.ResponseWriter, r *http.Request) {
 		totals["total"] += total
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"direction": direction, "rows": result, "totals": totals})
+}
+
+// GenerateCosts POST /waybills/{no}/generate-costs —— 按合同价生成运单应收/应付
+func (h *Handler) GenerateCosts(w http.ResponseWriter, r *http.Request) {
+	no := chi.URLParam(r, "no")
+	res, err := GenerateCosts(r.Context(), h.DB, no)
+	switch {
+	case errors.Is(err, ErrAlreadyBilled):
+		httpx.Err(w, http.StatusConflict, "COSTS_ALREADY_BILLED", err.Error())
+		return
+	case errors.Is(err, pgx.ErrNoRows):
+		httpx.Err(w, http.StatusNotFound, "WAYBILL_NOT_FOUND", "运单不存在。")
+		return
+	case err != nil:
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成失败："+err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"waybill_no": no, "generated": res})
 }

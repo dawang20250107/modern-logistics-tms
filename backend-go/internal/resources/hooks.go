@@ -145,3 +145,19 @@ func recognizeReceipt(source string) map[string]any {
 		"note":   "OCR 引擎 " + provider + " 尚未接入实现，签收信息待人工录入。",
 	}
 }
+
+// snapshotPartyName 合同落库后回填对手方名称快照。
+// 快照而非 JOIN：合同是财务凭证，客户/承运商日后改名不应让历史合同跟着变。
+func snapshotPartyName(ctx context.Context, h *masterdata.Handler, id string, body map[string]any, _ bool) error {
+	if v, _ := body["party_name"].(string); v != "" {
+		return nil // 显式给了就不覆盖
+	}
+	_, err := h.DB.Exec(ctx, `
+		UPDATE fin_contract c SET party_name = COALESCE((
+			SELECT name FROM md_customer WHERE id = c.party_id AND c.party_type='customer'
+			UNION ALL
+			SELECT name FROM md_carrier  WHERE id = c.party_id AND c.party_type='carrier'
+			LIMIT 1), '')
+		WHERE c.id = $1::uuid`, id)
+	return err
+}

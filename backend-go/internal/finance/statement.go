@@ -222,7 +222,8 @@ func nextStatementNo(ctx context.Context, tx pgx.Tx) (string, error) {
 		RETURNING value`, scope).Scan(&v); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("DZ%s%06d", day, v), nil
+	// 前缀保持 ST：对账单号是对外单据号，不该因为换了引擎就断成两段序列
+	return fmt.Sprintf("ST%s%06d", day, v), nil
 }
 
 func shanghai() *time.Location {
@@ -480,6 +481,36 @@ func (h *Handler) StatementPayments(w http.ResponseWriter, r *http.Request) {
 }
 
 // respondStatement 统一回读一张对账单（含 scope 与结算进度）
+// inTx 把一段写操作裹进事务：任一步失败整体回滚
+func (h *Handler) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// statementJSON 对账单表头的 StatementSerializer 列面（$1 = 主键）
+const statementJSON = `
+		SELECT json_build_object(
+		  'id', s.id::text, 'statement_no', s.statement_no, 'direction', s.direction,
+		  'counterparty_type', s.counterparty_type, 'counterparty_id', s.counterparty_id,
+		  'counterparty_name', s.counterparty_name,
+		  'scope_type', s.scope_type, 'scope_id', s.scope_id::text, 'scope_name', s.scope_name,
+		  'period_start', s.period_start::text, 'period_end', s.period_end::text,
+		  'due_date', s.due_date::text, 'total_amount', s.total_amount::text,
+		  'item_count', s.item_count, 'external_total', s.external_total::text,
+		  'settled_amount', s.settled_amount::text,
+		  'outstanding', (s.total_amount - s.settled_amount)::text,
+		  'diff', (s.total_amount - s.external_total)::text,
+		  'status', s.status, 'audited_at', s.audited_at, 'confirmed_at', s.confirmed_at,
+		  'settled_at', s.settled_at, 'created_at', s.created_at)
+		FROM fin_statement s WHERE s.id = $1::uuid`
+
 func (h *Handler) respondStatement(w http.ResponseWriter, r *http.Request, id string, code int) {
 	var out map[string]any
 	row := h.DB.QueryRow(r.Context(), `

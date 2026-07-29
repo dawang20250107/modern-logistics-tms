@@ -117,6 +117,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
+| AI 派单建议 + 外部比价 + 转运单 | GET /orders/{id}/{dispatch-suggestion·ymm-quote}、POST /orders/{id}/convert；POST /dispatch-batches/{id}/statement；POST /ai/{deepseek/chat·query-waybill} | ✅ 派单建议与调车比价双栈 diff 全一致（承运商评分七维、风险标签、建议价区间、外部信号、派单类型建议）；批次一键对账的表头与明细逐字段一致且幂等；查单三种入参一致（金额字段系修正，见清单） |
 | 调度建议引擎 | GET /waybills/{no}/dispatch-recommendation + POST /waybills/dispatch-plan | ✅ 6 张运单的车辆候选/司机候选/装载率/合规屏蔽双栈 diff 全一致；批量排线在无并列时完全一致 |
 | 运单剩余写动作 | POST /waybills/{no}/{dispatch·add-expense·contract/send·contract/confirm·partial-sign·reject·collect-cod·remit-cod·split}；GET·POST /waybills/{no}/events；POST /waybills/merge | ✅ 部分签收/拒收的回单、状态、自动立案的异常逐字段一致（含实收>应收、无短少、缺原因三类 400/409）；COD 收付两段的状态、时间戳、事件与四类错误分支一致；拆单/合单的子单货量、血缘、作废留痕与事件一致；合同发送/确认/重复发送 409 与合同事件一致；手工补事件与手工加费用的库行一致 |
 | 明细只读端点 | GET /finance/statements/{id}（含 lines）、/audit-logs/{id}、/ai/suggestions/{id} | ✅ 8 张对账单 + AI 建议详情双栈 diff 全一致；三者均为 List+Retrieve 只读集合，写动作 405 与 Django 一致 |
@@ -269,6 +270,18 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   但为了让它真的被填上，推荐做了打分（同线路历史单 > 起终点部分匹配 > 近 30 天活跃 >
   历史用量），每条附「为什么推它」，并支持在建单表单里直接敲名字新建（同客户同名去重）。
   这条链路断了的后果不是报错，而是对账那头归不了集——所以推荐质量本身就是功能的一部分。
+
+- **`/ai/query-waybill` 的金额此前恒为 0**：`WaybillSerializer` 的
+  `receivable_amount`/`payable_amount` 读的是视图 annotate 注入的聚合，而这个视图
+  自己建 queryset、没带 annotate，于是 `getattr(obj, "receivable_total", 0)` 一路回落 0。
+  查单结果把钱全显示成 0，比不显示更误导，Go 侧照实算。
+- **`/dispatch-batches/{id}/statement` 在 Django 本地直接 500**：对账单已落库，
+  但序列化时抛 TypeError（`StatementSerializer` 的 diff/outstanding 同样依赖视图注解）。
+  Go 侧正常返回；两栈落库的表头与明细逐字段一致。
+- **批次对账单的 scope_type 记为 `batch`**：Django 版早于 scope 三元组，落的是默认值
+  `all`。批次既不是项目也不是线路，如实标 `batch` 才能让对账单知道自己是怎么归集出来的。
+- **对账单号前缀统一回 `ST`**：财务重构时 Go 侧一度改成了 `DZ`，会让同一本台账在
+  切换引擎的那天断成两段序列。单号是对外单据号，不该因为换引擎而改形。
 
 - **排线在「两台车完全同参」时的配对可能互换**：`dispatch_plan` 是贪心，处理次序
   决定谁先挑车。Django 声明的模型序是 `-created_at`，但该 ViewSet 的 queryset 带了

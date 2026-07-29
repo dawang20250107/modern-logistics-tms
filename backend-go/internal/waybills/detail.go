@@ -30,6 +30,29 @@ func SerializeByNo(ctx context.Context, db *pgxpool.Pool, no string) (map[string
 	return scanWaybill(rows)
 }
 
+// SerializeWhere 按任意条件回读一组运单（WaybillSerializer 列面），
+// 默认序 -created_at；limit<=0 表示不限
+func SerializeWhere(ctx context.Context, db *pgxpool.Pool, where string, limit int, args ...any) ([]map[string]any, error) {
+	sql := selectWaybillSQL + fromClause + " WHERE " + where + " ORDER BY w.created_at DESC, w.id"
+	if limit > 0 {
+		sql += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	rows, err := db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		it, err := scanWaybill(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, nil
+}
+
 var stopTypeLabel = map[string]string{"pickup": "提货", "delivery": "送货"}
 var stopStatusLabel = map[string]string{"pending": "待到达", "arrived": "已到达", "departed": "已离开"}
 

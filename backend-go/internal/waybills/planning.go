@@ -185,6 +185,28 @@ func rankVehicles(vehicles []vehicleRow, need cargoNeed, today time.Time, includ
 	return out
 }
 
+// RankVehiclesFor 供 orders 域复用：按货量与车厢要求给可派车辆排名。
+// top<=0 表示不截断。
+func RankVehiclesFor(ctx context.Context, h *Handler, weightTon, volumeCbm float64,
+	needsReefer, hazmat bool, top int) ([]map[string]any, error) {
+	vehicles, err := h.availableVehicles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := rankVehicles(vehicles,
+		cargoNeed{WeightTon: weightTon, VolumeCbm: volumeCbm, NeedsReefer: needsReefer, Hazmat: hazmat},
+		cstMidnight(), false)
+	if top > 0 && len(out) > top {
+		out = out[:top]
+	}
+	return out, nil
+}
+
+// CarrierQuotesFor 供 orders 域复用：多承运商比价
+func CarrierQuotesFor(ctx context.Context, h *Handler, weightTon decimal.Decimal) ([]map[string]any, error) {
+	return h.carrierQuotes(ctx, weightTon)
+}
+
 // needOf 从运单推导对车辆的硬性要求（冷链/危险品要素挂在订单上）
 func (h *Handler) needOf(ctx context.Context, waybillID string) (cargoNeed, error) {
 	var n cargoNeed

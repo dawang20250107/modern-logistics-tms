@@ -173,3 +173,58 @@ SELECT s.id::text AS id, s.statement_no, s.direction, s.counterparty_type,
 func (h *Handler) Statements(md *masterdata.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { md.List(w, r, statementsCfg) }
 }
+
+// Aging GET /api/v1/finance/aging?direction=receivable|payable
+// 账龄分桶(0-30/31-60/61-90/90+)按对手方汇总，对齐 services.aging_report。
+func (h *Handler) Aging(w http.ResponseWriter, r *http.Request) {
+	direction := r.URL.Query().Get("direction")
+	if direction == "" {
+		direction = "receivable"
+	}
+	if direction != "receivable" && direction != "payable" {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_DIRECTION", "direction 必须是 receivable 或 payable。")
+		return
+	}
+	cpJoin, cpCol := "JOIN md_customer cp ON cp.id = wb.customer_id", "wb.customer_id"
+	if direction == "payable" {
+		cpJoin, cpCol = "JOIN md_carrier cp ON cp.id = wb.carrier_id", "wb.carrier_id"
+	}
+	rows, err := h.DB.Query(r.Context(), `
+		SELECT `+cpCol+`::text, max(cp.name),
+		       COALESCE(sum(e.amount) FILTER (WHERE age <= 30),0)::float8,
+		       COALESCE(sum(e.amount) FILTER (WHERE age BETWEEN 31 AND 60),0)::float8,
+		       COALESCE(sum(e.amount) FILTER (WHERE age BETWEEN 61 AND 90),0)::float8,
+		       COALESCE(sum(e.amount) FILTER (WHERE age > 90),0)::float8,
+		       COALESCE(sum(e.amount),0)::float8 AS total
+		FROM (SELECT *, COALESCE((now() AT TIME ZONE 'Asia/Shanghai')::date
+		             - (occurred_at AT TIME ZONE 'Asia/Shanghai')::date, 0) AS age
+		      FROM fin_expense_record WHERE direction = $1) e
+		JOIN ops_waybill wb ON wb.id = e.waybill_id
+		`+cpJoin+`
+		GROUP BY `+cpCol+` ORDER BY total DESC`, direction)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
+		return
+	}
+	defer rows.Close()
+	result := []map[string]any{}
+	totals := map[string]float64{"b0_30": 0, "b31_60": 0, "b61_90": 0, "b90": 0, "total": 0}
+	for rows.Next() {
+		var id, name string
+		var b0, b31, b61, b90, total float64
+		if err := rows.Scan(&id, &name, &b0, &b31, &b61, &b90, &total); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取失败")
+			return
+		}
+		result = append(result, map[string]any{
+			"counterparty_id": id, "counterparty_name": name,
+			"b0_30": b0, "b31_60": b31, "b61_90": b61, "b90": b90, "total": total,
+		})
+		totals["b0_30"] += b0
+		totals["b31_60"] += b31
+		totals["b61_90"] += b61
+		totals["b90"] += b90
+		totals["total"] += total
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"direction": direction, "rows": result, "totals": totals})
+}

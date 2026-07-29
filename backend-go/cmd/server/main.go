@@ -73,6 +73,7 @@ func main() {
 		p.Get("/api/v1/b2b-partners", mdH.B2BPartners)
 		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
+		p.Get("/api/v1/finance/aging", finH.Aging)
 	})
 
 	// ── 其余全部：绞杀者代理回 Django ──

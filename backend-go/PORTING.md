@@ -239,6 +239,19 @@ cd backend-go && go run ./cmd/server
   底栏位置、行高、字号、透明度与三行文案完全一致，字形笔画不同——水印是证据不是像素比对，
   可读性与内容一致即可。字体探测会验到「确实有中文字形」这一层，避免静默不水印；
   部署可用 WATERMARK_FONT 显式指定。
+- **字体探测原来只认 Debian 布局，生产镜像里一个字体都找不到**：候选路径写的全是
+  `/usr/share/fonts/{truetype,opentype}/<包名>/`，而运行镜像是 alpine，字体在
+  `/usr/share/fonts/<包名>/`；镜像里装的又恰好是解析不了的 wqy-zenhei。两件事叠起来，
+  线上打卡照片会一张不带水印，而且没有任何报错——打卡照常成功，只是证据没了。
+  现在三层兜住：候选路径补齐 alpine/macOS 布局 → 没命中就扫字体目录实测哪个能渲染中文
+  → 一个都没有就 `slog.Error` 喊出来。镜像改装 `font-noto-cjk`，并在 Dockerfile 里
+  `RUN` 一次 `cmd/fontcheck`：没有可用字体直接构建失败，把静默的运行期故障
+  变成响亮的构建期失败。CI 的 gateway job 也补装了 CJK 字体——
+  否则那条断言只能删掉，等于把这个风险原样放行。
+- **水印测试原来在 CI 上等于没跑**：它读 `/tmp/probe.png`，读不到就 `Skip`，
+  于是只有「有没有字体」那一句真正执行过。改成自己造底片，并解码回来比左下角与
+  左上角的像素——只看「字节变了」是不够的，重编码一次 JPEG 也会让字节变，
+  那正是「静默不水印」会伪装成的样子。
 - **本地 Django 的 POST /driver/checkin 与 POST /receipts 直接 500**：两者都要投递
   Celery（打卡触发状态流转里的 emit_event、回单触发 OCR 任务），本地无 broker 时
   抛 RuntimeError。Go 侧无此依赖，落库、状态推进、事件链与照片均已实测与 Django

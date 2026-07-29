@@ -16,7 +16,11 @@ import (
 	"image/draw"
 	"image/jpeg"
 	_ "image/png" // 打卡照片可能是 PNG
+	"io/fs"
+	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/image/font"
@@ -30,13 +34,31 @@ import (
 // 但 x/image/font/sfnt 解析它会报 invalid table offset，落到静默不水印。
 // 覆盖字形是水印的全部意义，所以探测必须验到字形这一层。
 var cjkFontPaths = []string{
+	// Debian/Ubuntu 布局
 	"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
 	"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 	"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 	"/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf",
 	"/usr/share/fonts/opentype/unifont/unifont.otf",
 	"/usr/share/fonts/opentype/unifont/unifont_jp.otf",
+	// Alpine 布局（运行镜像就是 alpine，字体装在 /usr/share/fonts/<包名>/ 下）
+	"/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+	"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
+	// macOS
 	"/System/Library/Fonts/PingFang.ttc",
+}
+
+// fontDirs 兜底扫描的根目录。写死路径挡不住发行版换布局——Alpine 把字体放在
+// /usr/share/fonts/<包名>/，Debian 放在 /usr/share/fonts/{truetype,opentype}/<包名>/，
+// 猜错的后果不是报错而是静默不水印，等于悄悄丢掉现场证据。所以候选路径只当快路径，
+// 没命中就把字体目录走一遍，实测哪个文件真能渲染中文。
+var fontDirs = []string{
+	"/usr/share/fonts",
+	"/usr/local/share/fonts",
+	"/usr/share/fonts/truetype",
+	"/Library/Fonts",
+	"/System/Library/Fonts",
 }
 
 // FontPathEnv 允许部署时显式指定字体，优先于内置候选
@@ -72,8 +94,9 @@ func parseFontFile(raw []byte) *sfnt.Font {
 }
 
 var (
-	fontOnce sync.Once
-	cjkFont  *sfnt.Font
+	fontOnce    sync.Once
+	cjkFont     *sfnt.Font
+	cjkFontPath string
 )
 
 func loadCJKFont() *sfnt.Font {
@@ -83,17 +106,63 @@ func loadCJKFont() *sfnt.Font {
 			paths = append([]string{p}, paths...)
 		}
 		for _, p := range paths {
-			raw, err := os.ReadFile(p)
-			if err != nil {
-				continue
-			}
-			if f := parseFontFile(raw); f != nil {
-				cjkFont = f
+			if f := tryFontFile(p); f != nil {
+				cjkFont, cjkFontPath = f, p
+				slog.Info("水印字体已加载", "path", p)
 				return
 			}
 		}
+		if p := scanFontDirs(); p != "" {
+			cjkFontPath = p
+			slog.Info("水印字体已加载（目录扫描命中）", "path", p)
+			return
+		}
+		// 没字体不阻断打卡，但必须喊出来：静默不水印 = 静默丢证据
+		slog.Error("未找到可用的中文字体，打卡照片将不带水印；请安装 CJK 字体或设置 " + FontPathEnv)
 	})
 	return cjkFont
+}
+
+func tryFontFile(p string) *sfnt.Font {
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return nil
+	}
+	return parseFontFile(raw)
+}
+
+// scanFontDirs 遍历字体目录找第一个能渲染中文的字体文件。命中即写入 cjkFont。
+// 只看扩展名筛一遍再解析，避免把每个 .pfb/.afm 都读进内存。
+func scanFontDirs() string {
+	found := ""
+	for _, root := range fontDirs {
+		if found != "" {
+			break
+		}
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil //nolint:nilerr // 权限不足的子树跳过即可，不该中断整次扫描
+			}
+			switch strings.ToLower(filepath.Ext(p)) {
+			case ".ttf", ".ttc", ".otf", ".otc":
+			default:
+				return nil
+			}
+			if f := tryFontFile(p); f != nil {
+				cjkFont, found = f, p
+				return fs.SkipAll
+			}
+			return nil
+		})
+	}
+	return found
+}
+
+// FontPath 返回实际启用的字体文件路径（未加载到则为空）。诊断用：
+// 水印出问题时第一个要问的就是「到底用的哪个字体」。
+func FontPath() string {
+	loadCJKFont()
+	return cjkFontPath
 }
 
 // Watermark 叠加水印并输出 JPEG；任何失败都原样返回入参，绝不阻断打卡。

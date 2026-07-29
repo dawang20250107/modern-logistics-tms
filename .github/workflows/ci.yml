@@ -31,6 +31,10 @@ jobs:
         with:
           go-version: "1.25"
           cache-dependency-path: backend-go/go.sum
+      # runner 上没有中文字体，而水印测试守的正是「本机确实能渲染中文」。
+      # 不装字体就只能把那条断言删掉，等于把生产上"静默不水印"的风险放行。
+      - name: 安装 CJK 字体（水印测试需要）
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont
       - name: Vet
         run: go vet ./...
       - name: Build
@@ -62,5 +66,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 镜像里的字体自检跑在 Dockerfile 的 RUN 里：没有可用 CJK 字体这一步就构建失败
       - name: Build gateway image
         run: docker build -t tms-gateway:ci backend-go
+      # 不加管道：静态链接出问题时要让这步真的红，别被 head 的退出码吃掉
+      - name: 冒烟：镜像里的二进制能跑起来
+        run: docker run --rm --entrypoint /app/adminctl tms-gateway:ci -h

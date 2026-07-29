@@ -93,6 +93,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 订单-流转 | POST /orders/{id}/confirm·pool·cancel·claim·release·unassign + /orders/assign 批量分单 | ✅ 全生命周期实测通过；行锁防抢单；进池通知扇出落库；Django timeline 读回事件链完整 |
 | 批量派车 | POST /orders/batch-dispatch（批次+N 运单+应付分摊+费用快照+点位拷贝+双事件，单事务） | ✅ 3 单按吨分摊 2:4:6 精确、之和恒等总额；Django 读回运单/批次/费用全对 |
 | 运单状态机 | POST /waybills/{no}/transition + /sign + /stop-event（行锁事务：里程碑物化、e-POD 回单落库、订单完成回写、司机累计、点位手动戳） | ✅ pending_dispatch→…→signed 全链实测；非法流转 409；sign 自动 arrived→signed + 回单 confirmed + receipt_status=received；兄弟运单全完成才回写订单 completed（实测生效）；Django 读回详情/回单/订单全对 |
+| 详情-读 | GET /orders/{id} + /orders/{id}/timeline + GET /waybills/{no}（stops/timeline/agent_suggestions/next_statuses 全嵌套） | ✅ 5 订单详情+timeline、3 运单详情双栈语义 diff 全一致；404 信封对齐 DRF；静态路由（funnel/stats）与代理子路由（workflow/eta）优先级回归通过 |
 
 ## 待移植（按前端依赖频度排序）
 
@@ -110,6 +111,11 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 
 ## 尚未对齐的已知差异（限制清单）
 
+- **datetime 时区表示**：Django 输出 `+08:00`（Asia/Shanghai），Go 输出 UTC
+  （`Z`/`+00:00`）——同一时刻的两种 ISO 表示，前端 `new Date()` 解析零感知。
+  双栈 diff 均按解析后时间戳比较。
+- **点位 seq 重复时的同 seq 内顺序**：Django `ordering=["waybill","seq"]` 无决胜键、
+  顺序不确定；Go 补 `ORDER BY seq, id` 决定性排序。集合完全一致。
 - **/waybills/{no}/transition 响应精简**：Django 返回整份 WaybillDetailSerializer，
   Go 返回 `{waybill_no, status, next_statuses}`。前端对该响应只做 invalidate 重取、
   不消费内容，故安全；运单详情 GET 移植后可改为复用详情序列化。

@@ -177,25 +177,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	limitPh := args.Add(pageSize)
 	offsetPh := args.Add((page - 1) * pageSize)
-	rows, err := h.DB.Query(ctx, `
-SELECT w.id::text, w.waybill_no, COALESCE(b.batch_no,''), COALESCE(c.name,''), COALESCE(ca.name,''),
-       COALESCE(v.plate_no,''), COALESCE(tr.plate_no,''), COALESCE(d.name,''), COALESCE(d.phone,''),
-       COALESCE(d.employment_type,''),
-       w.route_name, w.ai_conversation_id, w.origin, w.destination, w.status, w.dispatch_status, w.risk_level,
-       w.dispatch_type, w.platform_name, w.platform_order_no,
-       w.receipt_status, w.eta_drift_minutes, w.planned_arrival, w.estimated_arrival,
-       w.loaded_at, w.departed_at, w.arrived_at, w.signed_at,
-       w.freight_term, w.freight_payer,
-       w.cod_amount::text, w.cod_status, w.cod_collected_at, w.cod_remitted_at,
-       fin.receivable_total::float8, fin.payable_total::float8,
-       w.cargo_quantity, w.cargo_weight_ton::float8, w.cargo_volume_cbm::float8, w.created_at,
-       COALESCE((SELECT json_agg(json_build_object(
-           'id', wd.driver_id::text, 'name', dd.name, 'phone', dd.phone,
-           'wechat', dd.wechat, 'app_registered', dd.app_registered,
-           'role', wd.role, 'employment', dd.employment_type, 'note', wd.note
-         ) ORDER BY wd.created_at) FROM ops_waybill_driver wd JOIN md_driver dd ON dd.id = wd.driver_id
-         WHERE wd.waybill_id = w.id), '[]'::json)
-`+fromClause+" "+whereSQL+" "+orderSQL+
+	rows, err := h.DB.Query(ctx, selectWaybillSQL+fromClause+" "+whereSQL+" "+orderSQL+
 		fmt.Sprintf(" LIMIT %s OFFSET %s", limitPh, offsetPh), args.Values...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
@@ -252,6 +234,27 @@ type driverRow struct {
 	Employment    string `json:"employment"`
 	Note          string `json:"note"`
 }
+
+// selectWaybillSQL 列表/详情共用的序列化列面（与 WaybillSerializer 逐字段对齐）
+const selectWaybillSQL = `
+SELECT w.id::text, w.waybill_no, COALESCE(b.batch_no,''), COALESCE(c.name,''), COALESCE(ca.name,''),
+       COALESCE(v.plate_no,''), COALESCE(tr.plate_no,''), COALESCE(d.name,''), COALESCE(d.phone,''),
+       COALESCE(d.employment_type,''),
+       w.route_name, w.ai_conversation_id, w.origin, w.destination, w.status, w.dispatch_status, w.risk_level,
+       w.dispatch_type, w.platform_name, w.platform_order_no,
+       w.receipt_status, w.eta_drift_minutes, w.planned_arrival, w.estimated_arrival,
+       w.loaded_at, w.departed_at, w.arrived_at, w.signed_at,
+       w.freight_term, w.freight_payer,
+       w.cod_amount::text, w.cod_status, w.cod_collected_at, w.cod_remitted_at,
+       fin.receivable_total::float8, fin.payable_total::float8,
+       w.cargo_quantity, w.cargo_weight_ton::float8, w.cargo_volume_cbm::float8, w.created_at,
+       COALESCE((SELECT json_agg(json_build_object(
+           'id', wd.driver_id::text, 'name', dd.name, 'phone', dd.phone,
+           'wechat', dd.wechat, 'app_registered', dd.app_registered,
+           'role', wd.role, 'employment', dd.employment_type, 'note', wd.note
+         ) ORDER BY wd.created_at) FROM ops_waybill_driver wd JOIN md_driver dd ON dd.id = wd.driver_id
+         WHERE wd.waybill_id = w.id), '[]'::json)
+`
 
 func scanWaybill(rows pgx.Rows) (map[string]any, error) {
 	var (

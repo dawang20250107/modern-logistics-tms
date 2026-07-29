@@ -94,6 +94,8 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 批量派车 | POST /orders/batch-dispatch（批次+N 运单+应付分摊+费用快照+点位拷贝+双事件，单事务） | ✅ 3 单按吨分摊 2:4:6 精确、之和恒等总额；Django 读回运单/批次/费用全对 |
 | 运单状态机 | POST /waybills/{no}/transition + /sign + /stop-event（行锁事务：里程碑物化、e-POD 回单落库、订单完成回写、司机累计、点位手动戳） | ✅ pending_dispatch→…→signed 全链实测；非法流转 409；sign 自动 arrived→signed + 回单 confirmed + receipt_status=received；兄弟运单全完成才回写订单 completed（实测生效）；Django 读回详情/回单/订单全对 |
 | 详情-读 | GET /orders/{id} + /orders/{id}/timeline + GET /waybills/{no}（stops/timeline/agent_suggestions/next_statuses 全嵌套） | ✅ 5 订单详情+timeline、3 运单详情双栈语义 diff 全一致；404 信封对齐 DRF；静态路由（funnel/stats）与代理子路由（workflow/eta）优先级回归通过 |
+| 经营看板 | GET /analytics/dashboard?trends=true（13 指标卡 + 5 趋势，指标中台口径逐条翻译） | ✅ 双栈语义 diff 全一致（含 breakdown 构成/占比分子分母/趋势序列） |
+| 工作台 | GET /workbench（通知/异常/客服/调度/财务待办聚合 + 两组 Top5 订单嵌套） | ✅ 计数与嵌套全对齐；唯一差异 dispatchable 系修正 Django 缺陷（见差异清单） |
 
 ## 待移植（按前端依赖频度排序）
 
@@ -111,6 +113,10 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 
 ## 尚未对齐的已知差异（限制清单）
 
+- **/workbench 的 dispatchable 修正而非复刻**：Django WorkbenchView 调用
+  `OrderSerializer(..., many=True)` 时未传 `context={"request": ...}`，
+  `get_dispatchable` 拿不到当前用户恒返回 false。Go 版按真实用户口径计算
+  （与 /orders 列表一致）：主调度/认领人看到 true。属 Django 漏传 context 缺陷。
 - **datetime 时区表示**：Django 输出 `+08:00`（Asia/Shanghai），Go 输出 UTC
   （`Z`/`+00:00`）——同一时刻的两种 ISO 表示，前端 `new Date()` 解析零感知。
   双栈 diff 均按解析后时间戳比较。

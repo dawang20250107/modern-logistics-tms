@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/analytics"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/audit"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
@@ -48,6 +49,7 @@ func main() {
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
 	finH := &finance.Handler{DB: pool}
+	anaH := &analytics.Handler{DB: pool, Svc: authSvc}
 	django := proxy.New(cfg.DjangoUpstream)
 
 	r := chi.NewRouter()
@@ -92,6 +94,8 @@ func main() {
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
 		p.Get("/api/v1/finance/aging", finH.Aging)
 		p.Get("/api/v1/audit-logs", audit.Logs(authSvc, mdH))
+		p.Get("/api/v1/analytics/dashboard", anaH.Dashboard)
+		p.Get("/api/v1/workbench", orderH.Workbench)
 	})
 
 	// ── 其余全部：绞杀者代理回 Django ──

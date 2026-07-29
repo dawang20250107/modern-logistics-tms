@@ -30,6 +30,14 @@ type createParams struct {
 	ParseMeta  map[string]any   // 解析元信息（{"source":"rule"}；fields._meta 可覆盖）
 }
 
+// nilIfBlank 空建单人（公开自助下单无登录用户）落 NULL 而非空串
+func nilIfBlank(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // createOrder 返回新订单主键；失败返回业务错误码与文案（调用方直接回写响应）
 func (h *Handler) createOrder(ctx context.Context, p createParams) (string, string, string) {
 	// 白名单 + 时间字段解析（非法值丢弃，对齐 _coerce_datetimes）
@@ -78,7 +86,7 @@ func (h *Handler) createOrder(ctx context.Context, p createParams) (string, stri
 		"cargo_value": "0", "package_type": "", "is_hazardous": false, "temperature_range": "",
 		"quoted_amount": "0", "sla_status": "pending", "approval_status": "none", "approval_remark": "",
 		"raw_text": p.RawText, "ai_conversation_id": aiConvID(p), "parse_meta": metaJSON(p.ParseMeta), "remark": "",
-		"customer_id": p.CustomerID, "created_by_id": p.ActorID,
+		"customer_id": p.CustomerID, "created_by_id": nilIfBlank(p.ActorID),
 	}
 	for i, c := range cols {
 		base[c] = vals[i]
@@ -171,7 +179,7 @@ func (h *Handler) createOrder(ctx context.Context, p createParams) (string, stri
 		_, err := tx.Exec(ctx, `
 			INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type, from_status, to_status, actor_id, source, payload)
 			VALUES ($1, now(), now(), clock_timestamp(), $2, $3, '', $4, $5, $6, $7)`,
-			eid.String(), orderID, eventType, toStatus, p.ActorID, src, pj)
+			eid.String(), orderID, eventType, toStatus, nilIfBlank(p.ActorID), src, pj)
 		return err
 	}
 	if err := evt("created", p.Status, map[string]any{"channel": p.Channel}); err != nil {

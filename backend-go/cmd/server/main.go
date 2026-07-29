@@ -19,6 +19,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/audit"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/driver"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/exceptions"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/finance"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
@@ -62,6 +63,7 @@ func main() {
 	django := proxy.New(cfg.DjangoUpstream)
 	mdH.Fallback = django // CRUD 子路由未声明的自定义动作仍回代上游
 	resH := &resources.Handler{DB: pool, Svc: authSvc, MD: mdH}
+	drvH := &driver.Handler{DB: pool, Secret: cfg.SecretKey, MediaRoot: cfg.MediaRoot}
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH, Fallback: django}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
@@ -83,6 +85,14 @@ func main() {
 	r.Post("/api/v1/auth/register", authH.Register)
 	r.Post("/api/v1/auth/password-reset/request", authH.PasswordResetRequest)
 	r.Post("/api/v1/auth/password-reset/confirm", authH.PasswordResetConfirm)
+	// ── 司机端 H5 与公开域：免登录，各自带自证机制（详见各 handler 注释）──
+	r.Post("/api/v1/driver/login", drvH.Login)
+	r.Get("/api/v1/driver/tasks", drvH.Tasks)
+	r.Post("/api/v1/driver/checkin", drvH.Checkin)
+	r.Post("/api/v1/driver/credentials", drvH.UploadCredential)
+	r.Post("/api/v1/driver/reminders/{id}/ack", drvH.AckReminder)
+	r.Post("/api/v1/public/orders", orderH.PublicIntake)
+	r.Get("/api/v1/track", orderH.PublicTrack)
 	r.Group(func(p chi.Router) {
 		p.Use(authH.RequireAuth)
 		p.Get("/api/v1/auth/me", authH.Me)

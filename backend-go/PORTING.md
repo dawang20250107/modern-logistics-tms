@@ -110,6 +110,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
 | 组织中台-读 | GET /org/{overview·organizations·organizations/tree·roles·rbac/matrix·service-areas·employees·handovers·login-audit·route-resolve}（列表复用通用引擎，树/矩阵/区划仲裁定制） | ✅ 十端点双栈 diff 全一致（含子树人头累加、覆盖排他+优先级仲裁） |
 | 单单派车 | POST /orders/{id}/dispatch（own_vehicle/fleet/third_party/platform：状态/锁定/归属门禁 → 承运商风控 → 车辆司机行锁占用 → 核载/车厢/证件资质合规 → 转运单+承运状态+应付快照+双事件+承运合同 HT 取号，单事务） | ✅ 全校验链实测（ORDER_NOT_LOCKED/CARRIER_REQUIRED/VEHICLE_BUSY 等）；Django 读回运单/合同/费用/订单全对；合同为文本版（PDF 留 Django 的 try/except 语义，见差异清单） |
+| 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
 | 组织中台-写 | POST /org/{organizations·employees·service-areas} 创建 + employees/{id}/{roles·enable·disable·reset-password·handover} + roles/{id}/set-permissions | ✅ Go 写→Django 读回全对；物化路径 path 正确；重置密码 Go 生成 pbkdf2 哈希双栈均可登录；移交事务（下属改挂+部门改派+停用留痕）实测；唯一性/无账号 400 契约对齐 |
@@ -204,6 +205,16 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   走的是渲染器而非异常处理器，于是响应是 `success:true` + 400 状态码。找回密码的
   「请输入邮箱或手机号」「验证码无效或已过期」与头像上传的三处校验都属此类，
   Go 侧同样输出 success:true —— 前端按 detail 取值，改成 error 分支反而会读不到。
+
+- **打卡水印字体不同、版式相同**：Django 用 Pillow + wqy-zenhei.ttc；Go 用 x/image
+  且 wqy 的 .ttc 在 sfnt 下解析失败（invalid table offset），实际落到 unifont.otf。
+  底栏位置、行高、字号、透明度与三行文案完全一致，字形笔画不同——水印是证据不是像素比对，
+  可读性与内容一致即可。字体探测会验到「确实有中文字形」这一层，避免静默不水印；
+  部署可用 WATERMARK_FONT 显式指定。
+- **本地 Django 的 POST /driver/checkin 与 POST /receipts 直接 500**：两者都要投递
+  Celery（打卡触发状态流转里的 emit_event、回单触发 OCR 任务），本地无 broker 时
+  抛 RuntimeError。Go 侧无此依赖，落库、状态推进、事件链与照片均已实测与 Django
+  成功路径一致——属环境依赖差异，Django 退役后消失。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

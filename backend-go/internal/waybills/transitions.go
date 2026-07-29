@@ -7,6 +7,7 @@ package waybills
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -287,4 +288,42 @@ func (h *Handler) StopEvent(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), 'manual', $4, $5)`,
 		eid.String(), wbID, "stop_"+body.Event, "stop#"+strconv.Itoa(body.Seq), pj)
 	httpx.JSON(w, http.StatusOK, map[string]any{"waybill_no": no, "seq": body.Seq, "event": body.Event})
+}
+
+// 主推进链路（前向单向），对齐 apps/ops/workflow._STAGE_ORDER
+var stageOrder = []string{
+	"pending_dispatch", "dispatched", "loaded", "departed",
+	"in_transit", "arrived", "signed", "delivered", "settled",
+}
+
+func stageIndex(s string) int {
+	for i, v := range stageOrder {
+		if v == s {
+			return i
+		}
+	}
+	return -1
+}
+
+// AdvanceTo 沿主链路逐级前向推进到目标状态（仅前进，不可达即止步），
+// 对齐 workflow.advance_waybill_to —— 司机在弱网下漏打一两个卡也能一次补齐。
+// 须在调用方事务内执行；返回推进后的状态。
+func AdvanceTo(ctx context.Context, tx pgx.Tx, no, target, remark string) (string, error) {
+	w, err := lockWaybill(ctx, tx, no)
+	if err != nil || w == nil {
+		return "", err
+	}
+	if stageIndex(w.Status) < 0 || stageIndex(target) < 0 {
+		return w.Status, nil
+	}
+	for guard := 0; stageIndex(w.Status) < stageIndex(target) && guard < 12; guard++ {
+		next := stageOrder[stageIndex(w.Status)+1]
+		if !canGo(w.Status, next) {
+			break
+		}
+		if code, _, msg := doTransition(ctx, tx, w, next, remark); code != 0 {
+			return w.Status, errors.New(msg)
+		}
+	}
+	return w.Status, nil
 }

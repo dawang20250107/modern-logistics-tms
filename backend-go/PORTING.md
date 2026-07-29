@@ -117,6 +117,8 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
+| 指标中台 + 全局查单 | GET /analytics/{metrics·metrics/{code}/trend·catalog} + POST /analytics/metrics/query；GET /lookup（答案卡 + 跨实体跳转列表）+ /integrations/status | ✅ 目录/趋势/查询 8 组入参双栈 diff 全一致（含维度构成、未知指标 404、非法维度 400、空 codes 400）；lookup 十种查询词（运单号/订单号/车牌/电话/客户名/对账单号/地名/超短/无命中）双栈 diff 全一致 |
+| 异常处置闭环 | GET /exceptions/{id} + PUT/PATCH/DELETE + /{id}/{timeline·assign·handle·close} | ✅ 详情与时间线双栈 diff 一致；assign/handle/close 三动作的库行、事件链、响应体与 Django 逐字段对拍一致；close 生成的应付费用两栈同形；无运单异常、只读 status、PUT 必填、级联删事件全部对齐 |
 | 组织中台-写 | organizations / roles / service-areas / employees 全套 CRUD（详情+增改删收归通用引擎）+ handovers·login-audit 只读台账 + login-audit/unlock + employees/{id}/{roles·enable·disable·reset-password·handover} + roles/{id}/set-permissions | ✅ 六资源列表与详情双栈 diff 全一致；组织三层建树/改父/删父的物化 path 逐级重算实测；角色权限点与员工分组的 M2M 覆盖写实测；重置密码 Go 生成 pbkdf2 哈希双栈均可登录；移交事务（下属改挂+部门改派+停用留痕）实测 |
 | 权限闸门 | 通用 CRUD 引擎接入 `HasPermission` 等价的 ReadPerm/WritePerm（org/masterdata/carrier/telematics 四组权限点，共 19 份写配置） | ✅ 只读账号 × 8 组端点双栈状态码逐一相同（读放行/写 403）；403 信封与文案 `permission_denied` + 「缺少所需权限。」对齐 |
 
@@ -261,6 +263,18 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   但为了让它真的被填上，推荐做了打分（同线路历史单 > 起终点部分匹配 > 近 30 天活跃 >
   历史用量），每条附「为什么推它」，并支持在建单表单里直接敲名字新建（同客户同名去重）。
   这条链路断了的后果不是报错，而是对账那头归不了集——所以推荐质量本身就是功能的一部分。
+
+- **`/analytics/catalog` 改为自省 PostgreSQL，而不是冻一份 Django 模型快照**：
+  Django 版遍历 ORM 模型输出表/字段/类型/help_text（含反向关系伪字段）。这套元数据
+  随 Django 一起消失，照搬只能是把今天的模型定义硬编码进 Go——数据治理视图一旦
+  与真实 schema 脱钩，就从"资产可见"变成"资产撒谎"。故 Go 版直接读 information_schema
+  + col_description：表名前缀映射业务域，类型是 Postgres 类型，`row_count` 仍实时统计。
+  差异：多出 M2M 中间表（它们确实是库里的资产），少了 `model`/`verbose_name`
+  （ORM 概念）与 Django 内部类型名。该端点前端未使用，属治理/自省用途。
+- **异常删除会一并删掉其事件台账**：`ExceptionEvent.exception` 是 CASCADE，
+  Django 由 ORM 收集器执行，Go 侧在 CascadeTables 里声明。顺带修掉引擎的一处
+  遮蔽：删除语句报错（多半是没收干净的外键）此前会被当成 404 返回，
+  「本来就不存在」和「存在但删不掉」是两件事，现在前者 404、后者 500 带原因。
 
 - **SSE 事件流 `/api/v1/stream/events` 不移植，随 Django 一起下线**：现状是 Django SSE
   依赖 Redis 广播，本地与容器里本就跑不起来，前端也没有消费方。与其把一条没人用的

@@ -309,6 +309,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request, cfg ResourceCfg) 
 }
 
 // One 用资源配置回读单行（写路径回显复用列表列面）；未命中返回 nil
+// OneScoped 带数据范围的单对象读取：越权与不存在同样返回 (nil, nil)，
+// 让调用方一律回 404 —— 不告诉越权者"这条记录其实存在"。
+func (h *Handler) OneScoped(r *http.Request, cfg ResourceCfg, where string, args ...any) (map[string]any, error) {
+	scoped, errCode := h.applyScope(r, cfg)
+	if errCode != "" {
+		return nil, fmt.Errorf("%s", errCode)
+	}
+	return h.one(r.Context(), scoped, false, where, args...)
+}
+
 func (h *Handler) One(ctx context.Context, cfg ResourceCfg, where string, args ...any) (map[string]any, error) {
 	return h.one(ctx, cfg, false, where, args...)
 }

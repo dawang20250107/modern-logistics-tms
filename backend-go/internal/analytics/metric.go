@@ -22,16 +22,20 @@ type metricSpec struct {
 	Snapshot bool
 	// Float 为 true 时值是 Python float（字符串形态带 .0）；否则是 count() 的 int
 	Float bool
+	// Dimensions / Description 供 /analytics/metrics 目录输出（对齐 @metric 装饰器的声明）
+	Dimensions  []string
+	Description string
 }
 
 // metricSpecs 与 apps/analytics/definitions.py 的 13 个指标一一对应
 var metricSpecs = map[string]metricSpec{
-	"ops.waybill_count": {Name: "运单量", Unit: "单", Domain: "ops",
+	"ops.waybill_count": {Name: "运单量", Unit: "单", Domain: "ops", Dimensions: []string{"status", "risk_level"},
 		SQL: `SELECT count(*)::float8 FROM ops_waybill
 		      WHERE (created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date`},
 	"ops.in_transit": {Name: "在途运单", Unit: "单", Domain: "ops", Snapshot: true,
 		SQL: `SELECT count(*)::float8 FROM ops_waybill WHERE status='in_transit'`},
 	"ops.on_time_rate": {Name: "准班率", Unit: "%", Domain: "ops", Ratio: true,
+		Description: "实际到达不晚于计划到达的运单占比（真实时间戳对比）",
 		SQL: `SELECT count(*) FILTER (WHERE arrived_at <= planned_arrival)::float8, count(*)::float8
 		      FROM ops_waybill WHERE status IN ('arrived','signed','delivered','settled')
 		        AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
@@ -42,21 +46,24 @@ var metricSpecs = map[string]metricSpec{
 	"fleet.online_rate": {Name: "运力在线率", Unit: "%", Domain: "fleet", Ratio: true, Snapshot: true,
 		SQL: `SELECT count(*) FILTER (WHERE online)::float8, count(*)::float8 FROM tel_vehicle_state`},
 	"fleet.utilization_rate": {Name: "运力利用率", Unit: "%", Domain: "fleet", Ratio: true, Snapshot: true,
+		Description: "执行中运单占用车辆 / 在用车辆",
 		SQL: `SELECT (SELECT count(DISTINCT vehicle_id) FROM ops_waybill
 		              WHERE status IN ('dispatched','loaded','departed','in_transit') AND vehicle_id IS NOT NULL)::float8,
 		             (SELECT count(*) FROM md_vehicle WHERE is_active AND NOT is_deleted)::float8`},
-	"fleet.alert_count": {Name: "报警数", Unit: "条", Domain: "fleet",
+	"fleet.alert_count": {Name: "报警数", Unit: "条", Domain: "fleet", Dimensions: []string{"alert_type", "level"},
 		SQL: `SELECT count(*)::float8 FROM tel_alert
 		      WHERE (triggered_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date`},
-	"order.count": {Name: "订单量", Unit: "单", Domain: "order",
+	"order.count": {Name: "订单量", Unit: "单", Domain: "order", Dimensions: []string{"channel", "status"},
 		SQL: `SELECT count(*)::float8 FROM ops_order WHERE NOT is_deleted
 		        AND (created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date`},
 	"order.sla_on_time_rate": {Name: "SLA 准时率", Unit: "%", Domain: "order", Ratio: true,
+		Description: "已完成且有承诺时效的订单中准时占比",
 		SQL: `SELECT count(*) FILTER (WHERE sla_status='on_time')::float8, count(*)::float8
 		      FROM ops_order WHERE NOT is_deleted AND status='completed' AND delivered_at IS NOT NULL
 		        AND (delivered_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date
 		        AND sla_status IN ('on_time','breached')`},
 	"order.conversion_rate": {Name: "订单转化率", Unit: "%", Domain: "order", Ratio: true,
+		Description: "转运单订单 / 订单总数",
 		SQL: `SELECT count(*) FILTER (WHERE status='converted')::float8, count(*)::float8
 		      FROM ops_order WHERE NOT is_deleted
 		        AND (created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date`},
@@ -67,6 +74,7 @@ var metricSpecs = map[string]metricSpec{
 		SQL: `SELECT COALESCE(sum(amount),0)::float8 FROM fin_expense_record WHERE direction='payable'
 		        AND (occurred_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date`},
 	"finance.statement_diff_total": {Float: true, Name: "对账差异合计", Unit: "元", Domain: "finance",
+		Description: "对账单总额与对方金额差异之和（稽核）",
 		SQL: `SELECT (COALESCE(sum(total_amount),0) - COALESCE(sum(external_total),0))::float8
 		      FROM fin_statement
 		      WHERE (created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date`},

@@ -82,6 +82,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	h.MD.List(w, r, cfg)
 }
 
+// nilIfEmpty 空字符串转 NULL，避免把 ” 送进 uuid 列
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (h *Handler) excEvent(ctx context.Context, excID, eventType, toStatus, actorID, note, source string) {
 	eid, _ := uuid.NewV7()
 	pj, _ := json.Marshal(map[string]any{"source": source})
@@ -103,9 +111,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	details := map[string]any{}
+	// waybill 可空（模型 null=True）：不挂运单的异常也是合法登记
 	waybillID, _ := body["waybill"].(string)
-	if waybillID == "" {
-		details["waybill"] = []string{"该字段是必填项。"}
+	if waybillID == "" { //nolint:staticcheck — 保留空分支以对齐 Django 的"可空即跳过校验"
 	} else if _, err := uuid.Parse(waybillID); err != nil {
 		details["waybill"] = []string{"“" + waybillID + "” 不是合法 UUID。"}
 	} else {
@@ -140,7 +148,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		  exception_type, level, source, description, status, responsibility_party, amount, resolution)
 		VALUES ($1, now(), now(), $2::uuid, (SELECT order_id FROM ops_waybill WHERE id=$2::uuid),
 		  $3::uuid, $4, $5, $6, $7, 'pending_handle', '', 0, '')`,
-		id.String(), waybillID, me.ID, excType, level, source, desc)
+		id.String(), nilIfEmpty(waybillID), me.ID, excType, level, source, desc)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败")
 		return

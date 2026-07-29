@@ -524,7 +524,13 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		sql = "DELETE FROM " + wc.Table + " WHERE " + wc.pk() + "=$1::uuid"
 	}
 	ct, err := h.DB.Exec(ctx, sql, id)
-	if err != nil || ct.RowsAffected() == 0 {
+	if err != nil {
+		// 删失败（多半是没收干净的外键引用）不能伪装成 404——那会让调用方以为
+		// "本来就不存在"，而真相是"存在但删不掉"，两者要采取的动作完全不同。
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "删除失败："+err.Error())
+		return
+	}
+	if ct.RowsAffected() == 0 {
 		httpx.Err(w, http.StatusNotFound, "error", wc.notFound())
 		return
 	}

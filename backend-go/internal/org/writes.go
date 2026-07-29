@@ -61,76 +61,6 @@ func validationErr(w http.ResponseWriter, details map[string]any) {
 	httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败", details)
 }
 
-// CreateOrganization POST /api/v1/org/organizations
-func (h *Handler) CreateOrganization(w http.ResponseWriter, r *http.Request) {
-	if !h.requirePerm(w, r, "org.manage") {
-		return
-	}
-	ctx := r.Context()
-	var body map[string]any
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	name, code := strField(body, "name"), strField(body, "code")
-	details := map[string]any{}
-	if name == "" {
-		details["name"] = []string{"该字段是必填项。"}
-	}
-	if code == "" {
-		details["code"] = []string{"该字段是必填项。"}
-	} else {
-		var exists bool
-		_ = h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_organization WHERE code=$1)`, code).Scan(&exists)
-		if exists {
-			details["code"] = []string{"具有 编码 的 组织 已存在。"}
-		}
-	}
-	typ := strField(body, "type")
-	if typ == "" {
-		typ = "dept"
-	} else if orgTypeLabel[typ] == "" {
-		details["type"] = []string{fmt.Sprintf("“%s” 不是合法选项。", typ)}
-	}
-	prop := strField(body, "org_property")
-	if prop == "" {
-		prop = "self"
-	} else if orgPropertyLabel[prop] == "" {
-		details["org_property"] = []string{fmt.Sprintf("“%s” 不是合法选项。", prop)}
-	}
-	parent := uuidField(body, "parent")
-	var parentPath string
-	if parent != nil {
-		if err := h.DB.QueryRow(ctx, `SELECT COALESCE(NULLIF(path,''), id::text) FROM iam_organization WHERE id=$1::uuid`, *parent).Scan(&parentPath); err != nil {
-			details["parent"] = []string{"上级组织不存在。"}
-		}
-	}
-	if len(details) > 0 {
-		validationErr(w, details)
-		return
-	}
-	id, _ := uuid.NewV7()
-	path := id.String()
-	if parent != nil {
-		path = parentPath + "/" + id.String()
-	}
-	_, err := h.DB.Exec(ctx, `
-		INSERT INTO iam_organization (id, created_at, updated_at, name, short_name, code, type, org_property,
-		  parent_id, path, province, city, district, address, lng, lat,
-		  manager_name, manager_phone, business_phone, service_phone, complaint_phone,
-		  receipt_return_address, sort_order, is_active)
-		VALUES ($1, now(), now(), $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12,
-		  NULLIF($13,'')::numeric, NULLIF($14,'')::numeric, $15, $16, $17, $18, $19, $20, $21, $22)`,
-		id.String(), name, strField(body, "short_name"), code, typ, prop,
-		parent, path, strField(body, "province"), strField(body, "city"), strField(body, "district"),
-		strField(body, "address"), numStr(body, "lng"), numStr(body, "lat"),
-		strField(body, "manager_name"), strField(body, "manager_phone"), strField(body, "business_phone"),
-		strField(body, "service_phone"), strField(body, "complaint_phone"),
-		strField(body, "receipt_return_address"), intField(body, "sort_order", 0), boolField(body, "is_active", true))
-	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败")
-		return
-	}
-	h.respondRow(w, r.Context(), organizationsCfg, "o.id = $1::uuid", id.String(), http.StatusCreated)
-}
-
 func numStr(m map[string]any, key string) string {
 	switch v := m[key].(type) {
 	case float64:
@@ -139,108 +69,6 @@ func numStr(m map[string]any, key string) string {
 		return strings.TrimSpace(v)
 	}
 	return ""
-}
-
-// CreateEmployee POST /api/v1/org/employees
-func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
-	if !h.requirePerm(w, r, "org.employee") {
-		return
-	}
-	ctx := r.Context()
-	var body map[string]any
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	empNo, name := strField(body, "employee_no"), strField(body, "name")
-	details := map[string]any{}
-	if empNo == "" {
-		details["employee_no"] = []string{"该字段是必填项。"}
-	} else {
-		var exists bool
-		_ = h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_employee WHERE employee_no=$1)`, empNo).Scan(&exists)
-		if exists {
-			details["employee_no"] = []string{"具有 工号 的 员工 已存在。"}
-		}
-	}
-	if name == "" {
-		details["name"] = []string{"该字段是必填项。"}
-	}
-	status := strField(body, "status")
-	if status == "" {
-		status = "active"
-	} else if status != "active" && status != "disabled" && status != "left" {
-		details["status"] = []string{fmt.Sprintf("“%s” 不是合法选项。", status)}
-	}
-	if len(details) > 0 {
-		validationErr(w, details)
-		return
-	}
-	id, _ := uuid.NewV7()
-	_, err := h.DB.Exec(ctx, `
-		INSERT INTO iam_employee (id, created_at, updated_at, employee_no, name, phone, email, id_no,
-		  organization_id, department_id, supervisor_id, position, status,
-		  hire_date, leave_date, user_id)
-		VALUES ($1, now(), now(), $2, $3, $4, $5, $6, $7::uuid, $8::uuid, $9::uuid, $10, $11,
-		  NULLIF($12,'')::date, NULLIF($13,'')::date, $14::uuid)`,
-		id.String(), empNo, name, strField(body, "phone"), strField(body, "email"), strField(body, "id_no"),
-		uuidField(body, "organization"), uuidField(body, "department"), uuidField(body, "supervisor"),
-		strField(body, "position"), status,
-		strField(body, "hire_date"), strField(body, "leave_date"), uuidField(body, "user"))
-	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败")
-		return
-	}
-	if groups, ok := body["groups"].([]any); ok {
-		for _, g := range groups {
-			if gid, ok := g.(string); ok {
-				_, _ = h.DB.Exec(ctx, `INSERT INTO iam_employee_groups (employee_id, employeegroup_id)
-					SELECT $1::uuid, $2::uuid WHERE EXISTS(SELECT 1 FROM iam_employee_group WHERE id=$2::uuid)
-					ON CONFLICT DO NOTHING`, id.String(), gid)
-			}
-		}
-	}
-	h.respondRow(w, ctx, employeesCfg, "e.id = $1::uuid", id.String(), http.StatusCreated)
-}
-
-// CreateServiceArea POST /api/v1/org/service-areas
-func (h *Handler) CreateServiceArea(w http.ResponseWriter, r *http.Request) {
-	if !h.requirePerm(w, r, "org.manage") {
-		return
-	}
-	ctx := r.Context()
-	var body map[string]any
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	details := map[string]any{}
-	orgID := uuidField(body, "organization")
-	if orgID == nil {
-		details["organization"] = []string{"该字段是必填项。"}
-	}
-	regionName := strField(body, "region_name")
-	if regionName == "" {
-		details["region_name"] = []string{"该字段是必填项。"}
-	}
-	areaType := strField(body, "area_type")
-	if areaType == "" {
-		areaType = "deliver"
-	} else if areaTypeLabel[areaType] == "" {
-		details["area_type"] = []string{fmt.Sprintf("“%s” 不是合法选项。", areaType)}
-	}
-	if len(details) > 0 {
-		validationErr(w, details)
-		return
-	}
-	id, _ := uuid.NewV7()
-	_, err := h.DB.Exec(ctx, `
-		INSERT INTO iam_service_area (id, created_at, updated_at, organization_id, area_type,
-		  province, city, district, region_code, region_name, priority, note, is_active)
-		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		id.String(), *orgID, areaType,
-		strField(body, "province"), strField(body, "city"), strField(body, "district"),
-		strField(body, "region_code"), regionName, intField(body, "priority", 0),
-		strField(body, "note"), boolField(body, "is_active", true))
-	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败")
-		return
-	}
-	h.respondRow(w, ctx, serviceAreasCfg, "a.id = $1::uuid", id.String(), http.StatusCreated)
 }
 
 // SetRolePermissions POST /api/v1/org/roles/{id}/set-permissions {permissions:[ids]}
@@ -504,4 +332,137 @@ func (h *Handler) respondRow(w http.ResponseWriter, ctx context.Context, cfg mas
 		return
 	}
 	httpx.JSON(w, code, it)
+}
+
+// ── 通用 CRUD 引擎的写后钩子 ──
+
+// rebuildOrgPath 组织落库/改父后重建物化路径。
+// path 是数据范围（org_sub 子树可见性）的唯一依据，父子关系一变就必须跟着重算，
+// 否则会出现「调整了组织归属，但权限范围还停在老位置」的越权/漏看。
+func rebuildOrgPath(ctx context.Context, h *masterdata.Handler, id string, _ map[string]any, _ bool) error {
+	// 先修本节点，再级联修其整棵子树（子树成员的 path 以本节点 path 为前缀）
+	if _, err := h.DB.Exec(ctx, `
+		UPDATE iam_organization o SET path = COALESCE(
+		    (SELECT COALESCE(NULLIF(p.path,''), p.id::text) || '/' || o.id::text
+		     FROM iam_organization p WHERE p.id = o.parent_id),
+		    o.id::text), updated_at = now()
+		WHERE o.id = $1::uuid`, id); err != nil {
+		return err
+	}
+	// 子树逐层重建：层数有限，用递归 CTE 一次算出所有后代的新 path
+	_, err := h.DB.Exec(ctx, `
+		WITH RECURSIVE tree AS (
+		  -- 锚定项必须显式转 text：varchar(512) 与递归项拼出的 varchar 类型不一致，PG 会拒绝
+		  SELECT id, path::text AS path FROM iam_organization WHERE id = $1::uuid
+		  UNION ALL
+		  SELECT c.id, t.path || '/' || c.id::text
+		  FROM iam_organization c JOIN tree t ON c.parent_id = t.id
+		)
+		UPDATE iam_organization o SET path = tree.path, updated_at = now()
+		FROM tree WHERE o.id = tree.id AND o.id <> $1::uuid`, id)
+	return err
+}
+
+// detachOrgDependents 删组织前把「部门」这条二级依赖链拆干净。
+// 部门本身会被 CascadeTables 删掉，但部门上还挂着员工归属与子部门自引用，
+// 不先断开就会撞外键；Django 的收集器是递归的，声明式的一层覆盖不到这里。
+func detachOrgDependents(ctx context.Context, h *masterdata.Handler, id string) error {
+	const dept = `SELECT id FROM iam_department WHERE organization_id = $1::uuid`
+	if _, err := h.DB.Exec(ctx,
+		`UPDATE iam_employee SET department_id = NULL WHERE department_id IN (`+dept+`)`, id); err != nil {
+		return err
+	}
+	if _, err := h.DB.Exec(ctx,
+		`UPDATE iam_department SET parent_id = NULL WHERE parent_id IN (`+dept+`)`, id); err != nil {
+		return err
+	}
+	// 子组织提级到顶：断父之后 path 必须立刻重算，否则前缀里还留着已删组织的 id，
+	// 数据范围就会按一段不存在的祖先来判可见性。
+	rows, err := h.DB.Query(ctx, `SELECT id::text FROM iam_organization WHERE parent_id = $1::uuid`, id)
+	if err != nil {
+		return err
+	}
+	kids := []string{}
+	for rows.Next() {
+		var k string
+		if rows.Scan(&k) != nil {
+			break
+		}
+		kids = append(kids, k)
+	}
+	rows.Close()
+	for _, k := range kids {
+		if _, err := h.DB.Exec(ctx,
+			`UPDATE iam_organization SET parent_id = NULL WHERE id = $1::uuid`, k); err != nil {
+			return err
+		}
+		if err := rebuildOrgPath(ctx, h, k, nil, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dropEmployeeHandovers 删员工前清掉移交台账（两端外键都指向员工，都是 CASCADE）
+func dropEmployeeHandovers(ctx context.Context, h *masterdata.Handler, id string) error {
+	_, err := h.DB.Exec(ctx,
+		`DELETE FROM iam_account_handover WHERE from_employee_id = $1::uuid OR to_employee_id = $1::uuid`, id)
+	return err
+}
+
+// setRolePermissionsFromBody 请求体里带 permissions 时覆盖式写角色权限点
+func setRolePermissionsFromBody(ctx context.Context, h *masterdata.Handler, id string, body map[string]any, _ bool) error {
+	raw, has := body["permissions"]
+	if !has {
+		return nil
+	}
+	return replaceM2M(ctx, h, "iam_role_permissions", "role_id", "permission_id", id, raw)
+}
+
+// setEmployeeGroupsFromBody 请求体里带 groups 时覆盖式写员工分组
+func setEmployeeGroupsFromBody(ctx context.Context, h *masterdata.Handler, id string, body map[string]any, _ bool) error {
+	raw, has := body["groups"]
+	if !has {
+		return nil
+	}
+	return replaceM2M(ctx, h, "iam_employee_groups", "employee_id", "employeegroup_id", id, raw)
+}
+
+// replaceM2M 覆盖式重写一张 M2M 中间表（非法 id 跳过，不因一条脏数据整体失败）
+func replaceM2M(ctx context.Context, h *masterdata.Handler, table, ownCol, refCol, ownID string, raw any) error {
+	list, _ := raw.([]any)
+	if _, err := h.DB.Exec(ctx, "DELETE FROM "+table+" WHERE "+ownCol+"=$1::uuid", ownID); err != nil {
+		return err
+	}
+	for _, it := range list {
+		v, _ := it.(string)
+		if _, err := uuid.Parse(v); err != nil {
+			continue
+		}
+		if _, err := h.DB.Exec(ctx,
+			"INSERT INTO "+table+" ("+ownCol+", "+refCol+") VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING",
+			ownID, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UnlockLogin POST /org/login-audit/unlock —— 解除某用户名的登录失败锁定。
+// 权限口径与登录审计读取一致的更严一档（org.rbac）：能解锁等于能绕过防爆破闸。
+func (h *Handler) UnlockLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePerm(w, r, "org.rbac") {
+		return
+	}
+	var body struct {
+		Username string `json:"username"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	username := strings.TrimSpace(body.Username)
+	if username == "" {
+		httpx.Err(w, http.StatusBadRequest, "error", "缺少 username")
+		return
+	}
+	auth.ClearFailures(username)
+	httpx.JSON(w, http.StatusOK, map[string]any{"username": username, "unlocked": true})
 }

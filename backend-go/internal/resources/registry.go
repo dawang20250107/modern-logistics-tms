@@ -64,7 +64,8 @@ LEFT JOIN iam_employee mg ON mg.id = dp.manager_id`,
 }
 
 var DepartmentWrite = wcf{
-	Table: "iam_department", Model: "Department", Alias: "dp",
+	Table: "iam_department", Model: "Department", Verbose: "部门", Alias: "dp",
+	ReadPerm: "org.view", WritePerm: "org.manage",
 	Fields: map[string]fld{
 		"organization": {Kind: fUUID, Ref: "iam_organization", Required: true},
 		"parent":       {Kind: fUUID, Ref: "iam_department"},
@@ -95,9 +96,10 @@ SELECT g.id::text AS id, g.code, g.name, g.description,
 }
 
 var EmployeeGroupWrite = wcf{
-	Table: "iam_employee_group", Model: "EmployeeGroup", Alias: "g",
+	Table: "iam_employee_group", Model: "EmployeeGroup", Verbose: "用户组", Alias: "g",
+	ReadPerm: "org.view", WritePerm: "org.manage",
 	Fields: map[string]fld{
-		"code":        {Kind: fText, Required: true, Unique: true, Label: "编码"},
+		"code":        {Kind: fText, Required: true, Unique: true, Label: "code"},
 		"name":        {Kind: fText, Required: true},
 		"description": {Kind: fText},
 		"is_active":   {Kind: fBool, Default: true},
@@ -121,6 +123,7 @@ var PermissionsCfg = cfg{
 
 var PermissionWrite = wcf{
 	Table: "iam_permission", Model: "Permission", Alias: "pm", ReadOnly: true,
+	ReadPerm: "org.rbac",
 }
 
 // ─────────────────────────── ops：模板 / 提醒 / 回单 / 派车批次 ───────────────────────────
@@ -352,9 +355,10 @@ SELECT dv.id::text AS id, dv.device_no, dv.device_type, dv.vehicle_id::text AS v
 }
 
 var DeviceWrite = wcf{
-	Table: "tel_device", Model: "Device", Alias: "dv",
+	Table: "tel_device", Model: "Device", Verbose: "车载终端", Alias: "dv",
+	ReadPerm: "telematics.view", WritePerm: "telematics.manage",
 	Fields: map[string]fld{
-		"device_no": {Kind: fText, Required: true, Unique: true, Label: "设备号"},
+		"device_no": {Kind: fText, Required: true, Unique: true, Label: "device no"},
 		"device_type": {Kind: fEnum, Default: "gps",
 			Choices: []string{"gps", "beidou", "temperature", "fuel", "etc", "adas", "dsm"}},
 		"vehicle": {Kind: fUUID, Ref: "md_vehicle"},
@@ -381,6 +385,7 @@ SELECT gf.id::text AS id, gf.name, gf.shape, gf.purpose,
 
 var GeofenceWrite = wcf{
 	Table: "tel_geofence", Model: "Geofence", Alias: "gf",
+	ReadPerm: "telematics.view", WritePerm: "telematics.manage",
 	Fields: map[string]fld{
 		"name":       {Kind: fText, Required: true},
 		"shape":      {Kind: fEnum, Choices: []string{"circle", "polygon"}, Default: "circle"},
@@ -416,6 +421,7 @@ LEFT JOIN ops_waybill wb ON wb.id = al.waybill_id`,
 
 var AlertWrite = wcf{
 	Table: "tel_alert", Model: "Alert", Alias: "al", ReadOnly: true,
+	ReadPerm: "telematics.view",
 }
 
 // ─────────────────────────── finance：台账类标准资源 ───────────────────────────
@@ -432,9 +438,9 @@ SELECT ei.id::text AS id, ei.code, ei.name, ei.direction,
 }
 
 var ExpenseItemWrite = wcf{
-	Table: "fin_expense_item", Model: "ExpenseItem", Alias: "ei",
+	Table: "fin_expense_item", Model: "ExpenseItem", Verbose: "费用项", Alias: "ei",
 	Fields: map[string]fld{
-		"code": {Kind: fText, Required: true, Unique: true, Label: "编码"},
+		"code": {Kind: fText, Required: true, Unique: true, Label: "code"},
 		"name": {Kind: fText, Required: true},
 		"direction": {Kind: fEnum, Required: true,
 			Choices: []string{"receivable", "payable", "external"}},
@@ -494,9 +500,9 @@ SELECT pr.id::text AS id, pr.request_no, pr.waybill_id::text AS waybill, pr.coun
 }
 
 var PaymentRequestWrite = wcf{
-	Table: "fin_payment_request", Model: "PaymentRequest", Alias: "pr",
+	Table: "fin_payment_request", Model: "PaymentRequest", Verbose: "付款申请", Alias: "pr",
 	Fields: map[string]fld{
-		"request_no":           {Kind: fText, Required: true, Unique: true, Label: "申请单号"},
+		"request_no":           {Kind: fText, Required: true, Unique: true, Label: "request no"},
 		"waybill":              {Kind: fUUID, Ref: "ops_waybill"},
 		"counterparty_type":    {Kind: fText},
 		"counterparty_ref":     {Kind: fText},
@@ -688,9 +694,9 @@ SELECT ct.id::text AS id, ct.contract_no, ct.name, ct.contract_type,
 }
 
 var ContractWrite = wcf{
-	Table: "fin_contract", Model: "Contract", Alias: "ct", SoftDelete: true,
+	Table: "fin_contract", Model: "Contract", Verbose: "合同", Alias: "ct", SoftDelete: true,
 	Fields: map[string]fld{
-		"contract_no": {Kind: fText, Required: true, Unique: true, Label: "合同编号"},
+		"contract_no": {Kind: fText, Required: true, Unique: true, Label: "contract no"},
 		"name":        {Kind: fText},
 		"contract_type": {Kind: fEnum, Default: "long_term",
 			Choices: []string{"long_term", "short_term", "temporary", "agreement"}},
@@ -741,9 +747,9 @@ LEFT JOIN accounts_user u ON u.id = pj.manager_id`,
 }
 
 var ProjectWrite = wcf{
-	Table: "fin_project", Model: "Project", Alias: "pj", SoftDelete: true,
+	Table: "fin_project", Model: "Project", Verbose: "项目", Alias: "pj", SoftDelete: true,
 	Fields: map[string]fld{
-		"project_no": {Kind: fText, Required: true, Unique: true, Label: "项目编号"},
+		"project_no": {Kind: fText, Required: true, Unique: true, Label: "project no"},
 		"name":       {Kind: fText, Required: true},
 		"customer":   {Kind: fUUID, Ref: "md_customer", Column: "customer_id"},
 		"contract":   {Kind: fUUID, Ref: "fin_contract", Column: "contract_id"},

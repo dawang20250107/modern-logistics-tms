@@ -117,7 +117,8 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
-| 组织中台-写 | POST /org/{organizations·employees·service-areas} 创建 + employees/{id}/{roles·enable·disable·reset-password·handover} + roles/{id}/set-permissions | ✅ Go 写→Django 读回全对；物化路径 path 正确；重置密码 Go 生成 pbkdf2 哈希双栈均可登录；移交事务（下属改挂+部门改派+停用留痕）实测；唯一性/无账号 400 契约对齐 |
+| 组织中台-写 | organizations / roles / service-areas / employees 全套 CRUD（详情+增改删收归通用引擎）+ handovers·login-audit 只读台账 + login-audit/unlock + employees/{id}/{roles·enable·disable·reset-password·handover} + roles/{id}/set-permissions | ✅ 六资源列表与详情双栈 diff 全一致；组织三层建树/改父/删父的物化 path 逐级重算实测；角色权限点与员工分组的 M2M 覆盖写实测；重置密码 Go 生成 pbkdf2 哈希双栈均可登录；移交事务（下属改挂+部门改派+停用留痕）实测 |
+| 权限闸门 | 通用 CRUD 引擎接入 `HasPermission` 等价的 ReadPerm/WritePerm（org/masterdata/carrier/telematics 四组权限点，共 19 份写配置） | ✅ 只读账号 × 8 组端点双栈状态码逐一相同（读放行/写 403）；403 信封与文案 `permission_denied` + 「缺少所需权限。」对齐 |
 
 ## 待移植（按前端依赖频度排序）
 
@@ -129,8 +130,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 5. **finance**：statements/agings/settle/payments（事务密集，注意核销的行锁）
 6. **iam/org**：组织树/员工/RBAC 矩阵（读多写少）
 7. **telematics ingest**：MQTT 高频写入——Go 的主场，建议独立 goroutine 池批量落库
-8. **SSE /stream/events**：Go 原生 SSE + PG LISTEN/NOTIFY 或 Redis Stream
-   （现状 Django SSE 依赖 redis 主机名，本地容器本就不可用——移植时一并解决）
+8. ~~SSE /stream/events~~ —— **不移植，直接下线**（见差异清单）
 9. AI 域（langgraph）：保留 Django/Python 最久，或独立 Python 微服务
 
 ## 尚未对齐的已知差异（限制清单）
@@ -261,6 +261,32 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   但为了让它真的被填上，推荐做了打分（同线路历史单 > 起终点部分匹配 > 近 30 天活跃 >
   历史用量），每条附「为什么推它」，并支持在建单表单里直接敲名字新建（同客户同名去重）。
   这条链路断了的后果不是报错，而是对账那头归不了集——所以推荐质量本身就是功能的一部分。
+
+- **SSE 事件流 `/api/v1/stream/events` 不移植，随 Django 一起下线**：现状是 Django SSE
+  依赖 Redis 广播，本地与容器里本就跑不起来，前端也没有消费方。与其把一条没人用的
+  长连接通道原样搬过来，不如就此摘除——事件本身照旧落 `ops_waybill_event` 等台账，
+  没有任何数据丢失。将来真需要推送时，Go 侧用 PG LISTEN/NOTIFY 重做比翻译旧实现更省。
+  同理 `/api/v1/agent/stream`（AI 流式）一并下线，`/agent/chat` 的一次性响应保留。
+
+- **权限闸门此前是通用 CRUD 引擎的空档**：Django 侧 16 个 ViewSet 声明了
+  `required_permissions`，而引擎只做了鉴权、没做权限点校验——凡是走引擎的资源，
+  写入口都是敞开的（组织、承运商、车载终端等）。现补 `WriteCfg.ReadPerm/WritePerm`
+  由引擎统一执行：安全方法查 read、其余查 write，与 `HasPermission._resolve` 同口径。
+  这类闸门只要有一处漏配就等于没有，所以放在引擎而不是各域 handler 里。
+- **唯一冲突与必填文案改为逐字对齐 Django**：`unique` 报错走的是模型层的
+  `具有 <字段 verbose_name> 的 <模型 verbose_name> 已存在。`——字段名是英文原名
+  （`code`/`employee no`）、模型名是中文（`组织`/`员工`），两者来源不同不能混用，
+  故 `WriteCfg` 分出 `Verbose`（中文模型名）与 `Model`（404 用的英文类名）。
+  必填也分三档：键缺失「该字段是必填项。」/ 显式 null「该字段不能为 null。」/
+  空串「该字段不能为空。」，此前三种情况被压成同一句。
+- **组织物化路径的子树重算此前静默失效**：递归 CTE 的锚定项是 `varchar(512)`、
+  递归项拼出的是 `varchar`，PG 拒绝执行；而 `AfterWrite` 的返回值被 `_ =` 丢掉，
+  于是改父后子孙的 path 一直停在老位置——`path` 是 `org_sub` 数据范围的唯一依据，
+  这等于权限范围跟着错。现已 `path::text` 修正，并让引擎把写后钩子的失败打进日志。
+- **删组织的级联语义按 Django 收集器复刻**：部门/服务区跟着删，员工/用户/API Key/
+  角色分配/派车批次/运单只断开归属（SET_NULL），子组织提级到顶并立刻重算 path。
+  Django 的 `SET_NULL` 是批量 UPDATE、不触发 `save()`，所以它自己不会重算子组织的
+  path——这一处 Go 是有意修正而非复刻，理由同上：留着错的 path 就是留着错的可见范围。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

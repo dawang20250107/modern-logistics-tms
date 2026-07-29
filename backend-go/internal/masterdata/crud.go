@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
 
@@ -67,8 +69,11 @@ type Field struct {
 
 // WriteCfg 资源的写侧配置
 type WriteCfg struct {
-	Table      string           // 物理表
-	Model      string           // 404 文案里的模型名
+	Table string // 物理表
+	Model string // 404 文案里的模型名（DRF 用 _meta.object_name，即英文类名）
+	// Verbose 唯一冲突文案里的模型名。Django 的 unique 报错取 _meta.verbose_name
+	// （中文），与 404 用的英文类名不是同一个东西，故单列一项；留空则退回 Model。
+	Verbose    string
 	Fields     map[string]Field // 可写字段（JSON 键 → 声明）
 	SoftDelete bool             // true 走 is_deleted 软删（对齐 SoftDeleteModel）
 	Alias      string           // 列表 cfg 里该表的别名（回读 where 用）
@@ -84,10 +89,25 @@ type WriteCfg struct {
 	// 对应的库级 ON DELETE CASCADE 时会撞外键约束（典型是 M2M 中间表）。
 	CascadeTables map[string]string
 
+	// NullifyTables 对齐 on_delete=SET_NULL：表名 → 指向本资源的外键列，删除前置 NULL。
+	// 与 CascadeTables 的区别是「引用方要保留」，例如组织被删后员工仍在、只是没了归属。
+	NullifyTables map[string]string
+
+	// BeforeDelete 删除前的自定义收集：依赖链超过一层（删 A → 级联删 B → B 还有引用方）
+	// 时用它兜底，Django 的 ORM 收集器是递归的，声明式的两张表覆盖不到。
+	BeforeDelete func(ctx context.Context, h *Handler, id string) error
+
 	// ModelDefaults 模型层默认值：库列 → 字面量。用于「不在序列化器里、但模型 default
 	// 非零值」的 NOT NULL 列（如 DriverReminder.level='important'）——通用零值补齐会写成
 	// ''/0，与 Django 不符，故需显式声明。
 	ModelDefaults map[string]any
+
+	// ReadPerm / WritePerm 对齐 iam.permissions.HasPermission 的 required_permissions：
+	// 安全方法查 read、其余查 write；留空表示该 ViewSet 未声明，已认证即可。
+	// 这层闸门必须由引擎统一执行——只在少数自定义 handler 里手写，等于给通用
+	// CRUD 开了一道无人看守的写入口。
+	ReadPerm  string
+	WritePerm string
 
 	// ReadOnly 对齐 ReadOnlyModelViewSet：只暴露 list/retrieve
 	ReadOnly bool
@@ -96,6 +116,19 @@ type WriteCfg struct {
 	NoCreate bool
 	NoUpdate bool
 	NoDelete bool
+}
+
+// uniqueMsg 对齐 Django Model.unique_error_message：具有 <字段 verbose_name> 的 <模型 verbose_name> 已存在。
+func (c WriteCfg) uniqueMsg(key string, f Field) string {
+	label := f.Label
+	if label == "" {
+		label = key
+	}
+	model := c.Verbose
+	if model == "" {
+		model = c.Model
+	}
+	return fmt.Sprintf("具有 %s 的 %s 已存在。", label, model)
 }
 
 func (c WriteCfg) pk() string {
@@ -397,7 +430,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		return
 	}
 	if wc.AfterWrite != nil {
-		_ = wc.AfterWrite(ctx, h, id.String(), body, true)
+		if err := wc.AfterWrite(ctx, h, id.String(), body, true); err != nil {
+			// 行已落库，回 500 会给出「创建失败但记录存在」的错误印象；但也绝不能装作没发生
+			slog.Error("写后钩子失败", "table", wc.Table, "id", id.String(), "创建", true, "err", err)
+		}
 	}
 	it, err := h.OneDetail(ctx, cfg, wc.whereByID(), id.String())
 	if err != nil || it == nil {
@@ -440,7 +476,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		}
 	}
 	if wc.AfterWrite != nil {
-		_ = wc.AfterWrite(ctx, h, id, body, false)
+		if err := wc.AfterWrite(ctx, h, id, body, false); err != nil {
+			slog.Error("写后钩子失败", "table", wc.Table, "id", id, "创建", false, "err", err)
+		}
 	}
 	read := h.OneDetail
 	if r.Method == http.MethodPatch {
@@ -461,6 +499,18 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		return
 	}
 	id := chi.URLParam(r, "id")
+	if wc.BeforeDelete != nil {
+		if err := wc.BeforeDelete(ctx, h, id); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			return
+		}
+	}
+	for tbl, col := range wc.NullifyTables {
+		if _, err := h.DB.Exec(ctx, "UPDATE "+tbl+" SET "+col+"=NULL WHERE "+col+"=$1::uuid", id); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			return
+		}
+	}
 	for tbl, col := range wc.CascadeTables {
 		if _, err := h.DB.Exec(ctx, "DELETE FROM "+tbl+" WHERE "+col+"=$1::uuid", id); err != nil {
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
@@ -490,6 +540,18 @@ func fieldOf(wc WriteCfg, col string) Field {
 	return Field{Kind: FText}
 }
 
+// requiredMsg 对齐 DRF 三档必填文案：键缺失 / 显式 null / 空串是三种不同的错。
+func requiredMsg(has bool, raw any) string {
+	switch {
+	case !has:
+		return "该字段是必填项。"
+	case raw == nil:
+		return "该字段不能为 null。"
+	default:
+		return "该字段不能为空。"
+	}
+}
+
 // collect 创建时收集列与值（含必填与唯一性校验）
 func (h *Handler) collect(ctx context.Context, wc WriteCfg, body map[string]any, creating bool) ([]string, []any, map[string]any) {
 	cols, vals := []string{}, []any{}
@@ -498,7 +560,7 @@ func (h *Handler) collect(ctx context.Context, wc WriteCfg, body map[string]any,
 		raw, has := body[key]
 		if !has || raw == nil || raw == "" {
 			if creating && f.Required {
-				details[key] = []string{"该字段是必填项。"}
+				details[key] = []string{requiredMsg(has, raw)}
 				continue
 			}
 			if creating && f.Default != nil {
@@ -516,11 +578,7 @@ func (h *Handler) collect(ctx context.Context, wc WriteCfg, body map[string]any,
 			var dup bool
 			_ = h.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM "+wc.Table+" WHERE "+f.column(key)+"=$1)", v).Scan(&dup)
 			if dup {
-				label := f.Label
-				if label == "" {
-					label = key
-				}
-				details[key] = []string{fmt.Sprintf("具有 %s 的 %s 已存在。", label, wc.Model)}
+				details[key] = []string{wc.uniqueMsg(key, f)}
 				continue
 			}
 		}
@@ -572,6 +630,11 @@ func (h *Handler) collectUpdate(ctx context.Context, wc WriteCfg, body map[strin
 			}
 			continue
 		}
+		// 传了就要合法：partial=True 只放过「没传」，传空串/null 照样撞 blank/null 校验
+		if f.Required && (raw == nil || raw == "") {
+			details[key] = []string{requiredMsg(true, raw)}
+			continue
+		}
 		if raw == nil {
 			cols = append(cols, f.column(key))
 			vals = append(vals, nil)
@@ -586,11 +649,7 @@ func (h *Handler) collectUpdate(ctx context.Context, wc WriteCfg, body map[strin
 			var dup bool
 			_ = h.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM "+wc.Table+" WHERE "+f.column(key)+"=$1 AND "+wc.pk()+" <> $2::uuid)", v, id).Scan(&dup)
 			if dup {
-				label := f.Label
-				if label == "" {
-					label = key
-				}
-				details[key] = []string{fmt.Sprintf("具有 %s 的 %s 已存在。", label, wc.Model)}
+				details[key] = []string{wc.uniqueMsg(key, f)}
 				continue
 			}
 		}
@@ -611,6 +670,34 @@ func (h *Handler) collectUpdate(ctx context.Context, wc WriteCfg, body map[strin
 // CRUD 把一份读写配置绑成 chi 子路由（列表/创建/详情/更新/删除）。
 // WriteCfg 上的 ReadOnly/NoUpdate/NoDelete 决定实际暴露哪些动作，
 // 对齐各 ViewSet 选用的 mixin 组合与 http_method_names 收窄。
+// Allow 权限点闸门：want 为空表示不设限；被拒时已写 403 响应并返回 false。
+// 文案与 HasPermission.message 一致（DRF 的 PermissionDenied.default_code 是 permission_denied）。
+func (h *Handler) Allow(w http.ResponseWriter, r *http.Request, want string) bool {
+	if want == "" {
+		return true
+	}
+	me, err := h.Svc.UserByID(r.Context(), auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return false
+	}
+	_, _, perms, err := h.Svc.RolesAndPerms(r.Context(), me)
+	if err != nil || !hasPerm(perms, want) {
+		httpx.Err(w, http.StatusForbidden, "permission_denied", "缺少所需权限。")
+		return false
+	}
+	return true
+}
+
+// gate 把权限校验裹在 handler 外层
+func (h *Handler) gate(want string, next func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if h.Allow(w, r, want) {
+			next(w, r)
+		}
+	}
+}
+
 func (h *Handler) CRUD(cfg ResourceCfg, wc WriteCfg) func(chi.Router) {
 	return func(r chi.Router) {
 		if h.Fallback != nil {
@@ -632,20 +719,21 @@ func (h *Handler) CRUD(cfg ResourceCfg, wc WriteCfg) func(chi.Router) {
 				next(w, rq)
 			}
 		}
-		r.Get("/", func(w http.ResponseWriter, rq *http.Request) { h.List(w, rq, cfg) })
-		r.Get("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Retrieve(w, rq, cfg, wc) }))
+		r.Get("/", h.gate(wc.ReadPerm, func(w http.ResponseWriter, rq *http.Request) { h.List(w, rq, cfg) }))
+		r.Get("/{id}", detail(h.gate(wc.ReadPerm, func(w http.ResponseWriter, rq *http.Request) { h.Retrieve(w, rq, cfg, wc) })))
 		if wc.ReadOnly {
 			return
 		}
 		if !wc.NoCreate {
-			r.Post("/", func(w http.ResponseWriter, rq *http.Request) { h.Create(w, rq, cfg, wc) })
+			r.Post("/", h.gate(wc.WritePerm, func(w http.ResponseWriter, rq *http.Request) { h.Create(w, rq, cfg, wc) }))
 		}
 		if !wc.NoUpdate {
-			r.Put("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Update(w, rq, cfg, wc) }))
-			r.Patch("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Update(w, rq, cfg, wc) }))
+			up := detail(h.gate(wc.WritePerm, func(w http.ResponseWriter, rq *http.Request) { h.Update(w, rq, cfg, wc) }))
+			r.Put("/{id}", up)
+			r.Patch("/{id}", up)
 		}
 		if !wc.NoDelete {
-			r.Delete("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Delete(w, rq, cfg, wc) }))
+			r.Delete("/{id}", detail(h.gate(wc.WritePerm, func(w http.ResponseWriter, rq *http.Request) { h.Delete(w, rq, cfg, wc) })))
 		}
 	}
 }

@@ -52,7 +52,7 @@ func (h *Handler) requirePerm(w http.ResponseWriter, r *http.Request, want strin
 	}
 	_, _, perms, err := h.Svc.RolesAndPerms(ctx, me)
 	if err != nil || !hasPerm(perms, want) {
-		httpx.Err(w, http.StatusForbidden, "PERMISSION_DENIED", "无权限："+want)
+		httpx.Err(w, http.StatusForbidden, "permission_denied", "缺少所需权限。")
 		return false
 	}
 	return true
@@ -153,6 +153,12 @@ LEFT JOIN accounts_user u ON u.id = e.user_id`,
 		"status": "e.status", "supervisor": "e.supervisor_id::text",
 	},
 	DefaultOrder: "ORDER BY e.employee_no, e.id",
+	// 对齐 get_group_names：列表恒为 null（避免逐行查询），详情才真算
+	DetailExtras: map[string]string{
+		"group_names": `SELECT COALESCE(json_agg(g.name ORDER BY g.code), '[]'::json)
+		                FROM iam_employee_groups eg JOIN iam_employee_group g ON g.id = eg.employeegroup_id
+		                WHERE eg.employee_id = e.id`,
+	},
 }
 
 var handoversCfg = masterdata.ResourceCfg{
@@ -518,4 +524,132 @@ func (h *Handler) RouteResolve(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"destination": dest, "resolved": out, "excluded": excludedList,
 	})
+}
+
+// ── 写侧配置：让 org 域的标准资源接入通用 CRUD 引擎 ──
+//
+// 组织/角色/服务区/员工/移交/登录审计的详情与增删改此前仍走代理；
+// 这里补上写配置，全部交给同一套引擎驱动。
+
+var OrganizationsCfg = organizationsCfg
+var RolesCfg = rolesCfg
+var ServiceAreasCfg = serviceAreasCfg
+var EmployeesCfg = employeesCfg
+var HandoversCfg = handoversCfg
+var LoginAuditCfg = loginAuditCfg
+
+var OrganizationWrite = masterdata.WriteCfg{
+	Table: "iam_organization", Model: "Organization", Verbose: "组织", Alias: "o",
+	ReadPerm: "org.view", WritePerm: "org.manage",
+	Fields: map[string]masterdata.Field{
+		"name":                   {Kind: masterdata.FText, Required: true},
+		"short_name":             {Kind: masterdata.FText},
+		"code":                   {Kind: masterdata.FText, Required: true, Unique: true},
+		"type":                   {Kind: masterdata.FEnum, Default: "dept", Choices: orgTypeChoices},
+		"org_property":           {Kind: masterdata.FEnum, Default: "self", Choices: orgPropertyChoices},
+		"parent":                 {Kind: masterdata.FUUID, Ref: "iam_organization"},
+		"province":               {Kind: masterdata.FText},
+		"city":                   {Kind: masterdata.FText},
+		"district":               {Kind: masterdata.FText},
+		"address":                {Kind: masterdata.FText},
+		"lng":                    {Kind: masterdata.FDecimal},
+		"lat":                    {Kind: masterdata.FDecimal},
+		"manager_name":           {Kind: masterdata.FText},
+		"manager_phone":          {Kind: masterdata.FText},
+		"business_phone":         {Kind: masterdata.FText},
+		"service_phone":          {Kind: masterdata.FText},
+		"complaint_phone":        {Kind: masterdata.FText},
+		"receipt_return_address": {Kind: masterdata.FText},
+		"sort_order":             {Kind: masterdata.FInt, Default: int64(0)},
+		"is_active":              {Kind: masterdata.FBool, Default: true},
+	},
+	AfterWrite: rebuildOrgPath, // 物化路径必须跟着父子关系一起改，否则数据范围会错
+	// 组织被删时 Django 收集器的行为：部门/服务区跟着删，其余引用方只断开归属。
+	// 部门自身还有引用方（员工归属、子部门），一层声明覆盖不到，交给 BeforeDelete。
+	BeforeDelete:  detachOrgDependents,
+	CascadeTables: map[string]string{"iam_service_area": "organization_id", "iam_department": "organization_id"},
+	NullifyTables: map[string]string{
+		"accounts_user":       "organization_id",
+		"iam_api_key":         "organization_id",
+		"iam_employee":        "organization_id",
+		"iam_role_assignment": "organization_id",
+		"ops_dispatch_batch":  "organization_id",
+		"ops_waybill":         "organization_id",
+		"iam_organization":    "parent_id", // 子组织提级到顶，对齐 parent 的 SET_NULL
+	},
+}
+
+var orgTypeChoices = []string{"group", "company", "region", "dept", "station"}
+var orgPropertyChoices = []string{"self", "franchise", "outsource", "partner", "jv"}
+
+var RoleWrite = masterdata.WriteCfg{
+	Table: "iam_role", Model: "Role", Verbose: "角色", Alias: "r",
+	ReadPerm: "org.rbac", WritePerm: "org.rbac",
+	Fields: map[string]masterdata.Field{
+		"code":       {Kind: masterdata.FText, Required: true, Unique: true},
+		"name":       {Kind: masterdata.FText, Required: true},
+		"data_scope": {Kind: masterdata.FEnum, Default: "org_sub", Choices: []string{"self", "org", "org_sub", "all"}},
+		"is_active":  {Kind: masterdata.FBool, Default: true},
+	},
+	AfterWrite: setRolePermissionsFromBody,
+	CascadeTables: map[string]string{
+		"iam_role_permissions":     "role_id",
+		"iam_role_assignment":      "role_id",
+		"iam_employee_group_roles": "role_id",
+	},
+}
+
+var ServiceAreaWrite = masterdata.WriteCfg{
+	Table: "iam_service_area", Model: "ServiceArea", Verbose: "服务区划", Alias: "a",
+	ReadPerm: "org.view", WritePerm: "org.manage",
+	Fields: map[string]masterdata.Field{
+		"organization": {Kind: masterdata.FUUID, Ref: "iam_organization", Required: true},
+		"area_type":    {Kind: masterdata.FEnum, Default: "deliver", Choices: []string{"deliver", "transfer", "special", "no_deliver", "no_transfer"}},
+		"province":     {Kind: masterdata.FText},
+		"city":         {Kind: masterdata.FText},
+		"district":     {Kind: masterdata.FText},
+		"region_code":  {Kind: masterdata.FText},
+		"region_name":  {Kind: masterdata.FText, Required: true},
+		"priority":     {Kind: masterdata.FInt, Default: int64(0)},
+		"note":         {Kind: masterdata.FText},
+		"is_active":    {Kind: masterdata.FBool, Default: true},
+	},
+}
+
+var EmployeeWrite = masterdata.WriteCfg{
+	Table: "iam_employee", Model: "Employee", Verbose: "员工", Alias: "e",
+	ReadPerm: "org.view", WritePerm: "org.employee",
+	Fields: map[string]masterdata.Field{
+		// Label 取 Django 的 verbose_name（未显式声明时即字段名去下划线），
+		// 唯一冲突文案「具有 xx 的 员工 已存在。」要与之逐字一致
+		"employee_no":  {Kind: masterdata.FText, Required: true, Unique: true, Label: "employee no"},
+		"name":         {Kind: masterdata.FText, Required: true},
+		"phone":        {Kind: masterdata.FText},
+		"email":        {Kind: masterdata.FText},
+		"id_no":        {Kind: masterdata.FText},
+		"organization": {Kind: masterdata.FUUID, Ref: "iam_organization"},
+		"department":   {Kind: masterdata.FUUID, Ref: "iam_department"},
+		"supervisor":   {Kind: masterdata.FUUID, Ref: "iam_employee"},
+		"position":     {Kind: masterdata.FText},
+		"status":       {Kind: masterdata.FEnum, Default: "active", Choices: []string{"active", "disabled", "left"}},
+		"hire_date":    {Kind: masterdata.FDate},
+		"leave_date":   {Kind: masterdata.FDate},
+		"user":         {Kind: masterdata.FUUID, Ref: "accounts_user"},
+	},
+	AfterWrite: setEmployeeGroupsFromBody,
+	CascadeTables: map[string]string{
+		"iam_employee_groups": "employee_id",
+	},
+	// 移交台账两端都指向员工，CascadeTables 一表一列表达不了，交给 BeforeDelete
+	BeforeDelete:  dropEmployeeHandovers,
+	NullifyTables: map[string]string{"iam_department": "manager_id", "iam_employee": "supervisor_id"},
+}
+
+// 移交与登录审计都是只读台账：写入只能由各自的业务动作产生
+var HandoverWrite = masterdata.WriteCfg{
+	Table: "iam_account_handover", Model: "AccountHandover", Alias: "h", ReadOnly: true,
+	ReadPerm: "org.view",
+}
+var LoginAuditWrite = masterdata.WriteCfg{
+	Table: "iam_login_attempt", Model: "LoginAttempt", Alias: "l", ReadOnly: true,
 }

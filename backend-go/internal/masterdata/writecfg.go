@@ -6,9 +6,10 @@ package masterdata
 import "github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 
 var CustomerWrite = WriteCfg{
-	Table: "md_customer", Model: "Customer", Alias: "c", SoftDelete: true,
+	Table: "md_customer", Model: "Customer", Verbose: "客户", Alias: "c", SoftDelete: true,
+	ReadPerm: "masterdata.view", WritePerm: "masterdata.manage",
 	Fields: map[string]Field{
-		"code":            {Kind: FText, Required: true, Unique: true, Label: "编码"},
+		"code":            {Kind: FText, Required: true, Unique: true, Label: "code"},
 		"name":            {Kind: FText, Required: true},
 		"category":        {Kind: FText, Default: "enterprise"},
 		"level":           {Kind: FText, Default: "B"},
@@ -24,9 +25,10 @@ var CustomerWrite = WriteCfg{
 }
 
 var VehicleWrite = WriteCfg{
-	Table: "md_vehicle", Model: "Vehicle", Alias: "v", SoftDelete: true,
+	Table: "md_vehicle", Model: "Vehicle", Verbose: "车辆", Alias: "v", SoftDelete: true,
+	ReadPerm: "masterdata.view", WritePerm: "masterdata.manage",
 	Fields: map[string]Field{
-		"plate_no":               {Kind: FText, Required: true, Unique: true, Label: "车牌号"},
+		"plate_no":               {Kind: FText, Required: true, Unique: true, Label: "plate no"},
 		"vehicle_type":           {Kind: FText},
 		"vehicle_class":          {Kind: FText, Default: "rigid"},
 		"body_type":              {Kind: FText},
@@ -46,6 +48,7 @@ var VehicleWrite = WriteCfg{
 
 var DriverWrite = WriteCfg{
 	Table: "md_driver", Model: "Driver", Alias: "d", SoftDelete: true,
+	ReadPerm: "masterdata.view", WritePerm: "masterdata.manage",
 	Fields: map[string]Field{
 		"name":                  {Kind: FText, Required: true},
 		"phone":                 {Kind: FText},
@@ -64,9 +67,10 @@ var DriverWrite = WriteCfg{
 }
 
 var CarrierWrite = WriteCfg{
-	Table: "md_carrier", Model: "Carrier", Alias: "ca", SoftDelete: true,
+	Table: "md_carrier", Model: "Carrier", Verbose: "承运商", Alias: "ca", SoftDelete: true,
+	ReadPerm: "carrier.view", WritePerm: "carrier.manage",
 	Fields: map[string]Field{
-		"code":                 {Kind: FText, Required: true, Unique: true, Label: "编码"},
+		"code":                 {Kind: FText, Required: true, Unique: true, Label: "code"},
 		"name":                 {Kind: FText, Required: true},
 		"carrier_type":         {Kind: FText, Default: "owner_fleet"},
 		"grade":                {Kind: FText, Default: "B"},
@@ -91,10 +95,11 @@ var CarrierWrite = WriteCfg{
 }
 
 var B2BWrite = WriteCfg{
-	Table: "md_b2b_partner", Model: "B2BPartner", Alias: "p", SoftDelete: true,
+	Table: "md_b2b_partner", Model: "B2BPartner", Verbose: "上下游伙伴", Alias: "p", SoftDelete: true,
+	ReadPerm: "masterdata.view", WritePerm: "masterdata.manage",
 	Fields: map[string]Field{
 		"partner_type":  {Kind: FEnum, Choices: []string{"shipper", "consignee", "supplier"}, Required: true},
-		"code":          {Kind: FText, Required: true, Unique: true, Label: "编码"},
+		"code":          {Kind: FText, Required: true, Unique: true, Label: "code"},
 		"name":          {Kind: FText, Required: true},
 		"contact_name":  {Kind: FText},
 		"contact_phone": {Kind: FText},
@@ -120,7 +125,8 @@ SELECT r.id::text AS id, r.code, r.name, r.origin, r.destination, r.waypoints,
 }
 
 var RouteWrite = WriteCfg{
-	Table: "md_route", Model: "Route", Alias: "r", SoftDelete: true,
+	Table: "md_route", Model: "Route", Verbose: "线路", Alias: "r", SoftDelete: true,
+	ReadPerm: "masterdata.view", WritePerm: "masterdata.manage",
 	Fields: map[string]Field{
 		"code":        {Kind: FText, Required: true},
 		"name":        {Kind: FText, Required: true},
@@ -161,6 +167,7 @@ SELECT l.id::text AS id, l.carrier_id::text AS carrier, COALESCE(ca.name,'') AS 
 
 var LanePriceWrite = WriteCfg{
 	Table: "md_carrier_lane_price", Model: "CarrierLanePrice", Alias: "l", SoftDelete: true,
+	ReadPerm: "carrier.view", WritePerm: "carrier.manage",
 	Fields: map[string]Field{
 		"carrier":          {Kind: FUUID, Ref: "md_carrier", Required: true},
 		"origin_city":      {Kind: FText, Required: true},
@@ -207,6 +214,7 @@ SELECT dc.id::text AS id, dc.driver_id::text AS driver, COALESCE(d.name,'') AS d
 
 var DriverCredWrite = WriteCfg{
 	Table: "md_driver_credential", Model: "DriverCredential", Alias: "dc",
+	ReadPerm: "masterdata.view", WritePerm: "masterdata.manage",
 	Fields: map[string]Field{
 		"driver":        {Kind: FUUID, Ref: "md_driver", Required: true},
 		"cred_type":     {Kind: FEnum, Choices: []string{"vehicle_license", "trailer_license", "driving_license", "transport_cert", "id_card"}, Required: true},

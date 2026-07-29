@@ -68,6 +68,7 @@ func main() {
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)
 		p.Post("/api/v1/orders/intake", orderH.Intake)
 		p.Post("/api/v1/orders/assign", orderH.Assign)
+		p.Post("/api/v1/orders/batch-dispatch", orderH.BatchDispatch)
 		p.Post("/api/v1/orders/{id}/confirm", orderH.Confirm)
 		p.Post("/api/v1/orders/{id}/pool", orderH.Pool)
 		p.Post("/api/v1/orders/{id}/cancel", orderH.Cancel)

@@ -91,6 +91,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 财务-读 | GET /finance/statement-overview + /statements 台账 + /aging 账龄 | ✅ 双栈一致（overview 数值语义 deep-diff；statements 8 张逐字段；Decimal property 以 ::text 保刻度） |
 | 订单-写 | POST /orders/intake（规则解析/客户对齐/取号/嵌套写入/审批闸，全事务） | ✅ Go 建单→Django 读回一致；取号跨栈连续 |
 | 订单-流转 | POST /orders/{id}/confirm·pool·cancel·claim·release·unassign + /orders/assign 批量分单 | ✅ 全生命周期实测通过；行锁防抢单；进池通知扇出落库；Django timeline 读回事件链完整 |
+| 批量派车 | POST /orders/batch-dispatch（批次+N 运单+应付分摊+费用快照+点位拷贝+双事件，单事务） | ✅ 3 单按吨分摊 2:4:6 精确、之和恒等总额；Django 读回运单/批次/费用全对 |
 
 ## 待移植（按前端依赖频度排序）
 

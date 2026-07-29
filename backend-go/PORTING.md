@@ -98,6 +98,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 工作台 | GET /workbench（通知/异常/客服/调度/财务待办聚合 + 两组 Top5 订单嵌套） | ✅ 计数与嵌套全对齐；唯一差异 dispatchable 系修正 Django 缺陷（见差异清单） |
 | 证件预警 | GET /credentials/expiring?days=N（车辆年检/保险/维保 + 司机驾照/从业资格 + 承运资质，severity 分级） | ✅ days=30/90 双栈 diff 全一致（含稳定排序与 summary 计数） |
 | 财务大屏 | GET /finance/dashboard-metrics?days=N（营收/成本/毛利按日趋势 + 成本科目构成，读侧） | ✅ days=7/30 双栈 diff 全一致 |
+| 订单流程-读 | GET /orders/{id}/workflow（11 环节总览）+ /orders/{id}/lineage（订单→运单→对账单全链路，单条 CTE 主 SQL） | ✅ 10 张订单 × 2 端点双栈 diff 全一致（覆盖含对账单/已完成/无运单/新建四种形态） |
 | 运单卡片-读 | GET /waybills/cost-catalog + /{no}/{costs·eta·collection·finance-card·reply-card·contract·reminders} | ✅ 4 张运单 × 6 端点双栈 diff 全一致；ETA 的 haversine+道路系数+近 5 点均速逐值复现（336.6km / 78km·h⁻¹ 两栈相同） |
 | 通知域 | GET /notifications + /unread-count + POST {id}/read + read-all（recipient 隔离，铃铛高频轮询） | ✅ 双栈 diff 一致；已读/全读 Django 复核一致；他人通知 404 |
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
@@ -121,6 +122,9 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 
 ## 尚未对齐的已知差异（限制清单）
 
+- **lineage 的 `order.status_label`**：`Order.status` 未绑定 choices，Django
+  `_disp()` 回落原始值（返回 `converted` 而非「已派单」），Go 照此复刻返回原值——
+  与其他 status_label 返回中文不同，属 Django 既有行为，不擅自"修正"以免前端错位。
 - **越界分页**：Django 请求超出总页数时 DRF 抛 404「无效页面」，Go 返回 200 +
   空 items（`{items:[],total,page,page_size,pages}`）。前端筛选变更不重置页码，
   停留在越界页时 Django 会让表格整体报错、Go 则正常渲染空表且分页器可回跳，

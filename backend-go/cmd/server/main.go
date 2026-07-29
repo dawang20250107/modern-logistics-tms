@@ -93,6 +93,8 @@ func main() {
 		p.Post("/api/v1/notifications/read-all", ntfH.ReadAll)
 		p.Get("/api/v1/orders/{id}", orderH.Detail)
 		p.Get("/api/v1/orders/{id}/timeline", orderH.Timeline)
+		p.Get("/api/v1/orders/{id}/workflow", orderH.Workflow)
+		p.Get("/api/v1/orders/{id}/lineage", orderH.Lineage)
 		p.Get("/api/v1/waybills", waybillH.List)
 		p.Get("/api/v1/waybills/stats", waybillH.Stats)
 		p.Get("/api/v1/waybills/cost-catalog", waybillH.CostCatalog)

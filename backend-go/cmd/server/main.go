@@ -72,6 +72,7 @@ func main() {
 		p.Get("/api/v1/vehicles", mdH.Vehicles)
 		p.Get("/api/v1/drivers", mdH.Drivers)
 		p.Get("/api/v1/b2b-partners", mdH.B2BPartners)
+		p.Get("/api/v1/carriers", mdH.Carriers)
 		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
 		p.Get("/api/v1/finance/aging", finH.Aging)

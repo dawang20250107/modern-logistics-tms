@@ -267,3 +267,60 @@ SELECT p.id::text AS id, p.partner_type,
 }
 
 func (h *Handler) B2BPartners(w http.ResponseWriter, r *http.Request) { h.List(w, r, b2bCfg) }
+
+// carriers：dispatch_blocked 风控原因与 expiry_alerts 30 天到期预警均在 SQL 内联计算，
+// performance 聚合仅详情页有（列表恒 null，对齐 DRF _is_list 行为）。
+var carriersCfg = ResourceCfg{
+	SelectSQL: `
+SELECT ca.id::text AS id, ca.code, ca.name, ca.carrier_type,
+       (CASE ca.carrier_type WHEN 'owner_fleet' THEN '个体车队' WHEN 'company_fleet' THEN '公司车队'
+                             WHEN 'platform' THEN '网货平台' WHEN 'temporary' THEN '临时承运商' ELSE '' END) AS carrier_type_label,
+       ca.contact_name, ca.contact_phone, ca.city, ca.service_area, ca.settlement_type, ca.is_active,
+       ca.grade,
+       (CASE ca.grade WHEN 'A' THEN 'A · 优质' WHEN 'B' THEN 'B · 良好' WHEN 'C' THEN 'C · 关注' WHEN 'D' THEN 'D · 高风险' ELSE '' END) AS grade_label,
+       ca.blacklisted, ca.blacklist_reason,
+       ca.business_license_no, ca.transport_license_no, ca.qualification_expiry::text AS qualification_expiry,
+       ca.contract_expiry::text AS contract_expiry, ca.insurance_expiry::text AS insurance_expiry, ca.tax_no,
+       ca.credit_limit::text AS credit_limit, ca.credit_days, ca.billing_day,
+       (CASE WHEN ca.blacklisted THEN '承运商 '||ca.name||' 已列入黑名单'||(CASE WHEN COALESCE(ca.blacklist_reason,'')<>'' THEN '（'||ca.blacklist_reason||'）' ELSE '' END)
+             WHEN NOT ca.is_active THEN '承运商 '||ca.name||' 已停用'
+             WHEN ca.qualification_expiry IS NOT NULL AND ca.qualification_expiry < td.today
+               THEN '承运商 '||ca.name||' 承运资质已于 '||to_char(ca.qualification_expiry,'YYYY-MM-DD')||' 到期'
+             ELSE '' END) AS dispatch_blocked,
+       alerts.j AS expiry_alerts, NULL::text AS performance`,
+	FromClause: `FROM md_carrier ca
+CROSS JOIN LATERAL (SELECT (now() AT TIME ZONE 'Asia/Shanghai')::date AS today) td
+LEFT JOIN LATERAL (
+  SELECT COALESCE(json_agg(x.j ORDER BY x.ord), '[]'::json) AS j FROM (
+    SELECT 1 AS ord, json_build_object('field','qualification_expiry','label','承运资质','date',ca.qualification_expiry::text,'expired',ca.qualification_expiry<td.today) AS j
+      WHERE ca.qualification_expiry IS NOT NULL AND ca.qualification_expiry <= td.today + 30
+    UNION ALL
+    SELECT 2, json_build_object('field','contract_expiry','label','合作合同','date',ca.contract_expiry::text,'expired',ca.contract_expiry<td.today)
+      WHERE ca.contract_expiry IS NOT NULL AND ca.contract_expiry <= td.today + 30
+    UNION ALL
+    SELECT 3, json_build_object('field','insurance_expiry','label','承运人责任险','date',ca.insurance_expiry::text,'expired',ca.insurance_expiry<td.today)
+      WHERE ca.insurance_expiry IS NOT NULL AND ca.insurance_expiry <= td.today + 30
+  ) x
+) alerts ON true`,
+	SearchCols: []string{"ca.code", "ca.name", "ca.contact_phone", "ca.city"},
+	OrderingCols: map[string]string{
+		"code": "ca.code", "name": "ca.name", "grade": "ca.grade", "created_at": "ca.created_at",
+		"city": "ca.city", "credit_days": "ca.credit_days", "carrier_type": "ca.carrier_type", "is_active": "ca.is_active",
+	},
+	FilterFields: map[string]filters.FilterField{
+		"name":        {Type: filters.Text, Cols: []string{"ca.name"}},
+		"code":        {Type: filters.Text, Cols: []string{"ca.code"}},
+		"city":        {Type: filters.Text, Cols: []string{"ca.city"}},
+		"grade":       {Type: filters.Enum, Cols: []string{"ca.grade"}},
+		"type":        {Type: filters.Enum, Cols: []string{"ca.carrier_type"}},
+		"credit_days": {Type: filters.Number, Cols: []string{"ca.credit_days"}},
+		"blocked":     {Type: filters.Bool, Cols: []string{"(ca.blacklisted OR NOT ca.is_active OR (ca.qualification_expiry IS NOT NULL AND ca.qualification_expiry < (now() AT TIME ZONE 'Asia/Shanghai')::date))"}},
+		"active":      {Type: filters.Bool, Cols: []string{"ca.is_active"}},
+	},
+	DirectParams: map[string]string{
+		"is_active": "ca.is_active", "grade": "ca.grade", "carrier_type": "ca.carrier_type",
+	},
+	DefaultOrder: "ORDER BY ca.created_at DESC, ca.id",
+}
+
+func (h *Handler) Carriers(w http.ResponseWriter, r *http.Request) { h.List(w, r, carriersCfg) }

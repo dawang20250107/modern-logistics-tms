@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -62,10 +63,14 @@ func wbEvent(ctx context.Context, tx pgx.Tx, waybillID, eventType, resource stri
 	}
 	pj, _ := json.Marshal(body)
 	eid, _ := uuid.NewV7()
-	_, _ = tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), $4, $5, $6)`,
-		eid.String(), waybillID, eventType, payload["__source"], resource, pj)
+		eid.String(), waybillID, eventType, payload["__source"], resource, pj); err != nil {
+		// 事件写不进去，事务随后会整体回滚（留痕是业务的一部分，不能只丢事件继续走）。
+		// 这里必须记下来：否则调用方只看得到 COMMIT 阶段一句含糊的报错，查不到根因。
+		slog.Error("运单事件落库失败", "waybill_id", waybillID, "event", eventType, "err", err)
+	}
 }
 
 type wbRow struct {
@@ -101,10 +106,12 @@ func doTransition(ctx context.Context, tx pgx.Tx, w *wbRow, to, remark string) (
 	w.Status = to
 	pj, _ := json.Marshal(map[string]any{"from": from, "to": to, "remark": remark})
 	eid, _ := uuid.NewV7()
-	_, _ = tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), 'transition', $4, $5)`,
-		eid.String(), w.ID, "status_changed:"+to, w.No, pj)
+		eid.String(), w.ID, "status_changed:"+to, w.No, pj); err != nil {
+		slog.Error("状态流转事件落库失败", "waybill", w.No, "to", to, "err", err)
+	}
 	completeOrderOnDelivery(ctx, tx, w, to)
 	return 0, "", ""
 }
@@ -117,13 +124,15 @@ func completeOrderOnDelivery(ctx context.Context, tx pgx.Tx, w *wbRow, to string
 	if w.OrderID == nil {
 		return
 	}
-	_, _ = tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE ops_order SET status='completed', updated_at=now()
 		WHERE id=$1::uuid AND status <> 'completed'
 		  AND NOT EXISTS (
 		    SELECT 1 FROM ops_waybill s
 		    WHERE s.order_id=$1::uuid AND s.status NOT IN ('cancelled','voided','signed','delivered','settled'))`,
-		*w.OrderID)
+		*w.OrderID); err != nil {
+		slog.Error("回写订单完成状态失败", "order_id", *w.OrderID, "err", err)
+	}
 }
 
 // Transition POST /api/v1/waybills/{no}/transition {to_status, remark}
@@ -237,13 +246,15 @@ func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
 	}
 	// 司机累计统计刷新（签收完成后）
 	if wb.Driver != nil {
-		_, _ = tx.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 			UPDATE md_driver d SET
 			  cumulative_waybills = (SELECT count(*) FROM ops_waybill x WHERE x.driver_id=d.id AND x.status IN ('signed','delivered','settled')),
 			  cumulative_freight = COALESCE((SELECT sum(e.amount) FROM fin_expense_record e JOIN ops_waybill x ON x.id=e.waybill_id
 			                                 WHERE x.driver_id=d.id AND e.direction='payable'),0),
 			  updated_at = now()
-			WHERE d.id=$1::uuid`, *wb.Driver)
+			WHERE d.id=$1::uuid`, *wb.Driver); err != nil {
+			slog.Error("刷新司机累计统计失败", "driver_id", *wb.Driver, "err", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交失败")

@@ -165,6 +165,9 @@ func main() {
 		p.Post("/api/v1/orders/import", orderH.Import)
 		p.Post("/api/v1/orders/quote", orderH.Quote)
 		p.Post("/api/v1/orders/parse-preview", orderH.ParsePreview)
+		// 订单池批量排线，与 /waybills/dispatch-plan 是两个端点：
+		// 前者拼同向小单成整车、找承运商，后者给已有运单派自有车
+		p.Post("/api/v1/orders/dispatch-plan", orderH.DispatchPlan)
 		p.Get("/api/v1/orders/{id}/ymm-quote", orderH.YmmQuote)
 		p.Post("/api/v1/orders/{id}/convert", orderH.Convert)
 		p.Get("/api/v1/orders/{id}/dispatch-suggestion", orderH.DispatchSuggestion)

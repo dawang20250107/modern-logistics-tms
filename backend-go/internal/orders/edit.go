@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,7 +78,9 @@ func (h *Handler) Edit(w http.ResponseWriter, r *http.Request) {
 	if customerID == nil {
 		if c, okc := body.Fields["customer"].(string); okc && c != "" {
 			if _, err := uuid.Parse(c); err == nil {
-				_, _ = tx.Exec(ctx, `UPDATE ops_order SET customer_id=$2::uuid WHERE id=$1::uuid`, id, c)
+				if _, err := tx.Exec(ctx, `UPDATE ops_order SET customer_id=$2::uuid WHERE id=$1::uuid`, id, c); err != nil {
+					slog.Error("补挂客户失败", "order_id", id, "customer_id", c, "err", err)
+				}
 			}
 		}
 	}

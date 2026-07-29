@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -346,17 +347,21 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 点位拷贝
-	_, _ = tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO ops_waybill_stop (id, created_at, updated_at, waybill_id, seq, stop_type, city, address,
 		       contact_name, contact_phone, lat, lng, radius_m, planned_eta, arrival_source, status, note)
 		SELECT gen_random_uuid(), now(), now(), $2::uuid, seq, stop_type, city, address,
 		       contact_name, contact_phone, NULL, NULL, 0, COALESCE(expected_end, expected_start), '', 'pending', cargo_note
-		FROM ops_order_stop WHERE order_id=$1::uuid ORDER BY seq`, o.ID, wid.String())
+		FROM ops_order_stop WHERE order_id=$1::uuid ORDER BY seq`, o.ID, wid.String()); err != nil {
+		slog.Error("派单点位拷贝失败", "order", o.OrderNo, "waybill_id", wid.String(), "err", err)
+	}
 	// 司机分配：主驾 + 同行司机
 	if drv != nil {
 		mid, _ := uuid.NewV7()
-		_, _ = tx.Exec(ctx, `INSERT INTO ops_waybill_driver (id, created_at, updated_at, waybill_id, driver_id, role, note)
-			VALUES ($1, now(), now(), $2::uuid, $3::uuid, 'main', '')`, mid.String(), wid.String(), drv.ID)
+		if _, err := tx.Exec(ctx, `INSERT INTO ops_waybill_driver (id, created_at, updated_at, waybill_id, driver_id, role, note)
+			VALUES ($1, now(), now(), $2::uuid, $3::uuid, 'main', '')`, mid.String(), wid.String(), drv.ID); err != nil {
+			slog.Error("主驾分配失败", "waybill_id", wid.String(), "driver_id", drv.ID, "err", err)
+		}
 	}
 	for _, co := range body.CoDrivers {
 		if co == "" || (drv != nil && co == drv.ID) {
@@ -366,11 +371,13 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		cid, _ := uuid.NewV7()
-		_, _ = tx.Exec(ctx, `INSERT INTO ops_waybill_driver (id, created_at, updated_at, waybill_id, driver_id, role, note)
+		if _, err := tx.Exec(ctx, `INSERT INTO ops_waybill_driver (id, created_at, updated_at, waybill_id, driver_id, role, note)
 			SELECT $1, now(), now(), $2::uuid, d.id, 'co', '' FROM md_driver d
 			WHERE d.id=$3::uuid AND NOT d.is_deleted
 			  AND NOT EXISTS (SELECT 1 FROM ops_waybill_driver x WHERE x.waybill_id=$2::uuid AND x.driver_id=d.id)`,
-			cid.String(), wid.String(), co)
+			cid.String(), wid.String(), co); err != nil {
+			slog.Error("同行司机分配失败", "waybill_id", wid.String(), "driver_id", co, "err", err)
+		}
 	}
 	// 订单回写已派单
 	if _, err := tx.Exec(ctx, `UPDATE ops_order SET status='converted', updated_at=now() WHERE id=$1::uuid`, o.ID); err != nil {
@@ -441,10 +448,12 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		"price_source": evPriceSource, "agreed_payable": agreedF, "quote_id": body.QuoteID,
 	})
 	wevID, _ := uuid.NewV7()
-	_, _ = tx.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
 		VALUES ($1, now(), now(), $2::uuid, 'dispatched', now(), 'dispatch', $3, $4)`,
-		wevID.String(), wid.String(), res, wp)
+		wevID.String(), wid.String(), res, wp); err != nil {
+		slog.Error("派单事件落库失败", "waybill_id", wid.String(), "err", err)
+	}
 	// 工作流编排：带司机派单自动生成承运合同（文本；PDF 生成留 Django/收官期）
 	if drv != nil {
 		if err := generateContract(ctx, tx, wid.String(), wbNo, drv, veh, trailerArg,

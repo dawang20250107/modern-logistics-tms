@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -298,10 +299,17 @@ func (h *Handler) Handover(w http.ResponseWriter, r *http.Request) {
 	}
 	disabled := false
 	if disable {
-		_, _ = tx.Exec(ctx, `UPDATE iam_employee SET status='left', updated_at=now() WHERE id=$1::uuid`, empID)
+		if _, err := tx.Exec(ctx, `UPDATE iam_employee SET status='left', updated_at=now() WHERE id=$1::uuid`, empID); err != nil {
+			slog.Error("移交停用员工失败", "employee_id", empID, "err", err)
+		}
 		if userID != nil {
-			_, _ = tx.Exec(ctx, `UPDATE accounts_user SET is_active=false WHERE id=$1::uuid`, *userID)
-			disabled = true
+			// 只有登录账号真的停掉了才报 disabled=true：这条要回给前端，
+			// 说"已停用"而账号还能登录，比不停用更糟
+			if _, err := tx.Exec(ctx, `UPDATE accounts_user SET is_active=false WHERE id=$1::uuid`, *userID); err != nil {
+				slog.Error("移交停用登录账号失败", "user_id", *userID, "err", err)
+			} else {
+				disabled = true
+			}
 		}
 	}
 	hid, _ := uuid.NewV7()

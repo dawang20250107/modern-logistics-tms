@@ -7,6 +7,8 @@ package orders
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -229,96 +231,30 @@ func (h *Handler) BatchDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ok := []map[string]any{}
+	failed := []map[string]any{}
 	totalWeight := decimal.Zero
 	for _, o := range dispatchable {
-		// 批次隐含锁定：待分配订单先锁给操作人
-		if o.ClaimedBy == nil && o.AssignedTo == nil {
-			if _, err := tx.Exec(ctx, `
-				UPDATE ops_order SET claimed_by_id=$2::uuid, claimed_at=now(),
-				       status=(CASE WHEN status='pooled' THEN 'dispatching' ELSE status END), updated_at=now()
-				WHERE id=$1::uuid`, o.ID, me.ID); err != nil {
-				continue
-			}
-			_ = txEvent(ctx, tx, o.ID, "claimed", "", "dispatching", me.ID, "batch", map[string]any{"note": "批次 " + batchNo + " 锁定"})
-		}
-		wbNo, err := nextNoScoped(ctx, tx, "YD", "waybill")
+		// 每单一个 savepoint。这一层不是装饰：批派本来就要「一单出问题，其余照发」
+		// （响应里的 ok/failed 就是这个语义），但 Postgres 事务里任何一句报错都会让
+		// 整个事务进 aborted 态——不隔离的话，第一单出错会把后面每一单连同 COMMIT
+		// 一起带走，界面上看到的是「整批失败」。
+		sp, err := tx.Begin(ctx)
 		if err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "事务开启失败")
+			return
+		}
+		wbNo, pay, err := dispatchOneInBatch(ctx, sp, o, body, batchID, batchNo, carrierName, carrierIDArg, alloc[o.ID], me.ID)
+		if err != nil {
+			_ = sp.Rollback(ctx)
+			slog.Error("批派单单失败", "batch", batchNo, "order", o.OrderNo, "err", err)
+			failed = append(failed, map[string]any{"order_no": o.OrderNo, "reason": err.Error()})
 			continue
 		}
-		wid, _ := uuid.NewV7()
-		codStatus := "none"
-		if o.CodAmount.GreaterThan(decimal.Zero) {
-			codStatus = "pending"
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO ops_waybill (id, created_at, updated_at, waybill_no, dispatch_type, platform_name, platform_order_no,
-			  order_id, customer_id, carrier_id, batch_id, route_name, ai_conversation_id, origin, destination,
-			  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
-			  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
-			  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
-			VALUES ($1, now(), now(), $2, $3, $4, '', $5::uuid, $6::uuid, $7::uuid, $8::uuid, $9, $10, $11, $12,
-			  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid)`,
-			wid.String(), wbNo, body.DispatchType, body.PlatformName,
-			o.ID, o.CustomerID, carrierIDArg, batchID,
-			o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,
-			o.Quantity, o.Weight, o.VolumeCbm,
-			o.FreightTerm, o.FreightPayer, o.CodAmount, codStatus, o.ExpectedDeliveryAt, o.ProjectID); err != nil {
+		if err := sp.Commit(ctx); err != nil {
+			slog.Error("批派单单提交失败", "batch", batchNo, "order", o.OrderNo, "err", err)
+			failed = append(failed, map[string]any{"order_no": o.OrderNo, "reason": err.Error()})
 			continue
 		}
-		// 点位拷贝进执行层
-		_, _ = tx.Exec(ctx, `
-			INSERT INTO ops_waybill_stop (id, created_at, updated_at, waybill_id, seq, stop_type, city, address,
-			       contact_name, contact_phone, lat, lng, radius_m, planned_eta, arrival_source, status, note)
-			SELECT gen_random_uuid(), now(), now(), $2::uuid, seq, stop_type, city, address,
-			       contact_name, contact_phone, NULL, NULL, 0, COALESCE(expected_end, expected_start), '', 'pending', cargo_note
-			FROM ops_order_stop WHERE order_id=$1::uuid ORDER BY seq`, o.ID, wid.String())
-		// 订单回写已派单
-		if _, err := tx.Exec(ctx, "UPDATE ops_order SET status='converted', updated_at=now() WHERE id=$1::uuid", o.ID); err != nil {
-			continue
-		}
-		// 应付快照
-		pay := alloc[o.ID]
-		if pay.GreaterThan(decimal.Zero) {
-			payeeType, payeeRef := "carrier", carrierName
-			if body.DispatchType == "platform" {
-				payeeType = "platform"
-				payeeRef = body.PlatformName
-				if payeeRef == "" {
-					payeeRef = "网货平台"
-				}
-			}
-			snapIn, _ := json.Marshal(map[string]any{
-				"weight_ton": o.Weight.InexactFloat64(), "volume_cbm": o.VolumeCbm.InexactFloat64(),
-				"quantity": o.Quantity, "route": o.Origin + "→" + o.Destination,
-			})
-			snapCalc, _ := json.Marshal(map[string]any{"agreed_payable": pay.InexactFloat64(), "note": "派单议定应付金额快照"})
-			eid, _ := uuid.NewV7()
-			_, _ = tx.Exec(ctx, `
-				INSERT INTO fin_expense_record (id, created_at, updated_at, waybill_id, direction, expense_item_code,
-				  amount, currency, occurred_at, risk_status, source_system, external_id, payee_type, payee_ref,
-				  remark, price_source, quote_id, pricing_rule_id, pricing_rule_name, charge_method, matched_condition,
-				  input_snapshot, calculation_detail, rule_snapshot)
-				VALUES ($1, now(), now(), $2::uuid, 'payable', 'freight', $3, 'CNY', now(), 'normal', '', '',
-				  $4, $5, $6, 'batch', '', '', '', '', '', $7, $8, '{}'::jsonb)`,
-				eid.String(), wid.String(), pay, payeeType, payeeRef, "批次 "+batchNo+" 分摊应付", snapIn, snapCalc)
-		}
-		// 事件：订单 + 运单
-		_ = txEvent(ctx, tx, o.ID, "dispatched", "", "converted", me.ID, "dispatch",
-			map[string]any{"waybill_no": wbNo, "dispatch_type": body.DispatchType})
-		wevID, _ := uuid.NewV7()
-		res := carrierName
-		if body.DispatchType == "platform" {
-			res = body.PlatformName
-		}
-		wp, _ := json.Marshal(map[string]any{
-			"dispatch_type": body.DispatchType, "dispatch_status": "pending_accept",
-			"price_source": "batch", "agreed_payable": pay.InexactFloat64(), "quote_id": "",
-		})
-		_, _ = tx.Exec(ctx, `
-			INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
-			VALUES ($1, now(), now(), $2::uuid, 'dispatched', now(), 'dispatch', $3, $4)`,
-			wevID.String(), wid.String(), res, wp)
-
 		totalWeight = totalWeight.Add(o.Weight)
 		ok = append(ok, map[string]any{
 			"order_no": o.OrderNo, "waybill_no": wbNo,
@@ -347,8 +283,114 @@ func (h *Handler) BatchDispatch(w http.ResponseWriter, r *http.Request) {
 		"batch_no": batchNo, "batch_id": batchID, "carrier": display,
 		"dispatch_type": body.DispatchType, "allocation": body.Allocation,
 		"total_payable": totalPayable.InexactFloat64(), "order_count": len(ok),
-		"ok": ok, "failed": []any{}, "skipped": skipped,
+		"ok": ok, "failed": failed, "skipped": skipped,
 	})
+}
+
+// dispatchOneInBatch 批次里单张订单转运单的全部写入，跑在自己的 savepoint 里。
+// 返回运单号与该单分摊到的应付；任何一步出错都原样往上抛，由调用方回滚这一单。
+func dispatchOneInBatch(ctx context.Context, tx pgx.Tx, o dispatchableOrder, body batchReq,
+	batchID, batchNo, carrierName string, carrierIDArg *string,
+	pay decimal.Decimal, meID string) (string, decimal.Decimal, error) {
+	// 批次隐含锁定：待分配订单先锁给操作人
+	if o.ClaimedBy == nil && o.AssignedTo == nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE ops_order SET claimed_by_id=$2::uuid, claimed_at=now(),
+			       status=(CASE WHEN status='pooled' THEN 'dispatching' ELSE status END), updated_at=now()
+			WHERE id=$1::uuid`, o.ID, meID); err != nil {
+			return "", pay, fmt.Errorf("锁定订单失败：%w", err)
+		}
+		if err := txEvent(ctx, tx, o.ID, "claimed", "", "dispatching", meID, "batch",
+			map[string]any{"note": "批次 " + batchNo + " 锁定"}); err != nil {
+			return "", pay, fmt.Errorf("锁定事件落库失败：%w", err)
+		}
+	}
+	wbNo, err := nextNoScoped(ctx, tx, "YD", "waybill")
+	if err != nil {
+		return "", pay, fmt.Errorf("运单取号失败：%w", err)
+	}
+	wid, _ := uuid.NewV7()
+	codStatus := "none"
+	if o.CodAmount.GreaterThan(decimal.Zero) {
+		codStatus = "pending"
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ops_waybill (id, created_at, updated_at, waybill_no, dispatch_type, platform_name, platform_order_no,
+		  order_id, customer_id, carrier_id, batch_id, route_name, ai_conversation_id, origin, destination,
+		  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
+		  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
+		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
+		VALUES ($1, now(), now(), $2, $3, $4, '', $5::uuid, $6::uuid, $7::uuid, $8::uuid, $9, $10, $11, $12,
+		  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid)`,
+		wid.String(), wbNo, body.DispatchType, body.PlatformName,
+		o.ID, o.CustomerID, carrierIDArg, batchID,
+		o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,
+		o.Quantity, o.Weight, o.VolumeCbm,
+		o.FreightTerm, o.FreightPayer, o.CodAmount, codStatus, o.ExpectedDeliveryAt, o.ProjectID); err != nil {
+		return "", pay, fmt.Errorf("运单写入失败：%w", err)
+	}
+	// 点位拷贝进执行层
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ops_waybill_stop (id, created_at, updated_at, waybill_id, seq, stop_type, city, address,
+		       contact_name, contact_phone, lat, lng, radius_m, planned_eta, arrival_source, status, note)
+		SELECT gen_random_uuid(), now(), now(), $2::uuid, seq, stop_type, city, address,
+		       contact_name, contact_phone, NULL, NULL, 0, COALESCE(expected_end, expected_start), '', 'pending', cargo_note
+		FROM ops_order_stop WHERE order_id=$1::uuid ORDER BY seq`, o.ID, wid.String()); err != nil {
+		return "", pay, fmt.Errorf("点位拷贝失败：%w", err)
+	}
+	// 订单回写已派单
+	if _, err := tx.Exec(ctx, "UPDATE ops_order SET status='converted', updated_at=now() WHERE id=$1::uuid", o.ID); err != nil {
+		return "", pay, fmt.Errorf("订单状态回写失败：%w", err)
+	}
+	// 应付快照
+	if pay.GreaterThan(decimal.Zero) {
+		payeeType, payeeRef := "carrier", carrierName
+		if body.DispatchType == "platform" {
+			payeeType = "platform"
+			payeeRef = body.PlatformName
+			if payeeRef == "" {
+				payeeRef = "网货平台"
+			}
+		}
+		snapIn, _ := json.Marshal(map[string]any{
+			"weight_ton": o.Weight.InexactFloat64(), "volume_cbm": o.VolumeCbm.InexactFloat64(),
+			"quantity": o.Quantity, "route": o.Origin + "→" + o.Destination,
+		})
+		snapCalc, _ := json.Marshal(map[string]any{"agreed_payable": pay.InexactFloat64(), "note": "派单议定应付金额快照"})
+		eid, _ := uuid.NewV7()
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO fin_expense_record (id, created_at, updated_at, waybill_id, direction, expense_item_code,
+			  amount, currency, occurred_at, risk_status, source_system, external_id, payee_type, payee_ref,
+			  remark, price_source, quote_id, pricing_rule_id, pricing_rule_name, charge_method, matched_condition,
+			  input_snapshot, calculation_detail, rule_snapshot)
+			VALUES ($1, now(), now(), $2::uuid, 'payable', 'freight', $3, 'CNY', now(), 'normal', '', '',
+			  $4, $5, $6, 'batch', '', '', '', '', '', $7, $8, '{}'::jsonb)`,
+			eid.String(), wid.String(), pay, payeeType, payeeRef, "批次 "+batchNo+" 分摊应付", snapIn, snapCalc); err != nil {
+			// 应付快照落不下就整单退回：运单发出去了却没有成本，对账那头会凭空少一笔
+			return "", pay, fmt.Errorf("应付快照落库失败：%w", err)
+		}
+	}
+	// 事件：订单 + 运单
+	if err := txEvent(ctx, tx, o.ID, "dispatched", "", "converted", meID, "dispatch",
+		map[string]any{"waybill_no": wbNo, "dispatch_type": body.DispatchType}); err != nil {
+		return "", pay, fmt.Errorf("订单派单事件落库失败：%w", err)
+	}
+	wevID, _ := uuid.NewV7()
+	res := carrierName
+	if body.DispatchType == "platform" {
+		res = body.PlatformName
+	}
+	wp, _ := json.Marshal(map[string]any{
+		"dispatch_type": body.DispatchType, "dispatch_status": "pending_accept",
+		"price_source": "batch", "agreed_payable": pay.InexactFloat64(), "quote_id": "",
+	})
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
+		VALUES ($1, now(), now(), $2::uuid, 'dispatched', now(), 'dispatch', $3, $4)`,
+		wevID.String(), wid.String(), res, wp); err != nil {
+		return "", pay, fmt.Errorf("运单派单事件落库失败：%w", err)
+	}
+	return wbNo, pay, nil
 }
 
 // nextNoScoped 与 nextNo 同机制，scope 名可指定（batch/waybill 等）

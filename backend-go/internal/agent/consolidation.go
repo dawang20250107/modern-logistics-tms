@@ -5,11 +5,12 @@ package agent
 //   logistics.intelligent_consolidation 同向 LTL 小单合并配载 FTL 卡车的降本方案
 //
 // 对齐 apps/ops/dispatch.{recommend_dispatch, consolidate_and_group_orders}。
+// 拼单配载算法本身住在订单域（internal/orders），这里只是把它挂成 AI 工具——
+// 同一套算法不该有两份实现，调度台点出来的方案和 AI 说出来的方案必须是同一个。
 
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -81,189 +82,6 @@ func dispatchRecommendation(ctx context.Context, db *pgxpool.Pool, waybillNo str
 	}, nil
 }
 
-type consolOrder struct {
-	id, no, origin, dest, customer string
-	weight, volume                 float64
-}
-
-// intelligentConsolidation 同向小单拼车：按「起点→终点」归组，组内按货量从大到小
-// 贪心装车，装满一辆算一趟，再对比「各自单发」与「合单整车」的估价算节省。
-//
-// 拼单省的是车次不是运价，所以节省额一律不为负——算出来是负数只说明这批货本来
-// 就该分开发，那不叫"负节省"，叫"这条建议不成立"。
-func intelligentConsolidation(ctx context.Context, db *pgxpool.Pool, cityFilter string) (map[string]any, error) {
-	rows, err := db.Query(ctx, `
-		SELECT o.id::text, o.order_no, o.origin, o.destination,
-		       COALESCE(c.name,'散客'),
-		       COALESCE(o.cargo_weight_ton,0)::float8, COALESCE(o.cargo_volume_cbm,0)::float8
-		FROM ops_order o LEFT JOIN md_customer c ON c.id = o.customer_id
-		WHERE NOT o.is_deleted AND o.status IN ('pooled','dispatching')
-		  AND ($1 = '' OR o.origin ILIKE '%'||$1||'%' OR o.destination ILIKE '%'||$1||'%')
-		ORDER BY o.created_at DESC, o.id`, cityFilter)
-	if err != nil {
-		return nil, err
-	}
-	all := []consolOrder{}
-	for rows.Next() {
-		var o consolOrder
-		if rows.Scan(&o.id, &o.no, &o.origin, &o.dest, &o.customer, &o.weight, &o.volume) != nil {
-			break
-		}
-		all = append(all, o)
-	}
-	rows.Close()
-
-	// 按线路归组，保留首次出现的次序
-	groups := map[string][]consolOrder{}
-	routeOrder := []string{}
-	for _, o := range all {
-		key := orUnknown(o.origin) + "→" + orUnknown(o.dest)
-		if _, ok := groups[key]; !ok {
-			routeOrder = append(routeOrder, key)
-		}
-		groups[key] = append(groups[key], o)
-	}
-
-	wh := &waybills.Handler{DB: db}
-	oh := &orders.Handler{DB: db}
-	used := map[string]bool{}
-	trips := []map[string]any{}
-	unassigned := []map[string]any{}
-
-	for _, route := range routeOrder {
-		grp := groups[route]
-		origin, dest := splitRoute(route)
-		sort.SliceStable(grp, func(i, j int) bool { return grp[i].weight > grp[j].weight })
-
-		for len(grp) > 0 {
-			// 用一个"大重货"样板去找当下最大的空闲车，作为本趟的容量上限
-			free, err := waybills.RankVehiclesForExcluding(ctx, wh, 15, 40, false, false, used)
-			if err != nil || len(free) == 0 {
-				for _, o := range grp {
-					unassigned = append(unassigned, map[string]any{
-						"order_id": o.id, "order_no": o.no, "route": route})
-				}
-				break
-			}
-			pick := free[0]
-			capT, capV, err := vehicleCapacity(ctx, db, pick["vehicle_id"].(string))
-			if err != nil {
-				break
-			}
-			curW, curV := 0.0, 0.0
-			loaded := []consolOrder{}
-			rest := []consolOrder{}
-			for _, o := range grp {
-				if curW+o.weight <= capT && curV+o.volume <= capV {
-					loaded = append(loaded, o)
-					curW += o.weight
-					curV += o.volume
-				} else {
-					rest = append(rest, o)
-				}
-			}
-			if len(loaded) == 0 {
-				// 单件就装不下：这单没法拼，挑出来单列
-				unassigned = append(unassigned, map[string]any{
-					"order_id": grp[0].id, "order_no": grp[0].no, "route": route})
-				grp = grp[1:]
-				continue
-			}
-			used[pick["vehicle_id"].(string)] = true
-
-			consolidated := floatOf(oh.FreightQuote(ctx, origin, dest, curW, curV)["avg"])
-			sep := 0.0
-			items := make([]map[string]any, 0, len(loaded))
-			for _, o := range loaded {
-				sep += floatOf(oh.FreightQuote(ctx, o.origin, o.dest, o.weight, o.volume)["avg"])
-				items = append(items, map[string]any{
-					"order_id": o.id, "order_no": o.no,
-					"weight_ton": o.weight, "volume_cbm": o.volume, "customer_name": o.customer,
-				})
-			}
-			saved := roundN(sep-consolidated, 2)
-			if saved < 0 {
-				saved = 0
-			}
-			trips = append(trips, map[string]any{
-				"route": route, "origin": origin, "destination": dest,
-				"orders":           items,
-				"total_weight_ton": roundN(curW, 2), "total_volume_cbm": roundN(curV, 2),
-				"vehicle": map[string]any{
-					"id": pick["vehicle_id"], "plate_no": pick["plate_no"],
-					"load_capacity_ton": capT, "volume_capacity_cbm": capV,
-				},
-				"separate_cost": roundN(sep, 2), "consolidated_cost": roundN(consolidated, 2),
-				"money_saved": saved,
-			})
-			grp = rest
-		}
-	}
-
-	// 兼容旧版扁平字段：老调用方按 assignments/unassigned 读
-	flat := []map[string]any{}
-	assigned := 0
-	totalSaving := 0.0
-	for _, t := range trips {
-		v := t["vehicle"].(map[string]any)
-		for _, o := range t["orders"].([]map[string]any) {
-			flat = append(flat, map[string]any{
-				"order_id": o["order_id"], "order_no": o["order_no"],
-				"route": t["route"], "weight_ton": o["weight_ton"],
-				"vehicle": map[string]any{
-					"vehicle_id": v["id"], "plate_no": v["plate_no"],
-					"slack": 0.0, "utilization": 1.0,
-					"compliance": []string{}, "compliance_ok": true,
-				},
-			})
-			assigned++
-		}
-		totalSaving += t["money_saved"].(float64)
-	}
-	flatUnassigned := make([]map[string]any, 0, len(unassigned))
-	for _, u := range unassigned {
-		flatUnassigned = append(flatUnassigned, map[string]any{
-			"order_id": u["order_id"], "order_no": u["order_no"]})
-	}
-	return map[string]any{
-		"consolidated_count": len(trips), "unassigned_count": len(unassigned),
-		"consolidated_trips": trips, "unassigned_orders": unassigned,
-		"estimated_total_saving": roundN(totalSaving, 2),
-		"assigned_count":         assigned, "assignments": flat, "unassigned": flatUnassigned,
-	}, nil
-}
-
-func vehicleCapacity(ctx context.Context, db *pgxpool.Pool, id string) (float64, float64, error) {
-	var capT, capV float64
-	err := db.QueryRow(ctx, `
-		SELECT COALESCE(load_capacity_ton,0)::float8, COALESCE(volume_capacity_cbm,0)::float8
-		FROM md_vehicle WHERE id=$1::uuid`, id).Scan(&capT, &capV)
-	return capT, capV, err
-}
-
-func orUnknown(s string) string {
-	if s == "" {
-		return "未知"
-	}
-	return s
-}
-
-func splitRoute(route string) (string, string) {
-	for i := 0; i+3 <= len(route); i++ {
-		if route[i:i+3] == "→" {
-			return route[:i], route[i+3:]
-		}
-	}
-	return route, ""
-}
-
-func floatOf(v any) float64 {
-	if f, ok := v.(float64); ok {
-		return f
-	}
-	return 0
-}
-
 // 收官：这两个工具随所属域移植完毕，从 notPortedTools 转入原生注册表。
 func init() {
 	register(ToolSpec{
@@ -290,7 +108,7 @@ func init() {
 		},
 		Fn: func(ctx context.Context, db *pgxpool.Pool, args map[string]any) (map[string]any, *toolErr) {
 			city, _ := args["city_filter"].(string)
-			out, err := intelligentConsolidation(ctx, db, city)
+			out, err := orders.ConsolidateByCity(ctx, db, city)
 			if err != nil {
 				return nil, &toolErr{500, "CONSOLIDATION_FAILED", err.Error()}
 			}

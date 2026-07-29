@@ -7,6 +7,7 @@ package orders
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -51,13 +52,28 @@ func lockOrder(ctx context.Context, tx pgx.Tx, id string) (*orderRow, error) {
 	return o, err
 }
 
-// notifyRole 按角色扇出落库通知（对齐 notifications.services.notify_role；非关键路径失败忽略）
+// notifyRole 按角色扇出落库通知（对齐 notifications.services.notify_role）。
+//
+// 通知失败不该挡住业务，但光把错误丢掉是做不到"不阻断"的：Postgres 事务里
+// 任何一条语句报错，整个事务立刻进 aborted 态，后面所有语句连同 COMMIT 一起失败。
+// 于是"进池成功但通知没发出去"会变成"进池整个失败"，而且没有任何日志说明原因。
+// 所以要用 savepoint 把它真正隔离出来。
 func notifyRole(ctx context.Context, tx pgx.Tx, roleCode, category, title, body, level, linkType, linkID string) {
-	_, _ = tx.Exec(ctx, `
+	sp, err := tx.Begin(ctx) // 嵌套 Begin 在 pgx 里就是 SAVEPOINT
+	if err != nil {
+		slog.Error("通知扇出开 savepoint 失败", "role", roleCode, "err", err)
+		return
+	}
+	if _, err := sp.Exec(ctx, `
 		INSERT INTO ntf_notification (id, created_at, updated_at, recipient_id, category, title, body, level, link_type, link_id, payload, is_read)
 		SELECT gen_random_uuid(), now(), now(), ra.user_id, $2, $3, $4, $5, $6, $7, '{}'::jsonb, false
 		FROM iam_role_assignment ra JOIN iam_role r ON r.id = ra.role_id WHERE r.code = $1
-		GROUP BY ra.user_id`, roleCode, category, title, body, level, linkType, linkID)
+		GROUP BY ra.user_id`, roleCode, category, title, body, level, linkType, linkID); err != nil {
+		slog.Error("通知扇出失败（不阻断主流程）", "role", roleCode, "category", category, "err", err)
+		_ = sp.Rollback(ctx) // 回到 savepoint，主事务照常提交
+		return
+	}
+	_ = sp.Commit(ctx)
 }
 
 // mutate 通用骨架：行锁读单 → 校验/更新 → 事件 → 提交 → 回读完整序列化

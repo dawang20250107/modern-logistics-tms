@@ -117,6 +117,8 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
+| 运单剩余写动作 | POST /waybills/{no}/{dispatch·add-expense·contract/send·contract/confirm·partial-sign·reject·collect-cod·remit-cod·split}；GET·POST /waybills/{no}/events；POST /waybills/merge | ✅ 部分签收/拒收的回单、状态、自动立案的异常逐字段一致（含实收>应收、无短少、缺原因三类 400/409）；COD 收付两段的状态、时间戳、事件与四类错误分支一致；拆单/合单的子单货量、血缘、作废留痕与事件一致；合同发送/确认/重复发送 409 与合同事件一致；手工补事件与手工加费用的库行一致 |
+| 明细只读端点 | GET /finance/statements/{id}（含 lines）、/audit-logs/{id}、/ai/suggestions/{id} | ✅ 8 张对账单 + AI 建议详情双栈 diff 全一致；三者均为 List+Retrieve 只读集合，写动作 405 与 Django 一致 |
 | 订单剩余写动作 | POST /orders/{id}/{approve·reject·split}、/orders/{merge·batch·batch-update·import}；GET·POST /orders/{id}/attachments + DELETE /{att_id} | ✅ 审批通过/驳回/重复审批 409 的响应体与事件链一致；拆单（子单货量重算、站点复制、原单作废留痕）与合单（货物归并、报价合计、原单 merged 事件）逐字段一致；batch 四动作与 batch-update 白名单/非法值/已派单跳过一致；import 逐行隔离的 ok/failed 结构一致；附件的列表/上传/删除与 DRF 序列化逐字段一致 |
 | 订单池 / 调度台 / 导出 | GET /orders/{pool·dispatched·dispatchers·customer-addresses·export}；GET /org/{organizations,employees}/export + POST /org/employees/import | ✅ 池与已调派的 4 种 scope 分支（free/mine/all/默认）双栈 diff 全一致（差异仅 project_name，系 Go 侧新增字段）；客户地址簿 3 客户 + 无参一致；三个 CSV 导出内容逐格一致；员工导入的 created/updated/errors 计数、上级回填、重复导入幂等、缺文件 400 与 Django 逐字段一致 |
 | 主数据自定义动作 | GET /customers/{}/{context·lane-suggest}、/carriers/{}/performance、/drivers/lookup；POST /carriers/{}/blacklist、/drivers/{}/refresh-stats | ✅ 客户上下文 4 户 + 授信非零/超授信双栈 diff 全一致（授信占用、异常与回单未返计数、常用线路与收发地址名次）；lane-suggest 有/无线路两态一致；承运商表现 6 家一致（仅常跑线路并列时序，集合等价）；lookup 四种入参一致；拉黑/解除与刷新累计的库行与响应体逐字段对拍一致 |
@@ -266,6 +268,13 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   但为了让它真的被填上，推荐做了打分（同线路历史单 > 起终点部分匹配 > 近 30 天活跃 >
   历史用量），每条附「为什么推它」，并支持在建单表单里直接敲名字新建（同客户同名去重）。
   这条链路断了的后果不是报错，而是对账那头归不了集——所以推荐质量本身就是功能的一部分。
+
+- **运单事件的 payload 曾漏出内部键**：`wbEvent` 用 `payload["__source"]` 指定 source 列，
+  却把整个 map（含 `__source`）一起序列化进 payload。内部约定漏成对外字段，
+  现已在落库前剥掉。
+- **`add-expense` 的科目白名单取静态目录而非 `fin_expense_item` 表**：前者是
+  `cost_items.py` 里前后端共用的一套编码（运费/油卡/过路/…），后者是可配置的价目项，
+  两者不是一回事。照着表校验会把合法科目挡在门外。
 
 - **`approval_required` 事件里的金额是库中刻度**：Django 记的是内存对象上的原始入参
   （`"60000"`），Go 是插入后从 numeric 列读回的（`"60000.00"`）。同一个数、不同刻度，

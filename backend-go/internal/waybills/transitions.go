@@ -51,8 +51,16 @@ func canGo(from, to string) bool {
 	return false
 }
 
+// wbEvent 落一条运单事件。payload 里的 __source 只用来指定 source 列，
+// 不能跟着进 payload —— 那会把内部约定漏成对外字段。
 func wbEvent(ctx context.Context, tx pgx.Tx, waybillID, eventType, resource string, payload map[string]any) {
-	pj, _ := json.Marshal(payload)
+	body := make(map[string]any, len(payload))
+	for k, v := range payload {
+		if k != "__source" {
+			body[k] = v
+		}
+	}
+	pj, _ := json.Marshal(body)
 	eid, _ := uuid.NewV7()
 	_, _ = tx.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)

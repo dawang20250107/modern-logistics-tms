@@ -224,6 +224,29 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 	h.MD.List(w, r, cfg)
 }
 
+// suggestionWrite AI 建议只读：状态只能由 confirm 动作推进
+var suggestionWrite = masterdata.WriteCfg{
+	Table: "ai_agent_suggestion", Model: "AgentSuggestion", Verbose: "Agent 建议", Alias: "g", ReadOnly: true,
+}
+
+// SuggestionDetail GET /api/v1/ai/suggestions/{id}（数据范围同列表）
+func (h *Handler) SuggestionDetail(w http.ResponseWriter, r *http.Request) {
+	me, ok := h.require(w, r)
+	if !ok {
+		return
+	}
+	cfg := suggestionsCfg
+	scopeIDs, err := h.Svc.ScopeOrgIDs(r.Context(), me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取数据范围失败")
+		return
+	}
+	if scopeIDs != nil {
+		cfg.FromClause += " AND (w.organization_id IS NULL OR w.organization_id::text = ANY(" + pgArray(scopeIDs) + "))"
+	}
+	h.MD.Retrieve(w, r, cfg, suggestionWrite)
+}
+
 // pgArray 把组织 ID 列表内联为 SQL 数组字面量（元素为服务端生成的 UUID，非用户输入）
 func pgArray(ids []string) string {
 	if len(ids) == 0 {

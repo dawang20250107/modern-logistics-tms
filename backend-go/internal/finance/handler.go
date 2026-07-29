@@ -177,6 +177,27 @@ func (h *Handler) Statements(md *masterdata.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { md.List(w, r, statementsCfg) }
 }
 
+// StatementDetailCfg 详情多带一层对账明细（对齐 StatementSerializer 与
+// StatementListSerializer 的差别：列表刻意不带 lines，避免一屏拉出上千行）
+var StatementDetailCfg = func() masterdata.ResourceCfg {
+	c := statementsCfg
+	c.DetailExtras = map[string]string{
+		"lines": `SELECT COALESCE(json_agg(json_build_object(
+		    'id', l.id::text, 'waybill_no', l.waybill_no, 'expense_item_code', l.expense_item_code,
+		    'amount', l.amount::text, 'occurred_at', l.occurred_at,
+		    'is_anomaly', l.is_anomaly, 'baseline_avg', l.baseline_avg::text,
+		    'deviation_pct', l.deviation_pct::text) ORDER BY l.occurred_at, l.id), '[]'::json)
+		  FROM fin_statement_line l WHERE l.statement_id = s.id`,
+	}
+	return c
+}()
+
+// StatementWrite 对账单只读（ListModelMixin + RetrieveModelMixin）：
+// 状态与金额只能由 generate/confirm/audit/settle 推进，不给直改的口子
+var StatementWrite = masterdata.WriteCfg{
+	Table: "fin_statement", Model: "Statement", Verbose: "对账单", Alias: "s", ReadOnly: true,
+}
+
 // Aging GET /api/v1/finance/aging?direction=receivable|payable
 // 账龄分桶(0-30/31-60/61-90/90+)按对手方汇总，对齐 services.aging_report。
 func (h *Handler) Aging(w http.ResponseWriter, r *http.Request) {

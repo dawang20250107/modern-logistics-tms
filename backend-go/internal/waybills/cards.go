@@ -463,7 +463,7 @@ func (h *Handler) Contract(w http.ResponseWriter, r *http.Request) {
 		    'driver_reply', c.driver_reply, 'confirm_status', c.confirm_status,
 		    'status_label', (CASE c.confirm_status WHEN 'pending' THEN '待发送' WHEN 'sent' THEN '已发送'
 		                     WHEN 'confirmed' THEN '已确认' WHEN 'rejected' THEN '已拒签' ELSE c.confirm_status END),
-		    'confirmed_at', c.confirmed_at, 'pdf_url', COALESCE(NULLIF(c.pdf,''), ''), 'created_at', c.created_at)
+		    'confirmed_at', c.confirmed_at, 'pdf_url', (CASE WHEN c.pdf <> '' THEN '/media/' || c.pdf ELSE '' END), 'created_at', c.created_at)
 		  FROM ops_contract c LEFT JOIN md_driver d ON d.id=c.driver_id
 		  WHERE c.waybill_id=$1::uuid ORDER BY c.created_at DESC LIMIT 1
 		), 'null'::json)`, id).Scan(&out)

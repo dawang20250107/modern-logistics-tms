@@ -26,6 +26,24 @@ SELECT a.id::text AS id, a.actor_id::text AS actor, COALESCE(u.username,'') AS a
 	DefaultOrder: "ORDER BY a.created_at DESC, a.id",
 }
 
+// LogsCfg / LogsWrite 供详情复用；审计日志只读，任何写口都不该开
+var LogsCfg = logsCfg
+var LogsWrite = masterdata.WriteCfg{
+	Table: "audit_log", Model: "AuditLog", Verbose: "审计日志", Alias: "a", ReadOnly: true,
+}
+
+// Detail GET /api/v1/audit-logs/{id}（同样限管理员）
+func Detail(svc *auth.Service, md *masterdata.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		me, err := svc.UserByID(r.Context(), auth.UserID(r))
+		if err != nil || !me.IsStaff {
+			httpx.Err(w, http.StatusForbidden, "PERMISSION_DENIED", "仅管理员可查审计日志")
+			return
+		}
+		md.Retrieve(w, r, LogsCfg, LogsWrite)
+	}
+}
+
 // Logs GET /api/v1/audit-logs（IsAdminUser：is_staff 校验后走通用引擎）
 func Logs(svc *auth.Service, md *masterdata.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
@@ -273,171 +272,12 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 	customerID := h.matchCustomer(ctx, data, channel, source, explicitCustomer)
 	enrich(data)
 
-	// 白名单 + 时间字段解析（非法值丢弃，对齐 _coerce_datetimes）
-	cols := []string{}
-	vals := []any{}
-	for _, k := range orderFields {
-		v, ok := data[k]
-		if !ok || v == nil || v == "" {
-			continue
-		}
-		if k == "expected_pickup_at" || k == "expected_delivery_at" {
-			if s, isStr := v.(string); isStr {
-				if dt := coerceDT(s); dt != nil {
-					v = dt
-				} else {
-					continue
-				}
-			}
-		}
-		cols = append(cols, k)
-		vals = append(vals, v)
-	}
-
-	tx, err := h.DB.Begin(ctx)
-	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "事务开启失败")
-		return
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	orderNo, err := nextNo(ctx, tx, "DD")
-	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "取号失败")
-		return
-	}
-	id, _ := uuid.NewV7()
-	orderID := id.String()
-
-	// 基础 INSERT（模型默认值全集），业务字段以“默认+覆盖”方式合并
-	base := map[string]any{
-		"id": orderID, "created_at": httpx.Micros(time.Now()), "updated_at": httpx.Micros(time.Now()), "is_deleted": false,
-		"order_no": orderNo, "channel": channel, "source": source, "status": status,
-		"source_type": "enterprise", "business_type": "ftl", "priority": "normal",
-		"settlement_type": "monthly", "freight_term": "prepaid", "freight_payer": "shipper",
-		"cod_amount": "0", "cod_status": "none",
-		"contact_name": "", "contact_phone": "", "origin": "", "destination": "",
-		"pickup_address": "", "pickup_contact_name": "", "pickup_contact_phone": "",
-		"delivery_address": "", "delivery_contact_name": "", "delivery_contact_phone": "",
-		"cargo_desc": "", "cargo_quantity": 0, "cargo_weight_ton": "0", "cargo_volume_cbm": "0",
-		"cargo_value": "0", "package_type": "", "is_hazardous": false, "temperature_range": "",
-		"quoted_amount": "0", "sla_status": "pending", "approval_status": "none", "approval_remark": "",
-		"raw_text": body.Text, "ai_conversation_id": str(data, "ai_conversation_id"), "parse_meta": "{}", "remark": "",
-		"customer_id": customerID, "created_by_id": me.ID,
-	}
-	for i, c := range cols {
-		base[c] = vals[i]
-	}
-	insCols, insVals, phs := []string{}, []any{}, []string{}
-	for c, v := range base {
-		insCols = append(insCols, c)
-		insVals = append(insVals, v)
-		phs = append(phs, fmt.Sprintf("$%d", len(insVals)))
-	}
-	if _, err := tx.Exec(ctx,
-		"INSERT INTO ops_order ("+strings.Join(insCols, ",")+") VALUES ("+strings.Join(phs, ",")+")", insVals...); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "建单失败："+err.Error())
-		return
-	}
-
-	// 货物明细 + 汇总回写
-	seq := 0
-	for _, item := range body.CargoItems {
-		if strings.TrimSpace(str(item, "name")) == "" {
-			continue
-		}
-		seq++
-		row := map[string]any{"quantity": 0, "weight_ton": "0", "volume_cbm": "0", "package_type": "", "temperature_range": "", "remark": ""}
-		for _, k := range cargoItemFields {
-			if v, ok := item[k]; ok && v != nil && v != "" {
-				row[k] = v
-			}
-		}
-		cid, _ := uuid.NewV7()
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO ops_order_cargo_item (id, created_at, updated_at, order_id, seq, name, quantity, weight_ton, volume_cbm, package_type, temperature_range, remark)
-			VALUES ($1, now(), now(), $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			cid.String(), orderID, seq, row["name"], row["quantity"], row["weight_ton"], row["volume_cbm"],
-			row["package_type"], row["temperature_range"], row["remark"]); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "货物明细写入失败")
-			return
-		}
-	}
-	if seq > 0 {
-		if _, err := tx.Exec(ctx, `
-			UPDATE ops_order o SET cargo_quantity = s.q, cargo_weight_ton = s.w, cargo_volume_cbm = s.v, updated_at = now()
-			FROM (SELECT COALESCE(sum(quantity),0) q, COALESCE(sum(weight_ton),0) w, COALESCE(sum(volume_cbm),0) v
-			      FROM ops_order_cargo_item WHERE order_id = $1) s WHERE o.id = $1`, orderID); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "货量汇总失败")
-			return
-		}
-	}
-
-	// 站点
-	seq = 0
-	for _, sp := range body.Stops {
-		if str(sp, "address") == "" && str(sp, "city") == "" {
-			continue
-		}
-		seq++
-		row := map[string]any{"stop_type": "pickup", "city": "", "address": "", "contact_name": "", "contact_phone": "", "cargo_note": ""}
-		var es, ee any
-		for _, k := range stopFields {
-			if v, ok := sp[k]; ok && v != nil && v != "" {
-				if k == "expected_start" || k == "expected_end" {
-					if s, isStr := v.(string); isStr {
-						v = coerceDT(s)
-					}
-					if k == "expected_start" {
-						es = v
-					} else {
-						ee = v
-					}
-					continue
-				}
-				row[k] = v
-			}
-		}
-		sid, _ := uuid.NewV7()
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO ops_order_stop (id, created_at, updated_at, order_id, seq, stop_type, city, address, contact_name, contact_phone, expected_start, expected_end, cargo_note)
-			VALUES ($1, now(), now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-			sid.String(), orderID, seq, row["stop_type"], row["city"], row["address"],
-			row["contact_name"], row["contact_phone"], es, ee, row["cargo_note"]); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "站点写入失败")
-			return
-		}
-	}
-
-	// 建单事件 + 审批闸（报价≥5万 或 货值≥50万 → 待审批）
-	evt := func(eventType, toStatus string, payload map[string]any) error {
-		pj, _ := json.Marshal(payload)
-		eid, _ := uuid.NewV7()
-		_, err := tx.Exec(ctx, `
-			INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type, from_status, to_status, actor_id, source, payload)
-			VALUES ($1, now(), now(), now(), $2, $3, '', $4, $5, $6, $7)`,
-			eid.String(), orderID, eventType, toStatus, me.ID, map[bool]string{true: "cs", false: "system"}[eventType == "created"], pj)
-		return err
-	}
-	if err := evt("created", status, map[string]any{"channel": channel}); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "事件写入失败")
-		return
-	}
-	var quoted, cargoValue float64
-	var approvalPending bool
-	_ = tx.QueryRow(ctx, "SELECT quoted_amount::float8, cargo_value::float8 FROM ops_order WHERE id=$1", orderID).Scan(&quoted, &cargoValue)
-	if quoted >= 50000 || cargoValue >= 500000 {
-		if _, err := tx.Exec(ctx, "UPDATE ops_order SET approval_status='pending', updated_at=now() WHERE id=$1", orderID); err == nil {
-			approvalPending = true
-			_ = evt("approval_required", "", map[string]any{
-				"quoted_amount": strconv.FormatFloat(quoted, 'f', 2, 64), "cargo_value": strconv.FormatFloat(cargoValue, 'f', 2, 64),
-			})
-		}
-	}
-	_ = approvalPending
-
-	if err := tx.Commit(ctx); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交失败")
+	orderID, code, msg := h.createOrder(ctx, createParams{
+		RawText: body.Text, Data: data, Channel: channel, Source: source, Status: status,
+		CustomerID: customerID, CargoItems: body.CargoItems, Stops: body.Stops, ActorID: me.ID,
+	})
+	if code != "" {
+		httpx.Err(w, http.StatusInternalServerError, code, msg)
 		return
 	}
 

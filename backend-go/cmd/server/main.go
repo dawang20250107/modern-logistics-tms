@@ -84,6 +84,7 @@ func main() {
 		p.Post("/api/v1/orders/{id}/release", orderH.Release)
 		p.Post("/api/v1/orders/{id}/unassign", orderH.Unassign)
 		p.Post("/api/v1/orders/{id}/dispatch", orderH.Dispatch)
+		p.Post("/api/v1/orders/{id}/clone", orderH.Clone)
 		p.Post("/api/v1/orders/{id}/report-exception", excH.ReportForOrder)
 		p.Get("/api/v1/exceptions", excH.List)
 		p.Post("/api/v1/exceptions", excH.Create)

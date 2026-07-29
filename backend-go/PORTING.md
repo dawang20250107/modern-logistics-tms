@@ -117,6 +117,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
+| 订单池 / 调度台 / 导出 | GET /orders/{pool·dispatched·dispatchers·customer-addresses·export}；GET /org/{organizations,employees}/export + POST /org/employees/import | ✅ 池与已调派的 4 种 scope 分支（free/mine/all/默认）双栈 diff 全一致（差异仅 project_name，系 Go 侧新增字段）；客户地址簿 3 客户 + 无参一致；三个 CSV 导出内容逐格一致；员工导入的 created/updated/errors 计数、上级回填、重复导入幂等、缺文件 400 与 Django 逐字段一致 |
 | 主数据自定义动作 | GET /customers/{}/{context·lane-suggest}、/carriers/{}/performance、/drivers/lookup；POST /carriers/{}/blacklist、/drivers/{}/refresh-stats | ✅ 客户上下文 4 户 + 授信非零/超授信双栈 diff 全一致（授信占用、异常与回单未返计数、常用线路与收发地址名次）；lane-suggest 有/无线路两态一致；承运商表现 6 家一致（仅常跑线路并列时序，集合等价）；lookup 四种入参一致；拉黑/解除与刷新累计的库行与响应体逐字段对拍一致 |
 | 指标中台 + 全局查单 | GET /analytics/{metrics·metrics/{code}/trend·catalog} + POST /analytics/metrics/query；GET /lookup（答案卡 + 跨实体跳转列表）+ /integrations/status | ✅ 目录/趋势/查询 8 组入参双栈 diff 全一致（含维度构成、未知指标 404、非法维度 400、空 codes 400）；lookup 十种查询词（运单号/订单号/车牌/电话/客户名/对账单号/地名/超短/无命中）双栈 diff 全一致 |
 | 异常处置闭环 | GET /exceptions/{id} + PUT/PATCH/DELETE + /{id}/{timeline·assign·handle·close} | ✅ 详情与时间线双栈 diff 一致；assign/handle/close 三动作的库行、事件链、响应体与 Django 逐字段对拍一致；close 生成的应付费用两栈同形；无运单异常、只读 status、PUT 必填、级联删事件全部对齐 |
@@ -264,6 +265,14 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   但为了让它真的被填上，推荐做了打分（同线路历史单 > 起终点部分匹配 > 近 30 天活跃 >
   历史用量），每条附「为什么推它」，并支持在建单表单里直接敲名字新建（同客户同名去重）。
   这条链路断了的后果不是报错，而是对账那头归不了集——所以推荐质量本身就是功能的一部分。
+
+- **CSV 导出只发一个 BOM，且时间按项目时区**：Django 把响应 charset 设成 `utf-8-sig`
+  之后又手写了一次 BOM，而 `HttpResponse.write()` 每次都按该 charset 编码——结果是
+  表头前 3 个 BOM、每条数据行前各 1 个。Excel 里每行首格都会多一个不可见字符，
+  这是缺陷不是契约，Go 侧只发一个。订单导出的创建时间 Django 用
+  `created_at.strftime()` 直接打 UTC（比界面上看到的早 8 小时），Go 改为
+  `AT TIME ZONE 'Asia/Shanghai'`，与全站其它时间展示一致——导出对不上界面，
+  对账的人会先怀疑数据而不是怀疑格式。
 
 - **`/analytics/catalog` 改为自省 PostgreSQL，而不是冻一份 Django 模型快照**：
   Django 版遍历 ORM 模型输出表/字段/类型/help_text（含反向关系伪字段）。这套元数据

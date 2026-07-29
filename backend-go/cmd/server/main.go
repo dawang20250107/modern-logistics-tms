@@ -131,6 +131,11 @@ func main() {
 		p.Get("/api/v1/auth/login-history", authH.LoginHistory)
 		p.Get("/api/v1/orders", orderH.List)
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)
+		p.Get("/api/v1/orders/pool", orderH.PoolList)
+		p.Get("/api/v1/orders/dispatched", orderH.Dispatched)
+		p.Get("/api/v1/orders/dispatchers", orderH.Dispatchers)
+		p.Get("/api/v1/orders/customer-addresses", orderH.CustomerAddresses)
+		p.Get("/api/v1/orders/export", orderH.Export)
 		p.Post("/api/v1/orders/intake", orderH.Intake)
 		p.Post("/api/v1/orders/assign", orderH.Assign)
 		p.Post("/api/v1/orders/batch-dispatch", orderH.BatchDispatch)
@@ -282,6 +287,7 @@ func main() {
 		// 组织中台的标准资源全部走通用引擎；只有 detail=False 的动作需要单独注册
 		p.Route("/api/v1/org/organizations", func(rt chi.Router) {
 			rt.Get("/tree", orgH.Tree)
+			rt.Get("/export", orgH.ExportOrganizations)
 			mdH.CRUD(org.OrganizationsCfg, org.OrganizationWrite)(rt)
 		})
 		p.Route("/api/v1/org/roles", func(rt chi.Router) {
@@ -295,6 +301,8 @@ func main() {
 			mdH.CRUD(org.LoginAuditCfg, org.LoginAuditWrite)(rt)
 		})
 		p.Route("/api/v1/org/employees", func(rt chi.Router) {
+			rt.Get("/export", orgH.ExportEmployees)
+			rt.Post("/import", orgH.ImportEmployees)
 			mdH.CRUD(org.EmployeesCfg, org.EmployeeWrite)(rt)
 			rt.Get("/{id}/roles", orgH.EmployeeRoles)
 			rt.Post("/{id}/roles", orgH.EmployeeRoles)

@@ -19,6 +19,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/orders"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/proxy"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
 )
 
 func main() {
@@ -41,6 +42,7 @@ func main() {
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
 	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.DjangoUpstream}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
+	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	django := proxy.New(cfg.DjangoUpstream)
 
 	r := chi.NewRouter()
@@ -59,6 +61,8 @@ func main() {
 		p.Get("/api/v1/auth/me", authH.Me)
 		p.Get("/api/v1/orders", orderH.List)
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)
+		p.Get("/api/v1/waybills", waybillH.List)
+		p.Get("/api/v1/waybills/stats", waybillH.Stats)
 	})
 
 	// ── 其余全部：绞杀者代理回 Django ──

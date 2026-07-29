@@ -58,12 +58,35 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 # （比对脚本示例见 git 历史中的验证命令）
 ```
 
+## 终态目标：纯原生 Go 系统（Django 完全退役）
+
+```
+阶段0 网关+认证+订单读        ✅ 完成
+阶段1 读路径全量 Go           ◐ 进行中（orders/waybills 读已完成）
+      waybills 读 ✅ → masterdata 读 → finance 读/聚合 → workbench/stats → audit
+阶段2 写路径                  orders intake/流转/派单 → waybills 状态机/回单/签收
+      → finance 核销（事务+行锁）→ masterdata CRUD → iam/org 管理
+阶段3 平台域（去 Django 依赖）
+      SSE → Go 原生（PG LISTEN/NOTIFY）      媒体文件 → Go 静态服务
+      celery 定时任务 → Go cron(robfig/gocron)  telematics MQTT → Go 消费者批量落库
+      审计日志中间件 → Go 网关统一记录          admin 后台 → 前端管理页补齐后弃用
+阶段4 AI 域 Go 原生
+      放弃 langgraph（Python-only），用 LLM HTTP API + 手写 tool-calling 循环
+      重写 agent 工作台（Go goroutine 天然适配并行工具调用）
+阶段5 收官
+      schema 所有权移交：Django migrations 基线化 → goose/atlas 接管
+      删除 backend/ 与反向代理，网关变纯应用；部署收敛为单二进制 + PG
+```
+
+推进法则：每域「抄契约 → 一条主 SQL → 双栈 diff → 切路由」，任何时刻系统整体可用。
+
 ## 已移植
 
 | 域 | 路由 | 状态 |
 |---|---|---|
 | 认证 | POST /auth/token, /auth/token/refresh; GET /auth/me | ✅ 双栈互认 |
 | 订单-读 | GET /orders（筛选/搜索/排序/分页/数据范围）, GET /orders/funnel | ✅ 逐字段 diff 一致；~12× 提速（3.9ms vs 49.1ms/50 行） |
+| 运单-读 | GET /waybills（筛选/搜索/排序/分页/权限/数据范围/司机嵌套/应收应付聚合）, GET /waybills/stats | ✅ 20 张逐字段 diff 一致；stats 修正了 Django 的 JOIN 放大重复计数 bug（详见差异清单） |
 
 ## 待移植（按前端依赖频度排序）
 
@@ -80,6 +103,11 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 9. AI 域（langgraph）：保留 Django/Python 最久，或独立 Python 微服务
 
 ## 尚未对齐的已知差异（限制清单）
+
+- **/waybills/stats 修正而非复刻**：Django 版在带费用 Sum annotate 的 queryset 上
+  `values("status").annotate(Count("id"))`，费用 JOIN 放大导致各状态重复计数
+  （各状态之和 43 ≠ 实际 20 张）。Go 版直查 `GROUP BY status`，之和恒等于总数。
+  前端状态药丸此前显示的是虚高值，切 Go 后自动恢复真实。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

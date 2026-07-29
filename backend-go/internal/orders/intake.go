@@ -447,6 +447,10 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 
 // respondOne 建单后回读完整序列化（复用列表同一 SELECT 面），HTTP 201。
 func (h *Handler) respondOne(w http.ResponseWriter, r *http.Request, orderID string, me *auth.UserRow) {
+	h.respondOneStatus(w, r, orderID, me, http.StatusCreated)
+}
+
+func (h *Handler) respondOneStatus(w http.ResponseWriter, r *http.Request, orderID string, me *auth.UserRow, code int) {
 	ctx := r.Context()
 	isChief, _ := h.isChiefDispatcher(ctx, me)
 	rows, err := h.DB.Query(ctx, selectOrderSQL+fromClause+" WHERE o.id = $1::uuid", orderID)
@@ -461,7 +465,7 @@ func (h *Handler) respondOne(w http.ResponseWriter, r *http.Request, orderID str
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回读失败")
 			return
 		}
-		httpx.JSON(w, http.StatusCreated, it)
+		httpx.JSON(w, code, it)
 		return
 	}
 	httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "订单未找到")

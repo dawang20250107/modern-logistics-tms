@@ -149,6 +149,16 @@ func main() {
 		p.Post("/api/v1/orders/{id}/clone", orderH.Clone)
 		p.Post("/api/v1/orders/{id}/edit", orderH.Edit)
 		p.Post("/api/v1/orders/{id}/report-exception", excH.ReportForOrder)
+		p.Post("/api/v1/orders/{id}/approve", orderH.Approve)
+		p.Post("/api/v1/orders/{id}/reject", orderH.RejectApproval)
+		p.Post("/api/v1/orders/{id}/split", orderH.Split)
+		p.Post("/api/v1/orders/merge", orderH.Merge)
+		p.Post("/api/v1/orders/batch", orderH.Batch)
+		p.Post("/api/v1/orders/batch-update", orderH.BatchUpdate)
+		p.Post("/api/v1/orders/import", orderH.Import)
+		p.Get("/api/v1/orders/{id}/attachments", orderH.Attachments)
+		p.Post("/api/v1/orders/{id}/attachments", orderH.Attachments)
+		p.Delete("/api/v1/orders/{id}/attachments/{att_id}", orderH.DeleteAttachment)
 		p.Route("/api/v1/exceptions", func(rt chi.Router) {
 			mdH.CRUD(exceptions.Cfg, exceptions.Write)(rt)
 			rt.Get("/", excH.List)    // 列表的数据范围按运单组织，单独实现

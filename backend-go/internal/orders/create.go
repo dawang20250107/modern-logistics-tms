@@ -27,6 +27,7 @@ type createParams struct {
 	CargoItems []map[string]any // 货物明细
 	Stops      []map[string]any // 站点
 	ActorID    string           // 建单人
+	ParseMeta  map[string]any   // 解析元信息（{"source":"rule"}；fields._meta 可覆盖）
 }
 
 // createOrder 返回新订单主键；失败返回业务错误码与文案（调用方直接回写响应）
@@ -76,7 +77,7 @@ func (h *Handler) createOrder(ctx context.Context, p createParams) (string, stri
 		"cargo_desc": "", "cargo_quantity": 0, "cargo_weight_ton": "0", "cargo_volume_cbm": "0",
 		"cargo_value": "0", "package_type": "", "is_hazardous": false, "temperature_range": "",
 		"quoted_amount": "0", "sla_status": "pending", "approval_status": "none", "approval_remark": "",
-		"raw_text": p.RawText, "ai_conversation_id": str(p.Data, "ai_conversation_id"), "parse_meta": "{}", "remark": "",
+		"raw_text": p.RawText, "ai_conversation_id": aiConvID(p), "parse_meta": metaJSON(p.ParseMeta), "remark": "",
 		"customer_id": p.CustomerID, "created_by_id": p.ActorID,
 	}
 	for i, c := range cols {
@@ -169,7 +170,7 @@ func (h *Handler) createOrder(ctx context.Context, p createParams) (string, stri
 		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type, from_status, to_status, actor_id, source, payload)
-			VALUES ($1, now(), now(), now(), $2, $3, '', $4, $5, $6, $7)`,
+			VALUES ($1, now(), now(), clock_timestamp(), $2, $3, '', $4, $5, $6, $7)`,
 			eid.String(), orderID, eventType, toStatus, p.ActorID, src, pj)
 		return err
 	}
@@ -191,4 +192,27 @@ func (h *Handler) createOrder(ctx context.Context, p createParams) (string, stri
 		return "", "INTERNAL", "提交失败"
 	}
 	return orderID, "", ""
+}
+
+// metaJSON 解析元信息落库（Django 侧 parse_meta 为 JSONField，规则解析写 {"source":"rule"}）
+func metaJSON(m map[string]any) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// aiConvID 对齐 Django：显式字段优先，其次取 parse_meta.conversation_id
+func aiConvID(p createParams) string {
+	if v := str(p.Data, "ai_conversation_id"); v != "" {
+		return v
+	}
+	if c, ok := p.ParseMeta["conversation_id"].(string); ok {
+		return c
+	}
+	return ""
 }

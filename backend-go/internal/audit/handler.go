@@ -12,9 +12,9 @@ import (
 
 var logsCfg = masterdata.ResourceCfg{
 	SelectSQL: `
-SELECT a.id, a.actor_id::text AS actor, COALESCE(u.username,'') AS actor_name,
+SELECT a.id::text AS id, a.actor_id::text AS actor, COALESCE(u.username,'') AS actor_name,
        a.action, a.resource_type, a.resource_id, a.request_id, a.method, a.path,
-       a.status_code, a.ip::text AS ip, a.payload, a.created_at`,
+       a.status_code, host(a.ip) AS ip, a.payload, a.created_at`,
 	FromClause:   "FROM audit_log a LEFT JOIN accounts_user u ON u.id = a.actor_id",
 	SearchCols:   []string{"a.action", "a.path", "a.resource_id", "a.request_id"},
 	OrderingCols: map[string]string{"created_at": "a.created_at", "status_code": "a.status_code"},

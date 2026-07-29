@@ -256,15 +256,23 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]any{}
+	parseMeta := map[string]any{}
 	if body.Text != "" {
 		for k, v := range parseTextRule(body.Text) {
 			data[k] = v
 		}
+		parseMeta["source"] = "rule" // Go 侧建单走规则解析（DeepSeek 解析见差异清单）
 	}
 	explicitCustomer := ""
 	for k, v := range body.Fields {
 		if k == "customer" {
 			explicitCustomer = fmt.Sprint(v)
+			continue
+		}
+		if k == "_meta" { // 显式 _meta 覆盖解析元信息（对齐 explicit.pop("_meta", …)）
+			if m, ok := v.(map[string]any); ok && len(m) > 0 {
+				parseMeta = m
+			}
 			continue
 		}
 		data[k] = v
@@ -275,6 +283,7 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 	orderID, code, msg := h.createOrder(ctx, createParams{
 		RawText: body.Text, Data: data, Channel: channel, Source: source, Status: status,
 		CustomerID: customerID, CargoItems: body.CargoItems, Stops: body.Stops, ActorID: me.ID,
+		ParseMeta: parseMeta,
 	})
 	if code != "" {
 		httpx.Err(w, http.StatusInternalServerError, code, msg)

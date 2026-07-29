@@ -88,7 +88,7 @@ func (h *Handler) excEvent(ctx context.Context, excID, eventType, toStatus, acto
 	_, _ = h.DB.Exec(ctx, `
 		INSERT INTO ops_exception_event (id, created_at, updated_at, exception_id, event_type,
 		  from_status, to_status, actor_id, note, payload, event_time)
-		VALUES ($1, now(), now(), $2::uuid, $3, '', $4, $5::uuid, $6, $7, now())`,
+		VALUES ($1, now(), now(), $2::uuid, $3, '', $4, $5::uuid, $6, $7, clock_timestamp())`,
 		eid.String(), excID, eventType, toStatus, actorID, note, pj)
 }
 
@@ -208,7 +208,7 @@ func (h *Handler) ReportForOrder(w http.ResponseWriter, r *http.Request) {
 	_, _ = h.DB.Exec(ctx, `
 		INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type,
 		  from_status, to_status, actor_id, source, payload)
-		VALUES ($1, now(), now(), now(), $2::uuid, 'exception_reported', '', '', $3::uuid, 'exception', $4)`,
+		VALUES ($1, now(), now(), clock_timestamp(), $2::uuid, 'exception_reported', '', '', $3::uuid, 'exception', $4)`,
 		oe.String(), orderID, me.ID, pj)
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"id": id.String(), "order_no": orderNo, "exception_type": excType, "level": level,

@@ -27,7 +27,7 @@ func txEvent(ctx context.Context, tx pgx.Tx, orderID, eventType, fromStatus, toS
 	eid, _ := uuid.NewV7()
 	_, err := tx.Exec(ctx, `
 		INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type, from_status, to_status, actor_id, source, payload)
-		VALUES ($1, now(), now(), now(), $2, $3, $4, $5, $6, $7, $8)`,
+		VALUES ($1, now(), now(), clock_timestamp(), $2, $3, $4, $5, $6, $7, $8)`,
 		eid.String(), orderID, eventType, fromStatus, toStatus, actorID, source, pj)
 	return err
 }

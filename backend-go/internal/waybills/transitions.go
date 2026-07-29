@@ -55,7 +55,7 @@ func wbEvent(ctx context.Context, tx pgx.Tx, waybillID, eventType, resource stri
 	eid, _ := uuid.NewV7()
 	_, _ = tx.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
-		VALUES ($1, now(), now(), $2::uuid, $3, now(), $4, $5, $6)`,
+		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), $4, $5, $6)`,
 		eid.String(), waybillID, eventType, payload["__source"], resource, pj)
 }
 
@@ -94,7 +94,7 @@ func doTransition(ctx context.Context, tx pgx.Tx, w *wbRow, to, remark string) (
 	eid, _ := uuid.NewV7()
 	_, _ = tx.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
-		VALUES ($1, now(), now(), $2::uuid, $3, now(), 'transition', $4, $5)`,
+		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), 'transition', $4, $5)`,
 		eid.String(), w.ID, "status_changed:"+to, w.No, pj)
 	completeOrderOnDelivery(ctx, tx, w, to)
 	return 0, "", ""
@@ -284,7 +284,7 @@ func (h *Handler) StopEvent(w http.ResponseWriter, r *http.Request) {
 	eid, _ := uuid.NewV7()
 	_, _ = h.DB.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
-		VALUES ($1, now(), now(), $2::uuid, $3, now(), 'manual', $4, $5)`,
+		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), 'manual', $4, $5)`,
 		eid.String(), wbID, "stop_"+body.Event, "stop#"+strconv.Itoa(body.Seq), pj)
 	httpx.JSON(w, http.StatusOK, map[string]any{"waybill_no": no, "seq": body.Seq, "event": body.Event})
 }

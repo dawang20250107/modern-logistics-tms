@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/agent"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/analytics"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/audit"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
@@ -57,6 +58,10 @@ func main() {
 	excH := &exceptions.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	ntfH := &notifications.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	django := proxy.New(cfg.DjangoUpstream)
+	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH, Fallback: django}
+	if err := agent.EnsureSchema(ctx, pool); err != nil {
+		slog.Warn("agent schema", "err", err)
+	}
 
 	r := chi.NewRouter()
 	r.Use(httpx.Recover, httpx.AccessLog, httpx.CORS(cfg.CORSOrigins))
@@ -85,6 +90,7 @@ func main() {
 		p.Post("/api/v1/orders/{id}/unassign", orderH.Unassign)
 		p.Post("/api/v1/orders/{id}/dispatch", orderH.Dispatch)
 		p.Post("/api/v1/orders/{id}/clone", orderH.Clone)
+		p.Post("/api/v1/orders/{id}/edit", orderH.Edit)
 		p.Post("/api/v1/orders/{id}/report-exception", excH.ReportForOrder)
 		p.Get("/api/v1/exceptions", excH.List)
 		p.Post("/api/v1/exceptions", excH.Create)
@@ -123,6 +129,12 @@ func main() {
 		p.Get("/api/v1/credentials/expiring", mdH.ExpiringCredentials)
 		p.Get("/api/v1/finance/dashboard-metrics", finH.DashboardMetrics)
 		p.Get("/api/v1/workbench", orderH.Workbench)
+		p.Get("/api/v1/ai/deepseek/status", agentH.Status)
+		p.Get("/api/v1/agent/tools", agentH.Tools)
+		p.Post("/api/v1/agent/tools/execute", agentH.Execute)
+		p.Post("/api/v1/agent/chat", agentH.Chat)
+		p.Get("/api/v1/ai/suggestions", agentH.Suggestions)
+		p.Post("/api/v1/ai/suggestions/{id}/confirm", agentH.ConfirmSuggestion)
 		p.Get("/api/v1/org/overview", orgH.Overview)
 		p.Get("/api/v1/org/organizations", orgH.Organizations)
 		p.Post("/api/v1/org/organizations", orgH.CreateOrganization)

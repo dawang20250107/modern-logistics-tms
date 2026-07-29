@@ -52,6 +52,7 @@ interface ViewState {
   pinned?: string[];           // 固定列 key（含 stickyFirst 迁移）
   density?: Density;
   rowNums?: boolean;
+  totals?: boolean;          // 合计行（当页数字列求和）
 }
 
 function loadView(viewKey: string): ViewState | null {
@@ -122,6 +123,7 @@ export function DataTable<T>({
   const [pinned, setPinned] = useState<Set<string>>(() => new Set(saved?.pinned ?? []));
   const [density, setDensity] = useState<Density>(saved?.density ?? "standard");
   const [rowNums, setRowNums] = useState<boolean>(saved?.rowNums ?? false);
+  const [totals, setTotals] = useState<boolean>(saved?.totals ?? false);
   const [fullscreen, setFullscreen] = useState(false);
   const [colMenu, setColMenu] = useState(false);
   const [filters, setFilters] = useState<Record<string, Set<string>>>({});
@@ -144,10 +146,10 @@ export function DataTable<T>({
     try {
       localStorage.setItem(`dt.view.${viewKey}`, JSON.stringify({
         hidden: [...hidden], widths, sort: sorts[0] ?? null, sorts,
-        order, pinned: [...pinned], density, rowNums,
+        order, pinned: [...pinned], density, rowNums, totals,
       } satisfies ViewState));
     } catch { /* ignore */ }
-  }, [viewKey, hidden, widths, sorts, order, pinned, density, rowNums]);
+  }, [viewKey, hidden, widths, sorts, order, pinned, density, rowNums, totals]);
 
   useEffect(() => {
     const close = () => { setColMenu(false); setOpenFilter(null); setCtxMenu(null); };
@@ -497,13 +499,14 @@ export function DataTable<T>({
     setPinned(new Set(v.pinned ?? []));
     setDensity(v.density ?? "standard");
     setRowNums(v.rowNums ?? false);
+    setTotals(v.totals ?? false);
   };
   const saveNamedView = () => {
     const name = viewName.trim();
     if (!name) return;
     const next = {
       ...namedViews,
-      [name]: { hidden: [...hidden], widths, sort: sorts[0] ?? null, sorts, order, pinned: [...pinned], density, rowNums } satisfies ViewState,
+      [name]: { hidden: [...hidden], widths, sort: sorts[0] ?? null, sorts, order, pinned: [...pinned], density, rowNums, totals } satisfies ViewState,
     };
     setNamedViews(next);
     setViewName("");
@@ -560,6 +563,10 @@ export function DataTable<T>({
                 <input type="checkbox" checked={rowNums} onChange={() => setRowNums((v) => !v)} />
                 显示行号
               </label>
+              <label className="dt-colitem">
+                <input type="checkbox" checked={totals} onChange={() => setTotals((v) => !v)} />
+                Σ 合计行（当页数字列求和）
+              </label>
               <div className="context-divider" />
               <div className="muted small" style={{ padding: "2px 8px 4px" }}>命名视图</div>
               {Object.keys(namedViews).map((name) => (
@@ -574,7 +581,7 @@ export function DataTable<T>({
                 <button className="btn-ghost small" disabled={!viewName.trim()} onClick={saveNamedView}>保存</button>
               </div>
               <div className="context-divider" />
-              <button className="dt-colreset" onClick={() => { setHidden(new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key))); setWidths({}); setSorts([]); setFilters({}); setOrder([]); setPinned(new Set()); setDensity("standard"); setRowNums(false); }}>重置视图</button>
+              <button className="dt-colreset" onClick={() => { setHidden(new Set(columns.filter((c) => c.defaultHidden).map((c) => c.key))); setWidths({}); setSorts([]); setFilters({}); setOrder([]); setPinned(new Set()); setDensity("standard"); setRowNums(false); setTotals(false); }}>重置视图</button>
             </div>
           )}
         </div>
@@ -733,6 +740,27 @@ export function DataTable<T>({
               );
             })}
           </tbody>
+          {totals && displayRows.length > 0 && (
+            <tfoot>
+              <tr className="dt-totals">
+                {selectable && <td className="cell-check dt-sticky" style={{ left: 0 }} />}
+                {rowNums && <td className="dt-rownum dt-sticky" style={{ left: checkW }}>Σ</td>}
+                {visibleCols.map((c, ci) => {
+                  let sum = 0, hit = 0;
+                  for (const r of displayRows) {
+                    const n = parseNum(cellValue(c, r));
+                    if (n !== null) { sum += n; hit++; }
+                  }
+                  const show = hit > 0 && hit >= displayRows.length / 2; // 该列过半可解析为数字才视为数字列
+                  return (
+                    <td key={c.key} className={`${c.align === "right" ? "num" : ""} ${stickyCls(c.key)}`} style={stickyTd(c.key)} title={show ? `当页合计（${hit} 行）` : undefined}>
+                      {ci === 0 && !show ? <span className="muted small">当页合计</span> : show ? <b>{fmtStat(sum)}</b> : ""}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 

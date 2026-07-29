@@ -2200,3 +2200,8 @@ thead .dt-rownum { text-align: center; padding-right: 0 !important; }
 .dt-table thead .dt-sticky-r { z-index: 3; background: var(--panel-2); }
 .dt-table tbody tr:hover .dt-sticky-r { background: var(--panel-2); }
 .dt-table tbody tr.row-sel .dt-sticky-r { background: var(--accent-weak); }
+
+/* Σ 合计行：吸底、与表头同色系区分于数据行 */
+.dt-totals td { position: sticky; bottom: 0; background: var(--panel-2); border-top: 2px solid var(--line-2); font-variant-numeric: tabular-nums; z-index: 2; }
+.dt-totals td.dt-sticky { z-index: 3; }
+.dt-totals b { color: var(--accent); }

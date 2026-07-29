@@ -53,7 +53,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # 22 而不是 20：jsdom 30 依赖 undici 8，后者用到 Node 21.7+ 才有的
+          # webidl.util.markAsUncloneable，在 Node 20 上一 import 就 TypeError。
+          # 而且本地开发用的就是 22 —— CI 与本地不同版本，换来的就是"本地全绿、
+          # CI 红"这种最费时间的失败。Node 20 也已进入弃用轨道。
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci

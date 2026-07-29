@@ -1,0 +1,32 @@
+// Package httpx 统一响应信封与错误：与 Django 侧 {success, data, error} 契约逐字节对齐，
+// 前端 client.ts 无需感知后端是 Go 还是 Django。
+package httpx
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+type ErrorBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details"`
+}
+
+type Envelope struct {
+	Success bool       `json:"success"`
+	Data    any        `json:"data"`
+	Error   *ErrorBody `json:"error"`
+}
+
+func JSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(Envelope{Success: true, Data: data, Error: nil})
+}
+
+func Err(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(Envelope{Success: false, Data: nil, Error: &ErrorBody{Code: code, Message: message}})
+}

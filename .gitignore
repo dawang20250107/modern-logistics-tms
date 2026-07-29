@@ -52,3 +52,5 @@ tools/
 Thumbs.db
 dump.rdb
 backend/dump.rdb
+# Go 构建产物
+backend-go/tms-gateway

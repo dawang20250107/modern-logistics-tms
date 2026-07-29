@@ -3,7 +3,7 @@
 //
 // 模型：{"combinator":"and"|"or","conditions":[{"field","op","value"},...]}
 // 每个资源声明 map[key]FilterField{Type, Cols}，Cols 为一个或多个 SQL 列表达式
-//（多列用于「线路=起+讫」这类跨列文本，任一列命中即算命中）。
+// （多列用于「线路=起+讫」这类跨列文本，任一列命中即算命中）。
 package filters
 
 import (

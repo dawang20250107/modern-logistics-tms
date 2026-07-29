@@ -52,7 +52,7 @@ func (s *Service) userBy(ctx context.Context, where string, arg any) (*UserRow, 
 }
 
 // Authenticate 用户名+口令登录：口令走 Django pbkdf2 校验，成功后回写 last_login
-//（对齐 SIMPLE_JWT.UPDATE_LAST_LOGIN）。
+// （对齐 SIMPLE_JWT.UPDATE_LAST_LOGIN）。
 func (s *Service) Authenticate(ctx context.Context, username, password string) (*UserRow, error) {
 	u, err := s.userBy(ctx, "u.username = $1", username)
 	if err != nil {

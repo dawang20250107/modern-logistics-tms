@@ -252,3 +252,18 @@ func rowsToMaps(rows pgx.Rows) ([]map[string]any, error) {
 	}
 	return items, rows.Err()
 }
+
+var b2bCfg = resourceCfg{
+	selectSQL: `
+SELECT p.id::text AS id, p.partner_type,
+       (CASE p.partner_type WHEN 'shipper' THEN '发货方' WHEN 'consignee' THEN '收货方' WHEN 'supplier' THEN '供应商/承运商' ELSE '' END) AS partner_type_label,
+       p.code, p.name, p.contact_name, p.contact_phone, p.address, p.city, p.is_active`,
+	fromClause:   "FROM md_b2b_partner p",
+	searchCols:   []string{"p.code", "p.name", "p.contact_phone", "p.city"},
+	orderingCols: map[string]string{"code": "p.code", "name": "p.name", "created_at": "p.created_at"},
+	filterFields: map[string]filters.FilterField{},
+	directParams: map[string]string{"partner_type": "p.partner_type", "is_active": "p.is_active"},
+	defaultOrder: "ORDER BY p.created_at DESC, p.id",
+}
+
+func (h *Handler) B2BPartners(w http.ResponseWriter, r *http.Request) { h.list(w, r, b2bCfg) }

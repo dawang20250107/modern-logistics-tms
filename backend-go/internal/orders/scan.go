@@ -99,7 +99,7 @@ func scanOrder(rows pgx.Rows, currentUserID string, isChief bool) (map[string]an
 		"customer_name": customerName, "customer_level": customerLevel,
 		"channel": channel, "source": source, "source_type": sourceType,
 		"business_type": businessType, "priority": priority, "settlement_type": settlementType,
-		"status": status,
+		"status":       status,
 		"freight_term": freightTerm, "freight_term_label": freightTermLabel[freightTerm],
 		"freight_payer": freightPayer, "freight_payer_label": freightPayerLabel[freightPayer],
 		"cod_amount": codAmount, "cod_status": codStatus,

@@ -255,22 +255,22 @@ type driverRow struct {
 
 func scanWaybill(rows pgx.Rows) (map[string]any, error) {
 	var (
-		id, waybillNo, batchNo, customerName, carrierName            string
-		vehiclePlate, trailerPlate, driverName, driverPhone          string
-		driverEmployment                                             string
-		routeName, aiConvID, origin, destination                     string
-		status, dispatchStatus, riskLevel, dispatchType              string
-		platformName, platformOrderNo, receiptStatus                 string
-		etaDrift                                                     int
-		plannedArrival, estimatedArrival                             *time.Time
-		loadedAt, departedAt, arrivedAt, signedAt                    *time.Time
-		freightTerm, freightPayer, codStatus                         string
-		codAmount                                                    *string
-		codCollectedAt, codRemittedAt                                *time.Time
-		receivable, payable, cargoWeight, cargoVolume                float64
-		cargoQty                                                     int
-		createdAt                                                    time.Time
-		driversJSON                                                  json.RawMessage
+		id, waybillNo, batchNo, customerName, carrierName   string
+		vehiclePlate, trailerPlate, driverName, driverPhone string
+		driverEmployment                                    string
+		routeName, aiConvID, origin, destination            string
+		status, dispatchStatus, riskLevel, dispatchType     string
+		platformName, platformOrderNo, receiptStatus        string
+		etaDrift                                            int
+		plannedArrival, estimatedArrival                    *time.Time
+		loadedAt, departedAt, arrivedAt, signedAt           *time.Time
+		freightTerm, freightPayer, codStatus                string
+		codAmount                                           *string
+		codCollectedAt, codRemittedAt                       *time.Time
+		receivable, payable, cargoWeight, cargoVolume       float64
+		cargoQty                                            int
+		createdAt                                           time.Time
+		driversJSON                                         json.RawMessage
 	)
 	if err := rows.Scan(
 		&id, &waybillNo, &batchNo, &customerName, &carrierName,
@@ -310,8 +310,8 @@ func scanWaybill(rows pgx.Rows) (map[string]any, error) {
 		"vehicle_plate": vehiclePlate, "trailer_plate": trailerPlate,
 		"driver_name": driverName, "driver_phone": driverPhone,
 		"driver_employment": employmentLabel[driverEmployment],
-		"drivers":    drivers,
-		"route_name": routeName, "ai_conversation_id": aiConvID,
+		"drivers":           drivers,
+		"route_name":        routeName, "ai_conversation_id": aiConvID,
 		"origin": origin, "destination": destination,
 		"status": status, "dispatch_status": dispatchStatus, "risk_level": riskLevel,
 		"dispatch_type": dispatchType, "dispatch_type_label": dispatchTypeLabel[dispatchType],

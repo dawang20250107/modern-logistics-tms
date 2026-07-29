@@ -16,6 +16,7 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/finance"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/orders"
@@ -45,6 +46,7 @@ func main() {
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
+	finH := &finance.Handler{DB: pool}
 	django := proxy.New(cfg.DjangoUpstream)
 
 	r := chi.NewRouter()
@@ -68,6 +70,8 @@ func main() {
 		p.Get("/api/v1/customers", mdH.Customers)
 		p.Get("/api/v1/vehicles", mdH.Vehicles)
 		p.Get("/api/v1/drivers", mdH.Drivers)
+		p.Get("/api/v1/b2b-partners", mdH.B2BPartners)
+		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 	})
 
 	// ── 其余全部：绞杀者代理回 Django ──

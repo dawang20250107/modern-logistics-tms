@@ -18,8 +18,8 @@ HS256 token（同 claims：`token_type/exp/iat/jti/user_id`），**两侧互认*
 ## 运行
 
 ```bash
-# Django 上游（迁移期保留）
-cd backend  && python3 manage.py runserver 127.0.0.1:8001
+# Django 上游（迁移期保留；裸机无 docker 时用 local_standalone 配置）
+cd backend  && python3 manage.py runserver 127.0.0.1:8001 --settings=config.settings.local_standalone
 # Go 网关（对外入口）
 cd backend-go && go run ./cmd/server
 # 环境变量（均有开发默认值）：

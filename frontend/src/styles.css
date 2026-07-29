@@ -9,16 +9,16 @@
   color-scheme: light;
 
   /* ── Surfaces / neutrals — warm mineral field + near-white porcelain ── */
-  --bg: #f6f4ef;
-  --panel: #fffdfb;
-  --panel-2: #faf8f4;
-  --panel-3: #f1eee8;
+  --bg: #efece5;
+  --panel: #ffffff;
+  --panel-2: #f8f6f2;
+  --panel-3: #efece6;
   --ink: #191c22;
   --ink-2: #3f4652;
   --muted: #6c7280;
   --faint: #9aa0aa;
-  --line: #e8e3db;
-  --line-2: #d9d3ca;
+  --line: #eae6de;
+  --line-2: #dcd6cc;
 
   /* ── Accent — electric indigo → cyan gradient family (科技风) ── */
   --accent: #3f57e8;
@@ -41,7 +41,7 @@
   --glass-2: rgba(250, 248, 244, 0.88);
   --glass-line: rgba(255, 255, 255, 0.94);
   --glass-blur: saturate(1.35) blur(14px);
-  --surface-solid: #fffdfb;
+  --surface-solid: #ffffff;
 
   /* ── Chart palette（供 recharts 读取，随主题切换）── */
   --chart-revenue: #4b58f0;
@@ -111,7 +111,12 @@
 
   /* 三级文本（ink → ink-2 → ink-3 → muted → faint），此前 --ink-3 未定义致 4 处静默失效 */
   --ink-3: #52586a;
-  --dt-zebra: rgba(18, 20, 26, 0.024); /* 表格斑马纹（极低对比，密集行防串行）*/
+  /* 表格行三态底色。必须是不透明实色：固定列会浮在其他列之上，
+     底色一旦带 alpha，被盖住的列就会透上来变成字摞字。 */
+  --dt-row-bg: #ffffff;
+  --dt-row-hover: #eef7fa;
+  --dt-row-sel: #e8ecfe;
+  --dt-head-bg: #f6f3ee;
 
   /* 深色门面（Hero/驾驶舱顶栏/司机端/对账头）统一渐变与前景，收敛 4+ 处重复深色串 */
   --hero-grad: linear-gradient(135deg, #1b1e25 0%, #16181d 100%);
@@ -167,7 +172,10 @@
   --ink: #e9edf5;
   --ink-2: #bcc4d2;
   --ink-3: #949cad;
-  --dt-zebra: rgba(255, 255, 255, 0.028);
+  --dt-row-bg: #12151c;
+  --dt-row-hover: #1b2430;
+  --dt-row-sel: #1e2440;
+  --dt-head-bg: #1b1f29;
   --muted: #8b93a3;
   --faint: #5f6675;
   --line: rgba(255, 255, 255, 0.09);
@@ -226,7 +234,7 @@ body {
   background:
     radial-gradient(920px 460px at 9% -18%, rgba(63, 87, 232, 0.065), transparent 62%),
     radial-gradient(760px 440px at 104% -4%, rgba(41, 199, 220, 0.055), transparent 58%),
-    linear-gradient(180deg, #fbfaf7 0%, var(--bg) 390px);
+    linear-gradient(180deg, #f6f3ec 0%, var(--bg) 390px);
   background-attachment: fixed;
   color: var(--ink); font-size: 14px; line-height: 1.55; letter-spacing: -0.006em;
 }
@@ -639,19 +647,15 @@ select {
 .panel {
   background: var(--panel);
   border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: var(--shadow-xs), inset 0 1px 0 var(--glass-line); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(24, 28, 35, 0.04), 0 8px 20px -18px rgba(24, 28, 35, 0.30);
+  overflow: hidden;
 }
 .panel-head {
   position: relative;
   padding: 13px 18px; border-bottom: 1px solid var(--line); font-weight: 650; font-size: 13.8px;
   letter-spacing: -0.006em; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  color: var(--ink); background: linear-gradient(180deg, rgba(255,253,251,0.96), var(--panel-2));
+  color: var(--ink); background: transparent;
 }
-.panel-head::after {
-  content: ""; position: absolute; left: 0; bottom: -1px; width: 34px; height: 1px; pointer-events: none;
-  background: linear-gradient(90deg, var(--accent), var(--accent-cyan));
-}
-:root[data-theme="dark"] .panel-head { background: linear-gradient(180deg, var(--panel), var(--panel-2)); }
 .panel-actions { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 
 /* ── Table — dense, sticky, ledger-grade（实底，玻璃只在外层 panel）── */
@@ -659,14 +663,16 @@ select {
 /* 宽表在窄视口内横向滚动，避免撑破页面布局 */
 .table-wrap { overflow-x: auto; }
 .table-wrap > .table { min-width: 640px; }
-.table th, .table td { text-align: left; padding: 10px 17px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: middle; }
+.table th, .table td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: middle; }
 .table td { font-variant-numeric: tabular-nums slashed-zero; color: var(--ink-2); letter-spacing: -0.004em; }
 /* first column carries identity */
 .table td:first-child { color: var(--ink); font-weight: 550; }
 /* numeric-column helper — right-align + tnum for cells that opt in */
 .table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums slashed-zero; }
 .table th {
-  position: relative; color: var(--muted); font-weight: 620; font-size: 11.5px; letter-spacing: 0.02em; text-transform: none;
+  /* 11.5px 的小字用 --muted 在浅底上只有 4.36:1，差一点到 AA。
+     表头是每次扫读都要认的字，不该卡在及格线下。 */
+  position: relative; color: var(--ink-3); font-weight: 620; font-size: 11.5px; letter-spacing: 0.02em; text-transform: none;
   background: linear-gradient(180deg, var(--panel-2), color-mix(in srgb, var(--panel-3) 72%, var(--panel))); position: sticky; top: 0; z-index: 1;
   box-shadow: inset 0 -1px 0 var(--line);
 }
@@ -785,11 +791,11 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 
 .auth { min-height: 100vh; display: grid; grid-template-columns: 1.05fr 1fr; }
 .auth-hero {
-  position: relative; overflow: hidden; color: #d7dce6; padding: 48px 56px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  position: relative; overflow: hidden; color: #d7dce6; padding: 56px clamp(48px, 7vw, 96px);
+  display: flex; flex-direction: column; justify-content: center;
   background:
-    radial-gradient(760px 520px at 50% 34%, rgba(75,88,240,0.32), transparent 62%),
-    radial-gradient(620px 460px at 82% 96%, rgba(34,211,238,0.24), transparent 58%),
+    radial-gradient(820px 560px at 22% 26%, rgba(75,88,240,0.30), transparent 62%),
+    radial-gradient(660px 480px at 88% 92%, rgba(34,211,238,0.22), transparent 58%),
     linear-gradient(180deg, #12151c 0%, #0b0d12 100%);
 }
 .auth-hero::after {
@@ -797,19 +803,30 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
   background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
   background-size: 40px 40px; -webkit-mask-image: radial-gradient(66% 66% at 50% 44%, #000 0%, transparent 100%); mask-image: radial-gradient(66% 66% at 50% 44%, #000 0%, transparent 100%);
 }
-/* 居中门面：高清品牌图标 + 名称 */
-.auth-hero-center { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+/* 左栏门面：品牌 → 一句定位 → 四个能力锚点。靠左排布，读起来像一段话。 */
+.auth-hero-inner { position: relative; z-index: 1; max-width: 520px; }
+.auth-hero-brand { display: flex; align-items: center; gap: 16px; }
 .auth-logo-mark {
-  width: 108px; height: 108px; border-radius: 16px; display: grid; place-items: center;
+  width: 60px; height: 60px; border-radius: 12px; display: grid; place-items: center; flex: none;
   clip-path: polygon(20% 0, 100% 0, 100% 80%, 80% 100%, 0 100%, 0 20%);
-  font-size: 56px; font-weight: 800; color: #fff; background: var(--accent-grad);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.14), 0 18px 50px -12px rgba(34,211,238,0.7), inset 0 2px 0 rgba(255,255,255,0.28);
+  font-size: 31px; font-weight: 800; color: #fff; background: var(--accent-grad);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.14), 0 14px 38px -14px rgba(34,211,238,0.7), inset 0 2px 0 rgba(255,255,255,0.28);
 }
-.auth-logo-name { font-size: 30px; font-weight: 750; letter-spacing: 0.04em; color: #fff; }
-.auth-logo-name::after {
-  content: ""; display: block; width: 46px; height: 3px; margin: 14px auto 0; border-radius: 2px;
+.auth-logo-name { font-size: 26px; font-weight: 750; letter-spacing: 0.04em; color: #fff; }
+.auth-hero-tagline {
+  margin: 30px 0 0; font-size: clamp(21px, 2.1vw, 29px); line-height: 1.42; font-weight: 600;
+  letter-spacing: -0.01em; color: #fff;
+}
+.auth-hero-tagline::after {
+  content: ""; display: block; width: 52px; height: 3px; margin-top: 22px; border-radius: 2px;
   background: linear-gradient(90deg, #8b96ff, #22d3ee);
 }
+.auth-hero-pillars { list-style: none; margin: 26px 0 0; padding: 0; display: grid; gap: 13px; }
+.auth-hero-pillars li { display: flex; align-items: baseline; gap: 14px; font-size: 13.5px; }
+.auth-pillar-k {
+  flex: none; width: 34px; color: #fff; font-weight: 650; letter-spacing: 0.04em;
+}
+.auth-pillar-v { color: rgba(215, 220, 230, 0.72); }
 .auth-form-wrap { display: grid; place-items: center; background: var(--bg); padding: 32px; }
 .auth-form {
   width: 360px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 4px 16px 4px 4px; box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,0.9);
@@ -885,20 +902,24 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .region-col li.muted:hover { background: transparent; }
 .region-foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-top: 1px solid var(--line); }
 
-/* ── 订单管理台账概览 ─────────────────────────────────── */
-/* KPI 瘦身：订单管理等非驾驶舱页面，卡片紧凑，空间让位表格/表单 */
-.om-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-@media (max-width: 980px) { .om-stats { grid-template-columns: repeat(3, 1fr); } }
-.om-stat {
+/* ── 台账概览指标带 ───────────────────────────────────────
+   从「5 张边框卡片」改成「一条指标带」。5 个数字要 5 个盒子、5 圈边框、
+   5 份内边距，换来的是 90px 垂直空间和一排跟数据抢注意力的框线。
+   分组交给竖分隔线就够了 —— 少一层框，页面就少碎一块。 */
+.om-stats {
+  display: flex; flex-wrap: wrap; align-items: stretch;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
-  padding: 7px 12px; text-align: left; display: flex; flex-direction: column; justify-content: center;
+  overflow: hidden;
 }
-.om-stat-n { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
-.om-stat-l { font-size: 11px; color: var(--muted); margin-top: 1px; }
-/* 更紧凑：让筛选与表格尽量少占空间，表格主导 */
-.om-stats-slim { gap: 8px; }
-.om-stats-slim .om-stat { padding: 6px 11px; }
-.om-stats-slim .om-stat-n { font-size: 16px; }
+.om-stat {
+  flex: 1 1 0; min-width: 128px; padding: 9px 16px; text-align: left;
+  display: flex; align-items: baseline; gap: 8px;
+  background: transparent; border: 0; border-left: 1px solid var(--line);
+}
+.om-stat:first-child { border-left: 0; }
+.om-stat-n { font-size: var(--text-xl); font-weight: var(--fw-bold); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.om-stat-l { font-size: var(--text-sm); color: var(--muted); }
+@media (max-width: 980px) { .om-stat { flex-basis: 33%; } }
 .om-panel { display: flex; flex-direction: column; }
 .om-filterbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .om-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; font-size: 14px; white-space: nowrap; }
@@ -906,9 +927,12 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .btn-ghost.on-accent { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
 /* 表格主导：内部滚动，占据视口大部分高度 */
 .om-panel .dt-scroll { max-height: calc(100vh - 300px); min-height: 340px; }
-.om-clickable { cursor: pointer; font: inherit; transition: border-color var(--speed), box-shadow var(--speed); }
-.om-clickable:hover { border-color: var(--accent-weak-2); box-shadow: var(--shadow-xs); }
-.om-clickable.on { border-color: var(--accent); box-shadow: var(--ring); }
+/* 可点的指标格：整格是筛选入口，hover 给底色而不是描边——
+   带上描边就等于把刚拆掉的卡片框又画回来了 */
+.om-clickable { cursor: pointer; font: inherit; transition: background var(--speed), box-shadow var(--speed); }
+.om-clickable:hover { background: var(--panel-2); }
+.om-clickable.on { background: var(--accent-weak); box-shadow: inset 0 -2px 0 var(--accent); }
+.om-clickable.on .om-stat-l { color: var(--accent); }
 
 /* ── 订单流转四段（客服工作台） ───────────────────────── */
 .lc4 { display: flex; align-items: stretch; gap: 0; padding: 10px 14px; }
@@ -1047,15 +1071,20 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .form-row { display: flex; gap: 10px; padding: 14px 18px; align-items: center; flex-wrap: wrap; }
 .form-row input, .form-row select { padding: 8.5px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--panel); transition: border-color var(--speed), box-shadow var(--speed); }
 .form-row input:focus, .form-row select:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
-.row-actions { display: flex; gap: 6px; }
+/* 行内动作。靠右对齐 + 不换行：操作列是固定宽度的，一旦允许换行或左对齐，
+   按钮就会被挤出单元格叠到相邻列上去。链接与按钮统一成一种视觉，
+   否则同一行里「确认」是带框按钮、「详情」是裸文字，基线也对不齐。 */
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: nowrap; min-width: 0; }
 .table tbody tr .row-actions { opacity: 0; transition: opacity var(--speed); }
 .table tbody tr:hover .row-actions, .table tbody tr:focus-within .row-actions, .table tbody tr.row-sel .row-actions { opacity: 1; }
-.row-actions button {
-  min-height: 32px; padding: 4px 9px; font-size: 12px; border-radius: var(--radius-xs); border: 1px solid var(--line-2);
-  background: var(--panel); color: var(--ink-2); cursor: pointer; white-space: nowrap;
+.row-actions button, .row-actions .link, .row-actions a {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 26px; padding: 0 9px; font-size: 12px; line-height: 1; border-radius: var(--radius-xs);
+  border: 1px solid var(--line-2);
+  background: var(--panel); color: var(--ink-2); cursor: pointer; white-space: nowrap; text-decoration: none;
   transition: border-color var(--speed), color var(--speed), background var(--speed);
 }
-.row-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
+.row-actions button:hover:not(:disabled), .row-actions a:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
 .row-actions button:disabled { opacity: 0.45; cursor: default; }
 /* 主操作按钮（如「派单」）在行内保持强调色，突出当前池的核心动作 */
 .row-actions button.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
@@ -1399,7 +1428,9 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dt-toolbar-main { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; min-width: 0; }
 .dt-toolbar-actions { display: flex; align-items: center; gap: 6px; position: relative; flex: none; }
 .dt-toolbar-actions .btn-ghost { padding-inline: 11px; }
-.dt-empty { padding: 42px 18px; text-align: center; color: var(--muted); font-size: 13px; }
+/* 空态不该独占半屏。表格空的时候用户要么去建单、要么去改筛选，
+   这两件事都在上方的工具条里——把它们推到视线外没有任何好处。 */
+.dt-empty { padding: 26px 18px; text-align: center; color: var(--muted); font-size: 13px; }
 .dt-colmenu {
   z-index: 1250; min-width: 190px; padding: 6px;
   max-width: calc(100vw - 20px); max-height: calc(100dvh - 20px); overflow: auto;
@@ -1414,9 +1445,9 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dt-table { table-layout: fixed; min-width: 760px; background: var(--surface-solid); }
 /* DataTable 自管布局：去掉页面级 sticky 表头(top:56px)，避免相对定位把表头下移到首行下方 */
 /* 表头在内部滚动容器内吸顶（配合 .dt-scroll max-height）*/
-.dt-table thead th { position: sticky; top: 0; z-index: 5; background: var(--panel-2); user-select: none; }
+.dt-table thead th { position: sticky; top: 0; z-index: 5; background: var(--dt-head-bg); user-select: none; }
 .dt-table th { user-select: none; font-size: 11.5px; font-weight: 620; letter-spacing: 0.02em; text-transform: none; }
-.dt-table thead th.dt-sticky { position: sticky; top: 0; z-index: 6; }
+.dt-table thead th.dt-fixed { position: sticky; top: 0; z-index: 7; }
 /* 列内字段筛选 */
 .dt-filter-btn { flex: none; width: 28px; height: 28px; border: none; background: none; color: var(--ink-3); cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; }
 .dt-filter-btn:hover { color: var(--accent); background: var(--accent-weak); }
@@ -1479,30 +1510,62 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dt-sortable { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: inherit; }
 .dt-sortable:hover { color: var(--accent); }
 .dt-sortable:hover .dt-sortic-idle, .dt-sortable:focus-visible .dt-sortic-idle { opacity: 0.85; color: var(--accent); }
-/* 斑马纹：非 sticky 单元格上极淡底纹；hover / 选中 / 骨架行以 td 级覆盖胜出 */
-.dt-table tbody tr:nth-child(even):not(.dt-skrow):not(.dt-expandrow) td { background: var(--dt-zebra); }
-.dt-table tbody tr:nth-child(even):not(.dt-skrow):not(.dt-expandrow) .dt-sticky { background: color-mix(in srgb, var(--dt-zebra), var(--panel)); }
-.dt-table tbody tr:hover td { background: color-mix(in srgb, var(--accent-cyan) 8%, var(--surface-solid)); }
-.dt-table tbody tr:hover .dt-sticky { background: color-mix(in srgb, var(--accent-cyan) 8%, var(--surface-solid)); }
-.dt-table tbody tr.row-sel td { background: var(--accent-weak); }
+/* ── 行状态与固定列 ───────────────────────────────────────────
+   固定列的背景必须是**完全不透明**的实色。之前这里用
+   color-mix(in srgb, var(--dt-zebra), var(--panel)) 算固定列底色，
+   而 --dt-zebra 本身带 alpha，color-mix 会把 alpha 一起混——算出来
+   只有 51% 不透明，被固定列盖住的那几列文字直接透上来，视觉上就是
+   「YD202607详情00007」这种字摞字。固定列浮在别的列之上是它的本分，
+   底色不实就等于没有这一层。
+
+   所以本节所有涉及 .dt-fixed 的底色一律走 --dt-row-* 三个实色变量。
+   斑马纹一并去掉：行的区分交给 hover 高亮与选中色条，密集账本上
+   隔行底纹只会和状态色抢注意力。                                  */
+.dt-table tbody tr:hover td { background: var(--dt-row-hover); }
+.dt-table tbody tr.row-sel td { background: var(--dt-row-sel); }
 .dt-table tbody tr.row-sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
-.dt-skrow td { height: 43px; }
 .dt-skrow:hover td { background: transparent; }
 .dt-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }
 .dt-resizer:hover { background: linear-gradient(90deg, transparent, var(--accent-weak-2)); }
-.dt-table td { overflow: hidden; text-overflow: ellipsis; }
-.dt-table tbody tr { height: 48px; }
-.dt-sticky { position: sticky; z-index: 1; background: var(--panel); }
-.dt-sticky-right { position: sticky; right: 0; z-index: 2; background: var(--panel); box-shadow: -10px 0 16px -14px rgba(18,20,26,0.42), inset 1px 0 0 var(--line); }
-.dt-table thead .dt-sticky { z-index: 3; background: var(--panel-2); }
-.dt-table thead .dt-sticky-right { z-index: 7; background: var(--panel-2); }
-.dt-table tbody tr:hover .dt-sticky { background: color-mix(in srgb, var(--accent-cyan) 8%, var(--surface-solid)); }
-.dt-table tbody tr:hover .dt-sticky-right { background: color-mix(in srgb, var(--accent-cyan) 8%, var(--surface-solid)); }
-.dt-table tbody tr.row-sel .dt-sticky { background: var(--accent-weak); }
-.dt-table tbody tr.row-sel .dt-sticky-right { background: var(--accent-weak); }
-.pool-row.row-active .dt-sticky-right { background: var(--accent-weak) !important; }
+/* 单元格内容一律单行省略；需要两行的列自己加 .cell-wrap */
+.dt-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-table td.cell-wrap { white-space: normal; }
+
+/* 单元格内的单位与次要量：主数字保持满对比，单位和从属数字退一档。
+   「14.10吨/31件」里真正驱动决策的是吨数，件数是佐证——同样字重同样颜色地并排，
+   等于让眼睛每行都做一次无谓的取舍。 */
+.cell-unit { margin-left: 1px; font-size: var(--text-xs); color: var(--muted); font-weight: 400; }
+/* 用 --muted 而非 --faint：这里放的是「31 件」这类真实数据，不是纯装饰，
+   --faint 在白底上只有 2.6:1，读起来要眯眼。 */
+.cell-sub { margin-left: 6px; font-size: var(--text-xs); color: var(--muted); font-weight: 400; }
+/* 一格两行：主行满对比、次行退两档。用于「谁+什么时候」这类同属一件事的字段对 */
+.cell-stack { display: inline-flex; flex-direction: column; gap: 1px; line-height: 1.25; min-width: 0; }
+.cell-stack-a { color: var(--ink-2); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; }
+.cell-stack-b { color: var(--faint); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; }
+
+/* 单值列折叠后的标注：这一列本页全是这个值，点一下放回来 */
+.dt-uniform {
+  display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 9px;
+  border: 1px dashed var(--line-2); border-radius: 999px; background: transparent;
+  font-size: var(--text-sm); color: var(--muted); cursor: pointer; white-space: nowrap;
+}
+.dt-uniform:hover { border-color: var(--accent); background: var(--accent-weak); color: var(--accent); }
+.dt-uniform-k::after { content: "："; }
+.dt-uniform-v { color: var(--ink-2); font-weight: var(--fw-medium); }
+.dt-uniform:hover .dt-uniform-v { color: var(--accent); }
+
+.dt-fixed { position: sticky; z-index: 2; background: var(--dt-row-bg); }
+.dt-fixed-r { box-shadow: -10px 0 16px -14px rgba(18, 20, 26, 0.42), inset 1px 0 0 var(--line); }
+.dt-table thead .dt-fixed { z-index: 7; background: var(--dt-head-bg); }
+.dt-table tbody tr:hover .dt-fixed { background: var(--dt-row-hover); }
+.dt-table tbody tr.row-sel .dt-fixed { background: var(--dt-row-sel); }
+.dt-table tfoot .dt-fixed { background: var(--dt-head-bg); }
+.pool-row.row-active .dt-fixed { background: var(--dt-row-sel) !important; }
+/* 窄屏放弃右固定：横向空间不够时，固定列会盖掉半张表 */
 @media (max-width: 620px) {
-  .dt-table thead th.dt-sticky-right, .dt-table tbody td.dt-sticky-right { position: static; box-shadow: none; }
+  .dt-table thead th.dt-fixed-r, .dt-table tbody td.dt-fixed-r, .dt-table tfoot td.dt-fixed-r {
+    position: static; box-shadow: none;
+  }
 }
 .dt-table tbody tr.dt-clickable { cursor: pointer; }
 .dt-table tbody tr.dt-clickable:focus-visible { outline: none; }
@@ -1528,8 +1591,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 /* ── 五态统一视图（加载/错误/空/离线/无权限） ───────── */
 .state-loading { padding: 28px 18px; display: flex; flex-direction: column; gap: 10px; }
 .state-loading.state-compact { padding: 16px; }
-.state-view { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 46px 20px; gap: 4px; overflow: hidden; }
-.state-view::after { content: ""; position: absolute; width: 44px; height: 1px; bottom: 20px; background: linear-gradient(90deg, transparent, var(--line-2), transparent); }
+.state-view { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 30px 20px; gap: 4px; overflow: hidden; }
 .state-icon { width: 46px; height: 46px; border-radius: 4px 12px 4px 4px; display: grid; place-items: center; font-size: 22px; margin-bottom: 10px; background: var(--panel-3); color: var(--muted); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--glass-line); }
 .state-title { font-weight: 600; font-size: 15px; color: var(--ink-2); }
 .state-hint { max-width: 360px; margin-top: 4px; }
@@ -1763,14 +1825,18 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .lin-batches { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px dashed var(--line); }
 
 /* 运输驾驶舱：日期联动置于经营指标标题行 */
-.ct-metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.ct-period { flex: none; }
+/* section-label 的色条是 ::before，也算一个 flex 子项。这里原本用
+   justify-content: space-between 把时间段按钮推到右边，结果三个子项被两端对齐：
+   色条贴左、标题跑到中间、按钮在右——色条和它要标记的标题分了家。
+   改成靠左排布 + 按钮 margin-left:auto，色条就跟着标题走。 */
+.ct-metrics-head { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
+.ct-period { flex: none; margin-left: auto; }
 
 /* ═══════ 运输驾驶舱（指挥中心：实用 + 排版美学）═══════ */
 /* 顶部指挥仪表带：六个读数共用一块瓷白底板，像一件仪器而不是六张散卡 */
 .ct-hero {
   position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0;
-  overflow: hidden; counter-reset: ct-tile; background: var(--panel); border: 1px solid var(--line-2);
+  overflow: hidden; background: var(--panel); border: 1px solid var(--line-2);
   border-radius: 3px 14px 3px 3px; box-shadow: 0 12px 28px -25px rgba(18,20,26,0.62), inset 0 1px 0 var(--glass-line);
 }
 .ct-hero::before {
@@ -1782,14 +1848,14 @@ input[type="checkbox"] { accent-color: var(--accent); }
   background: var(--accent-cyan);
 }
 .ct-tile {
-  counter-increment: ct-tile; min-height: 136px; padding: 19px 18px 17px; gap: 8px; text-decoration: none; color: inherit;
+  min-height: 118px; padding: 16px 18px 15px; gap: 8px; text-decoration: none; color: inherit;
   border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none;
   transition: background var(--speed), box-shadow var(--speed);
 }
 .ct-tile:last-child { border-right: 0; }
-.ct-tile::before { display: block; content: ""; position: absolute; top: 17px; right: -2px; left: auto; width: 3px; height: 3px; border-radius: 50%; background: var(--accent-cyan); opacity: 0.45; }
-.ct-tile:last-child::before { right: 12px; opacity: 0.75; }
-.ct-tile::after { content: "0" counter(ct-tile); position: absolute; right: 11px; bottom: 9px; font: 8.5px/1 var(--font-mono); letter-spacing: 0.08em; color: var(--faint); opacity: 0.68; }
+/* 曾经这里有一圈装饰性小圆点和一串序号 01–06。它们不承载任何信息，
+   却在六个真实读数旁边各放了两个视觉噪点——仪表盘上多余的刻度只会让人
+   多看一眼才找到数。一并去掉。 */
 .ct-tile:hover {
   color: inherit; border-color: var(--line); background: linear-gradient(180deg, var(--panel), var(--accent-weak));
   box-shadow: inset 0 -2px 0 var(--accent-cyan); transform: none;
@@ -1816,7 +1882,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .ct-sub-label { font-size: 11.5px; font-weight: 630; letter-spacing: 0.02em; color: var(--muted); margin-top: 5px; }
 
 /* 运单状态分布：分段条 + 图例 */
-.ct-dist { min-height: 126px; padding: 18px 16px 17px; display: flex; flex-direction: column; justify-content: center; gap: 15px; }
+/* 一条分段条 + 一行图例，撑到 126px 高只是把空白摊开。内容多高就多高。 */
+.ct-dist { padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 12px; }
 .ct-bar { display: flex; height: 13px; border-radius: 2px; overflow: hidden; background: var(--panel-3); box-shadow: inset 0 0 0 1px var(--line); }
 .ct-bar-seg { height: 100%; transition: width var(--speed); }
 .ct-bar-seg:not(:last-child) { box-shadow: 1px 0 0 rgba(255,255,255,0.4); }
@@ -2149,12 +2216,19 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 
 /* ══════════════════ DataTable Excel 级能力 ══════════════════ */
-/* 行密度三档（Excel 视图缩放的语义等价物） */
-.dt-den-compact .dt-table tbody tr { height: 34px; }
-.dt-den-compact .dt-table th, .dt-den-compact .dt-table td { padding-top: 3px; padding-bottom: 3px; font-size: 12.5px; }
-.dt-den-standard .dt-table tbody tr { height: 43px; }
-.dt-den-relaxed .dt-table tbody tr { height: 54px; }
-.dt-den-relaxed .dt-table th, .dt-den-relaxed .dt-table td { padding-top: 10px; padding-bottom: 10px; }
+/* 行密度三档（Excel 视图缩放的语义等价物）。
+   此前 .dt-table tbody tr 上另有一条写死的 height:48px，三档里只有「宽松」
+   压得过它，切换密度看着像没反应——那条已删。 */
+.dt-den-compact .dt-table tbody tr { height: 32px; }
+.dt-den-compact .dt-table th, .dt-den-compact .dt-table td { padding-top: 2px; padding-bottom: 2px; font-size: 12.5px; }
+.dt-den-standard .dt-table tbody tr { height: 40px; }
+.dt-den-standard .dt-table th, .dt-den-standard .dt-table td { padding-top: 6px; padding-bottom: 6px; }
+.dt-den-relaxed .dt-table tbody tr { height: 52px; }
+.dt-den-relaxed .dt-table th, .dt-den-relaxed .dt-table td { padding-top: 11px; padding-bottom: 11px; }
+/* 骨架行跟随当前密度，别在加载时把行高跳一下 */
+.dt-den-compact .dt-skrow td { height: 32px; }
+.dt-den-standard .dt-skrow td { height: 40px; }
+.dt-den-relaxed .dt-skrow td { height: 52px; }
 
 /* 全屏表格：覆盖全视口的沉浸工作模式（Esc 退出） */
 .dt-fs { position: fixed; inset: 10px; z-index: 300; background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; padding: 4px; }
@@ -2196,12 +2270,8 @@ thead .dt-rownum { text-align: center; padding-right: 0 !important; }
 .dt-viewsave .search { min-width: 0; flex: 1; padding: 5px 8px; font-size: 12px; }
 
 /* 右固定列（操作列常驻可见），左缘投影提示悬浮层级 */
-.dt-sticky-r { position: sticky; z-index: 1; background: var(--panel); box-shadow: -6px 0 8px -6px rgba(18, 20, 26, 0.12); }
-.dt-table thead .dt-sticky-r { z-index: 3; background: var(--panel-2); }
-.dt-table tbody tr:hover .dt-sticky-r { background: var(--panel-2); }
-.dt-table tbody tr.row-sel .dt-sticky-r { background: var(--accent-weak); }
 
 /* Σ 合计行：吸底、与表头同色系区分于数据行 */
 .dt-totals td { position: sticky; bottom: 0; background: var(--panel-2); border-top: 2px solid var(--line-2); font-variant-numeric: tabular-nums; z-index: 2; }
-.dt-totals td.dt-sticky { z-index: 3; }
+.dt-totals td.dt-fixed { z-index: 4; }
 .dt-totals b { color: var(--accent); }

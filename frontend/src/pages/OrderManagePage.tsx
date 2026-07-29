@@ -175,16 +175,30 @@ function OrdersTab() {
     { key: "channel", header: "渠道", width: 90, filterable: true, filterValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, sortField: "channel", sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
     { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <><b>{o.origin || "?"}</b> → <b>{o.destination || "?"}</b></> },
     { key: "biz", header: "业务", width: 90, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortField: "business_type", sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
-    { key: "cargo", header: "货量", width: 110, align: "right", sortField: "cargo_weight_ton", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}吨/{o.cargo_quantity}件</span> },
+    { key: "cargo", header: "货量", width: 128, align: "right", sortField: "cargo_weight_ton", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}<span className="cell-unit">吨</span><span className="cell-sub">{o.cargo_quantity}件</span></span> },
     { key: "amount", header: "报价", width: 110, align: "right", sortField: "quoted_amount", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
     { key: "priority", header: "优先级", width: 92, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortField: "priority", sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
     { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
     { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortField: "sla_status", sortValue: (o) => o.sla_status, exportValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
     { key: "waybill", header: "关联运单 (YD)", width: 150, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, overflow: "hidden" }}>{o.waybill_nos.slice(0, 1).map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}{o.waybill_nos.length > 1 && <span className="tag tag-none small" title={o.waybill_nos.join("、")}>+{o.waybill_nos.length - 1}</span>}</span> : <span className="muted small">未生成</span> },
-    { key: "creator", header: "建单人", width: 100, filterable: true, filterValue: (o) => o.created_by_name || "-", sortValue: (o) => o.created_by_name || "", exportValue: (o) => o.created_by_name || "", render: (o) => <span className="small muted">{o.created_by_name || "-"}</span> },
-    { key: "created", header: "建单时间", width: 130, sortField: "created_at", sortValue: (o) => o.created_at, exportValue: (o) => fmtDateTime(o.created_at), render: (o) => <span className="small" title={fmtDateTime(o.created_at)}>{fmtRelative(o.created_at)}</span> },
+    // 「谁在什么时候建的」是一件事，不是两件事。合成一列省下 ~90px 横向空间，
+    // 正好让整张表落回可视宽度内——否则右固定的操作列会一直压着建单时间。
     {
-      key: "actions", header: "操作", width: 150, alwaysVisible: true, sticky: "right",
+      key: "created", header: "建单", width: 140, sortField: "created_at",
+      sortValue: (o) => o.created_at,
+      filterable: true, filterValue: (o) => o.created_by_name || "-",
+      exportValue: (o) => `${o.created_by_name || "-"} ${fmtDateTime(o.created_at)}`,
+      // 单行：这批单大多来自 API / 客户自助，没有建单人，两行渲染会让整表行高
+      // 为一列少数有值的字段全部变高。建单人进 title，要看的时候再看。
+      render: (o) => (
+        <span className="small" title={`${o.created_by_name || "系统"} · ${fmtDateTime(o.created_at)}`}>
+          {fmtRelative(o.created_at)}
+          {o.created_by_name ? <span className="cell-sub">{o.created_by_name}</span> : null}
+        </span>
+      ),
+    },
+    {
+      key: "actions", header: "操作", width: 176, alwaysVisible: true, sticky: "right",
       render: (o) => (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           {(o.status === "draft" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "confirm", ids: [o.id] })}>确认</button>}

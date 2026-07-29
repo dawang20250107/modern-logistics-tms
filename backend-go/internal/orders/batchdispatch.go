@@ -363,7 +363,7 @@ func dispatchOneInBatch(ctx context.Context, tx pgx.Tx, o dispatchableOrder, bod
 			  amount, currency, occurred_at, risk_status, source_system, external_id, payee_type, payee_ref,
 			  remark, price_source, quote_id, pricing_rule_id, pricing_rule_name, charge_method, matched_condition,
 			  input_snapshot, calculation_detail, rule_snapshot)
-			VALUES ($1, now(), now(), $2::uuid, 'payable', 'freight', $3, 'CNY', now(), 'normal', '', '',
+			VALUES ($1, now(), now(), $2::uuid, 'payable', 'TRANSPORT_COST', $3, 'CNY', now(), 'normal', '', '',
 			  $4, $5, $6, 'batch', '', '', '', '', '', $7, $8, '{}'::jsonb)`,
 			eid.String(), wid.String(), pay, payeeType, payeeRef, "批次 "+batchNo+" 分摊应付", snapIn, snapCalc); err != nil {
 			// 应付快照落不下就整单退回：运单发出去了却没有成本，对账那头会凭空少一笔

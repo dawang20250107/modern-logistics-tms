@@ -323,7 +323,7 @@ LEFT JOIN LATERAL (
             'status', w.status, 'status_label', ` + waybillStatusLabel + `,
             'payable', (SELECT e.amount::float8 FROM fin_expense_record e
                         WHERE e.waybill_id = w.id AND e.direction='payable'
-                          AND e.expense_item_code='freight'
+                          AND e.expense_item_code='TRANSPORT_COST'
                         ORDER BY e.created_at DESC, e.id LIMIT 1))
             ORDER BY w.created_at DESC, w.id), '[]'::json)
           FROM ops_waybill w

@@ -415,7 +415,7 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 			  amount, currency, occurred_at, risk_status, source_system, external_id, payee_type, payee_ref,
 			  remark, price_source, quote_id, pricing_rule_id, pricing_rule_name, charge_method, matched_condition,
 			  input_snapshot, calculation_detail, rule_snapshot)
-			VALUES ($1, now(), now(), $2::uuid, 'payable', 'freight', $3, 'CNY', now(), 'normal', '', '',
+			VALUES ($1, now(), now(), $2::uuid, 'payable', 'TRANSPORT_COST', $3, 'CNY', now(), 'normal', '', '',
 			  $4, $5, $6, $7, $8, '', '', '', '', $9, $10, '{}'::jsonb)`,
 			eid.String(), wid.String(), *agreed, payeeType, payeeRef,
 			strings.TrimSpace(body.PriceRemark), ps, strings.TrimSpace(body.QuoteID), snapIn, snapCalc); err != nil {

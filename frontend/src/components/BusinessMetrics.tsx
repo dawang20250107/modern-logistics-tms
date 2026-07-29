@@ -93,13 +93,33 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
   const formatRmb = (val: number) => fmtMoney(val);
   const pieData: Array<{ name: string; value: number }> = financeMetrics.data?.cost_composition ?? [];
 
+  // 稀疏度决定图形：营收是离散的成单事件，不是连续的水位。
+  // 三十天里只有两天有数时，面积图会把两根尖峰之间连成一条穿过零的斜坡，
+  // 看着像"业务在缓慢下滑"——实际那些天什么都没发生。这种时候柱状图才诚实：
+  // 有柱子就是有单，没柱子就是没单，中间不编故事。
+  const trendPoints: Array<{ date: string; revenue: number; cost: number; profit: number }> =
+    financeMetrics.data?.trend ?? [];
+  const busyDays = trendPoints.filter((p) => p.revenue || p.cost);
+  const sparse = trendPoints.length >= 7 && busyDays.length / trendPoints.length < 0.3;
+  // 稀疏时只画有业务的那几天。三十个日期槽里画两根柱子，剩下 28 个空槽既不说明
+  // "那几天为零"（本来就没单），又把两根柱子压成头发丝。横轴换成实际发生的日子，
+  // 标题里写清一共几天——信息一点没少，可读性天差地别。
+  const chartData = sparse ? busyDays : trendPoints;
+
   return (
     <div className="stack">
       {financeMetrics.data && (
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }} className="bm-charts">
           <div className="panel" style={{ padding: 18, height: 380, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <div className="section-label" style={{ margin: 0 }}>营业额与利润趋势 ({financeMetrics.data.period})</div>
+              <div className="section-label" style={{ margin: 0 }}>
+                营业额与利润 ({financeMetrics.data.period})
+                {sparse && (
+                  <span className="muted small" style={{ marginLeft: 8, fontWeight: 400 }}>
+                    · 近 {trendPoints.length} 天中 {busyDays.length} 天有业务
+                  </span>
+                )}
+              </div>
               {!controlled && (
                 <div className="seg-toggle">
                   {PERIODS.map((p) => (
@@ -109,7 +129,7 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
               )}
             </div>
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={financeMetrics.data.trend} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+              <ComposedChart data={chartData} margin={{ top: 10, right: 8, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={c["--chart-revenue"]} stopOpacity={0.35} />
@@ -121,9 +141,19 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(val) => wanLabel(Number(val))} />
                 <Tooltip contentStyle={{ borderRadius: 10, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} formatter={(value) => formatRmb(Number(value))} />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                <Area type="monotone" name="主营收入" dataKey="revenue" fill="url(#colorRevenue)" stroke={c["--chart-revenue"]} strokeWidth={3} />
-                <Bar name="外协成本/支出" dataKey="cost" barSize={16} fill={c["--chart-cost"]} radius={[4, 4, 0, 0]} />
-                <Area type="monotone" name="毛利润" dataKey="profit" fill="none" stroke={c["--chart-profit"]} strokeWidth={2} strokeDasharray="5 5" />
+                {sparse ? (
+                  <>
+                    <Bar name="主营收入" dataKey="revenue" maxBarSize={44} fill={c["--chart-revenue"]} radius={[3, 3, 0, 0]} />
+                    <Bar name="外协成本/支出" dataKey="cost" maxBarSize={44} fill={c["--chart-cost"]} radius={[3, 3, 0, 0]} />
+                    <Bar name="毛利润" dataKey="profit" maxBarSize={44} fill={c["--chart-profit"]} radius={[3, 3, 0, 0]} />
+                  </>
+                ) : (
+                  <>
+                    <Area type="monotone" name="主营收入" dataKey="revenue" fill="url(#colorRevenue)" stroke={c["--chart-revenue"]} strokeWidth={3} />
+                    <Bar name="外协成本/支出" dataKey="cost" barSize={16} fill={c["--chart-cost"]} radius={[4, 4, 0, 0]} />
+                    <Area type="monotone" name="毛利润" dataKey="profit" fill="none" stroke={c["--chart-profit"]} strokeWidth={2} strokeDasharray="5 5" />
+                  </>
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           </div>

@@ -20,6 +20,7 @@ export interface DataColumn<T> {
   defaultHidden?: boolean;
   alwaysVisible?: boolean;
   sticky?: "left" | "right"; // 声明式固定：left 并入默认 pin，right 常驻右侧（操作列）
+  collapseUniform?: false;   // 关掉「整页同值自动折叠」（该列即使全同值也要占位）
 }
 
 export interface ServerPage {
@@ -124,6 +125,8 @@ export function DataTable<T>({
   const [density, setDensity] = useState<Density>(saved?.density ?? "standard");
   const [rowNums, setRowNums] = useState<boolean>(saved?.rowNums ?? false);
   const [totals, setTotals] = useState<boolean>(saved?.totals ?? false);
+  // 用户手动展开的单值列（不持久化：数据一变，该不该折叠也就变了）
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());
   const [fullscreen, setFullscreen] = useState(false);
   const [colMenu, setColMenu] = useState(false);
   const [filters, setFilters] = useState<Record<string, Set<string>>>({});
@@ -177,7 +180,7 @@ export function DataTable<T>({
     return out;
   }, [columns, order]);
 
-  const visibleCols = orderedCols.filter((c) => !hidden.has(c.key));
+  const shownCols = orderedCols.filter((c) => !hidden.has(c.key));
 
   const filterText = (c: DataColumn<T>, r: T): string =>
     String((c.filterValue ? c.filterValue(r) : c.exportValue ? c.exportValue(r) : c.sortValue ? c.sortValue(r) : "") ?? "");
@@ -211,6 +214,29 @@ export function DataTable<T>({
   }, [filteredRows, sorts, columns]);
 
   const displayRows = server ? rows : sortedRows;
+
+  // 单值列折叠：整页只有一个取值的列不占横向空间，取值收进工具栏的标注 chip。
+  // 运营台上「优先级」整列"普通"、「业务」整列"整车"是常态，三列这样的就吃掉
+  // 近 300px——而横向空间正是密集账本最缺的东西。信息没丢：chip 上写着值，
+  // 点一下就能把列放回来。
+  const uniformCols = useMemo(() => {
+    const m = new Map<string, string>();
+    if (displayRows.length < 3) return m;
+    for (const c of shownCols) {
+      if (c.alwaysVisible || c.sticky || c.collapseUniform === false) continue;
+      const seen = new Set<string>();
+      for (const r of displayRows) {
+        seen.add(String(cellValue(c, r) ?? ""));
+        if (seen.size > 1) break;
+      }
+      const only = seen.size === 1 ? [...seen][0] : "";
+      if (only) m.set(c.key, only);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayRows, shownCols]);
+
+  const visibleCols = shownCols.filter((c) => !uniformCols.has(c.key) || unfolded.has(c.key));
 
   const cycleSort = (key: string, additive: boolean) => {
     setSorts((prev) => {
@@ -522,13 +548,27 @@ export function DataTable<T>({
   const rowNumBase = server ? (server.page - 1) * server.pageSize : 0;
   const stickyTd = (key: string): React.CSSProperties | undefined =>
     isPinned(key) ? { left: pinLeft.get(key) } : isPinnedR(key) ? { right: pinRight.get(key) } : undefined;
-  const stickyCls = (key: string) => (isPinned(key) ? "dt-sticky" : isPinnedR(key) ? "dt-sticky dt-sticky-r" : "");
+  const stickyCls = (key: string) => (isPinned(key) ? "dt-fixed" : isPinnedR(key) ? "dt-fixed dt-fixed-r" : "");
 
   return (
     <div className={`dt dt-den-${density}${fill ? " dt-fill" : ""}${fullscreen ? " dt-fs" : ""}`}>
       <div className="dt-toolbar">
         <div className="dt-toolbar-main">{toolbarLeft}</div>
         <div className="dt-toolbar-actions">
+          {[...uniformCols].filter(([k]) => !unfolded.has(k)).map(([k, v]) => {
+            const col = shownCols.find((c) => c.key === k);
+            return (
+              <button
+                key={k}
+                className="dt-uniform"
+                title={`本页「${col?.header}」全部为「${v}」，已折叠该列以腾出横向空间。点击展开`}
+                onClick={(e) => { e.stopPropagation(); setUnfolded((s) => new Set(s).add(k)); }}
+              >
+                <span className="dt-uniform-k">{col?.header}</span>
+                <span className="dt-uniform-v">{v}</span>
+              </button>
+            );
+          })}
           {toolbarRight}
           {activeFilterCount > 0 && (
             <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setFilters({}); }} title="清除所有列筛选">清筛 {activeFilterCount}</button>
@@ -596,13 +636,13 @@ export function DataTable<T>({
           <thead>
             <tr>
               {selectable && (
-                <th className="cell-check dt-sticky" style={{ left: 0 }}>
+                <th className="cell-check dt-fixed" style={{ left: 0 }}>
                   <input type="checkbox" checked={Boolean(allChecked)}
                     ref={(el) => { if (el) el.indeterminate = Boolean(someChecked && !allChecked); }}
                     onChange={onToggleAll} aria-label={allChecked ? "取消全选本页" : "全选本页"} title="全选/取消本页" />
                 </th>
               )}
-              {rowNums && <th className="dt-rownum dt-sticky" style={{ left: checkW }} aria-label="行号">#</th>}
+              {rowNums && <th className="dt-rownum dt-fixed" style={{ left: checkW }} aria-label="行号">#</th>}
               {visibleCols.map((c) => {
                 const fActive = (filters[c.key]?.size ?? 0) > 0;
                 const sIdx = sorts.findIndex((s) => s.key === c.key);
@@ -677,8 +717,8 @@ export function DataTable<T>({
             {displayRows.length === 0 && server?.loading && (
               Array.from({ length: 8 }).map((_, ri) => (
                 <tr key={`sk${ri}`} className="dt-skrow">
-                  {selectable && <td className="cell-check dt-sticky" style={{ left: 0 }}><span className="skeleton" style={{ height: 12, width: 12, borderRadius: 3 }} /></td>}
-                  {rowNums && <td className="dt-rownum dt-sticky" style={{ left: checkW }} />}
+                  {selectable && <td className="cell-check dt-fixed" style={{ left: 0 }}><span className="skeleton" style={{ height: 12, width: 12, borderRadius: 3 }} /></td>}
+                  {rowNums && <td className="dt-rownum dt-fixed" style={{ left: checkW }} />}
                   {visibleCols.map((c, ci) => (
                     <td key={c.key} className={stickyCls(c.key)} style={stickyTd(c.key)}>
                       <span className="skeleton" style={{ height: 12, width: `${55 + ((ri + ci) % 4) * 10}%`, display: "block", borderRadius: 4 }} />
@@ -708,11 +748,11 @@ export function DataTable<T>({
                   onClick={onRowClick ? () => onRowClick(r) : undefined}
                 >
                   {selectable && (
-                    <td className="cell-check dt-sticky" style={{ left: 0 }} onClick={(e) => { e.stopPropagation(); handleCheck(e, idx, id); }}>
+                    <td className="cell-check dt-fixed" style={{ left: 0 }} onClick={(e) => { e.stopPropagation(); handleCheck(e, idx, id); }}>
                       <input type="checkbox" checked={Boolean(isSel)} readOnly tabIndex={-1} />
                     </td>
                   )}
-                  {rowNums && <td className="dt-rownum dt-sticky" style={{ left: checkW }}>{rowNumBase + idx + 1}</td>}
+                  {rowNums && <td className="dt-rownum dt-fixed" style={{ left: checkW }}>{rowNumBase + idx + 1}</td>}
                   {visibleCols.map((c, ci) => {
                     const selCls = inSel(idx, ci) ? " dt-cellsel" : "";
                     const focusCls = selF && selF.r === idx && selF.c === ci ? " dt-cellfocus" : "";
@@ -743,8 +783,8 @@ export function DataTable<T>({
           {totals && displayRows.length > 0 && (
             <tfoot>
               <tr className="dt-totals">
-                {selectable && <td className="cell-check dt-sticky" style={{ left: 0 }} />}
-                {rowNums && <td className="dt-rownum dt-sticky" style={{ left: checkW }}>Σ</td>}
+                {selectable && <td className="cell-check dt-fixed" style={{ left: 0 }} />}
+                {rowNums && <td className="dt-rownum dt-fixed" style={{ left: checkW }}>Σ</td>}
                 {visibleCols.map((c, ci) => {
                   let sum = 0, hit = 0;
                   for (const r of displayRows) {

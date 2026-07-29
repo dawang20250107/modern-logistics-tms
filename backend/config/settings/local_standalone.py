@@ -6,7 +6,9 @@
 - CORS 放行 vite dev(:5173) 与 preview(:4173)
 
 用法：python3 manage.py runserver 127.0.0.1:8001 --settings=config.settings.local_standalone
-（配套 Go 网关启动方式见 backend-go/PORTING.md）
+
+纳入版本库的原因：这是双栈并跑期唯一的 Django 启动方式，此前只是本地未跟踪文件，
+容器重建后随之丢失、环境要从头重搭。Django 退役时随 backend/ 一并删除。
 """
 
 from .local import *  # noqa: F401,F403

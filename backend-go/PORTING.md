@@ -110,6 +110,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
 | 组织中台-读 | GET /org/{overview·organizations·organizations/tree·roles·rbac/matrix·service-areas·employees·handovers·login-audit·route-resolve}（列表复用通用引擎，树/矩阵/区划仲裁定制） | ✅ 十端点双栈 diff 全一致（含子树人头累加、覆盖排他+优先级仲裁） |
 | 单单派车 | POST /orders/{id}/dispatch（own_vehicle/fleet/third_party/platform：状态/锁定/归属门禁 → 承运商风控 → 车辆司机行锁占用 → 核载/车厢/证件资质合规 → 转运单+承运状态+应付快照+双事件+承运合同 HT 取号，单事务） | ✅ 全校验链实测（ORDER_NOT_LOCKED/CARRIER_REQUIRED/VEHICLE_BUSY 等）；Django 读回运单/合同/费用/订单全对；合同为文本版（PDF 留 Django 的 try/except 语义，见差异清单） |
+| 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
 | 组织中台-写 | POST /org/{organizations·employees·service-areas} 创建 + employees/{id}/{roles·enable·disable·reset-password·handover} + roles/{id}/set-permissions | ✅ Go 写→Django 读回全对；物化路径 path 正确；重置密码 Go 生成 pbkdf2 哈希双栈均可登录；移交事务（下属改挂+部门改派+停用留痕）实测；唯一性/无账号 400 契约对齐 |
 
@@ -192,6 +193,17 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   在 PATCH（`partial=True`）下，一旦 `x` 为 None，`get_default()` 直接 `raise SkipField`，
   该键会从响应里整个消失（而非返回 `""`）。这是 DRF 的既有行为而非本项目设计，
   Go 侧以 `ResourceCfg.PartialOmit` 逐字段声明复刻，避免前端在 PATCH 回包上错位。
+
+- **登录失败计数与找回验证码存进程内**：Django 走 cache（本地 LocMemCache，生产 Redis），
+  Go 侧同样是进程内带 TTL 的 map，单实例语义等价。多实例部署时锁定与验证码不共享，
+  需换成 Redis 或 PG —— 收官阶段随部署形态一并定。
+- **头像文件名**：Django 的 `upload_to="avatars/"` 保留原始文件名（重名时加随机后缀），
+  Go 侧一律改用 UUID 文件名。这是有意收紧：原始文件名会把用户可控字符串带进落盘路径。
+  库里存的都是相对路径，`/media/` 直出与 `avatar_url` 回显两栈一致。
+- **DRF 普通 Response 的信封悖论已按原样复刻**：视图里 `Response({"detail": ...}, status=400)`
+  走的是渲染器而非异常处理器，于是响应是 `success:true` + 400 状态码。找回密码的
+  「请输入邮箱或手机号」「验证码无效或已过期」与头像上传的三处校验都属此类，
+  Go 侧同样输出 success:true —— 前端按 detail 取值，改成 error 分支反而会读不到。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

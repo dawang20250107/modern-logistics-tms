@@ -49,7 +49,8 @@ func main() {
 
 	authSvc := &auth.Service{DB: pool}
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
-	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.DjangoUpstream}
+	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.DjangoUpstream,
+		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
@@ -77,9 +78,19 @@ func main() {
 	// ── 已移植域：Go 原生处理 ──
 	r.Post("/api/v1/auth/token", authH.Token)
 	r.Post("/api/v1/auth/token/refresh", authH.Refresh)
+	r.Post("/api/v1/auth/token/verify", authH.TokenVerify)
+	r.Get("/api/v1/auth/methods", authH.AuthMethods)
+	r.Post("/api/v1/auth/register", authH.Register)
+	r.Post("/api/v1/auth/password-reset/request", authH.PasswordResetRequest)
+	r.Post("/api/v1/auth/password-reset/confirm", authH.PasswordResetConfirm)
 	r.Group(func(p chi.Router) {
 		p.Use(authH.RequireAuth)
 		p.Get("/api/v1/auth/me", authH.Me)
+		p.Patch("/api/v1/auth/me", authH.MePatch)
+		p.Post("/api/v1/auth/me/avatar", authH.Avatar)
+		p.Delete("/api/v1/auth/me/avatar", authH.Avatar)
+		p.Post("/api/v1/auth/change-password", authH.ChangePassword)
+		p.Get("/api/v1/auth/login-history", authH.LoginHistory)
 		p.Get("/api/v1/orders", orderH.List)
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)
 		p.Post("/api/v1/orders/intake", orderH.Intake)

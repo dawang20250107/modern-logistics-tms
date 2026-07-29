@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -78,6 +79,28 @@ func (t *TokenIssuer) Parse(raw, wantType string) (*Claims, error) {
 	}
 	if claims.UserID == "" {
 		return nil, fmt.Errorf("missing user_id")
+	}
+	return claims, nil
+}
+
+// ParseAny 不限 token_type 的校验（对齐 simplejwt 的 UntypedToken，供 token/verify 用）。
+// 返回的错误串直接对应 DRF 输出的 detail：过期与非法要分开，前端据此决定是否续期。
+func (t *TokenIssuer) ParseAny(raw string) (*Claims, error) {
+	claims := &Claims{}
+	_, err := jwt.ParseWithClaims(raw, claims, func(tok *jwt.Token) (any, error) {
+		if _, ok := tok.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return t.secret, nil
+	}, jwt.WithValidMethods([]string{"HS256"}))
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, errors.New("Token is expired")
+		}
+		return nil, errors.New("Token is invalid")
+	}
+	if claims.UserID == "" {
+		return nil, errors.New("Token is invalid")
 	}
 	return claims, nil
 }

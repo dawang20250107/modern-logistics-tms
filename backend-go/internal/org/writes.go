@@ -7,7 +7,6 @@ package org
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
@@ -351,22 +349,12 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	raw := make([]byte, 9)
 	_, _ = rand.Read(raw)
 	newPwd := base64.RawURLEncoding.EncodeToString(raw)
-	hash := djangoPBKDF2(newPwd)
+	hash := auth.MakeDjangoPassword(newPwd)
 	var username string
 	_ = h.DB.QueryRow(ctx, `UPDATE accounts_user SET password=$2 WHERE id=$1::uuid RETURNING username`, *userID, hash).Scan(&username)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"employee_no": empNo, "username": username, "password": newPwd,
 	})
-}
-
-// djangoPBKDF2 生成 django.contrib.auth.hashers 兼容口令哈希（pbkdf2_sha256, 100 万迭代级别用默认 87 万）
-func djangoPBKDF2(password string) string {
-	const iterations = 870000 // Django 5.x 默认
-	saltRaw := make([]byte, 12)
-	_, _ = rand.Read(saltRaw)
-	salt := base64.RawURLEncoding.EncodeToString(saltRaw)[:16]
-	dk := pbkdf2.Key([]byte(password), []byte(salt), iterations, sha256.Size, sha256.New)
-	return fmt.Sprintf("pbkdf2_sha256$%d$%s$%s", iterations, salt, base64.StdEncoding.EncodeToString(dk))
 }
 
 // EmployeeRoles GET/POST /api/v1/org/employees/{id}/roles

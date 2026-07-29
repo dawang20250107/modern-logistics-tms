@@ -57,7 +57,7 @@ func (h *Handler) require(w http.ResponseWriter, r *http.Request) (*auth.UserRow
 		return nil, false
 	}
 	// LLM 成本闸：与 Django scope="ai" 同档（默认 30/min，按用户计）
-	if ok, wait := aiThrottle.allow(me.ID); !ok {
+	if ok, wait := aiThrottle.Allow(me.ID); !ok {
 		httpx.Err(w, http.StatusTooManyRequests, "throttled",
 			fmt.Sprintf("请求已被限流。 预计 %d 秒后可用。", wait))
 		return nil, false
@@ -275,3 +275,7 @@ func (h *Handler) ConfirmSuggestion(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, it)
 }
+
+// aiThrottle LLM/Agent 调用限额（对齐 DRF scope="ai"，默认 30/min）：
+// 防 token 成本 DoS —— 缺这道闸，一次脚本循环就能把模型调用打爆。
+var aiThrottle = httpx.NewThrottle("THROTTLE_AI", "30/min")

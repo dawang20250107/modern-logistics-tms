@@ -12,8 +12,10 @@ type Config struct {
 	SecretKey      string // 必须与 DJANGO_SECRET_KEY 一致：签发/校验 simplejwt 兼容 token
 	DjangoUpstream string // 未移植路由的反向代理上游（绞杀者模式）
 	CORSOrigins    []string
-	AccessMinutes  int // 与 SIMPLE_JWT.ACCESS_TOKEN_LIFETIME 对齐
-	RefreshDays    int // 与 SIMPLE_JWT.REFRESH_TOKEN_LIFETIME 对齐
+	AccessMinutes  int    // 与 SIMPLE_JWT.ACCESS_TOKEN_LIFETIME 对齐
+	RefreshDays    int    // 与 SIMPLE_JWT.REFRESH_TOKEN_LIFETIME 对齐
+	MediaRoot      string // 媒体文件落盘根目录（对齐 Django MEDIA_ROOT）
+	Debug          bool   // 对齐 settings.DEBUG（仅影响调试期的额外响应字段）
 }
 
 func env(key, def string) string {
@@ -36,5 +38,7 @@ func Load() Config {
 		CORSOrigins:    origins,
 		AccessMinutes:  30,
 		RefreshDays:    7,
+		MediaRoot:      env("MEDIA_ROOT", "../backend/media"),
+		Debug:          strings.EqualFold(env("DJANGO_DEBUG", "true"), "true"),
 	}
 }

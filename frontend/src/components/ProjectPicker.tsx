@@ -148,7 +148,9 @@ export function ProjectPicker({ value, valueName, onChange, customer, origin, de
               style={{
                 display: "block", width: "100%", textAlign: "left", padding: "7px 9px",
                 border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13,
-                background: p.id === value ? "var(--chip-bg, #eef2ff)" : "transparent",
+                // --chip-bg 从未定义过，一直走的是 fallback #eef2ff 这个写死的浅蓝，
+                // 暗色主题下不跟随。选中项底色本来就有语义 token。
+                background: p.id === value ? "var(--accent-weak)" : "transparent",
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>

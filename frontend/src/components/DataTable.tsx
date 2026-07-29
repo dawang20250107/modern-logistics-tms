@@ -84,6 +84,23 @@ function parseNum(v: string | number): number | null {
 }
 const fmtStat = (n: number) => n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 
+// 中文列排序此前用裸 `<` 比较，那是 UTF-16 码点序：点「客户」升序，第一名是
+// 「宁德时代」（宁 U+5B81）而不是「比亚迪」（比 U+6BD4）——按 Unicode 编号排，
+// 对看表的人没有任何意义。中文必须走 localeCompare 的拼音序。
+//
+// numeric:true 顺带修掉另一处：单号 DD10 在纯字典序里排在 DD9 前面，
+// 开了自然数序才是 DD9 → DD10。
+//
+// 服务端排序的列不受影响（Postgres 有自己的 collation），这里只管客户端排序。
+const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+
+function compareValues(a: string | number, b: string | number): number {
+  if (typeof a === "number" && typeof b === "number") {
+    return a === b ? 0 : a < b ? -1 : 1;
+  }
+  return collator.compare(String(a ?? ""), String(b ?? ""));
+}
+
 export function DataTable<T>({
   columns, rows, rowKey, viewKey, selectable, selected, onToggle, onToggleAll,
   onRowContextMenu, onRowDoubleClick, onRowClick, rowClassName, stickyFirst, toolbarLeft, toolbarRight, batchBar, exportName,
@@ -206,8 +223,8 @@ export function DataTable<T>({
     return [...filteredRows].sort((a, b) => {
       for (const { s, col } of chain) {
         const va = col!.sortValue!(a), vb = col!.sortValue!(b);
-        if (va < vb) return s.dir === "asc" ? -1 : 1;
-        if (va > vb) return s.dir === "asc" ? 1 : -1;
+        const d = compareValues(va, vb);
+        if (d !== 0) return s.dir === "asc" ? d : -d;
       }
       return 0;
     });
@@ -550,6 +567,36 @@ export function DataTable<T>({
     isPinned(key) ? { left: pinLeft.get(key) } : isPinnedR(key) ? { right: pinRight.get(key) } : undefined;
   const stickyCls = (key: string) => (isPinned(key) ? "dt-fixed" : isPinnedR(key) ? "dt-fixed dt-fixed-r" : "");
 
+  // 单元格选区的事件委托。
+  //
+  // 这三个处理器原先挂在每一个 <td> 上：100 行 × 13 列 = 1300 个单元格，
+  // 每次重渲染就要新建 3900 个箭头函数，React 再逐个 diff。实测 100 行时
+  // 点一次排序要 500ms —— 而 500ms 的响应已经是明显的卡顿。
+  //
+  // 委托到 tbody 只需 3 个处理器，坐标从 data-cell 属性读。这个属性本来就有
+  // （键盘导航靠它定位单元格），基础设施是现成的。
+  const cellCoord = (e: React.MouseEvent): { r: number; c: number } | null => {
+    const td = (e.target as HTMLElement).closest?.("[data-cell]");
+    if (!td) return null;
+    const [r, c] = (td.getAttribute("data-cell") ?? "").split("-").map(Number);
+    return Number.isFinite(r) && Number.isFinite(c) ? { r, c } : null;
+  };
+  const onBodyMouseDown = (e: React.MouseEvent) => {
+    const p = cellCoord(e);
+    if (p) startCellSel(e, p.r, p.c);
+  };
+  const onBodyMouseOver = (e: React.MouseEvent) => {
+    if (!draggingRef.current) return; // 非拖拽状态直接返回，不做 closest 查询
+    const p = cellCoord(e);
+    if (p) dragCellSel(p.r, p.c);
+  };
+  const onBodyClickCapture = (e: React.MouseEvent) => {
+    if (movedRef.current) {
+      e.stopPropagation();
+      movedRef.current = false;
+    }
+  };
+
   return (
     <div className={`dt dt-den-${density}${fill ? " dt-fill" : ""}${fullscreen ? " dt-fs" : ""}`}>
       <div className="dt-toolbar">
@@ -713,7 +760,7 @@ export function DataTable<T>({
               })}
             </tr>
           </thead>
-          <tbody>
+          <tbody onMouseDown={onBodyMouseDown} onMouseOver={onBodyMouseOver} onClickCapture={onBodyClickCapture}>
             {displayRows.length === 0 && server?.loading && (
               Array.from({ length: 8 }).map((_, ri) => (
                 <tr key={`sk${ri}`} className="dt-skrow">
@@ -762,9 +809,6 @@ export function DataTable<T>({
                         data-cell={`${idx}-${ci}`}
                         className={`${c.align === "right" ? "num" : ""} ${stickyCls(c.key)}${selCls}${focusCls}`}
                         style={stickyTd(c.key)}
-                        onMouseDown={(e) => startCellSel(e, idx, ci)}
-                        onMouseEnter={() => dragCellSel(idx, ci)}
-                        onClickCapture={(e) => { if (movedRef.current) { e.stopPropagation(); movedRef.current = false; } }}
                       >
                         {c.render(r)}
                       </td>

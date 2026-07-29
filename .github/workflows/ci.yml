@@ -59,6 +59,10 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npx tsc --noEmit
+      # DataTable 是 10+ 个页面的公共依赖，它坏了整站表格都坏。
+      # 这些用例钉的都是"不报错、只静默失效"那类回归。
+      - name: Test
+        run: npx vitest run
       - name: Build
         run: npx vite build
 

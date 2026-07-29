@@ -27,13 +27,9 @@ export function AdminHubPage() {
 
   return (
     <div className="stack">
-      <div className="panel" style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", border: "none" }}>
-        <div style={{ padding: "20px 24px" }}>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>管理后台</div>
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>
-            组织、账号、权限与合规审计的统一管理入口 · 仅超级管理员可进
-          </div>
-        </div>
+      {/* 深色 hero 去掉：标题与顶栏重复，只有这行说明是新信息 */}
+      <div className="page-intro">
+        <span className="page-intro-flow">组织、账号、权限与合规审计的统一管理入口 · 仅超级管理员可进</span>
       </div>
 
       <div className="panel">

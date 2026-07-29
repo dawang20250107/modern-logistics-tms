@@ -364,16 +364,10 @@ function ResourceOverview({ onJump }: { onJump: (tab: string) => void }) {
     { key: "compliance", icon: credAlert > 0 ? <IconWarning size={20} /> : <IconShield size={20} />, tone: credAlert > 0 ? "red" : "green", n: credAlert, label: "证件预警", sub: credAlert > 0 ? `${credSum?.expired ?? 0} 过期 · ${credSum?.critical ?? 0} 紧急` : "30 天内无临期", jump: "compliance" },
   ];
 
+  // 原先这里有一条深色 hero，整条 80px 只写了「资源库」三个字——顶栏的页面标题
+  // 已经写着同样三个字。重复一遍不是强调，是把入口卡片往下推了 96px。
   return (
     <div className="stack" style={{ gap: 16 }}>
-      <div className="rh-hero">
-        <div className="rh-hero-brand">
-          <div className="rh-hero-ic"><IconDatabase size={22} /></div>
-          <div>
-            <div className="rh-hero-title">资源库</div>
-          </div>
-        </div>
-      </div>
       <div className="rh-cards">
         {cards.map((c) => (
           <button key={c.key} className={`rh-card rh-${c.tone}`} onClick={() => onJump(c.jump)}>

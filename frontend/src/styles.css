@@ -1531,6 +1531,15 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .dt-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-table td.cell-wrap { white-space: normal; }
 
+/* 页面引言条：替代此前各页顶部那条深色 hero。
+   页面标题顶栏已经写了，这里只放真正的新信息——流程说明与视图切换。
+   不用面板、不用深底：它是一行注解，不是一个区块。 */
+.page-intro {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 2px 2px 4px;
+}
+.page-intro-flow { color: var(--muted); font-size: var(--text-base); min-width: 0; }
+
 /* 单元格内的单位与次要量：主数字保持满对比，单位和从属数字退一档。
    「14.10吨/31件」里真正驱动决策的是吨数，件数是佐证——同样字重同样颜色地并排，
    等于让眼睛每行都做一次无谓的取舍。 */
@@ -1717,9 +1726,10 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 
 /* ══════════════════ 对账中心（Reconciliation Center） ══════════════════ */
-.recon-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--hero-line); border-radius: var(--radius-sm); }
-.recon-tabs button { position: relative; padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--hero-sub); background: transparent; border: none; border-radius: 7px; cursor: pointer; transition: all .14s; }
-.recon-tabs button:hover { color: var(--hero-ink); }
+/* 从深色 hero 挪到浅底后，配色跟着换回常规 token（原来吃的是 --hero-* 那套） */
+.recon-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--panel-3); border-radius: var(--radius-sm); }
+.recon-tabs button { position: relative; padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--ink-3); background: transparent; border: none; border-radius: 7px; cursor: pointer; transition: all .14s; }
+.recon-tabs button:hover { color: var(--ink); background: var(--panel); }
 .recon-tabs button.active { background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-glow); }
 .recon-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 6px; font-size: 10px; font-weight: 700; color: #fff; background: var(--red); border-radius: 8px; }
 
@@ -1963,7 +1973,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .om-panel > .dt-fill { flex: 1; min-height: 0; }
 
 /* ── 科技风：经营图表窄屏降列（此前两列栅格未响应）── */
-@media (max-width: 980px) { .bm-charts { grid-template-columns: 1fr !important; } }
+/* 断点从 980 提到 1200：2fr/1fr 下右栏在 1024 只剩 ~250px，
+   甜甜圈的圆环和图例一起被切掉半边。图表不是文字，挤不动。 */
+@media (max-width: 1200px) { .bm-charts { grid-template-columns: 1fr !important; } }
 
 /* ═══════ 操作体验打磨：加载反馈 + 主题平滑过渡 ═══════ */
 /* 全局请求进度条：任意后台请求/写操作进行时，顶部滑动一道青光 */

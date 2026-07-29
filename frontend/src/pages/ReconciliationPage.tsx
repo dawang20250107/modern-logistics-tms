@@ -440,19 +440,17 @@ export function ReconciliationPage() {
 
   return (
     <div className={`stack${tab === "statements" ? " table-page" : ""}`} style={{ position: "relative" }}>
-      <div className="panel" style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", border: "none" }}>
-        <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: "bold" }}>对账中心</div>
-            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>
-              应收应付一体化：总览敞口 → 生成对账单 → 异常审计 → 账龄分析 → 收付款核销闭环。
-            </div>
-          </div>
-          <div className="recon-tabs" role="tablist" aria-label="对账中心视图">
-            {([["overview", "对账总览"], ["statements", "对账单台账"], ["aging", "账龄分析"], ["settle", "收付款核销"]] as const).map(([k, label]) => (
-              <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleQueue.length > 0 ? <span className="recon-badge">{settleQueue.length}</span> : null}</button>
-            ))}
-          </div>
+      {/* 这里原是一条深色 hero：页面上视觉最重的元素，装的却是顶栏已经写过的
+          「对账中心」四个字。深色横幅还会跟同为深色的侧栏抢注意力，把视线拉到
+          一个没有信息的地方。留下真正有用的——流程说明与视图切换。 */}
+      <div className="page-intro">
+        <span className="page-intro-flow">
+          应收应付一体化：总览敞口 → 生成对账单 → 异常审计 → 账龄分析 → 收付款核销闭环
+        </span>
+        <div className="recon-tabs" role="tablist" aria-label="对账中心视图">
+          {([["overview", "对账总览"], ["statements", "对账单台账"], ["aging", "账龄分析"], ["settle", "收付款核销"]] as const).map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleQueue.length > 0 ? <span className="recon-badge">{settleQueue.length}</span> : null}</button>
+          ))}
         </div>
       </div>
 

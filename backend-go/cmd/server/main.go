@@ -201,6 +201,8 @@ func main() {
 		p.Post("/api/v1/waybills/{no}/sign", waybillH.Sign)
 		p.Post("/api/v1/waybills/{no}/stop-event", waybillH.StopEvent)
 		p.Post("/api/v1/waybills/merge", waybillH.Merge)
+		p.Post("/api/v1/waybills/dispatch-plan", waybillH.DispatchPlan)
+		p.Get("/api/v1/waybills/{no}/dispatch-recommendation", waybillH.DispatchRecommendation)
 		p.Post("/api/v1/waybills/{no}/dispatch", waybillH.Dispatch)
 		p.Get("/api/v1/waybills/{no}/events", waybillH.Events)
 		p.Post("/api/v1/waybills/{no}/events", waybillH.Events)

@@ -245,3 +245,42 @@ func nullIfEmpty(s string) any {
 	}
 	return s
 }
+
+// CostRulesFor 某承运商当下适用的全部成本价规则（含无对手方的通用规则）。
+// 供调度比价用：Django 那版不看生效期，改价会把历史比价一起改掉；这里按
+// 「当天有效」筛，比出来的价与真派单时会落的价是同一套。
+func CostRulesFor(ctx context.Context, q Querier, carrierID string, at time.Time) ([]Rule, error) {
+	rows, err := q.Query(ctx, `
+		SELECT p.id::text, p.name, p.price_type, p.charge_method, p.expense_item_code,
+		       COALESCE(p.contract_id::text,''), COALESCE(c.contract_no,''),
+		       COALESCE(cm.name,''), COALESCE(cr.name,''), p.route_name, p.vehicle_type,
+		       p.base_price, p.min_price, p.unit_price, p.min_charge_qty,
+		       p.volumetric_factor, p.fuel_surcharge_pct, p.tier_prices
+		FROM fin_pricing_rule p
+		LEFT JOIN fin_contract c ON c.id = p.contract_id
+		LEFT JOIN md_customer cm ON cm.id = p.customer_id
+		LEFT JOIN md_carrier cr ON cr.id = p.carrier_id
+		WHERE p.is_active AND p.price_type = 'cost'
+		  AND (p.effective_from IS NULL OR p.effective_from <= $1::date)
+		  AND (p.effective_to   IS NULL OR p.effective_to   >= $1::date)
+		  AND (p.carrier_id IS NULL OR p.carrier_id::text = $2)
+		ORDER BY p.priority DESC, p.name, p.id`, at, carrierID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Rule{}
+	for rows.Next() {
+		var r Rule
+		var tiers []byte
+		if rows.Scan(&r.ID, &r.Name, &r.PriceType, &r.ChargeMethod, &r.ExpenseItemCode,
+			&r.ContractID, &r.ContractNo, &r.CustomerName, &r.CarrierName, &r.RouteName, &r.VehicleType,
+			&r.BasePrice, &r.MinPrice, &r.UnitPrice, &r.MinChargeQty,
+			&r.VolumetricFactor, &r.FuelSurchargePct, &tiers) != nil {
+			break
+		}
+		_ = jsonUnmarshal(tiers, &r.TierPrices)
+		out = append(out, r)
+	}
+	return out, nil
+}

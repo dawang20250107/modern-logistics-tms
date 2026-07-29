@@ -3,9 +3,7 @@ package agent
 // AI 域 HTTP 层：/ai/deepseek/status、/agent/tools、/agent/tools/execute、
 // /agent/chat、/ai/suggestions（列表 + 人工确认闭环）。
 //
-// 两个尚未原生化的工具（logistics.dispatch_recommendation 依赖报价规则引擎、
-// logistics.intelligent_consolidation 依赖拼单配载算法）由 Fallback 透传回 Django，
-// 对外契约不变；待各自所属域移植后接管。
+// 9 个工具全部原生实现，注册序即 /agent/tools 的输出序（对外契约的一部分）。
 
 import (
 	"context"
@@ -24,10 +22,9 @@ import (
 )
 
 type Handler struct {
-	DB       *pgxpool.Pool
-	Svc      *auth.Service
-	MD       *masterdata.Handler
-	Fallback http.Handler // 未原生化工具 → Django 代理
+	DB  *pgxpool.Pool
+	Svc *auth.Service
+	MD  *masterdata.Handler
 }
 
 const permAIUse = "ai.use"
@@ -111,15 +108,6 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			httpx.Err(w, http.StatusBadRequest, "INVALID_ARGUMENTS", "arguments 必须是对象。")
 			return
 		}
-	}
-	if _, native := registryByName[body.ToolName]; !native {
-		// 未原生化的工具透传回 Django（对外契约不变）
-		if h.Fallback != nil {
-			h.Fallback.ServeHTTP(w, r)
-			return
-		}
-		httpx.Err(w, http.StatusNotFound, "UNKNOWN_AGENT_TOOL", "未知工具："+body.ToolName)
-		return
 	}
 	res, terr := ExecuteTool(r.Context(), h.DB, body.ToolName, args)
 	if terr != nil {

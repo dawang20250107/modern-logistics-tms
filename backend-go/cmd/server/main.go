@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,7 +30,6 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/notifications"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/orders"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/org"
-	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/proxy"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/resources"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/telematics"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
@@ -59,7 +59,7 @@ func main() {
 
 	authSvc := &auth.Service{DB: pool}
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
-	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.DjangoUpstream,
+	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.PublicBase,
 		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
@@ -70,27 +70,34 @@ func main() {
 	orgH := &org.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	excH := &exceptions.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	ntfH := &notifications.Handler{DB: pool, Svc: authSvc, MD: mdH}
-	django := proxy.New(cfg.DjangoUpstream)
-	mdH.Fallback = django // CRUD 子路由未声明的自定义动作仍回代上游
 	resH := &resources.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	drvH := &driver.Handler{DB: pool, Secret: cfg.SecretKey, MediaRoot: cfg.MediaRoot}
 	// 车联网上报走进程内有界队列 + 后台批处理，替代 Redis 队列 + Celery
 	ingestor := telematics.NewIngestor(pool)
 	ingestor.Start(context.Background())
 	ingestor.StartOfflineScanner(context.Background(), 1*time.Minute)
+	// MQTT 终端接入（替代 mqtt_gateway 管理命令）；未配 MQTT_HOST 则不启用
+	ingestor.StartMQTTGateway(context.Background(), telematics.MQTTOptions{
+		Host: cfg.MQTTHost, Port: cfg.MQTTPort, Topic: cfg.MQTTTopic,
+		Username: cfg.MQTTUsername, Password: cfg.MQTTPassword,
+	})
 	telH := &telematics.Handler{DB: pool, Svc: authSvc, In: ingestor}
-	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH, Fallback: django}
+	// 指标按日物化，替代 Django 的 materialize_metrics 命令（趋势图的数据来源）
+	analytics.StartMaterializer(context.Background(), pool, 1*time.Hour, 30)
+	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
 	}
+	// 外部 MCP server 的工具与内置工具同表注册。必须在开始监听之前跑完：
+	// 注册表是启动期一次性构建的，之后只读，这样才不用为它上锁。
+	agent.LoadMCPTools(ctx, os.Getenv("AGENT_MCP_SERVERS"))
 
-	// detailOnly 包一层：路径参数不是 UUID 时，说明命中的其实是集合级动作
-	// （/orders/pool、/orders/export…）——chi 的 {id} 会先把它吃掉，导致这些端点
-	// 变成 404。凡是「静态段与 {id} 同层」的路由都必须显式回代上游。
+	// detailOnly 包一层：路径参数不是 UUID 时说明命中的其实是同层的集合级动作，
+	// 而那些动作都已单独注册——走到这里就是真的没有这个资源。
 	detailOnly := func(param string, next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, rq *http.Request) {
 			if _, err := uuid.Parse(chi.URLParam(rq, param)); err != nil {
-				django.ServeHTTP(w, rq)
+				httpx.Err(w, http.StatusNotFound, "error", "Not found.")
 				return
 			}
 			next(w, rq)
@@ -156,6 +163,8 @@ func main() {
 		p.Post("/api/v1/orders/batch", orderH.Batch)
 		p.Post("/api/v1/orders/batch-update", orderH.BatchUpdate)
 		p.Post("/api/v1/orders/import", orderH.Import)
+		p.Post("/api/v1/orders/quote", orderH.Quote)
+		p.Post("/api/v1/orders/parse-preview", orderH.ParsePreview)
 		p.Get("/api/v1/orders/{id}/ymm-quote", orderH.YmmQuote)
 		p.Post("/api/v1/orders/{id}/convert", orderH.Convert)
 		p.Get("/api/v1/orders/{id}/dispatch-suggestion", orderH.DispatchSuggestion)
@@ -198,10 +207,6 @@ func main() {
 		p.Get("/api/v1/telematics/vehicles/live", telH.Live)
 		p.Get("/api/v1/telematics/waybills/{no}/trajectory", telH.Trajectory)
 		p.Get("/api/v1/telematics/command-center/summary", telH.CommandCenterSummary)
-		// 与 {no} 同层的集合级动作：运单号不是 UUID，没法靠格式判别，
-		// 只能显式挂到代理上（随各自域移植后从这里摘掉）。
-		p.Post("/api/v1/waybills/dispatch-plan", django.ServeHTTP)
-		p.Post("/api/v1/waybills/merge", django.ServeHTTP)
 		p.Get("/api/v1/waybills/{no}", waybillH.Detail)
 		p.Post("/api/v1/waybills/{no}/transition", waybillH.Transition)
 		p.Post("/api/v1/waybills/{no}/sign", waybillH.Sign)
@@ -349,10 +354,27 @@ func main() {
 		p.Get("/api/v1/org/route-resolve", orgH.RouteResolve)
 	})
 
-	// ── 其余全部：绞杀者代理回 Django ──
-	r.NotFound(django.ServeHTTP)
+	// 媒体文件（头像/回单/证件/打卡照/合同）：Django 退役后由网关自服务。
+	// nosniff 是必须的——这些是用户上传物，绝不能让浏览器按内容猜出可执行类型。
+	media := http.StripPrefix("/media/", http.FileServer(http.Dir(cfg.MediaRoot)))
+	r.Handle("/media/*", http.HandlerFunc(
+		func(w http.ResponseWriter, rq *http.Request) {
+			// 不开目录列表。判定必须在 StripPrefix 之前做：`/media/` 自身被削完就是
+			// 空串，尾斜杠判断落空，FileServer 会把整个上传目录列出来。
+			if strings.HasSuffix(rq.URL.Path, "/") {
+				httpx.Err(w, http.StatusNotFound, "not_found", "未找到。")
+				return
+			}
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			media.ServeHTTP(w, rq)
+		}))
 
-	slog.Info("gateway up", "addr", cfg.ListenAddr, "django_upstream", cfg.DjangoUpstream)
+	// 未知路由：DRF 同款 404 信封
+	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
+		httpx.Err(w, http.StatusNotFound, "not_found", "未找到。")
+	})
+
+	slog.Info("gateway up", "addr", cfg.ListenAddr)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
 	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("server", "err", err)

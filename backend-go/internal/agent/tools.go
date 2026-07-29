@@ -33,7 +33,14 @@ type ToolSpec struct {
 	Description string
 	InputSchema map[string]any
 	Risk        string
-	Fn          func(ctx context.Context, db *pgxpool.Pool, args map[string]any) (map[string]any, *toolErr)
+	// RequiresConfirm 为 true 时，ReAct 循环里不自动执行，只登记为待确认；
+	// 人工在工具面板点执行（/agent/tools/execute）仍可跑。
+	//
+	// 内置的高风险工具用不上它——它们在自己的 Fn 里就落 AgentSuggestion 了，
+	// 那是"执行了查询、但不落地动作"。外部 MCP 工具做什么我们无从判断，
+	// 只能整条挡在循环外。
+	RequiresConfirm bool
+	Fn              func(ctx context.Context, db *pgxpool.Pool, args map[string]any) (map[string]any, *toolErr)
 }
 
 type toolErr struct {
@@ -57,7 +64,10 @@ func register(s ToolSpec) {
 		s.Risk = riskLow
 	}
 	registry = append(registry, s)
-	registryByName[s.Name] = &registry[len(registry)-1]
+	// 存副本而不是 &registry[len-1]：append 扩容会换掉底层数组，
+	// 之前存进 map 的指针就指向旧数组了。MCP 工具是运行期才注册的，更要防这一手。
+	spec := s
+	registryByName[s.Name] = &spec
 }
 
 // ListTools 工具清单（不含实现）
@@ -67,6 +77,7 @@ func ListTools() []map[string]any {
 		out = append(out, map[string]any{
 			"name": s.Name, "description": s.Description,
 			"input_schema": s.InputSchema, "risk": s.Risk,
+			"requires_confirm": s.RequiresConfirm,
 		})
 	}
 	return out
@@ -490,30 +501,7 @@ func fmtNum(v any) string {
 	}
 }
 
-// notPortedTools 两个尚未原生化的工具声明——保持 /agent/tools 清单与 Django 完全一致，
-// 执行时透传回 Django（dispatch_recommendation 依赖报价规则引擎、
-// intelligent_consolidation 依赖拼单配载算法，各随所属域移植后接管）。
-var notPortedTools = []map[string]any{
-	{
-		"name":         "logistics.dispatch_recommendation",
-		"description":  "为运单推荐可用车辆/司机并预估成本毛利。",
-		"input_schema": waybillSchema,
-		"risk":         riskLow,
-	},
-	{
-		"name":        "logistics.intelligent_consolidation",
-		"description": "运行智能 B2B 拼单配载与最省算路算法，将同向 LTL 小单合并配载 FTL 卡车，输出降本方案与预计节省金额。",
-		"input_schema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"city_filter": map[string]any{"type": "string", "description": "可选：指定始发或目的城市名称（如'无锡'），过滤匹配的拼单建议"},
-			},
-		},
-		"risk": riskLow,
-	},
-}
-
-// mergedToolList 按 Django 注册序输出完整 9 个工具
+// mergedToolList 按既定注册序输出完整 9 个工具（顺序是对外契约的一部分）
 func mergedToolList() []map[string]any {
 	order := []string{
 		"logistics.eta_risk_analysis", "logistics.receipt_reminder", "finance.expense_risk_check",
@@ -522,9 +510,6 @@ func mergedToolList() []map[string]any {
 	}
 	byName := map[string]map[string]any{}
 	for _, t := range ListTools() {
-		byName[t["name"].(string)] = t
-	}
-	for _, t := range notPortedTools {
 		byName[t["name"].(string)] = t
 	}
 	out := make([]map[string]any, 0, len(order))

@@ -202,6 +202,24 @@ func RankVehiclesFor(ctx context.Context, h *Handler, weightTon, volumeCbm float
 	return out, nil
 }
 
+// RankVehiclesForExcluding 排除已占用车辆后再排名（拼单配载逐趟取车用）
+func RankVehiclesForExcluding(ctx context.Context, h *Handler, weightTon, volumeCbm float64,
+	needsReefer, hazmat bool, used map[string]bool) ([]map[string]any, error) {
+	vehicles, err := h.availableVehicles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	free := make([]vehicleRow, 0, len(vehicles))
+	for _, v := range vehicles {
+		if !used[v.ID] {
+			free = append(free, v)
+		}
+	}
+	return rankVehicles(free,
+		cargoNeed{WeightTon: weightTon, VolumeCbm: volumeCbm, NeedsReefer: needsReefer, Hazmat: hazmat},
+		cstMidnight(), false), nil
+}
+
 // CarrierQuotesFor 供 orders 域复用：多承运商比价
 func CarrierQuotesFor(ctx context.Context, h *Handler, weightTon decimal.Decimal) ([]map[string]any, error) {
 	return h.carrierQuotes(ctx, weightTon)

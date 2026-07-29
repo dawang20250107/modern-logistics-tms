@@ -1,31 +1,45 @@
-# Django → Go 迁移手册（绞杀者模式）
+# Django → Go 迁移手册（绞杀者模式 · 已收官）
 
-## 架构
+**Django 已退役**：`backend/` 整个删除，反向代理摘掉，编排里不再有 Django、
+Redis 与 Celery。本文档从"怎么迁"转为"迁完了什么、哪些地方与原实现不同、为什么"。
+
+## 架构（当前）
 
 ```
-前端 (React, 零改动)
+前端 (React, 全程零改动)
    │  http://<host>:8000
    ▼
-Go 网关 (backend-go, chi + pgx)          ← 对外唯一入口
-   ├── 已移植域 → 原生处理（直连 PostgreSQL）
-   └── 其余全部 → 反向代理 → Django (:8001)   ← 逐域摘除，直至退役
+Go 网关 (backend-go, chi + pgx 裸 SQL)   ← 唯一的应用进程
+   ├── 全部 /api/v1 路由原生处理
+   ├── /media/* 静态直出（用户上传物，强制 nosniff）
+   ├── schema 由内嵌迁移器接管（000_baseline 是从并跑期运行库整体快照来的）
+   └── 削峰队列与掉线扫描都在进程内（不再需要 Redis / Celery）
 ```
 
-两栈共享同一 PostgreSQL 与同一 `DJANGO_SECRET_KEY`：Go 签发 simplejwt 兼容
-HS256 token（同 claims：`token_type/exp/iat/jti/user_id`），**两侧互认**，
-用户与前端在迁移全程零感知。
+一个空库到能登录的系统：
+
+```bash
+go run ./cmd/migrate                              # 建库（空库跑基线，已有库只补增量）
+go run ./cmd/adminctl -u admin -p '<强口令>'      # 开首个超管
+go run ./cmd/server                               # 起网关
+```
+
+JWT 仍是 simplejwt 兼容的 HS256（同 claims：`token_type/exp/iat/jti/user_id`），
+口令仍是 Django 的 `pbkdf2_sha256` 格式——迁移前签发的令牌与设置的口令继续有效，
+用户侧完全无感。环境变量名沿用 `DJANGO_*` 前缀：部署脚本与密钥管理都按这套名字
+配好了，为了改名去动运维不划算。
 
 ## 运行
 
 ```bash
-# Django 上游（迁移期保留；裸机无 docker 时用 local_standalone 配置）
-cd backend  && python3 manage.py runserver 127.0.0.1:8001 --settings=config.settings.local_standalone
-# Go 网关（对外入口）
 cd backend-go && go run ./cmd/server
 # 环境变量（均有开发默认值）：
 #   GO_LISTEN_ADDR=:8000  DATABASE_URL=postgres://...  DJANGO_SECRET_KEY=...
-#   DJANGO_UPSTREAM=http://127.0.0.1:8001  DJANGO_CORS_ORIGINS=...
+#   PUBLIC_BASE_URL=http://127.0.0.1:8000  MEDIA_ROOT=./media  DJANGO_CORS_ORIGINS=...
+#   可选：DEEPSEEK_API_KEY  AGENT_MCP_SERVERS={}  MQTT_HOST=（留空不启用）
 ```
+
+本地一键拉起（PostgreSQL + 网关 + 令牌写入 /tmp/tok.txt）：`bash scripts/dev/up.sh`
 
 ## 契约铁律（每个域移植前必读）
 
@@ -42,46 +56,52 @@ cd backend-go && go run ./cmd/server
 
 `internal/orders/handler.go` 是标准模板：一条主 SQL（JOIN + LATERAL 聚合）
 替代 Django 的 `select_related/prefetch_related`，嵌套明细用 `json_agg`
-子查询一次带出，天然无 N+1。移植新域时复制该模式：
+子查询一次带出，天然无 N+1。新增资源时照这个模式写：
 
-1. 从 Django ViewSet 抄 `server_filter_fields` → `filterFields` 映射
-2. 从 serializer `Meta.fields` 对齐 SELECT 列与 JSON 键名
-3. `ordering_fields` → `orderingCols` 白名单
-4. 写完跑 **双栈 diff**（见下）再切路由
+1. `filterFields` 映射（前端 FilterBuilder 的字段名 → 列表达式）
+2. SELECT 的列别名即 JSON 键名，不再手写序列化
+3. `orderingCols` 白名单，且一律补 `, id` 决胜键
+4. 标准 CRUD 直接写一份 `masterdata.ResourceCfg` + `WriteCfg` 交给通用引擎，
+   别再复制一遍 handler——引擎已包含数据范围、软删可见性、权限闸门、
+   DRF 校验文案与 partial 语义
 
-## 验证方法（每域必做）
+## 验证方法（迁移期用过的手段）
 
-```bash
-# 同一请求打双栈，逐字段 diff（首移植 orders 已验证：24 单全字段一致）
-curl -s "http://127.0.0.1:8000/api/v1/<res>?..." -H "Authorization: Bearer $TOK" > go.json
-curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK" > dj.json
-# （比对脚本示例见 git 历史中的验证命令）
+整个迁移靠「双栈契约比对」推进：同一请求同时打 Go(:8000) 与 Django(:8001)，
+语义 diff 归一化时间戳与整数浮点后逐字段比。Django 退役后这套已无对拍对象
+（`scripts/dev/diff.sh` 只剩一句说明），逐端点的结论保留在下方进度表里。
+
+财务域是唯一的例外：那里是**重新设计**而非等价移植，旧实现有三处会直接算错钱，
+照搬等于把 bug 固化，因此验证方式换成「计价数学逐分对拍 + 业务规则逐条断言」。
+
+## 迁移阶段（全部收官）
+
 ```
-
-## 终态目标：纯原生 Go 系统（Django 完全退役）
-
-```
-阶段0 网关+认证+订单读        ✅ 完成
-阶段1 读路径全量 Go           ◐ 进行中（orders/waybills 读已完成）
-      waybills 读 ✅ → masterdata 读 → finance 读/聚合 → workbench/stats → audit
-阶段2 写路径                  orders intake/流转/派单 → waybills 状态机/回单/签收
-      → finance 核销（事务+行锁）→ masterdata CRUD → iam/org 管理
-阶段3 平台域（去 Django 依赖）
-      SSE → Go 原生（PG LISTEN/NOTIFY）      媒体文件 → Go 静态服务
-      celery 定时任务 → Go cron(robfig/gocron)  telematics MQTT → Go 消费者批量落库
-      审计日志中间件 → Go 网关统一记录          admin 后台 → 前端管理页补齐后弃用
-阶段4 AI 域 Go 原生                                        ✅ 已完成（决策见下）
+阶段0 网关+认证+订单读                                     ✅
+阶段1 读路径全量 Go（orders/waybills/masterdata/finance/    ✅
+      workbench/stats/audit/analytics）
+阶段2 写路径（orders intake·流转·派单 / waybills 状态机·   ✅
+      回单·签收 / finance 核销 / masterdata CRUD / iam·org）
+阶段3 平台域去 Django 依赖                                 ✅
+      媒体文件 → Go 静态直出          telematics 上报 → 进程内削峰队列
+      celery beat → 进程内周期协程    审计日志 → 网关中间件统一记录
+      指标物化命令 → 周期协程         mqtt_gateway 命令 → 网关内订阅协程
+      SSE → 直接下线（无消费方，见差异清单）
+      admin 后台 → 随 Django 一并下线（管理动作已由 /org 前端页覆盖）
+阶段4 AI 域 Go 原生                                        ✅
       放弃 langgraph：其拓扑就是 START→agent⇄tools→END 的朴素 ReAct 环，
       无分支/并行/子图/人工中断，Go 里一个 for 循环 + goroutine 并行工具调用即可；
       工具全部直查 Go 已拥有的业务表，若拆成 FastAPI 需复制查询层或 HTTP 回调，得不偿失。
       改口条件：要做 RAG/本地 embedding、复杂多 agent 编排、pandas 级数据管线时，
       再外挂 Python 服务——LLM 客户端已放在接口后，届时只换实现。
-阶段5 收官
-      schema 所有权移交：Django migrations 基线化 → goose/atlas 接管
-      删除 backend/ 与反向代理，网关变纯应用；部署收敛为单二进制 + PG
+阶段5 收官                                                 ✅
+      schema 所有权移交：Django migrations 基线化为 000_baseline，迁移器接管
+      删除 backend/ 与反向代理，网关变唯一应用；编排收敛为「单二进制 + PG」
 ```
 
-推进法则：每域「抄契约 → 一条主 SQL → 双栈 diff → 切路由」，任何时刻系统整体可用。
+推进法则（历史）：每域「抄契约 → 一条主 SQL → 双栈 diff → 切路由」，任何时刻系统整体可用。
+这条法则贯穿全程——迁移期间没有出现过一次「停机切换」，最后一步删 `backend/` 时
+所有路由早已由 Go 应答，代理面上已无一条活路由。
 
 ## 已移植
 
@@ -128,32 +148,28 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 异常处置闭环 | GET /exceptions/{id} + PUT/PATCH/DELETE + /{id}/{timeline·assign·handle·close} | ✅ 详情与时间线双栈 diff 一致；assign/handle/close 三动作的库行、事件链、响应体与 Django 逐字段对拍一致；close 生成的应付费用两栈同形；无运单异常、只读 status、PUT 必填、级联删事件全部对齐 |
 | 组织中台-写 | organizations / roles / service-areas / employees 全套 CRUD（详情+增改删收归通用引擎）+ handovers·login-audit 只读台账 + login-audit/unlock + employees/{id}/{roles·enable·disable·reset-password·handover} + roles/{id}/set-permissions | ✅ 六资源列表与详情双栈 diff 全一致；组织三层建树/改父/删父的物化 path 逐级重算实测；角色权限点与员工分组的 M2M 覆盖写实测；重置密码 Go 生成 pbkdf2 哈希双栈均可登录；移交事务（下属改挂+部门改派+停用留痕）实测 |
 | 权限闸门 | 通用 CRUD 引擎接入 `HasPermission` 等价的 ReadPerm/WritePerm（org/masterdata/carrier/telematics 四组权限点，共 19 份写配置） | ✅ 只读账号 × 8 组端点双栈状态码逐一相同（读放行/写 403）；403 信封与文案 `permission_denied` + 「缺少所需权限。」对齐 |
+| 录单辅助 | POST /orders/parse-preview（只解析不落库 + 缺项提示 + 24h 重单检测）、POST /orders/quote（按收入计价规则估价，含体积折算重） | ✅ 收官冒烟时补齐——此前路由盘点用 GET 探测，POST-only 端点回 405 被误判为「已接管」，实为漏网 |
+| **收官** | 删 `backend/`（Django 全量）与 `internal/proxy`；`/media/*` 由网关静态直出；schema 移交 `000_baseline`；新增 `cmd/migrate` 与 `cmd/adminctl` | ✅ 空库验证：`go run ./cmd/migrate` 建 66 张表 → `cmd/adminctl` 开超管 → 登录成功 → 8 组代表性端点全 200；开发库另跑 `003_drop_django_runtime` 清掉 17 张 Django 运行时表 |
+| 收官补漏 | 指标按日物化（`analytics.StartMaterializer`）；JT/T 808 解析构帧 + MQTT 接入协程；MCP 客户端（Streamable HTTP 上的 JSON-RPC） | ✅ 这三样原来都活在 Django 的管理命令或 Python 库里，删 `backend/` 时会跟着消失。物化实测把 5 指标 × 31 天补齐；JT808 与原 Python 实现构出的帧逐字节相同（参考帧钉进单测）；MCP 用假 server 验了 JSON 与 SSE 两种传输、必填校验与四条降级路径 |
 
-## 待移植（按前端依赖频度排序）
+## 遗留与未接管的东西（诚实清单）
 
-1. **orders 写路径**：intake / claim / assign / batch-dispatch / report-exception /
-   状态流转 / import / quote / parse-preview（业务规则最重，建议对照 `apps/ops/intake.py`、`order_dispatch.py` 逐函数翻）
-2. **waybills**：列表/详情/状态机/回单/费用（表 `ops_waybill*`）
-3. **workbench / stats 聚合**：控制塔与工作台的只读聚合（纯 SQL，收益快）
-4. **masterdata**：customers/carriers/vehicles/drivers/b2b-partners/lane-prices（模板化 CRUD）
-5. **finance**：statements/agings/settle/payments（事务密集，注意核销的行锁）
-6. **iam/org**：组织树/员工/RBAC 矩阵（读多写少）
-7. **telematics ingest**：MQTT 高频写入——Go 的主场，建议独立 goroutine 池批量落库
-8. ~~SSE /stream/events~~ —— **不移植，直接下线**（见差异清单）
-9. AI 域（langgraph）：保留 Django/Python 最久，或独立 Python 微服务
+- **前端未做任何改动**：整个迁移的验收标准就是前端零改动，故 `frontend/` 至今未动一行。
+- **演示数据播种命令随 `backend/` 一起删除**：`seed_demo` / `seed_org` / `seed_realistic`
+  是 Django management command，没有 Go 对应物。需要时从 git 历史里取
+  （`git show <删除前的commit>:backend/apps/ops/management/commands/seed_demo.py`），
+  或按同样口径写一个 `cmd/seed`。现有开发库的数据不受影响。
+- **`iam_outstanding/blacklisted`（refresh token 服务端黑名单）仍未写**：见下方限制清单。
 
 ## 尚未对齐的已知差异（限制清单）
 
 - **lineage 的 `order.status_label`**：`Order.status` 未绑定 choices，Django
   `_disp()` 回落原始值（返回 `converted` 而非「已派单」），Go 照此复刻返回原值——
   与其他 status_label 返回中文不同，属 Django 既有行为，不擅自"修正"以免前端错位。
-- **AI 工具 2/9 暂由代理提供**：`logistics.dispatch_recommendation` 依赖报价规则引擎、
-  `logistics.intelligent_consolidation` 依赖拼单配载算法，各随所属域移植后接管；
-  `/agent/tools` 清单仍输出完整 9 个，执行时按名透传，对外契约不变。
-- **建单文本解析目前只走规则**：Django 的 `parse_order_text` 在配置了 DEEPSEEK_API_KEY 时
-  会先试 LLM 解析（parse_meta.source=deepseek），Go 侧当前固定规则解析（source=rule）。
-  待 LLM 客户端从 internal/agent 下沉为公共包后接入。
-- **/agent/stream（SSE 流式）**仍由代理提供，随阶段 3 的 SSE 平台域一并原生化。
+- **建单文本解析只走规则**：Django 的 `parse_order_text` 在配置了 DEEPSEEK_API_KEY 时
+  会先试 LLM 解析（`parse_meta.source=deepseek`），Go 侧固定规则解析（`source=rule`）。
+  这是唯一一处「功能上少一档」的地方：规则解析覆盖常见话术，LLM 兜底的是长尾表达。
+  接入点已备好（LLM 客户端在 `internal/agent` 的接口后），把它下沉为公共包即可开。
 - **越界分页**：Django 请求超出总页数时 DRF 抛 404「无效页面」，Go 返回 200 +
   空 items（`{items:[],total,page,page_size,pages}`）。前端筛选变更不重置页码，
   停留在越界页时 Django 会让表格整体报错、Go 则正常渲染空表且分页器可回跳，
@@ -166,12 +182,9 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 - **承运合同 PDF**：Django 生成文本合同 + reportlab PDF（PDF 失败不阻断）；
   Go 版生成同版式文本合同、`pdf` 字段留空——语义等价于 Django 的 PDF 生成失败分支。
   正式化时用 Go PDF 库（如 go-pdf/fpdf + 中文字体）补齐。
-- **dispatch-suggestion / ymm-quote / dispatch-plan**（AI 派单建议/比价/批量排线）
-  仍由代理提供，属阶段 4 AI 域。
-- **授权变更的权限缓存**：Django 侧 `effective_permissions` 有 TTL 缓存
-  （`iam:perms:<uid>`），Go 写角色分配后不主动清 Django 缓存，靠 TTL 过期兜底；
-  Go 自身每请求实时查库无缓存。Django 退役后此差异消失。
-- **org 域 CSV 导入/导出**仍由代理提供（前端低频/未用），随收官阶段一并原生化。
+- **权限判定不带缓存**：Django 侧 `effective_permissions` 有 TTL 缓存（`iam:perms:<uid>`），
+  改了角色要等缓存过期才生效；Go 每请求实时查库。授权变更即时生效是更安全的一侧，
+  代价是每请求一次角色-权限的 JOIN——量级远小于业务主查询，没有优化必要。
 - **/workbench 的 dispatchable 修正而非复刻**：Django WorkbenchView 调用
   `OrderSerializer(..., many=True)` 时未传 `context={"request": ...}`，
   `get_dispatchable` 拿不到当前用户恒返回 false。Go 版按真实用户口径计算
@@ -184,9 +197,11 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 - **/waybills/{no}/transition 响应精简**：Django 返回整份 WaybillDetailSerializer，
   Go 返回 `{waybill_no, status, next_statuses}`。前端对该响应只做 invalidate 重取、
   不消费内容，故安全；运单详情 GET 移植后可改为复用详情序列化。
-- **状态机暂不发 Webhook/SSE**：Django `transition_waybill` 里的 `emit_event`（外部
-  Webhook）与 `publish_event`（SSE，依赖 Redis，本地本就不可用）属阶段 3 平台域，
-  随 SSE/集成域移植一并补上。事件均已落库 `ops_waybill_event`，不丢数据。
+- **状态机不再外发 Webhook/SSE**：Django `transition_waybill` 里的 `publish_event`（SSE，
+  依赖 Redis）随 SSE 一并下线；`emit_event`（外部 Webhook）的投递面保留为
+  `fin_webhook` + `fin_webhook_delivery` 两张表的 CRUD，但状态机不主动触发投递——
+  当前没有已配置的订阅方，投递器等真有外部系统对接时再按需补。事件全部落
+  `ops_waybill_event`，不丢数据。
 
 - **/waybills/stats 修正而非复刻**：Django 版在带费用 Sum annotate 的 queryset 上
   `values("status").annotate(Count("id"))`，费用 JOIN 放大导致各状态重复计数
@@ -237,9 +252,12 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 - **掉线扫描替代 celery beat**：网关内起周期协程（默认 1 分钟）跑
   scan_offline_devices 的等价逻辑，置离线 + 掉线报警，文案与阈值一致。
 
-- **代理响应带 `X-Upstream: django` 头**：迁移收尾靠它盘点「还剩哪些路由没被接管」。
+- **盘点残余路由靠代理的 `X-Upstream: django` 头**（代理已随收官摘除，此条留作方法记录）：
   数路由表里的字符串不可靠——CRUD 子路由是挂载式的，不体现在字面量里。
-  注意按此盘点时要对 POST-only 端点用 POST 探测，否则 GET 会落到代理面被误判。
+  这套盘点法有个坑，我踩了：POST-only 端点用 GET 探测会先撞 Go 侧的 405，
+  看起来像「已接管」，实际是漏网。`/orders/quote` 与 `/orders/parse-preview` 就是这么
+  漏到最后一刻的，删完 `backend/` 跑冒烟才暴露（99 通过 / 2 失败）。
+  盘点必须按端点声明的方法探，别图省事全用 GET。
 
 - **财务是「重新设计」而非「等价移植」，因此不做双栈 diff**。Django 的旧实现有三处
   会直接算错钱，照搬等于把 bug 固化：（1）`generate_statement` 归集费用时不排除
@@ -264,8 +282,8 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   部分唯一索引才是真保证。迁移里先清理了存量重复行再建索引。
 
 - **订单响应新增 `project` / `project_name`（Django 无此字段）**：项目是对账的主归集维度，
-  前端建单表单要用，属有意的加法而非偏差。`/api/v1/orders` 的双栈 diff 会因此报 6 处差异，
-  Django 退役后消失。
+  前端建单表单要用，属有意的加法而非偏差。并跑期 `/api/v1/orders` 的双栈 diff
+  会因此报 6 处差异，属预期内。
 - **项目对录单是可选项**：填不上不该挡住建单，故非法项目 id 静默忽略而不报错。
   但为了让它真的被填上，推荐做了打分（同线路历史单 > 起终点部分匹配 > 近 30 天活跃 >
   历史用量），每条附「为什么推它」，并支持在建单表单里直接敲名字新建（同客户同名去重）。
@@ -352,7 +370,28 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   Django 的 `SET_NULL` 是批量 UPDATE、不触发 `save()`，所以它自己不会重算子组织的
   path——这一处 Go 是有意修正而非复刻，理由同上：留着错的 path 就是留着错的可见范围。
 
-- refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
-  测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。
-- `/auth/me` 的 `avatar_url` 经代理指向 Django `/media/`；媒体文件迁 Go 静态服务后改。
-- Django admin (`/admin/`) 持续由代理提供，直至后台管理页面完全前端化。
+- **删 Django 时差点带走三样只活在 Python 侧的能力**，收官冒烟才发现，现已原生化：
+  （1）`ana_metric_snapshot` 只有读没有写了——趋势图不会报错，只会一天天变空，
+  这种"静静地少数据"最难发现。物化搬进网关周期协程，并按「这天已物化了几个指标」
+  回补缺日（不能只看「这天有没有行」，后加的指标在历史日期上永远补不上）。
+  （2）JT/T 808 解析与 MQTT 订阅原是 `gateway.py` + `mqtt_gateway` 管理命令。
+  Go 版把订阅协程放进网关本身——上报最终要进的削峰队列就在这个进程里，
+  多一跳进程只是多一个会掉线的东西。帧格式与原实现逐字节对拍并钉进单测：
+  终端固件不会跟着我们改，帧格式一变就是整个车队失联。
+  （3）MCP 接入原是 `langchain_mcp_adapters` 的 30 行外壳，Go 无等价库，
+  故自实现 Streamable HTTP 上的 JSON-RPC（initialize/tools/list/tools/call）。
+  stdio 传输不做：网关是长驻服务，不该 fork 子进程当 MCP host。
+- **MCP 的 `risk:"high"` 是真闸门，不是标签**：外部工具能干什么无从判断，
+  标 high 的 server 其工具不进 ReAct 自动循环，只把拟用参数登记为待确认，
+  人工在工具面板点了才跑。内置高风险工具用不上这个——它们在自己的 Fn 里落
+  AgentSuggestion，那是「执行了查询、但不落地动作」，性质不同。
+  `/agent/tools` 因此多一个 `requires_confirm` 字段（Django 无，属新增）。
+- **`/media/` 根路径曾能列出整个上传目录**：目录列表的守卫写在 `StripPrefix` 之后，
+  而 `/media/` 自身被削完就是空串，尾斜杠判断落空，`http.FileServer` 就把
+  avatars/contracts/credentials 全列了出来。判断已移到剥前缀之前。
+- **refresh token 轮换后旧 token 未进服务端黑名单**（simplejwt 的 `iam_outstanding/blacklisted`
+  两张表建了但没写）：登出后旧 refresh 在有效期内仍可换 access。正式化前要补——
+  这是当前唯一一条「安全上应该做而没做」的欠账，不是取舍。
+- **Django admin (`/admin/`) 随 Django 一起没了**：后台的增删改查已由 `/org` 与各资源
+  管理页覆盖，但 admin 那种「任意表直接改」的能力没有等价物。真需要时用 psql，
+  或按需给 `cmd/adminctl` 加子命令——前者有审计缺口，后者才是该走的路。

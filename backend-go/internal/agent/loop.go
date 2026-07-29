@@ -111,6 +111,18 @@ func Run(ctx context.Context, db *pgxpool.Pool, message, threadID string) (*RunR
 				var args map[string]any
 				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 				name := denormalizeName(tc.Function.Name)
+				if spec, ok := registryByName[name]; ok && spec.RequiresConfirm {
+					// 声明为待确认的工具不在自动循环里执行。把参数原样回给模型，
+					// 让它据此把"要做什么"讲清楚，人再决定跑不跑。
+					aj, _ := json.Marshal(args)
+					artifacts[i] = map[string]any{
+						"tool_name": name, "requires_confirm": true, "arguments": args,
+						"summary": name + " 已声明为高风险，需人工确认后执行，本轮未执行。",
+					}
+					results[i] = Message{Role: "tool", ToolCallID: tc.ID, Name: tc.Function.Name,
+						Content: name + " 需人工确认，未执行。拟用参数：" + string(aj)}
+					return
+				}
 				res, terr := ExecuteTool(ctx, db, name, args)
 				var content string
 				if terr != nil {

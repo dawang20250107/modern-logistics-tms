@@ -110,6 +110,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
 | 组织中台-读 | GET /org/{overview·organizations·organizations/tree·roles·rbac/matrix·service-areas·employees·handovers·login-audit·route-resolve}（列表复用通用引擎，树/矩阵/区划仲裁定制） | ✅ 十端点双栈 diff 全一致（含子树人头累加、覆盖排他+优先级仲裁） |
 | 单单派车 | POST /orders/{id}/dispatch（own_vehicle/fleet/third_party/platform：状态/锁定/归属门禁 → 承运商风控 → 车辆司机行锁占用 → 核载/车厢/证件资质合规 → 转运单+承运状态+应付快照+双事件+承运合同 HT 取号，单事务） | ✅ 全校验链实测（ORDER_NOT_LOCKED/CARRIER_REQUIRED/VEHICLE_BUSY 等）；Django 读回运单/合同/费用/订单全对；合同为文本版（PDF 留 Django 的 try/except 语义，见差异清单） |
+| 车联网 + 轨迹 | POST /telematics/ingest + /tracking/points（削峰异步落库）；GET /telematics/{vehicles/live, waybills/{}/trajectory, command-center/summary} + /waybills/{}/tracking；规则报警引擎（超速/温度/油量/设备事件/围栏进出/偏航/掉线） | ✅ 10 个读端点双栈 diff 全一致；规则矩阵 11 组输入与 Django evaluate_telemetry 逐字段对拍一致；上报链路 13 项端到端实测（设备心跳/实时状态/轨迹续点/四类报警/高危转异常工单/去重窗口/围栏首见不报与跳变才报/脏点丢弃/超量 413/掉线扫描） |
 | 司机端 + 公开域 | POST /driver/{login,checkin,credentials} + GET /driver/tasks + POST /driver/reminders/{}/ack；POST /public/orders + GET /track | ✅ 18 条契约比对全绿（登录四分支/任务/token 缺失与损坏/打卡非法节点与越权/证件非法类型/跟踪四分支/自助下单）；司机 token 与 django.core.signing.TimestampSigner 完全互认（两栈互签实测）；打卡落库、状态自动推进、事件链、水印照片四项逐项一致 |
 | 认证自助域 | POST /auth/{register,change-password,password-reset/request,password-reset/confirm,token/verify} + GET /auth/{methods,login-history} + PATCH /auth/me + POST·DELETE /auth/me/avatar；登录改为审计版（失败锁定 + 流水落库） | ✅ 22 条契约比对（弱口令/相似度/必填/码长/一次性/限流文案）+ 端到端闭环（注册→登录→改密→找回→重置后登录）双栈全绿；Django 四条内建口令校验器逐条复刻（含内嵌 19646 条常见弱口令表与 difflib quick_ratio 相似度）；口令哈希跨栈互认实测 |
 | 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
@@ -215,6 +216,14 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   Celery（打卡触发状态流转里的 emit_event、回单触发 OCR 任务），本地无 broker 时
   抛 RuntimeError。Go 侧无此依赖，落库、状态推进、事件链与照片均已实测与 Django
   成功路径一致——属环境依赖差异，Django 退役后消失。
+
+- **上报削峰改用进程内队列**：Django 是「请求压 Redis → Celery 批量落库」，Go 改为
+  进程内有界队列 + 后台批处理协程，少一整套 Redis + Celery 依赖，对外契约（202 +
+  queued 计数 + 异步持久化）不变。队列有界是刻意的：满时丢弃并计数，宁可丢采样点
+  也不让内存膨胀拖垮网关——轨迹点是可容忍稀疏的时序采样，网关不可用是全站故障。
+  多实例部署时各实例各自缓冲，落库仍归一到同一张表，无需协调。
+- **掉线扫描替代 celery beat**：网关内起周期协程（默认 1 分钟）跑
+  scan_offline_devices 的等价逻辑，置离线 + 掉线报警，文案与阈值一致。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

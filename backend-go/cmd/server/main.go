@@ -29,6 +29,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/org"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/proxy"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/resources"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/telematics"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
 )
 
@@ -64,6 +65,11 @@ func main() {
 	mdH.Fallback = django // CRUD 子路由未声明的自定义动作仍回代上游
 	resH := &resources.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	drvH := &driver.Handler{DB: pool, Secret: cfg.SecretKey, MediaRoot: cfg.MediaRoot}
+	// 车联网上报走进程内有界队列 + 后台批处理，替代 Redis 队列 + Celery
+	ingestor := telematics.NewIngestor(pool)
+	ingestor.Start(context.Background())
+	ingestor.StartOfflineScanner(context.Background(), 1*time.Minute)
+	telH := &telematics.Handler{DB: pool, Svc: authSvc, In: ingestor}
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH, Fallback: django}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
@@ -136,6 +142,12 @@ func main() {
 		p.Get("/api/v1/waybills/{no}/reply-card", waybillH.ReplyCard)
 		p.Get("/api/v1/waybills/{no}/contract", waybillH.Contract)
 		p.Get("/api/v1/waybills/{no}/reminders", waybillH.Reminders)
+		p.Get("/api/v1/waybills/{no}/tracking", telH.WaybillTracking)
+		p.Post("/api/v1/tracking/points", telH.TrackingIngest)
+		p.Post("/api/v1/telematics/ingest", telH.Ingest)
+		p.Get("/api/v1/telematics/vehicles/live", telH.Live)
+		p.Get("/api/v1/telematics/waybills/{no}/trajectory", telH.Trajectory)
+		p.Get("/api/v1/telematics/command-center/summary", telH.CommandCenterSummary)
 		p.Get("/api/v1/waybills/{no}", waybillH.Detail)
 		p.Post("/api/v1/waybills/{no}/transition", waybillH.Transition)
 		p.Post("/api/v1/waybills/{no}/sign", waybillH.Sign)

@@ -88,7 +88,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 订单-读 | GET /orders（筛选/搜索/排序/分页/数据范围）, GET /orders/funnel | ✅ 逐字段 diff 一致；~12× 提速（3.9ms vs 49.1ms/50 行） |
 | 运单-读 | GET /waybills（筛选/搜索/排序/分页/权限/数据范围/司机嵌套/应收应付聚合）, GET /waybills/stats | ✅ 20 张逐字段 diff 一致；stats 修正了 Django 的 JOIN 放大重复计数 bug（详见差异清单） |
 | 主数据-读 | GET /customers /vehicles /drivers /b2b-partners（搜索/排序/filter/直连参数/分页） | ✅ 四资源双栈 diff 全一致；通用行→JSON 引擎（列别名即键，新资源仅需一份 resourceCfg） |
-| 财务-读 | GET /finance/statement-overview（AR/AP 敞口/状态分布/逾期/本期/Top 对手方/净头寸） | ✅ 数值语义 deep-diff 一致（numeric 精确相减后转 float，避免浮点误差） |
+| 财务-读 | GET /finance/statement-overview + /finance/statements 台账列表 | ✅ 双栈一致（overview 数值语义 deep-diff；statements 8 张逐字段；Decimal property 以 ::text 保刻度） |
 
 ## 待移植（按前端依赖频度排序）
 

@@ -1,6 +1,6 @@
 // Package masterdata 主数据读路径：customers / vehicles / drivers 列表。
 // 通用引擎：SELECT 列别名即 JSON 键（uuid/numeric/date 一律 ::text 保持 DRF 字符串语义），
-// rows.Values() 泛化扫描 —— 新资源只需一份 resourceCfg 配置，无逐字段 scan 代码。
+// rows.Values() 泛化扫描 —— 新资源只需一份 ResourceCfg 配置，无逐字段 scan 代码。
 package masterdata
 
 import (
@@ -24,32 +24,32 @@ type Handler struct {
 	Svc *auth.Service
 }
 
-type resourceCfg struct {
-	selectSQL    string // 列别名 = JSON 键
-	fromClause   string
-	searchCols   []string
-	orderingCols map[string]string
-	filterFields map[string]filters.FilterField
-	directParams map[string]string // DRF filterset_fields：查询参数 → SQL 列
-	defaultOrder string
+type ResourceCfg struct {
+	SelectSQL    string // 列别名 = JSON 键
+	FromClause   string
+	SearchCols   []string
+	OrderingCols map[string]string
+	FilterFields map[string]filters.FilterField
+	DirectParams map[string]string // DRF filterset_fields：查询参数 → SQL 列
+	DefaultOrder string
 }
 
-var customersCfg = resourceCfg{
-	selectSQL: `
+var customersCfg = ResourceCfg{
+	SelectSQL: `
 SELECT c.id::text AS id, c.code, c.name, c.category, c.level,
        (CASE c.level WHEN 'S' THEN 'S · 战略' WHEN 'A' THEN 'A · 重点' WHEN 'B' THEN 'B · 常规'
                      WHEN 'C' THEN 'C · 一般' WHEN 'D' THEN 'D · 观察' ELSE '' END) AS level_label,
        c.contact_name, c.contact_phone, c.wechat_group,
        c.settlement_type, c.credit_limit::text AS credit_limit, c.credit_days, c.billing_day,
        c.is_active, NULL::text AS history`,
-	fromClause: "FROM md_customer c",
-	searchCols: []string{"c.code", "c.name", "c.contact_phone"},
-	orderingCols: map[string]string{
+	FromClause: "FROM md_customer c",
+	SearchCols: []string{"c.code", "c.name", "c.contact_phone"},
+	OrderingCols: map[string]string{
 		"code": "c.code", "name": "c.name", "created_at": "c.created_at", "level": "c.level",
 		"category": "c.category", "credit_limit": "c.credit_limit", "credit_days": "c.credit_days",
 		"contact_name": "c.contact_name", "contact_phone": "c.contact_phone", "is_active": "c.is_active",
 	},
-	filterFields: map[string]filters.FilterField{
+	FilterFields: map[string]filters.FilterField{
 		"name":     {Type: filters.Text, Cols: []string{"c.name"}},
 		"code":     {Type: filters.Text, Cols: []string{"c.code"}},
 		"contact":  {Type: filters.Text, Cols: []string{"c.contact_name"}},
@@ -59,12 +59,12 @@ SELECT c.id::text AS id, c.code, c.name, c.category, c.level,
 		"days":     {Type: filters.Number, Cols: []string{"c.credit_days"}},
 		"active":   {Type: filters.Bool, Cols: []string{"c.is_active"}},
 	},
-	directParams: map[string]string{"is_active": "c.is_active"},
-	defaultOrder: "ORDER BY c.created_at DESC, c.id",
+	DirectParams: map[string]string{"is_active": "c.is_active"},
+	DefaultOrder: "ORDER BY c.created_at DESC, c.id",
 }
 
-var vehiclesCfg = resourceCfg{
-	selectSQL: `
+var vehiclesCfg = ResourceCfg{
+	SelectSQL: `
 SELECT v.id::text AS id, v.plate_no, v.vehicle_class,
        (CASE v.vehicle_class WHEN 'tractor' THEN '牵引车' WHEN 'trailer' THEN '挂车' WHEN 'rigid' THEN '单体车' ELSE '' END) AS vehicle_class_label,
        v.body_type,
@@ -77,14 +77,14 @@ SELECT v.id::text AS id, v.plate_no, v.vehicle_class,
        v.road_transport_cert_no, v.inspection_expiry::text AS inspection_expiry,
        v.insurance_expiry::text AS insurance_expiry, v.maintenance_due_date::text AS maintenance_due_date,
        NULL::text AS freight_total, v.is_active`,
-	fromClause: "FROM md_vehicle v LEFT JOIN md_carrier ca ON ca.id = v.carrier_id",
-	searchCols: []string{"v.plate_no", "v.vehicle_type"},
-	orderingCols: map[string]string{
+	FromClause: "FROM md_vehicle v LEFT JOIN md_carrier ca ON ca.id = v.carrier_id",
+	SearchCols: []string{"v.plate_no", "v.vehicle_type"},
+	OrderingCols: map[string]string{
 		"plate_no": "v.plate_no", "created_at": "v.created_at", "load_capacity_ton": "v.load_capacity_ton",
 		"volume_capacity_cbm": "v.volume_capacity_cbm", "vehicle_type": "v.vehicle_type",
 		"owner_name": "COALESCE(ca.name,'自有')", "is_active": "v.is_active",
 	},
-	filterFields: map[string]filters.FilterField{
+	FilterFields: map[string]filters.FilterField{
 		"plate":  {Type: filters.Text, Cols: []string{"v.plate_no"}},
 		"type":   {Type: filters.Text, Cols: []string{"v.vehicle_type"}},
 		"owner":  {Type: filters.Text, Cols: []string{"COALESCE(ca.name,'自有')"}},
@@ -92,15 +92,15 @@ SELECT v.id::text AS id, v.plate_no, v.vehicle_class,
 		"cbm":    {Type: filters.Number, Cols: []string{"v.volume_capacity_cbm"}},
 		"active": {Type: filters.Bool, Cols: []string{"v.is_active"}},
 	},
-	directParams: map[string]string{
+	DirectParams: map[string]string{
 		"is_active": "v.is_active", "carrier": "v.carrier_id::text",
 		"vehicle_class": "v.vehicle_class", "dispatch_source": "v.dispatch_source",
 	},
-	defaultOrder: "ORDER BY v.created_at DESC, v.id",
+	DefaultOrder: "ORDER BY v.created_at DESC, v.id",
 }
 
-var driversCfg = resourceCfg{
-	selectSQL: `
+var driversCfg = ResourceCfg{
+	SelectSQL: `
 SELECT d.id::text AS id, d.name, d.phone, d.wechat, d.employment_type,
        (CASE d.employment_type WHEN 'employee' THEN '自有员工' WHEN 'outsourced' THEN '外协外调'
                                 WHEN 'carrier_driver' THEN '承运商司机' WHEN 'temp' THEN '临时' ELSE '' END) AS employment_label,
@@ -108,15 +108,15 @@ SELECT d.id::text AS id, d.name, d.phone, d.wechat, d.employment_type,
        d.id_no, d.license_no, d.license_type, d.license_expiry::text AS license_expiry,
        d.qualification_cert_no, d.qualification_expiry::text AS qualification_expiry,
        d.carrier_id::text AS carrier, COALESCE(ca.name,'') AS carrier_name, d.is_active`,
-	fromClause: "FROM md_driver d LEFT JOIN md_carrier ca ON ca.id = d.carrier_id",
-	searchCols: []string{"d.name", "d.phone", "d.wechat"},
-	orderingCols: map[string]string{
+	FromClause: "FROM md_driver d LEFT JOIN md_carrier ca ON ca.id = d.carrier_id",
+	SearchCols: []string{"d.name", "d.phone", "d.wechat"},
+	OrderingCols: map[string]string{
 		"name": "d.name", "created_at": "d.created_at", "cumulative_waybills": "d.cumulative_waybills",
 		"cumulative_freight": "d.cumulative_freight", "phone": "d.phone", "employment_type": "d.employment_type",
 		"owner_name": "COALESCE(ca.name,'自有')", "license_type": "d.license_type",
 		"license_expiry": "d.license_expiry", "is_active": "d.is_active",
 	},
-	filterFields: map[string]filters.FilterField{
+	FilterFields: map[string]filters.FilterField{
 		"name":     {Type: filters.Text, Cols: []string{"d.name"}},
 		"phone":    {Type: filters.Text, Cols: []string{"d.phone"}},
 		"license":  {Type: filters.Text, Cols: []string{"d.license_type"}},
@@ -125,16 +125,16 @@ SELECT d.id::text AS id, d.name, d.phone, d.wechat, d.employment_type,
 		"waybills": {Type: filters.Number, Cols: []string{"d.cumulative_waybills"}},
 		"active":   {Type: filters.Bool, Cols: []string{"d.is_active"}},
 	},
-	directParams: map[string]string{
+	DirectParams: map[string]string{
 		"is_active": "d.is_active", "carrier": "d.carrier_id::text",
 		"employment_type": "d.employment_type", "app_registered": "d.app_registered",
 	},
-	defaultOrder: "ORDER BY d.created_at DESC, d.id",
+	DefaultOrder: "ORDER BY d.created_at DESC, d.id",
 }
 
-func (h *Handler) Customers(w http.ResponseWriter, r *http.Request) { h.list(w, r, customersCfg) }
-func (h *Handler) Vehicles(w http.ResponseWriter, r *http.Request)  { h.list(w, r, vehiclesCfg) }
-func (h *Handler) Drivers(w http.ResponseWriter, r *http.Request)   { h.list(w, r, driversCfg) }
+func (h *Handler) Customers(w http.ResponseWriter, r *http.Request) { h.List(w, r, customersCfg) }
+func (h *Handler) Vehicles(w http.ResponseWriter, r *http.Request)  { h.List(w, r, vehiclesCfg) }
+func (h *Handler) Drivers(w http.ResponseWriter, r *http.Request)   { h.List(w, r, driversCfg) }
 
 func clampInt(s string, def, lo, hi int) int {
 	n, err := strconv.Atoi(s)
@@ -155,7 +155,7 @@ func parseBoolish(s string) (bool, bool) {
 }
 
 // list 通用列表：search/ordering/filter/直连参数/分页 → {items,total,page,page_size,pages}
-func (h *Handler) list(w http.ResponseWriter, r *http.Request, cfg resourceCfg) {
+func (h *Handler) List(w http.ResponseWriter, r *http.Request, cfg ResourceCfg) {
 	ctx := r.Context()
 	q := r.URL.Query()
 	page := clampInt(q.Get("page"), 1, 1, 1<<30)
@@ -165,13 +165,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, cfg resourceCfg) 
 	where := []string{"true"}
 	if s := strings.TrimSpace(q.Get("search")); s != "" {
 		ph := args.Add("%" + s + "%")
-		parts := make([]string, len(cfg.searchCols))
-		for i, c := range cfg.searchCols {
+		parts := make([]string, len(cfg.SearchCols))
+		for i, c := range cfg.SearchCols {
 			parts[i] = fmt.Sprintf("%s ILIKE %s", c, ph)
 		}
 		where = append(where, "("+strings.Join(parts, " OR ")+")")
 	}
-	for param, col := range cfg.directParams {
+	for param, col := range cfg.DirectParams {
 		if v := q.Get(param); v != "" {
 			if b, ok := parseBoolish(v); ok && (strings.HasSuffix(col, "is_active") || strings.HasSuffix(col, "app_registered")) {
 				where = append(where, fmt.Sprintf("%s = %s", col, args.Add(b)))
@@ -180,18 +180,18 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, cfg resourceCfg) 
 			}
 		}
 	}
-	if frag := filters.Apply(q.Get("filter"), cfg.filterFields, args); frag != "" {
+	if frag := filters.Apply(q.Get("filter"), cfg.FilterFields, args); frag != "" {
 		where = append(where, frag)
 	}
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
 
-	orderSQL := cfg.defaultOrder
+	orderSQL := cfg.DefaultOrder
 	if raw := q.Get("ordering"); raw != "" {
 		var parts []string
 		for _, f := range strings.Split(raw, ",") {
 			f = strings.TrimSpace(f)
 			desc := strings.HasPrefix(f, "-")
-			col, ok := cfg.orderingCols[strings.TrimPrefix(f, "-")]
+			col, ok := cfg.OrderingCols[strings.TrimPrefix(f, "-")]
 			if !ok {
 				continue
 			}
@@ -207,11 +207,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, cfg resourceCfg) 
 	}
 
 	var total int
-	if err := h.DB.QueryRow(ctx, "SELECT count(*) "+cfg.fromClause+" "+whereSQL, args.Values...).Scan(&total); err != nil {
+	if err := h.DB.QueryRow(ctx, "SELECT count(*) "+cfg.FromClause+" "+whereSQL, args.Values...).Scan(&total); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
 	}
-	sql := cfg.selectSQL + " " + cfg.fromClause + " " + whereSQL + " " + orderSQL +
+	sql := cfg.SelectSQL + " " + cfg.FromClause + " " + whereSQL + " " + orderSQL +
 		fmt.Sprintf(" LIMIT %s OFFSET %s", args.Add(pageSize), args.Add((page-1)*pageSize))
 	rows, err := h.DB.Query(ctx, sql, args.Values...)
 	if err != nil {
@@ -253,17 +253,17 @@ func rowsToMaps(rows pgx.Rows) ([]map[string]any, error) {
 	return items, rows.Err()
 }
 
-var b2bCfg = resourceCfg{
-	selectSQL: `
+var b2bCfg = ResourceCfg{
+	SelectSQL: `
 SELECT p.id::text AS id, p.partner_type,
        (CASE p.partner_type WHEN 'shipper' THEN '发货方' WHEN 'consignee' THEN '收货方' WHEN 'supplier' THEN '供应商/承运商' ELSE '' END) AS partner_type_label,
        p.code, p.name, p.contact_name, p.contact_phone, p.address, p.city, p.is_active`,
-	fromClause:   "FROM md_b2b_partner p",
-	searchCols:   []string{"p.code", "p.name", "p.contact_phone", "p.city"},
-	orderingCols: map[string]string{"code": "p.code", "name": "p.name", "created_at": "p.created_at"},
-	filterFields: map[string]filters.FilterField{},
-	directParams: map[string]string{"partner_type": "p.partner_type", "is_active": "p.is_active"},
-	defaultOrder: "ORDER BY p.created_at DESC, p.id",
+	FromClause:   "FROM md_b2b_partner p",
+	SearchCols:   []string{"p.code", "p.name", "p.contact_phone", "p.city"},
+	OrderingCols: map[string]string{"code": "p.code", "name": "p.name", "created_at": "p.created_at"},
+	FilterFields: map[string]filters.FilterField{},
+	DirectParams: map[string]string{"partner_type": "p.partner_type", "is_active": "p.is_active"},
+	DefaultOrder: "ORDER BY p.created_at DESC, p.id",
 }
 
-func (h *Handler) B2BPartners(w http.ResponseWriter, r *http.Request) { h.list(w, r, b2bCfg) }
+func (h *Handler) B2BPartners(w http.ResponseWriter, r *http.Request) { h.List(w, r, b2bCfg) }

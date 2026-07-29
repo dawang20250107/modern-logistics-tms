@@ -9,6 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
+
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
 
@@ -43,7 +46,7 @@ func (h *Handler) StatementOverview(w http.ResponseWriter, r *http.Request) {
 			       count(*) FILTER (WHERE status='partial'), count(*) FILTER (WHERE status='settled')
 			FROM fin_statement WHERE direction=$1`, direction,
 		).Scan(&s.Total, &s.Settled, &s.Outstanding, &s.Count, &s.Draft, &s.Confirmed, &s.Partial, &s.SettledCount)
-			return s, err
+		return s, err
 	}
 	overdue := func(direction string) (map[string]any, error) {
 		var amt float64
@@ -124,4 +127,49 @@ func round2(f float64) float64 {
 		}
 		return 0.5
 	}())) / 100
+}
+
+// ── 对账单台账列表（复用 masterdata 通用列表引擎）──
+
+var statementsCfg = masterdata.ResourceCfg{
+	SelectSQL: `
+SELECT s.id::text AS id, s.statement_no, s.direction, s.counterparty_type,
+       s.counterparty_id::text AS counterparty_id, s.counterparty_name,
+       s.period_start::text AS period_start, s.period_end::text AS period_end, s.due_date::text AS due_date,
+       s.total_amount::text AS total_amount, s.item_count, s.external_total::text AS external_total,
+       (s.total_amount - s.external_total)::text AS diff,
+       s.settled_amount::text AS settled_amount,
+       (s.total_amount - s.settled_amount)::text AS outstanding,
+       s.settled_at, s.status,
+       (CASE s.status WHEN 'draft' THEN '草稿' WHEN 'confirmed' THEN '已确认'
+                      WHEN 'partial' THEN '部分结算' WHEN 'settled' THEN '已结算' ELSE s.status END) AS status_label,
+       s.confirmed_at, s.audited_at, s.created_at`,
+	FromClause: "FROM fin_statement s",
+	SearchCols: []string{"s.statement_no", "s.counterparty_name"},
+	OrderingCols: map[string]string{
+		"statement_no": "s.statement_no", "counterparty_name": "s.counterparty_name",
+		"direction": "s.direction", "status": "s.status", "total_amount": "s.total_amount",
+		"settled_amount": "s.settled_amount", "created_at": "s.created_at",
+		"outstanding_anno": "(s.total_amount - s.settled_amount)",
+		"diff_anno":        "abs(s.total_amount - s.external_total)",
+	},
+	FilterFields: map[string]filters.FilterField{
+		"no":     {Type: filters.Text, Cols: []string{"s.statement_no"}},
+		"cp":     {Type: filters.Text, Cols: []string{"s.counterparty_name"}},
+		"dir":    {Type: filters.Enum, Cols: []string{"s.direction"}},
+		"status": {Type: filters.Enum, Cols: []string{"s.status"}},
+		"amt":    {Type: filters.Number, Cols: []string{"s.total_amount"}},
+		"out":    {Type: filters.Number, Cols: []string{"(s.total_amount - s.settled_amount)"}},
+		"diff":   {Type: filters.Number, Cols: []string{"abs(s.total_amount - s.external_total)"}},
+	},
+	DirectParams: map[string]string{
+		"direction": "s.direction", "status": "s.status",
+		"counterparty_type": "s.counterparty_type", "counterparty_id": "s.counterparty_id::text",
+	},
+	DefaultOrder: "ORDER BY s.created_at DESC, s.id",
+}
+
+// Statements GET /api/v1/finance/statements（列表模式，无 lines 明细）
+func (h *Handler) Statements(md *masterdata.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { md.List(w, r, statementsCfg) }
 }

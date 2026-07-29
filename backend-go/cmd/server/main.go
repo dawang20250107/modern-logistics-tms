@@ -27,6 +27,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/orders"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/org"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/proxy"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/resources"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
 )
 
@@ -58,6 +59,8 @@ func main() {
 	excH := &exceptions.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	ntfH := &notifications.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	django := proxy.New(cfg.DjangoUpstream)
+	mdH.Fallback = django // CRUD 子路由未声明的自定义动作仍回代上游
+	resH := &resources.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH, Fallback: django}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
@@ -128,6 +131,42 @@ func main() {
 			mdH.CRUD(masterdata.DriverCredsCfg, masterdata.DriverCredWrite)(rt)
 			rt.Post("/{id}/ocr", mdH.CredentialOCR)
 		})
+		// 其余标准 ModelViewSet 资源：同一份引擎，配置在 internal/resources
+		p.Route("/api/v1/order-templates", mdH.CRUD(resources.OrderTemplatesCfg, resources.OrderTemplateWrite))
+		p.Route("/api/v1/reminder-templates", mdH.CRUD(resources.ReminderTemplatesCfg, resources.ReminderTemplateWrite))
+		p.Route("/api/v1/reminders", func(rt chi.Router) {
+			mdH.CRUD(resources.DriverRemindersCfg, resources.DriverReminderWrite)(rt)
+			rt.Post("/{id}/acknowledge", resH.ReminderAcknowledge)
+		})
+		p.Route("/api/v1/receipts", func(rt chi.Router) {
+			mdH.CRUD(resources.ReceiptsCfg, resources.ReceiptWrite)(rt)
+			rt.Post("/{id}/confirm", resH.ReceiptConfirm)
+		})
+		p.Route("/api/v1/dispatch-batches", mdH.CRUD(resources.DispatchBatchesCfg, resources.DispatchBatchWrite))
+		p.Route("/api/v1/org/departments", mdH.CRUD(resources.DepartmentsCfg, resources.DepartmentWrite))
+		p.Route("/api/v1/org/employee-groups", mdH.CRUD(resources.EmployeeGroupsCfg, resources.EmployeeGroupWrite))
+		p.Route("/api/v1/org/permissions", mdH.CRUD(resources.PermissionsCfg, resources.PermissionWrite))
+		p.Route("/api/v1/telematics/devices", mdH.CRUD(resources.DevicesCfg, resources.DeviceWrite))
+		p.Route("/api/v1/telematics/geofences", mdH.CRUD(resources.GeofencesCfg, resources.GeofenceWrite))
+		p.Route("/api/v1/telematics/alerts", func(rt chi.Router) {
+			mdH.CRUD(resources.AlertsCfg, resources.AlertWrite)(rt)
+			rt.Post("/{id}/ack", resH.AlertTransition("acknowledged"))
+			rt.Post("/{id}/close", resH.AlertTransition("closed"))
+		})
+		p.Route("/api/v1/finance/expense-items", mdH.CRUD(resources.ExpenseItemsCfg, resources.ExpenseItemWrite))
+		p.Route("/api/v1/finance/expense-records", mdH.CRUD(resources.ExpenseRecordsCfg, resources.ExpenseRecordWrite))
+		p.Route("/api/v1/finance/payment-requests", mdH.CRUD(resources.PaymentRequestsCfg, resources.PaymentRequestWrite))
+		p.Route("/api/v1/finance/pricing-rules", mdH.CRUD(resources.PricingRulesCfg, resources.PricingRuleWrite))
+		p.Route("/api/v1/finance/webhooks", mdH.CRUD(resources.WebhooksCfg, resources.WebhookWrite))
+		p.Route("/api/v1/finance/webhook-deliveries", mdH.CRUD(resources.WebhookDeliveriesCfg, resources.WebhookDeliveryWrite))
+		p.Route("/api/v1/finance/reimbursements", func(rt chi.Router) {
+			mdH.CRUD(resources.ReimbursementsCfg, resources.ReimbursementWrite)(rt)
+			rt.Post("/", resH.ReimbursementCreate) // ViewSet.create 完全重写
+			rt.Post("/{id}/approve", resH.ReimbursementApprove)
+			rt.Post("/{id}/reject", resH.ReimbursementReject)
+			rt.Post("/{id}/pay", resH.ReimbursementPay)
+		})
+		p.Post("/api/v1/finance/payment-results", resH.PaymentResult)
 		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
 		p.Get("/api/v1/finance/aging", finH.Aging)

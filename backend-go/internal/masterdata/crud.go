@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -37,7 +38,20 @@ const (
 	FDateTime                  // DateTimeField
 	FUUID                      // ForeignKey
 	FJSON                      // JSONField
+	FURL                       // URLField（带 Django URLValidator 同款校验）
 )
+
+// urlRe 近似 Django URLValidator：scheme://host[:port][/path]，
+// host 允许域名（需含合法 TLD）、IPv4、localhost。
+var urlRe = regexp.MustCompile(`^(?i)(https?|ftps?)://` +
+	`([^\s:@/]+(:[^\s:@/]*)?@)?` + // 可选 user:pass@
+	`(` +
+	`(\d{1,3}\.){3}\d{1,3}` + // IPv4
+	`|localhost` +
+	`|([a-z0-9\x{00a1}-\x{ffff}]([a-z0-9\x{00a1}-\x{ffff}-]*[a-z0-9\x{00a1}-\x{ffff}])?\.)+` +
+	`[a-z\x{00a1}-\x{ffff}]{2,}\.?` +
+	`)` +
+	`(:\d{2,5})?([/?#]\S*)?$`)
 
 // Field 一个可写字段的声明
 type Field struct {
@@ -62,6 +76,26 @@ type WriteCfg struct {
 	PKColumn string
 	// AfterWrite 可选钩子：落库后处理 M2M 等
 	AfterWrite func(ctx context.Context, h *Handler, id string, body map[string]any, creating bool) error
+	// BeforeCreate 可选钩子：落库前补服务端生成的列（单号、当前用户等）
+	BeforeCreate func(ctx context.Context, h *Handler, r *http.Request, body map[string]any) (map[string]any, error)
+
+	// CascadeTables 物理删除前需先清掉的从属行：表名 → 指向本资源的外键列。
+	// Django 的 on_delete=CASCADE 由 ORM 收集器在 Python 层执行，原生 SQL 没有
+	// 对应的库级 ON DELETE CASCADE 时会撞外键约束（典型是 M2M 中间表）。
+	CascadeTables map[string]string
+
+	// ModelDefaults 模型层默认值：库列 → 字面量。用于「不在序列化器里、但模型 default
+	// 非零值」的 NOT NULL 列（如 DriverReminder.level='important'）——通用零值补齐会写成
+	// ''/0，与 Django 不符，故需显式声明。
+	ModelDefaults map[string]any
+
+	// ReadOnly 对齐 ReadOnlyModelViewSet：只暴露 list/retrieve
+	ReadOnly bool
+	// NoCreate / NoUpdate / NoDelete 对齐 http_method_names 收窄或缺失的 mixin；
+	// NoCreate 也用于「create 被 ViewSet 完全重写」的资源（由域内自定义 handler 接管）
+	NoCreate bool
+	NoUpdate bool
+	NoDelete bool
 }
 
 func (c WriteCfg) pk() string {
@@ -160,6 +194,16 @@ func normalize(key string, f Field, raw any) (any, string) {
 			return nil, ""
 		}
 		return strings.TrimSpace(s), ""
+	case FURL:
+		s, ok := raw.(string)
+		if !ok {
+			return nil, "该字段必须是字符串。"
+		}
+		s = strings.TrimSpace(s)
+		if s != "" && !urlRe.MatchString(s) {
+			return nil, "请输入合法的URL。"
+		}
+		return s, ""
 	case FUUID:
 		s, ok := raw.(string)
 		if !ok || s == "" {
@@ -255,19 +299,31 @@ func (h *Handler) requiredZeros(ctx context.Context, table string) map[string]an
 	return z
 }
 
-// Retrieve GET /<res>/{id}
-func (h *Handler) Retrieve(w http.ResponseWriter, r *http.Request, cfg ResourceCfg, wc WriteCfg) {
+// object 按主键取单对象（含数据范围收窄）；未命中/越权时写 404 并返回 nil
+func (h *Handler) object(w http.ResponseWriter, r *http.Request, cfg ResourceCfg, wc WriteCfg) map[string]any {
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", wc.notFound())
-		return
+		return nil
 	}
-	it, err := h.OneDetail(r.Context(), cfg, wc.whereByID(), id)
+	scoped, scopeErr := h.applyScope(r, cfg)
+	if scopeErr != "" {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取数据范围失败")
+		return nil
+	}
+	it, err := h.OneDetail(r.Context(), scoped, wc.whereByID(), id)
 	if err != nil || it == nil {
 		httpx.Err(w, http.StatusNotFound, "error", wc.notFound())
-		return
+		return nil
 	}
-	httpx.JSON(w, http.StatusOK, it)
+	return it
+}
+
+// Retrieve GET /<res>/{id}
+func (h *Handler) Retrieve(w http.ResponseWriter, r *http.Request, cfg ResourceCfg, wc WriteCfg) {
+	if it := h.object(w, r, cfg, wc); it != nil {
+		httpx.JSON(w, http.StatusOK, it)
+	}
 }
 
 // Create POST /<res>
@@ -278,6 +334,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
 			map[string]any{"detail": []string{"请求体不是合法 JSON。"}})
 		return
+	}
+	// 先跑字段级校验再跑钩子：DRF 是 is_valid() 通过后才进 create()，
+	// 钩子里的业务校验（如 waybill_no 解析）必须排在字段必填之后。
+	if _, _, details := h.collect(ctx, wc, body, true); len(details) > 0 {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败", details)
+		return
+	}
+	if wc.BeforeCreate != nil {
+		nb, err := wc.BeforeCreate(ctx, h, r, body)
+		if err != nil {
+			httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+				map[string]any{"detail": []string{err.Error()}})
+			return
+		}
+		body = nb
 	}
 	cols, vals, details := h.collect(ctx, wc, body, true)
 	if len(details) > 0 {
@@ -296,6 +367,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	provided := map[string]bool{}
 	for _, c := range cols {
 		provided[c] = true
+	}
+	for col, dv := range wc.ModelDefaults {
+		if provided[col] {
+			continue
+		}
+		provided[col] = true
+		cols = append(cols, col)
+		args = append(args, dv)
+		phs = append(phs, fmt.Sprintf("$%d", len(args)))
 	}
 	for col, zero := range h.requiredZeros(ctx, wc.Table) {
 		if provided[col] {
@@ -330,17 +410,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 // Update PUT/PATCH /<res>/{id}
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg, wc WriteCfg) {
 	ctx := r.Context()
+	if h.object(w, r, cfg, wc) == nil {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	if _, err := uuid.Parse(id); err != nil {
-		httpx.Err(w, http.StatusNotFound, "error", wc.notFound())
-		return
-	}
-	var exists bool
-	_ = h.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM "+wc.Table+" WHERE "+wc.pk()+"=$1::uuid)", id).Scan(&exists)
-	if !exists {
-		httpx.Err(w, http.StatusNotFound, "error", wc.notFound())
-		return
-	}
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
@@ -369,7 +442,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	if wc.AfterWrite != nil {
 		_ = wc.AfterWrite(ctx, h, id, body, false)
 	}
-	it, err := h.OneDetail(ctx, cfg, wc.whereByID(), id)
+	read := h.OneDetail
+	if r.Method == http.MethodPatch {
+		read = h.OnePartial // partial=True 下 DRF 会丢掉 source 链为 None 的只读关联字段
+	}
+	it, err := read(ctx, cfg, wc.whereByID(), id)
 	if err != nil || it == nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回读失败")
 		return
@@ -378,12 +455,17 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 }
 
 // Delete DELETE /<res>/{id} —— 软删模型置 is_deleted，否则物理删；均返回 204
-func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, wc WriteCfg) {
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, cfg ResourceCfg, wc WriteCfg) {
 	ctx := r.Context()
-	id := chi.URLParam(r, "id")
-	if _, err := uuid.Parse(id); err != nil {
-		httpx.Err(w, http.StatusNotFound, "error", wc.notFound())
+	if h.object(w, r, cfg, wc) == nil {
 		return
+	}
+	id := chi.URLParam(r, "id")
+	for tbl, col := range wc.CascadeTables {
+		if _, err := h.DB.Exec(ctx, "DELETE FROM "+tbl+" WHERE "+col+"=$1::uuid", id); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			return
+		}
 	}
 	var sql string
 	if wc.SoftDelete {
@@ -526,14 +608,44 @@ func (h *Handler) collectUpdate(ctx context.Context, wc WriteCfg, body map[strin
 	return cols, vals, details
 }
 
-// CRUD 把一份读写配置绑成 chi 子路由（列表/创建/详情/更新/删除）
+// CRUD 把一份读写配置绑成 chi 子路由（列表/创建/详情/更新/删除）。
+// WriteCfg 上的 ReadOnly/NoUpdate/NoDelete 决定实际暴露哪些动作，
+// 对齐各 ViewSet 选用的 mixin 组合与 http_method_names 收窄。
 func (h *Handler) CRUD(cfg ResourceCfg, wc WriteCfg) func(chi.Router) {
 	return func(r chi.Router) {
+		if h.Fallback != nil {
+			r.NotFound(h.Fallback.ServeHTTP)
+		}
+		// 未开放的动作走 DRF 同款 405（而非 chi 默认空体）
+		r.MethodNotAllowed(func(w http.ResponseWriter, rq *http.Request) {
+			httpx.Err(w, http.StatusMethodNotAllowed, "method_not_allowed",
+				fmt.Sprintf("方法 “%s” 不被允许。", rq.Method))
+		})
+		// detail 路由：{id} 不是 UUID 时说明命中的其实是 detail=False 的自定义动作
+		// （如 /drivers/lookup）——chi 的 {id} 会先吃掉它，故在此显式回代上游。
+		detail := func(next func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+			return func(w http.ResponseWriter, rq *http.Request) {
+				if _, err := uuid.Parse(chi.URLParam(rq, "id")); err != nil && h.Fallback != nil {
+					h.Fallback.ServeHTTP(w, rq)
+					return
+				}
+				next(w, rq)
+			}
+		}
 		r.Get("/", func(w http.ResponseWriter, rq *http.Request) { h.List(w, rq, cfg) })
-		r.Post("/", func(w http.ResponseWriter, rq *http.Request) { h.Create(w, rq, cfg, wc) })
-		r.Get("/{id}", func(w http.ResponseWriter, rq *http.Request) { h.Retrieve(w, rq, cfg, wc) })
-		r.Put("/{id}", func(w http.ResponseWriter, rq *http.Request) { h.Update(w, rq, cfg, wc) })
-		r.Patch("/{id}", func(w http.ResponseWriter, rq *http.Request) { h.Update(w, rq, cfg, wc) })
-		r.Delete("/{id}", func(w http.ResponseWriter, rq *http.Request) { h.Delete(w, rq, wc) })
+		r.Get("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Retrieve(w, rq, cfg, wc) }))
+		if wc.ReadOnly {
+			return
+		}
+		if !wc.NoCreate {
+			r.Post("/", func(w http.ResponseWriter, rq *http.Request) { h.Create(w, rq, cfg, wc) })
+		}
+		if !wc.NoUpdate {
+			r.Put("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Update(w, rq, cfg, wc) }))
+			r.Patch("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Update(w, rq, cfg, wc) }))
+		}
+		if !wc.NoDelete {
+			r.Delete("/{id}", detail(func(w http.ResponseWriter, rq *http.Request) { h.Delete(w, rq, cfg, wc) }))
+		}
 	}
 }

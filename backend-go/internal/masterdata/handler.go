@@ -24,6 +24,10 @@ import (
 type Handler struct {
 	DB  *pgxpool.Pool
 	Svc *auth.Service
+	// Fallback 子路由未命中时的兜底（绞杀期回代 Django）。
+	// CRUD 子路由是挂载式的，未声明的自定义动作（如 /carriers/{id}/blacklist）
+	// 不会回到父路由，必须在子路由上显式兜底，否则会被误判成 404。
+	Fallback http.Handler
 }
 
 type ResourceCfg struct {
@@ -37,6 +41,26 @@ type ResourceCfg struct {
 	// DetailExtras 仅详情（retrieve）计算的重聚合列：别名 → SQL 表达式。
 	// 对齐 DRF 里「_is_list(self) 则返回 None」的字段（列表恒为 null，避免 N+1）。
 	DetailExtras map[string]string
+
+	// ScopeOrgCol 数据范围：该资源「归属组织 ID」的 SQL 标量表达式（可为子查询）。
+	// 置空表示不做数据范围收窄。对齐 iam.scoping.scope_queryset：
+	// 超管/all 档全量；否则限组织（子树）；表达式取值为 NULL 相当于 Django 里
+	// LEFT JOIN 后的 organization__isnull=True。
+	ScopeOrgCol string
+	// ScopeIncludeNull 对齐 org_scope_include_null：无组织归属的记录对所有人可见
+	ScopeIncludeNull bool
+
+	// PartialOmit 复刻 DRF 的一个反直觉行为：partial=True（即 PATCH）时，
+	// Field.get_default() 直接 raise SkipField，于是「带 default 的只读关联字段」
+	// 一旦 source 链上出现 None，该键会从 PATCH 响应里**整个消失**（而非返回 ""）。
+	// 键 = JSON 字段名；值 = 判空的 SQL 表达式，为 NULL 时该键在 PATCH 响应中省略。
+	PartialOmit map[string]string
+	// SoftDeleteCol 软删列（如 "c.is_deleted"）。对齐 core.SoftDeleteManager：
+	// 这些模型的默认管理器带 WHERE NOT is_deleted，软删行在读路径上必须不可见。
+	SoftDeleteCol string
+
+	// scopeWhere 由 applyScope 计算后注入，不在配置里手写
+	scopeWhere string
 }
 
 var customersCfg = ResourceCfg{
@@ -64,8 +88,9 @@ SELECT c.id::text AS id, c.code, c.name, c.category, c.level,
 		"days":     {Type: filters.Number, Cols: []string{"c.credit_days"}},
 		"active":   {Type: filters.Bool, Cols: []string{"c.is_active"}},
 	},
-	DirectParams: map[string]string{"is_active": "c.is_active"},
-	DefaultOrder: "ORDER BY c.code, c.id",
+	DirectParams:  map[string]string{"is_active": "c.is_active"},
+	DefaultOrder:  "ORDER BY c.code, c.id",
+	SoftDeleteCol: "c.is_deleted",
 }
 
 var vehiclesCfg = ResourceCfg{
@@ -101,7 +126,8 @@ SELECT v.id::text AS id, v.plate_no, v.vehicle_class,
 		"is_active": "v.is_active", "carrier": "v.carrier_id::text",
 		"vehicle_class": "v.vehicle_class", "dispatch_source": "v.dispatch_source",
 	},
-	DefaultOrder: "ORDER BY v.plate_no, v.id",
+	DefaultOrder:  "ORDER BY v.plate_no, v.id",
+	SoftDeleteCol: "v.is_deleted",
 }
 
 var driversCfg = ResourceCfg{
@@ -134,7 +160,8 @@ SELECT d.id::text AS id, d.name, d.phone, d.wechat, d.employment_type,
 		"is_active": "d.is_active", "carrier": "d.carrier_id::text",
 		"employment_type": "d.employment_type", "app_registered": "d.app_registered",
 	},
-	DefaultOrder: "ORDER BY d.name, d.id",
+	DefaultOrder:  "ORDER BY d.name, d.id",
+	SoftDeleteCol: "d.is_deleted",
 }
 
 func (h *Handler) Customers(w http.ResponseWriter, r *http.Request) { h.List(w, r, customersCfg) }
@@ -159,15 +186,61 @@ func parseBoolish(s string) (bool, bool) {
 	return false, false
 }
 
+// applyScope 按当前用户的数据范围收窄配置；返回 false 表示已写出错误响应
+func (h *Handler) applyScope(r *http.Request, cfg ResourceCfg) (ResourceCfg, string) {
+	if cfg.ScopeOrgCol == "" {
+		return cfg, ""
+	}
+	ctx := r.Context()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		return cfg, "TOKEN_INVALID"
+	}
+	ids, err := h.Svc.ScopeOrgIDs(ctx, me)
+	if err != nil {
+		return cfg, "INTERNAL"
+	}
+	if ids == nil { // all 档：不收窄
+		return cfg, ""
+	}
+	cond := "false"
+	if len(ids) > 0 {
+		quoted := make([]string, len(ids))
+		for i, id := range ids {
+			quoted[i] = "'" + strings.ReplaceAll(id, "'", "") + "'"
+		}
+		cond = fmt.Sprintf("(%s)::text IN (%s)", cfg.ScopeOrgCol, strings.Join(quoted, ","))
+	}
+	if cfg.ScopeIncludeNull {
+		cond = "(" + cond + " OR (" + cfg.ScopeOrgCol + ") IS NULL)"
+	}
+	cfg.scopeWhere = cond
+	return cfg, ""
+}
+
 // list 通用列表：search/ordering/filter/直连参数/分页 → {items,total,page,page_size,pages}
 func (h *Handler) List(w http.ResponseWriter, r *http.Request, cfg ResourceCfg) {
 	ctx := r.Context()
+	cfg, scopeErr := h.applyScope(r, cfg)
+	if scopeErr == "TOKEN_INVALID" {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return
+	} else if scopeErr != "" {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取数据范围失败")
+		return
+	}
 	q := r.URL.Query()
 	page := clampInt(q.Get("page"), 1, 1, 1<<30)
 	pageSize := clampInt(q.Get("page_size"), 20, 1, 1000) // 主数据下拉常用 page_size=500
 
 	args := &filters.Args{}
 	where := []string{"true"}
+	if cfg.SoftDeleteCol != "" {
+		where = append(where, "NOT "+cfg.SoftDeleteCol)
+	}
+	if cfg.scopeWhere != "" {
+		where = append(where, cfg.scopeWhere)
+	}
 	if s := strings.TrimSpace(q.Get("search")); s != "" {
 		ph := args.Add("%" + s + "%")
 		parts := make([]string, len(cfg.SearchCols))
@@ -245,6 +318,33 @@ func (h *Handler) OneDetail(ctx context.Context, cfg ResourceCfg, where string, 
 	return h.one(ctx, cfg, true, where, args...)
 }
 
+// OnePartial 回读 PATCH 响应：按 PartialOmit 摘掉 source 链为 None 的只读关联字段
+func (h *Handler) OnePartial(ctx context.Context, cfg ResourceCfg, where string, args ...any) (map[string]any, error) {
+	if len(cfg.PartialOmit) == 0 {
+		return h.OneDetail(ctx, cfg, where, args...)
+	}
+	keys := make([]string, 0, len(cfg.PartialOmit))
+	for k := range cfg.PartialOmit {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	probe := cfg
+	for _, k := range keys {
+		probe.SelectSQL += ", ((" + cfg.PartialOmit[k] + ") IS NULL) AS __po_" + k
+	}
+	it, err := h.one(ctx, probe, true, where, args...)
+	if err != nil || it == nil {
+		return it, err
+	}
+	for _, k := range keys {
+		if drop, _ := it["__po_"+k].(bool); drop {
+			delete(it, k)
+		}
+		delete(it, "__po_"+k)
+	}
+	return it, nil
+}
+
 func (h *Handler) one(ctx context.Context, cfg ResourceCfg, detail bool, where string, args ...any) (map[string]any, error) {
 	sel := cfg.SelectSQL
 	if detail && len(cfg.DetailExtras) > 0 {
@@ -260,6 +360,12 @@ func (h *Handler) one(ctx context.Context, cfg ResourceCfg, detail bool, where s
 		for _, k := range keys {
 			sel += ", (" + cfg.DetailExtras[k] + ") AS " + k
 		}
+	}
+	if cfg.SoftDeleteCol != "" {
+		where = "(" + where + ") AND NOT " + cfg.SoftDeleteCol
+	}
+	if cfg.scopeWhere != "" {
+		where = "(" + where + ") AND " + cfg.scopeWhere
 	}
 	rows, err := h.DB.Query(ctx, sel+" "+cfg.FromClause+" WHERE "+where, args...)
 	if err != nil {
@@ -288,7 +394,16 @@ func stripColumn(sel, alias string) string {
 	return sel[:start] + sel[end:]
 }
 
-// rowsToMaps 泛化扫描：列别名即 JSON 键；time.Time 走 RFC3339Nano 由 encoding/json 处理
+// pyISO 复刻 Python datetime.isoformat() + DRF 的 +00:00→Z 替换：
+// 微秒为 0 时不带小数部分，否则固定 6 位（Go 的 RFC3339Nano 会裁掉末尾零，与 Python 不符）。
+func pyISO(t time.Time) string {
+	if t.Nanosecond() == 0 {
+		return t.Format("2006-01-02T15:04:05Z07:00")
+	}
+	return t.Format("2006-01-02T15:04:05.000000Z07:00")
+}
+
+// rowsToMaps 泛化扫描：列别名即 JSON 键；time.Time 走 DRF 同款 ISO-8601
 func rowsToMaps(rows pgx.Rows) ([]map[string]any, error) {
 	fds := rows.FieldDescriptions()
 	items := []map[string]any{}
@@ -301,7 +416,7 @@ func rowsToMaps(rows pgx.Rows) ([]map[string]any, error) {
 		for i, fd := range fds {
 			v := vals[i]
 			if t, ok := v.(time.Time); ok {
-				m[fd.Name] = t.Format(time.RFC3339Nano)
+				m[fd.Name] = pyISO(t)
 			} else {
 				m[fd.Name] = v
 			}
@@ -316,12 +431,13 @@ var b2bCfg = ResourceCfg{
 SELECT p.id::text AS id, p.partner_type,
        (CASE p.partner_type WHEN 'shipper' THEN '发货方' WHEN 'consignee' THEN '收货方' WHEN 'supplier' THEN '供应商/承运商' ELSE '' END) AS partner_type_label,
        p.code, p.name, p.contact_name, p.contact_phone, p.address, p.city, p.is_active`,
-	FromClause:   "FROM md_b2b_partner p",
-	SearchCols:   []string{"p.code", "p.name", "p.contact_phone", "p.city"},
-	OrderingCols: map[string]string{"code": "p.code", "name": "p.name", "created_at": "p.created_at"},
-	FilterFields: map[string]filters.FilterField{},
-	DirectParams: map[string]string{"partner_type": "p.partner_type", "is_active": "p.is_active"},
-	DefaultOrder: "ORDER BY p.code, p.id",
+	FromClause:    "FROM md_b2b_partner p",
+	SearchCols:    []string{"p.code", "p.name", "p.contact_phone", "p.city"},
+	OrderingCols:  map[string]string{"code": "p.code", "name": "p.name", "created_at": "p.created_at"},
+	FilterFields:  map[string]filters.FilterField{},
+	DirectParams:  map[string]string{"partner_type": "p.partner_type", "is_active": "p.is_active"},
+	DefaultOrder:  "ORDER BY p.code, p.id",
+	SoftDeleteCol: "p.is_deleted",
 }
 
 func (h *Handler) B2BPartners(w http.ResponseWriter, r *http.Request) { h.List(w, r, b2bCfg) }
@@ -378,7 +494,8 @@ LEFT JOIN LATERAL (
 	DirectParams: map[string]string{
 		"is_active": "ca.is_active", "grade": "ca.grade", "carrier_type": "ca.carrier_type",
 	},
-	DefaultOrder: "ORDER BY ca.code, ca.id",
+	DefaultOrder:  "ORDER BY ca.code, ca.id",
+	SoftDeleteCol: "ca.is_deleted",
 }
 
 func (h *Handler) Carriers(w http.ResponseWriter, r *http.Request) { h.List(w, r, carriersCfg) }

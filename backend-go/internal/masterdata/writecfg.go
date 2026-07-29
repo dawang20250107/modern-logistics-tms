@@ -110,12 +110,13 @@ var RoutesCfg = ResourceCfg{
 	SelectSQL: `
 SELECT r.id::text AS id, r.code, r.name, r.origin, r.destination, r.waypoints,
        r.corridor_m::text AS corridor_m, r.distance_km::text AS distance_km, r.is_active`,
-	FromClause:   "FROM md_route r",
-	SearchCols:   []string{"r.code", "r.name", "r.origin", "r.destination"},
-	OrderingCols: map[string]string{"code": "r.code", "created_at": "r.created_at"},
-	FilterFields: map[string]filters.FilterField{},
-	DirectParams: map[string]string{"is_active": "r.is_active"},
-	DefaultOrder: "ORDER BY r.code, r.id",
+	FromClause:    "FROM md_route r",
+	SearchCols:    []string{"r.code", "r.name", "r.origin", "r.destination"},
+	OrderingCols:  map[string]string{"code": "r.code", "created_at": "r.created_at"},
+	FilterFields:  map[string]filters.FilterField{},
+	DirectParams:  map[string]string{"is_active": "r.is_active"},
+	DefaultOrder:  "ORDER BY r.code, r.id",
+	SoftDeleteCol: "r.is_deleted",
 }
 
 var RouteWrite = WriteCfg{
@@ -154,7 +155,8 @@ SELECT l.id::text AS id, l.carrier_id::text AS carrier, COALESCE(ca.name,'') AS 
 		"carrier": "l.carrier_id::text", "origin_city": "l.origin_city",
 		"dest_city": "l.dest_city", "vehicle_type": "l.vehicle_type", "is_active": "l.is_active",
 	},
-	DefaultOrder: "ORDER BY l.origin_city, l.dest_city, l.standard_price, l.id",
+	DefaultOrder:  "ORDER BY l.origin_city, l.dest_city, l.standard_price, l.id",
+	SoftDeleteCol: "l.is_deleted",
 }
 
 var LanePriceWrite = WriteCfg{
@@ -275,7 +277,7 @@ SELECT json_build_object(
      SELECT w.origin, w.destination, count(*) AS deals FROM ops_waybill w
      WHERE w.carrier_id=ca.id AND w.created_at >= now() - interval '90 days'
        AND w.status <> 'voided' AND w.origin <> '' AND w.destination <> ''
-     GROUP BY w.origin, w.destination ORDER BY deals DESC LIMIT 5) f), '[]'::json))
+     GROUP BY w.origin, w.destination ORDER BY deals DESC, w.origin, w.destination LIMIT 5) f), '[]'::json))
 FROM (SELECT
     count(*) AS total,
     count(*) FILTER (WHERE w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL) AS timed_total,

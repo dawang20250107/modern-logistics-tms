@@ -110,6 +110,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
 | 组织中台-读 | GET /org/{overview·organizations·organizations/tree·roles·rbac/matrix·service-areas·employees·handovers·login-audit·route-resolve}（列表复用通用引擎，树/矩阵/区划仲裁定制） | ✅ 十端点双栈 diff 全一致（含子树人头累加、覆盖排他+优先级仲裁） |
 | 单单派车 | POST /orders/{id}/dispatch（own_vehicle/fleet/third_party/platform：状态/锁定/归属门禁 → 承运商风控 → 车辆司机行锁占用 → 核载/车厢/证件资质合规 → 转运单+承运状态+应付快照+双事件+承运合同 HT 取号，单事务） | ✅ 全校验链实测（ORDER_NOT_LOCKED/CARRIER_REQUIRED/VEHICLE_BUSY 等）；Django 读回运单/合同/费用/订单全对；合同为文本版（PDF 留 Django 的 try/except 语义，见差异清单） |
+| 标准资源-CRUD | 18 个标准 ModelViewSet 全套动作：order-templates / reminder-templates / reminders(+acknowledge) / receipts(+confirm) / dispatch-batches / org{departments,employee-groups,permissions} / telematics{devices,geofences,alerts(+ack,close)} / finance{expense-items,expense-records,payment-requests,pricing-rules,webhooks,webhook-deliveries,reimbursements(+approve,reject,pay),payment-results} | ✅ 12 资源跑通 create→retrieve→patch→404→校验错误→delete 全序列双栈逐字节一致；只读资源与自定义动作单独比对；70 端点全量回归仅剩 1 处并列时序差异（集合等价）。引擎补齐数据范围、软删可见性、ReadOnly/NoCreate/NoUpdate/NoDelete、级联删、URLField 校验、DRF partial 的 SkipField 行为 |
 | 组织中台-写 | POST /org/{organizations·employees·service-areas} 创建 + employees/{id}/{roles·enable·disable·reset-password·handover} + roles/{id}/set-permissions | ✅ Go 写→Django 读回全对；物化路径 path 正确；重置密码 Go 生成 pbkdf2 哈希双栈均可登录；移交事务（下属改挂+部门改派+停用留痕）实测；唯一性/无账号 400 契约对齐 |
 
 ## 待移植（按前端依赖频度排序）
@@ -155,8 +156,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 - **授权变更的权限缓存**：Django 侧 `effective_permissions` 有 TTL 缓存
   （`iam:perms:<uid>`），Go 写角色分配后不主动清 Django 缓存，靠 TTL 过期兜底；
   Go 自身每请求实时查库无缓存。Django 退役后此差异消失。
-- **org 域 CSV 导入/导出、departments/employee-groups/permissions 列表**仍由代理
-  提供（前端低频/未用），随收官阶段一并原生化。
+- **org 域 CSV 导入/导出**仍由代理提供（前端低频/未用），随收官阶段一并原生化。
 - **/workbench 的 dispatchable 修正而非复刻**：Django WorkbenchView 调用
   `OrderSerializer(..., many=True)` 时未传 `context={"request": ...}`，
   `get_dispatchable` 拿不到当前用户恒返回 false。Go 版按真实用户口径计算
@@ -177,6 +177,21 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
   `values("status").annotate(Count("id"))`，费用 JOIN 放大导致各状态重复计数
   （各状态之和 43 ≠ 实际 20 张）。Go 版直查 `GROUP BY status`，之和恒等于总数。
   前端状态药丸此前显示的是虚高值，切 Go 后自动恢复真实。
+
+- **`ordering` 未声明时的模型默认序并列**：多处 `Meta.ordering = ["-created_at"]`
+  的台账（费用流水、批次内运单、承运商常跑线路）在种子数据里 `created_at` 完全相同
+  （同一事务内 `now()`），Django 无决胜键时组内次序由 Postgres 计划任意决定；
+  Go 一律补决胜键（`, id` 或 `, origin, destination`），结果确定且与 Django 集合等价。
+  真实业务数据 `created_at` 带微秒不会并列，此差异只在演示数据上可见。
+- **回单 OCR 的异步语义**：Django `perform_create` 走 `process_receipt_ocr.delay`
+  投递 Celery，POST 立即返回 `ocr_status=pending`；Go 用 goroutine 复刻同一时序
+  （返回 pending，随后落 manual）。本地无 broker 时 Django 的 POST /receipts 直接
+  RuntimeError，Go 版可用——属环境依赖差异，最终态无 Celery 后 Go 是唯一实现。
+  两版 OCR 均保留「未配引擎绝不伪造签收人/签收时间」的安全语义。
+- **DRF partial 的 SkipField 行为已按原样复刻**：`CharField(source="x.y", default="")`
+  在 PATCH（`partial=True`）下，一旦 `x` 为 None，`get_default()` 直接 `raise SkipField`，
+  该键会从响应里整个消失（而非返回 `""`）。这是 DRF 的既有行为而非本项目设计，
+  Go 侧以 `ResourceCfg.PartialOmit` 逐字段声明复刻，避免前端在 PATCH 回包上错位。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

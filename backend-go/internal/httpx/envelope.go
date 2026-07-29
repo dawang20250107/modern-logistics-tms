@@ -5,6 +5,7 @@ package httpx
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 type ErrorBody struct {
@@ -37,3 +38,7 @@ func ErrDetails(w http.ResponseWriter, status int, code, message string, details
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(Envelope{Success: false, Data: nil, Error: &ErrorBody{Code: code, Message: message, Details: details}})
 }
+
+// Micros 把计算得到的时间截断到微秒 —— Python datetime 只有微秒精度，
+// Go 的 time.Now() 是纳秒。对外统一按微秒输出，两栈 wire 格式逐字节可比。
+func Micros(t time.Time) time.Time { return t.Truncate(time.Microsecond) }

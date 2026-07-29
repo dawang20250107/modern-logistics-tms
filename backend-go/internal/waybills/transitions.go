@@ -242,7 +242,7 @@ func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"waybill_no": wb.No, "status": wb.Status, "receipt_status": "received",
-		"receipt_id": rid.String(), "signed_at": time.Now().In(time.FixedZone("CST", 8*3600)),
+		"receipt_id": rid.String(), "signed_at": httpx.Micros(time.Now()).In(time.FixedZone("CST", 8*3600)),
 	})
 }
 

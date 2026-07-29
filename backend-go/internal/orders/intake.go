@@ -311,7 +311,7 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 
 	// 基础 INSERT（模型默认值全集），业务字段以“默认+覆盖”方式合并
 	base := map[string]any{
-		"id": orderID, "created_at": time.Now(), "updated_at": time.Now(), "is_deleted": false,
+		"id": orderID, "created_at": httpx.Micros(time.Now()), "updated_at": httpx.Micros(time.Now()), "is_deleted": false,
 		"order_no": orderNo, "channel": channel, "source": source, "status": status,
 		"source_type": "enterprise", "business_type": "ftl", "priority": "normal",
 		"settlement_type": "monthly", "freight_term": "prepaid", "freight_payer": "shipper",

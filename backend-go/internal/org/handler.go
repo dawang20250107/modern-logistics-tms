@@ -88,9 +88,10 @@ var rolesCfg = masterdata.ResourceCfg{
 SELECT r.id::text AS id, r.code, r.name, r.data_scope,
        (CASE r.data_scope WHEN 'self' THEN '仅本人' WHEN 'org' THEN '本组织'
                           WHEN 'org_sub' THEN '本组织及下级' WHEN 'all' THEN '全部' ELSE r.data_scope END) AS data_scope_label,
-       COALESCE((SELECT json_agg(rp.permission_id::text ORDER BY rp.id)
-                 FROM iam_role_permissions rp WHERE rp.role_id = r.id), '[]'::json) AS permissions,
-       COALESCE((SELECT json_agg(pp.code ORDER BY rp.id)
+       COALESCE((SELECT json_agg(pp.id::text ORDER BY pp.code)
+                 FROM iam_role_permissions rp JOIN iam_permission pp ON pp.id = rp.permission_id
+                 WHERE rp.role_id = r.id), '[]'::json) AS permissions,
+       COALESCE((SELECT json_agg(pp.code ORDER BY pp.code)
                  FROM iam_role_permissions rp JOIN iam_permission pp ON pp.id = rp.permission_id
                  WHERE rp.role_id = r.id), '[]'::json) AS permission_codes,
        (SELECT count(*) FROM iam_role_permissions rp WHERE rp.role_id = r.id)::int AS permission_count,
@@ -126,8 +127,9 @@ SELECT e.id::text AS id, e.employee_no, e.name, e.phone, e.email, e.id_no,
        e.organization_id::text AS organization, COALESCE(og.name,'') AS organization_name,
        e.department_id::text AS department, COALESCE(dp.name,'') AS department_name,
        e.supervisor_id::text AS supervisor, COALESCE(sp.name,'') AS supervisor_name,
-       COALESCE((SELECT json_agg(eg.employeegroup_id::text ORDER BY eg.id)
-                 FROM iam_employee_groups eg WHERE eg.employee_id = e.id), '[]'::json) AS groups,
+       COALESCE((SELECT json_agg(g.id::text ORDER BY g.code)
+                 FROM iam_employee_groups eg JOIN iam_employee_group g ON g.id = eg.employeegroup_id
+                 WHERE eg.employee_id = e.id), '[]'::json) AS groups,
        NULL::text AS group_names,
        e.position, e.status,
        (CASE e.status WHEN 'active' THEN '在职' WHEN 'disabled' THEN '停用' WHEN 'left' THEN '离职' ELSE e.status END) AS status_label,
@@ -398,7 +400,7 @@ func (h *Handler) RbacMatrix(w http.ResponseWriter, r *http.Request) {
 	roles := []map[string]any{}
 	rrows, err := h.DB.Query(ctx, `
 		SELECT r.id::text, r.code, r.name, r.data_scope, r.is_active,
-		       COALESCE((SELECT json_agg(pp.code ORDER BY rp.id)
+		       COALESCE((SELECT json_agg(pp.code ORDER BY pp.code)
 		                 FROM iam_role_permissions rp JOIN iam_permission pp ON pp.id=rp.permission_id
 		                 WHERE rp.role_id=r.id), '[]'::json)
 		FROM iam_role r ORDER BY r.code`)

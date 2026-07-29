@@ -98,6 +98,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 工作台 | GET /workbench（通知/异常/客服/调度/财务待办聚合 + 两组 Top5 订单嵌套） | ✅ 计数与嵌套全对齐；唯一差异 dispatchable 系修正 Django 缺陷（见差异清单） |
 | 证件预警 | GET /credentials/expiring?days=N（车辆年检/保险/维保 + 司机驾照/从业资格 + 承运资质，severity 分级） | ✅ days=30/90 双栈 diff 全一致（含稳定排序与 summary 计数） |
 | 财务大屏 | GET /finance/dashboard-metrics?days=N（营收/成本/毛利按日趋势 + 成本科目构成，读侧） | ✅ days=7/30 双栈 diff 全一致 |
+| 运单卡片-读 | GET /waybills/cost-catalog + /{no}/{costs·eta·collection·finance-card·reply-card·contract·reminders} | ✅ 4 张运单 × 6 端点双栈 diff 全一致；ETA 的 haversine+道路系数+近 5 点均速逐值复现（336.6km / 78km·h⁻¹ 两栈相同） |
 | 通知域 | GET /notifications + /unread-count + POST {id}/read + read-all（recipient 隔离，铃铛高频轮询） | ✅ 双栈 diff 一致；已读/全读 Django 复核一致；他人通知 404 |
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
 | 组织中台-读 | GET /org/{overview·organizations·organizations/tree·roles·rbac/matrix·service-areas·employees·handovers·login-audit·route-resolve}（列表复用通用引擎，树/矩阵/区划仲裁定制） | ✅ 十端点双栈 diff 全一致（含子树人头累加、覆盖排他+优先级仲裁） |
@@ -120,6 +121,15 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 
 ## 尚未对齐的已知差异（限制清单）
 
+- **越界分页**：Django 请求超出总页数时 DRF 抛 404「无效页面」，Go 返回 200 +
+  空 items（`{items:[],total,page,page_size,pages}`）。前端筛选变更不重置页码，
+  停留在越界页时 Django 会让表格整体报错、Go 则正常渲染空表且分页器可回跳，
+  属修正而非复刻。任何能处理空列表的客户端路径都兼容 200 空页。
+- **显式 `ordering=` 且排序键有并列时的组内次序**：Django 仅按该字段排序、无决胜键，
+  并列组内次序由 Postgres 任意决定（实测车辆载重 13 路并列、司机累计单量 8 路并列）；
+  Go 统一补 `, id` 决胜，结果确定且与 Django 集合等价。
+- **计算时间戳精度**：Go `time.Now()` 为纳秒、Python `datetime` 为微秒。对外输出统一
+  经 `httpx.Micros` 截断到微秒，两栈 wire 格式逐字节可比（ETA/签收时间等）。
 - **承运合同 PDF**：Django 生成文本合同 + reportlab PDF（PDF 失败不阻断）；
   Go 版生成同版式文本合同、`pdf` 字段留空——语义等价于 Django 的 PDF 生成失败分支。
   正式化时用 Go PDF 库（如 go-pdf/fpdf + 中文字体）补齐。

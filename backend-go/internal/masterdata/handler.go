@@ -61,7 +61,7 @@ SELECT c.id::text AS id, c.code, c.name, c.category, c.level,
 		"active":   {Type: filters.Bool, Cols: []string{"c.is_active"}},
 	},
 	DirectParams: map[string]string{"is_active": "c.is_active"},
-	DefaultOrder: "ORDER BY c.created_at DESC, c.id",
+	DefaultOrder: "ORDER BY c.code, c.id",
 }
 
 var vehiclesCfg = ResourceCfg{
@@ -97,7 +97,7 @@ SELECT v.id::text AS id, v.plate_no, v.vehicle_class,
 		"is_active": "v.is_active", "carrier": "v.carrier_id::text",
 		"vehicle_class": "v.vehicle_class", "dispatch_source": "v.dispatch_source",
 	},
-	DefaultOrder: "ORDER BY v.created_at DESC, v.id",
+	DefaultOrder: "ORDER BY v.plate_no, v.id",
 }
 
 var driversCfg = ResourceCfg{
@@ -130,7 +130,7 @@ SELECT d.id::text AS id, d.name, d.phone, d.wechat, d.employment_type,
 		"is_active": "d.is_active", "carrier": "d.carrier_id::text",
 		"employment_type": "d.employment_type", "app_registered": "d.app_registered",
 	},
-	DefaultOrder: "ORDER BY d.created_at DESC, d.id",
+	DefaultOrder: "ORDER BY d.name, d.id",
 }
 
 func (h *Handler) Customers(w http.ResponseWriter, r *http.Request) { h.List(w, r, customersCfg) }
@@ -278,7 +278,7 @@ SELECT p.id::text AS id, p.partner_type,
 	OrderingCols: map[string]string{"code": "p.code", "name": "p.name", "created_at": "p.created_at"},
 	FilterFields: map[string]filters.FilterField{},
 	DirectParams: map[string]string{"partner_type": "p.partner_type", "is_active": "p.is_active"},
-	DefaultOrder: "ORDER BY p.created_at DESC, p.id",
+	DefaultOrder: "ORDER BY p.code, p.id",
 }
 
 func (h *Handler) B2BPartners(w http.ResponseWriter, r *http.Request) { h.List(w, r, b2bCfg) }
@@ -335,7 +335,7 @@ LEFT JOIN LATERAL (
 	DirectParams: map[string]string{
 		"is_active": "ca.is_active", "grade": "ca.grade", "carrier_type": "ca.carrier_type",
 	},
-	DefaultOrder: "ORDER BY ca.created_at DESC, ca.id",
+	DefaultOrder: "ORDER BY ca.code, ca.id",
 }
 
 func (h *Handler) Carriers(w http.ResponseWriter, r *http.Request) { h.List(w, r, carriersCfg) }

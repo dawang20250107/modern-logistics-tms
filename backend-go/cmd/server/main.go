@@ -95,6 +95,8 @@ func main() {
 		p.Get("/api/v1/finance/aging", finH.Aging)
 		p.Get("/api/v1/audit-logs", audit.Logs(authSvc, mdH))
 		p.Get("/api/v1/analytics/dashboard", anaH.Dashboard)
+		p.Get("/api/v1/credentials/expiring", mdH.ExpiringCredentials)
+		p.Get("/api/v1/finance/dashboard-metrics", finH.DashboardMetrics)
 		p.Get("/api/v1/workbench", orderH.Workbench)
 	})
 

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/audit"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/finance"
@@ -74,6 +75,7 @@ func main() {
 		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
 		p.Get("/api/v1/finance/aging", finH.Aging)
+		p.Get("/api/v1/audit-logs", audit.Logs(authSvc, mdH))
 	})
 
 	// ── 其余全部：绞杀者代理回 Django ──

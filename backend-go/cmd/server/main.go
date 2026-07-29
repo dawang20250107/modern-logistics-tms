@@ -66,6 +66,7 @@ func main() {
 		p.Get("/api/v1/auth/me", authH.Me)
 		p.Get("/api/v1/orders", orderH.List)
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)
+		p.Post("/api/v1/orders/intake", orderH.Intake)
 		p.Get("/api/v1/waybills", waybillH.List)
 		p.Get("/api/v1/waybills/stats", waybillH.Stats)
 		p.Get("/api/v1/customers", mdH.Customers)

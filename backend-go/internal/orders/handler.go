@@ -184,35 +184,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	limitPh := args.Add(pageSize)
 	offsetPh := args.Add((page - 1) * pageSize)
-	rows, err := h.DB.Query(ctx, `
-SELECT o.id::text, o.order_no, o.customer_id::text, COALESCE(c.name,''), COALESCE(c.level,''),
-       o.channel, o.source, o.source_type, o.business_type, o.priority, o.settlement_type, o.status,
-       o.freight_term, o.freight_payer, o.cod_amount::text, o.cod_status,
-       o.contact_name, o.contact_phone, o.origin, o.destination,
-       o.pickup_address, o.pickup_contact_name, o.pickup_contact_phone,
-       o.delivery_address, o.delivery_contact_name, o.delivery_contact_phone,
-       o.cargo_desc, o.cargo_quantity, o.cargo_weight_ton::text, o.cargo_volume_cbm::text,
-       o.cargo_value::text, o.package_type, o.is_hazardous, o.temperature_range, o.quoted_amount::text,
-       o.expected_pickup_at, o.expected_delivery_at, o.sla_status, o.delivered_at,
-       o.claimed_by_id::text, COALESCE(NULLIF(clb.nickname,''), clb.username, ''), o.claimed_at, o.pooled_at,
-       o.assigned_to_id::text, COALESCE(NULLIF(asb.nickname,''), asb.username, ''),
-       COALESCE(abb.username,''), o.assigned_at,
-       o.created_by_id::text, COALESCE(cb.username,''), o.raw_text, o.ai_conversation_id,
-       COALESCE(o.parse_meta,'{}'::jsonb), o.remark, o.created_at,
-       wb.nos, wb.first_dispatched,
-       exc.open_count, exc.max_level,
-       o.approval_status, o.approval_remark, o.approved_at,
-       COALESCE((SELECT json_agg(json_build_object(
-           'id', ci.id::text, 'seq', ci.seq, 'name', ci.name, 'quantity', ci.quantity,
-           'weight_ton', ci.weight_ton::text, 'volume_cbm', ci.volume_cbm::text,
-           'package_type', ci.package_type, 'temperature_range', ci.temperature_range, 'remark', ci.remark
-         ) ORDER BY ci.seq) FROM ops_order_cargo_item ci WHERE ci.order_id = o.id), '[]'::json),
-       COALESCE((SELECT json_agg(json_build_object(
-           'id', st.id::text, 'seq', st.seq, 'stop_type', st.stop_type, 'city', st.city, 'address', st.address,
-           'contact_name', st.contact_name, 'contact_phone', st.contact_phone,
-           'expected_start', st.expected_start, 'expected_end', st.expected_end, 'cargo_note', st.cargo_note
-         ) ORDER BY st.seq) FROM ops_order_stop st WHERE st.order_id = o.id), '[]'::json)
-`+fromClause+" "+whereSQL+" "+orderSQL+
+	rows, err := h.DB.Query(ctx, selectOrderSQL+fromClause+" "+whereSQL+" "+orderSQL+
 		fmt.Sprintf(" LIMIT %s OFFSET %s", limitPh, offsetPh), args.Values...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
@@ -285,3 +257,34 @@ func (h *Handler) isChiefDispatcher(ctx context.Context, u *auth.UserRow) (bool,
 	}
 	return false, nil
 }
+
+// selectOrderSQL 列表/单条回读共用的序列化列面（与 OrderSerializer 逐字段对齐）
+const selectOrderSQL = `
+SELECT o.id::text, o.order_no, o.customer_id::text, COALESCE(c.name,''), COALESCE(c.level,''),
+       o.channel, o.source, o.source_type, o.business_type, o.priority, o.settlement_type, o.status,
+       o.freight_term, o.freight_payer, o.cod_amount::text, o.cod_status,
+       o.contact_name, o.contact_phone, o.origin, o.destination,
+       o.pickup_address, o.pickup_contact_name, o.pickup_contact_phone,
+       o.delivery_address, o.delivery_contact_name, o.delivery_contact_phone,
+       o.cargo_desc, o.cargo_quantity, o.cargo_weight_ton::text, o.cargo_volume_cbm::text,
+       o.cargo_value::text, o.package_type, o.is_hazardous, o.temperature_range, o.quoted_amount::text,
+       o.expected_pickup_at, o.expected_delivery_at, o.sla_status, o.delivered_at,
+       o.claimed_by_id::text, COALESCE(NULLIF(clb.nickname,''), clb.username, ''), o.claimed_at, o.pooled_at,
+       o.assigned_to_id::text, COALESCE(NULLIF(asb.nickname,''), asb.username, ''),
+       COALESCE(abb.username,''), o.assigned_at,
+       o.created_by_id::text, COALESCE(cb.username,''), o.raw_text, o.ai_conversation_id,
+       COALESCE(o.parse_meta,'{}'::jsonb), o.remark, o.created_at,
+       wb.nos, wb.first_dispatched,
+       exc.open_count, exc.max_level,
+       o.approval_status, o.approval_remark, o.approved_at,
+       COALESCE((SELECT json_agg(json_build_object(
+           'id', ci.id::text, 'seq', ci.seq, 'name', ci.name, 'quantity', ci.quantity,
+           'weight_ton', ci.weight_ton::text, 'volume_cbm', ci.volume_cbm::text,
+           'package_type', ci.package_type, 'temperature_range', ci.temperature_range, 'remark', ci.remark
+         ) ORDER BY ci.seq) FROM ops_order_cargo_item ci WHERE ci.order_id = o.id), '[]'::json),
+       COALESCE((SELECT json_agg(json_build_object(
+           'id', st.id::text, 'seq', st.seq, 'stop_type', st.stop_type, 'city', st.city, 'address', st.address,
+           'contact_name', st.contact_name, 'contact_phone', st.contact_phone,
+           'expected_start', st.expected_start, 'expected_end', st.expected_end, 'cargo_note', st.cargo_note
+         ) ORDER BY st.seq) FROM ops_order_stop st WHERE st.order_id = o.id), '[]'::json)
+`

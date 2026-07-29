@@ -709,3 +709,48 @@ var ContractWrite = wcf{
 	},
 	AfterWrite: snapshotPartyName, // 落对手方名称快照，列表与对账单免 JOIN
 }
+
+// ProjectsCfg /api/v1/finance/projects —— 对账的主归集维度
+var ProjectsCfg = cfg{
+	SelectSQL: `
+SELECT pj.id::text AS id, pj.project_no, pj.name,
+       pj.customer_id::text AS customer, COALESCE(cm.name,'') AS customer_name,
+       pj.contract_id::text AS contract, COALESCE(ct.contract_no,'') AS contract_no,
+       pj.start_date::text AS start_date, pj.end_date::text AS end_date, pj.status,
+       (CASE pj.status WHEN 'active' THEN '进行中' WHEN 'paused' THEN '已暂停'
+                       WHEN 'closed' THEN '已结项' ELSE pj.status END) AS status_label,
+       pj.manager_id::text AS manager, COALESCE(u.username,'') AS manager_name,
+       pj.remark, pj.created_at,
+       (SELECT count(*)::int FROM ops_waybill w WHERE w.project_id = pj.id) AS waybill_count`,
+	FromClause: `FROM fin_project pj
+LEFT JOIN md_customer cm ON cm.id = pj.customer_id
+LEFT JOIN fin_contract ct ON ct.id = pj.contract_id
+LEFT JOIN accounts_user u ON u.id = pj.manager_id`,
+	SearchCols: []string{"pj.project_no", "pj.name", "cm.name"},
+	OrderingCols: map[string]string{
+		"project_no": "pj.project_no", "start_date": "pj.start_date", "created_at": "pj.created_at",
+	},
+	DirectParams: map[string]string{
+		"customer": "pj.customer_id::text", "status": "pj.status", "contract": "pj.contract_id::text",
+	},
+	DefaultOrder:  "ORDER BY pj.start_date DESC NULLS LAST, pj.project_no, pj.id",
+	SoftDeleteCol: "pj.is_deleted",
+	PartialOmit: map[string]string{
+		"customer_name": "pj.customer_id", "contract_no": "pj.contract_id", "manager_name": "pj.manager_id",
+	},
+}
+
+var ProjectWrite = wcf{
+	Table: "fin_project", Model: "Project", Alias: "pj", SoftDelete: true,
+	Fields: map[string]fld{
+		"project_no": {Kind: fText, Required: true, Unique: true, Label: "项目编号"},
+		"name":       {Kind: fText, Required: true},
+		"customer":   {Kind: fUUID, Ref: "md_customer", Column: "customer_id"},
+		"contract":   {Kind: fUUID, Ref: "fin_contract", Column: "contract_id"},
+		"start_date": {Kind: fDate},
+		"end_date":   {Kind: fDate},
+		"status":     {Kind: fEnum, Default: "active", Choices: []string{"active", "paused", "closed"}},
+		"manager":    {Kind: fUUID, Ref: "accounts_user", Column: "manager_id"},
+		"remark":     {Kind: fText},
+	},
+}

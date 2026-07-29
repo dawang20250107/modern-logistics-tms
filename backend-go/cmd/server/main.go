@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/agent"
@@ -75,6 +76,19 @@ func main() {
 		slog.Warn("agent schema", "err", err)
 	}
 
+	// detailOnly 包一层：路径参数不是 UUID 时，说明命中的其实是集合级动作
+	// （/orders/pool、/orders/export…）——chi 的 {id} 会先把它吃掉，导致这些端点
+	// 变成 404。凡是「静态段与 {id} 同层」的路由都必须显式回代上游。
+	detailOnly := func(param string, next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, rq *http.Request) {
+			if _, err := uuid.Parse(chi.URLParam(rq, param)); err != nil {
+				django.ServeHTTP(w, rq)
+				return
+			}
+			next(w, rq)
+		}
+	}
+
 	r := chi.NewRouter()
 	r.Use(httpx.Recover, httpx.AccessLog, httpx.CORS(cfg.CORSOrigins))
 
@@ -128,7 +142,7 @@ func main() {
 		p.Get("/api/v1/notifications/unread-count", ntfH.UnreadCount)
 		p.Post("/api/v1/notifications/{id}/read", ntfH.Read)
 		p.Post("/api/v1/notifications/read-all", ntfH.ReadAll)
-		p.Get("/api/v1/orders/{id}", orderH.Detail)
+		p.Get("/api/v1/orders/{id}", detailOnly("id", orderH.Detail))
 		p.Get("/api/v1/orders/{id}/timeline", orderH.Timeline)
 		p.Get("/api/v1/orders/{id}/workflow", orderH.Workflow)
 		p.Get("/api/v1/orders/{id}/lineage", orderH.Lineage)
@@ -148,6 +162,10 @@ func main() {
 		p.Get("/api/v1/telematics/vehicles/live", telH.Live)
 		p.Get("/api/v1/telematics/waybills/{no}/trajectory", telH.Trajectory)
 		p.Get("/api/v1/telematics/command-center/summary", telH.CommandCenterSummary)
+		// 与 {no} 同层的集合级动作：运单号不是 UUID，没法靠格式判别，
+		// 只能显式挂到代理上（随各自域移植后从这里摘掉）。
+		p.Post("/api/v1/waybills/dispatch-plan", django.ServeHTTP)
+		p.Post("/api/v1/waybills/merge", django.ServeHTTP)
 		p.Get("/api/v1/waybills/{no}", waybillH.Detail)
 		p.Post("/api/v1/waybills/{no}/transition", waybillH.Transition)
 		p.Post("/api/v1/waybills/{no}/sign", waybillH.Sign)

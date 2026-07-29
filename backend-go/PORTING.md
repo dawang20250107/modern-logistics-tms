@@ -225,6 +225,10 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 - **掉线扫描替代 celery beat**：网关内起周期协程（默认 1 分钟）跑
   scan_offline_devices 的等价逻辑，置离线 + 掉线报警，文案与阈值一致。
 
+- **代理响应带 `X-Upstream: django` 头**：迁移收尾靠它盘点「还剩哪些路由没被接管」。
+  数路由表里的字符串不可靠——CRUD 子路由是挂载式的，不体现在字面量里。
+  注意按此盘点时要对 POST-only 端点用 POST 探测，否则 GET 会落到代理面被误判。
+
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。
 - `/auth/me` 的 `avatar_url` 经代理指向 Django `/media/`；媒体文件迁 Go 静态服务后改。

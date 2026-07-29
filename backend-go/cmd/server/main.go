@@ -79,6 +79,7 @@ func main() {
 		p.Post("/api/v1/orders/{id}/claim", orderH.Claim)
 		p.Post("/api/v1/orders/{id}/release", orderH.Release)
 		p.Post("/api/v1/orders/{id}/unassign", orderH.Unassign)
+		p.Post("/api/v1/orders/{id}/dispatch", orderH.Dispatch)
 		p.Get("/api/v1/orders/{id}", orderH.Detail)
 		p.Get("/api/v1/orders/{id}/timeline", orderH.Timeline)
 		p.Get("/api/v1/waybills", waybillH.List)

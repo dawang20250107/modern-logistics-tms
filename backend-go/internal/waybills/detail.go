@@ -4,16 +4,31 @@ package waybills
 // 列表列面 + stops + timeline(events) + agent_suggestions + next_statuses。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
+
+// SerializeByNo 按运单号回读 WaybillSerializer 列面（供派单等写路径回显）
+func SerializeByNo(ctx context.Context, db *pgxpool.Pool, no string) (map[string]any, error) {
+	rows, err := db.Query(ctx, selectWaybillSQL+fromClause+" WHERE w.waybill_no = $1", no)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, nil
+	}
+	return scanWaybill(rows)
+}
 
 var stopTypeLabel = map[string]string{"pickup": "提货", "delivery": "送货"}
 var stopStatusLabel = map[string]string{"pending": "待到达", "arrived": "已到达", "departed": "已离开"}

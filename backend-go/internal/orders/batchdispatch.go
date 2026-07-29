@@ -31,7 +31,7 @@ type batchReq struct {
 
 type dispatchableOrder struct {
 	ID, OrderNo, Status, CustomerName, Origin, Destination, AIConvID string
-	CustomerID, ClaimedBy, AssignedTo                                *string
+	CustomerID, ClaimedBy, AssignedTo, ProjectID                     *string
 	Weight                                                           decimal.Decimal
 	Quantity                                                         int
 	VolumeCbm, CodAmount                                             decimal.Decimal
@@ -173,13 +173,13 @@ func (h *Handler) BatchDispatch(w http.ResponseWriter, r *http.Request) {
 			SELECT o.id::text, o.order_no, o.status, COALESCE(c.name,''), o.origin, o.destination, o.ai_conversation_id,
 			       o.customer_id::text, o.claimed_by_id::text, o.assigned_to_id::text,
 			       o.cargo_weight_ton, o.cargo_quantity, o.cargo_volume_cbm, o.cod_amount,
-			       o.freight_term, o.freight_payer, o.expected_delivery_at
+			       o.freight_term, o.freight_payer, o.expected_delivery_at, o.project_id::text
 			FROM ops_order o LEFT JOIN md_customer c ON c.id=o.customer_id
 			WHERE o.id=$1::uuid FOR UPDATE OF o`, id,
 		).Scan(&o.ID, &o.OrderNo, &o.Status, &o.CustomerName, &o.Origin, &o.Destination, &o.AIConvID,
 			&o.CustomerID, &o.ClaimedBy, &o.AssignedTo,
 			&o.Weight, &o.Quantity, &o.VolumeCbm, &o.CodAmount,
-			&o.FreightTerm, &o.FreightPayer, &o.ExpectedDeliveryAt)
+			&o.FreightTerm, &o.FreightPayer, &o.ExpectedDeliveryAt, &o.ProjectID)
 		if err == pgx.ErrNoRows {
 			continue
 		}
@@ -255,14 +255,14 @@ func (h *Handler) BatchDispatch(w http.ResponseWriter, r *http.Request) {
 			  order_id, customer_id, carrier_id, batch_id, route_name, ai_conversation_id, origin, destination,
 			  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
 			  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
-			  freight_term, freight_payer, cod_amount, cod_status, planned_arrival)
+			  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
 			VALUES ($1, now(), now(), $2, $3, $4, '', $5::uuid, $6::uuid, $7::uuid, $8::uuid, $9, $10, $11, $12,
-			  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20)`,
+			  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid)`,
 			wid.String(), wbNo, body.DispatchType, body.PlatformName,
 			o.ID, o.CustomerID, carrierIDArg, batchID,
 			o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,
 			o.Quantity, o.Weight, o.VolumeCbm,
-			o.FreightTerm, o.FreightPayer, o.CodAmount, codStatus, o.ExpectedDeliveryAt); err != nil {
+			o.FreightTerm, o.FreightPayer, o.CodAmount, codStatus, o.ExpectedDeliveryAt, o.ProjectID); err != nil {
 			continue
 		}
 		// 点位拷贝进执行层

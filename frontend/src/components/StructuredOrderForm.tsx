@@ -16,9 +16,13 @@ import { IconSparkles, IconSave, IconPlus, IconX, IconCheck, IconZap } from "./I
 import { CityCombobox } from "./CityCombobox";
 import { RegionCascader } from "./RegionCascader";
 import { DateTimeField } from "./DateTimeField";
+import { ProjectPicker } from "./ProjectPicker";
 
 interface FormState {
   customer: string;
+  /** 已选项目 id；为空且 project_name 非空表示建单时新建 */
+  project: string;
+  project_name: string;
   channel: string;
   source: string;
   source_type: string;
@@ -41,7 +45,7 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = {
-  customer: "", channel: "cs", source: "", source_type: "enterprise", business_type: "ftl",
+  customer: "", project: "", project_name: "", channel: "cs", source: "", source_type: "enterprise", business_type: "ftl",
   priority: "normal", settlement_type: "monthly", freight_term: "prepaid", freight_payer: "shipper",
   cod_amount: "", origin: "", destination: "", cargo_value: "",
   package_type: "", is_hazardous: false, temperature_range: "", quoted_amount: "",
@@ -145,6 +149,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
       channel: f.channel, source: f.source, source_type: f.source_type,
       business_type: f.business_type, priority: f.priority, settlement_type: f.settlement_type,
       freight_term: f.freight_term, freight_payer: f.freight_payer, customer: f.customer,
+      project: f.project, project_name: f.project_name,
     }));
     setCargo([emptyCargo()]);
     setStops([emptyStop("pickup"), emptyStop("delivery")]);
@@ -166,6 +171,8 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
     status,
     fields: {
       customer: form.customer || undefined,
+      project: form.project || undefined,
+      project_name: form.project ? undefined : (form.project_name || undefined),
       source_type: form.source_type, business_type: form.business_type, priority: form.priority,
       settlement_type: form.settlement_type,
       freight_term: form.freight_term, freight_payer: form.freight_payer,
@@ -534,6 +541,16 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   <option value="">选择合同客户（可选）</option>
                   {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+              </label>
+              <label>项目
+                <ProjectPicker
+                  value={form.project}
+                  valueName={form.project_name}
+                  customer={form.customer}
+                  origin={form.origin}
+                  destination={form.destination}
+                  onChange={(v) => setForm((f) => ({ ...f, project: v.id, project_name: v.name }))}
+                />
               </label>
               <label>客户分类
                 <select value={form.source_type} onChange={(e) => set("source_type", e.target.value)}>

@@ -110,6 +110,7 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 | 异常域 | GET/POST /exceptions（数据范围按运单组织）+ POST /orders/{id}/report-exception（订单池登记+订单事件+首运单挂靠） | ✅ 列表双栈 diff 一致；Go 写→Django 读回（异常列表/订单 timeline/异常 timeline）全对；非法类型 400 契约对齐 |
 | 组织中台-读 | GET /org/{overview·organizations·organizations/tree·roles·rbac/matrix·service-areas·employees·handovers·login-audit·route-resolve}（列表复用通用引擎，树/矩阵/区划仲裁定制） | ✅ 十端点双栈 diff 全一致（含子树人头累加、覆盖排他+优先级仲裁） |
 | 单单派车 | POST /orders/{id}/dispatch（own_vehicle/fleet/third_party/platform：状态/锁定/归属门禁 → 承运商风控 → 车辆司机行锁占用 → 核载/车厢/证件资质合规 → 转运单+承运状态+应付快照+双事件+承运合同 HT 取号，单事务） | ✅ 全校验链实测（ORDER_NOT_LOCKED/CARRIER_REQUIRED/VEHICLE_BUSY 等）；Django 读回运单/合同/费用/订单全对；合同为文本版（PDF 留 Django 的 try/except 语义，见差异清单） |
+| 财务-项目维度 | 建单可选/可新建项目（POST /orders/intake 接 project 或 project_name）+ GET /finance/projects/suggest 智能推荐 + 派车继承项目 + 前端 ProjectPicker | ✅ 14 条端到端断言全绿（可选不填/表单内新建/同名不重复/选已有/非法 id 静默忽略/派车继承/推荐排序与理由/关键词过滤/空结果/按项目出对账单） |
 | 财务-对账单 | POST /finance/statements/{generate,{}/confirm,{}/audit,{}/settle} + GET /finance/statements/{}/payments；新增 fin_project 与 /finance/projects CRUD | ✅ 18 条业务断言全绿（按项目归集/按线路归集/重复生成不再收录/账期重叠不重复计费/三类参数校验/草稿不可核销/重复确认 409/超额拒绝/分次核销 partial→settled/流水两笔/结清后拒绝/异常审计） |
 | 财务-合同计价 | 新增 fin_contract（长期/短期/临时/仅协议）+ 计价规则挂合同 + 费用留合同快照；POST /waybills/{}/generate-costs；/finance/contracts 全套 CRUD | ✅ 计价矩阵 30 组算例与 Django PricingRule.quote 逐分一致（含银行家舍入）；合同规则 10 条业务断言全绿（类型优先级/生效期/终止/无合同回落/应付走承运商合同/单运单单条应付/已入账拒绝重算） |
 | 车联网 + 轨迹 | POST /telematics/ingest + /tracking/points（削峰异步落库）；GET /telematics/{vehicles/live, waybills/{}/trajectory, command-center/summary} + /waybills/{}/tracking；规则报警引擎（超速/温度/油量/设备事件/围栏进出/偏航/掉线） | ✅ 10 个读端点双栈 diff 全一致；规则矩阵 11 组输入与 Django evaluate_telemetry 逐字段对拍一致；上报链路 13 项端到端实测（设备心跳/实时状态/轨迹续点/四类报警/高危转异常工单/去重窗口/围栏首见不报与跳变才报/脏点丢弃/超量 413/掉线扫描） |
@@ -252,6 +253,14 @@ curl -s "http://127.0.0.1:8001/api/v1/<res>?..." -H "Authorization: Bearer $TOK"
 - **一笔费用只能进一张对账单，靠库级唯一索引兜底**：应用层的 NOT EXISTS 只挡得住
   顺序执行的重复，挡不住并发两次生成；`fin_statement_line(expense_record_id)` 的
   部分唯一索引才是真保证。迁移里先清理了存量重复行再建索引。
+
+- **订单响应新增 `project` / `project_name`（Django 无此字段）**：项目是对账的主归集维度，
+  前端建单表单要用，属有意的加法而非偏差。`/api/v1/orders` 的双栈 diff 会因此报 6 处差异，
+  Django 退役后消失。
+- **项目对录单是可选项**：填不上不该挡住建单，故非法项目 id 静默忽略而不报错。
+  但为了让它真的被填上，推荐做了打分（同线路历史单 > 起终点部分匹配 > 近 30 天活跃 >
+  历史用量），每条附「为什么推它」，并支持在建单表单里直接敲名字新建（同客户同名去重）。
+  这条链路断了的后果不是报错，而是对账那头归不了集——所以推荐质量本身就是功能的一部分。
 
 - refresh token 轮换后旧 token 未进服务端黑名单（simplejwt 的 token_blacklist 表未写）；
   测试项目范围可接受，正式化时补 `iam_outstanding/blacklisted` 写入。

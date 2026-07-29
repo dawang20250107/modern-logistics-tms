@@ -27,9 +27,16 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
 
+// ProjectResolver 建单时的项目「取或建」（由 finance 域实现）
+type ProjectResolver interface {
+	EnsureProject(ctx context.Context, name, customerID string) (string, string, error)
+}
+
 type Handler struct {
 	DB  *pgxpool.Pool
 	Svc *auth.Service
+	// Projects 建单表单里直接新建项目时用；为 nil 时该能力静默关闭
+	Projects ProjectResolver
 }
 
 // ordering= 白名单：前端 sortField → SQL 列（防注入 + 契约文档化）
@@ -75,6 +82,7 @@ const fromClause = `
 FROM ops_order o
 LEFT JOIN md_customer c ON c.id = o.customer_id
 LEFT JOIN accounts_user cb ON cb.id = o.created_by_id
+LEFT JOIN fin_project pj ON pj.id = o.project_id
 LEFT JOIN accounts_user clb ON clb.id = o.claimed_by_id
 LEFT JOIN accounts_user asb ON asb.id = o.assigned_to_id
 LEFT JOIN accounts_user abb ON abb.id = o.assigned_by_id
@@ -274,6 +282,7 @@ SELECT o.id::text, o.order_no, o.customer_id::text, COALESCE(c.name,''), COALESC
        COALESCE(abb.username,''), o.assigned_at,
        o.created_by_id::text, COALESCE(cb.username,''), o.raw_text, o.ai_conversation_id,
        COALESCE(o.parse_meta,'{}'::jsonb), o.remark, o.created_at,
+       o.project_id::text, COALESCE(pj.name,''),
        wb.nos, wb.first_dispatched,
        exc.open_count, exc.max_level,
        o.approval_status, o.approval_remark, o.approved_at,

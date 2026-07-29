@@ -136,14 +136,15 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		       o.customer_id::text, o.claimed_by_id::text, o.assigned_to_id::text,
 		       o.cargo_weight_ton, o.cargo_quantity, o.cargo_volume_cbm, o.cod_amount,
 		       o.freight_term, o.freight_payer, o.expected_delivery_at,
-		       o.is_hazardous, COALESCE(o.temperature_range,''), o.business_type, COALESCE(o.cargo_desc,'')
+		       o.is_hazardous, COALESCE(o.temperature_range,''), o.business_type, COALESCE(o.cargo_desc,''),
+		       o.project_id::text
 		FROM ops_order o LEFT JOIN md_customer c ON c.id=o.customer_id
 		WHERE o.id=$1::uuid AND NOT o.is_deleted FOR UPDATE OF o`, orderID,
 	).Scan(&o.ID, &o.OrderNo, &o.Status, &o.CustomerName, &o.Origin, &o.Destination, &o.AIConvID,
 		&o.CustomerID, &o.ClaimedBy, &o.AssignedTo,
 		&o.Weight, &o.Quantity, &o.VolumeCbm, &o.CodAmount,
 		&o.FreightTerm, &o.FreightPayer, &o.ExpectedDeliveryAt,
-		&isHaz, &tempRange, &bizType, &cargoDesc)
+		&isHaz, &tempRange, &bizType, &cargoDesc, &o.ProjectID)
 	if err == pgx.ErrNoRows {
 		httpx.Err(w, http.StatusNotFound, "error", "No Order matches the given query.")
 		return
@@ -333,14 +334,14 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		  order_id, customer_id, carrier_id, vehicle_id, driver_id, trailer_id, route_name, ai_conversation_id, origin, destination,
 		  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
 		  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
-		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival)
+		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
 		VALUES ($1, now(), now(), $2, $3, $4, $5, $6::uuid, $7::uuid, $8::uuid, $9::uuid, $10::uuid, $11::uuid,
-		  $12, $13, $14, $15, 'pending_dispatch', $16, 'none', 'not_due', 0, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		  $12, $13, $14, $15, 'pending_dispatch', $16, 'none', 'not_due', 0, $17, $18, $19, $20, $21, $22, $23, $24, $25::uuid)`,
 		wid.String(), wbNo, body.DispatchType, body.PlatformName, body.PlatformOrderNo,
 		o.ID, o.CustomerID, carrierID, vehArg, drvArg, trailerArg,
 		o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,
 		dispatchStatus, o.Quantity, o.Weight, o.VolumeCbm,
-		o.FreightTerm, o.FreightPayer, o.CodAmount, codStatus, o.ExpectedDeliveryAt); err != nil {
+		o.FreightTerm, o.FreightPayer, o.CodAmount, codStatus, o.ExpectedDeliveryAt, o.ProjectID); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "运单写入失败")
 		return
 	}

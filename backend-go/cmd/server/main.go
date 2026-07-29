@@ -65,6 +65,7 @@ func main() {
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
 	finH := &finance.Handler{DB: pool}
+	orderH.Projects = finH // 建单表单可直接新建项目
 	anaH := &analytics.Handler{DB: pool, Svc: authSvc}
 	orgH := &org.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	excH := &exceptions.Handler{DB: pool, Svc: authSvc, MD: mdH}
@@ -226,7 +227,11 @@ func main() {
 		})
 		p.Post("/api/v1/finance/payment-results", resH.PaymentResult)
 		p.Route("/api/v1/finance/contracts", mdH.CRUD(resources.ContractsCfg, resources.ContractWrite))
-		p.Route("/api/v1/finance/projects", mdH.CRUD(resources.ProjectsCfg, resources.ProjectWrite))
+		p.Route("/api/v1/finance/projects", func(rt chi.Router) {
+			// 静态段必须先注册，否则会被 CRUD 的 {id} 吃掉
+			rt.Get("/suggest", finH.SuggestProjects)
+			mdH.CRUD(resources.ProjectsCfg, resources.ProjectWrite)(rt)
+		})
 		p.Post("/api/v1/finance/statements/generate", finH.GenerateStatement)
 		p.Post("/api/v1/finance/statements/{id}/confirm", finH.ConfirmStatement)
 		p.Post("/api/v1/finance/statements/{id}/audit", finH.AuditStatement)

@@ -11,8 +11,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
@@ -37,6 +39,7 @@ var orderFields = []string{
 	"source_type", "business_type", "priority", "settlement_type", "quoted_amount",
 	"freight_term", "freight_payer", "cod_amount",
 	"expected_pickup_at", "expected_delivery_at", "remark",
+	"project_id",
 }
 var cargoItemFields = []string{"name", "quantity", "weight_ton", "volume_cbm", "package_type", "temperature_range", "remark"}
 var stopFields = []string{"stop_type", "city", "address", "contact_name", "contact_phone", "expected_start", "expected_end", "cargo_note"}
@@ -263,10 +266,20 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 		}
 		parseMeta["source"] = "rule" // Go 侧建单走规则解析（DeepSeek 解析见差异清单）
 	}
-	explicitCustomer := ""
+	explicitCustomer, explicitProject, newProjectName := "", "", ""
 	for k, v := range body.Fields {
 		if k == "customer" {
 			explicitCustomer = fmt.Sprint(v)
+			continue
+		}
+		// 项目：可选。既接受已有项目 id，也接受一个名字——名字走「取或建」，
+		// 让客服在建单表单里直接新增项目，不必先跳去项目管理页再回来。
+		if k == "project" {
+			explicitProject = fmt.Sprint(v)
+			continue
+		}
+		if k == "project_name" {
+			newProjectName = fmt.Sprint(v)
 			continue
 		}
 		if k == "_meta" { // 显式 _meta 覆盖解析元信息（对齐 explicit.pop("_meta", …)）
@@ -279,6 +292,9 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 	}
 	customerID := h.matchCustomer(ctx, data, channel, source, explicitCustomer)
 	enrich(data)
+	if pid := h.resolveProject(ctx, explicitProject, newProjectName, customerID); pid != "" {
+		data["project_id"] = pid
+	}
 
 	orderID, code, msg := h.createOrder(ctx, createParams{
 		RawText: body.Text, Data: data, Channel: channel, Source: source, Status: status,
@@ -318,4 +334,32 @@ func (h *Handler) respondOneStatus(w http.ResponseWriter, r *http.Request, order
 		return
 	}
 	httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "订单未找到")
+}
+
+// resolveProject 解析建单表单里的项目字段：优先已选项目 id，其次按名字取或建。
+// 项目是对账的主归集维度，但对录单是可选项——填不上也不该挡住建单。
+func (h *Handler) resolveProject(ctx context.Context, projectID, projectName string, customerID *string) string {
+	if projectID != "" {
+		if _, err := uuid.Parse(projectID); err == nil {
+			var ok bool
+			_ = h.DB.QueryRow(ctx,
+				"SELECT EXISTS(SELECT 1 FROM fin_project WHERE id=$1::uuid AND NOT is_deleted)", projectID).Scan(&ok)
+			if ok {
+				return projectID
+			}
+		}
+		return ""
+	}
+	if projectName == "" || h.Projects == nil {
+		return ""
+	}
+	cid := ""
+	if customerID != nil {
+		cid = *customerID
+	}
+	id, _, err := h.Projects.EnsureProject(ctx, projectName, cid)
+	if err != nil {
+		return ""
+	}
+	return id
 }

@@ -34,6 +34,8 @@ func scanOrder(rows pgx.Rows, currentUserID string, isChief bool) (map[string]an
 		approvalStatus, approvalRemark                                                           string
 		approvedAt                                                                               *time.Time
 		cargoItemsJSON, stopsJSON                                                                json.RawMessage
+		projectID                                                                                *string
+		projectName                                                                              string
 	)
 
 	if err := rows.Scan(
@@ -51,6 +53,7 @@ func scanOrder(rows pgx.Rows, currentUserID string, isChief bool) (map[string]an
 		&assignedByName, &assignedAt,
 		&createdByID, &createdByName, &rawText, &aiConversationID,
 		&parseMeta, &remark, &createdAt,
+		&projectID, &projectName,
 		&waybillNos, &firstDispatched,
 		&excOpenCount, &excMaxLevel,
 		&approvalStatus, &approvalRemark, &approvedAt,
@@ -121,6 +124,7 @@ func scanOrder(rows pgx.Rows, currentUserID string, isChief bool) (map[string]an
 		"created_by": createdByID, "created_by_name": createdByName,
 		"raw_text": rawText, "ai_conversation_id": aiConversationID, "parse_meta": parseMeta,
 		"remark": remark, "created_at": createdAt,
+		"project": projectID, "project_name": projectName,
 		"waybill_nos": waybillNos,
 		"cargo_items": cargoItemsJSON, "stops": stopsJSON, "attachments": []any{},
 		"approval_status": approvalStatus, "approval_remark": approvalRemark, "approved_at": approvedAt,

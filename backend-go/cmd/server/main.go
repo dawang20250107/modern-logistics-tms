@@ -17,6 +17,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/orders"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/proxy"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
@@ -43,6 +44,7 @@ func main() {
 	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.DjangoUpstream}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
+	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
 	django := proxy.New(cfg.DjangoUpstream)
 
 	r := chi.NewRouter()
@@ -63,6 +65,9 @@ func main() {
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)
 		p.Get("/api/v1/waybills", waybillH.List)
 		p.Get("/api/v1/waybills/stats", waybillH.Stats)
+		p.Get("/api/v1/customers", mdH.Customers)
+		p.Get("/api/v1/vehicles", mdH.Vehicles)
+		p.Get("/api/v1/drivers", mdH.Drivers)
 	})
 
 	// ── 其余全部：绞杀者代理回 Django ──

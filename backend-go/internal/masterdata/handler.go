@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ type ResourceCfg struct {
 	FilterFields map[string]filters.FilterField
 	DirectParams map[string]string // DRF filterset_fields：查询参数 → SQL 列
 	DefaultOrder string
+	// DetailExtras 仅详情（retrieve）计算的重聚合列：别名 → SQL 表达式。
+	// 对齐 DRF 里「_is_list(self) 则返回 None」的字段（列表恒为 null，避免 N+1）。
+	DetailExtras map[string]string
 }
 
 var customersCfg = ResourceCfg{
@@ -233,7 +237,31 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request, cfg ResourceCfg) 
 
 // One 用资源配置回读单行（写路径回显复用列表列面）；未命中返回 nil
 func (h *Handler) One(ctx context.Context, cfg ResourceCfg, where string, args ...any) (map[string]any, error) {
-	rows, err := h.DB.Query(ctx, cfg.SelectSQL+" "+cfg.FromClause+" WHERE "+where, args...)
+	return h.one(ctx, cfg, false, where, args...)
+}
+
+// OneDetail 详情回读：额外算上 DetailExtras 的重聚合列
+func (h *Handler) OneDetail(ctx context.Context, cfg ResourceCfg, where string, args ...any) (map[string]any, error) {
+	return h.one(ctx, cfg, true, where, args...)
+}
+
+func (h *Handler) one(ctx context.Context, cfg ResourceCfg, detail bool, where string, args ...any) (map[string]any, error) {
+	sel := cfg.SelectSQL
+	if detail && len(cfg.DetailExtras) > 0 {
+		keys := make([]string, 0, len(cfg.DetailExtras))
+		for k := range cfg.DetailExtras {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		// 详情列覆盖同名的列表占位列（列表里恒为 NULL）
+		for _, k := range keys {
+			sel = stripColumn(sel, k)
+		}
+		for _, k := range keys {
+			sel += ", (" + cfg.DetailExtras[k] + ") AS " + k
+		}
+	}
+	rows, err := h.DB.Query(ctx, sel+" "+cfg.FromClause+" WHERE "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +271,21 @@ func (h *Handler) One(ctx context.Context, cfg ResourceCfg, where string, args .
 		return nil, err
 	}
 	return items[0], nil
+}
+
+// stripColumn 从 SELECT 列面里摘掉某个别名列（详情态用真实聚合替换列表占位）
+func stripColumn(sel, alias string) string {
+	marker := " AS " + alias
+	i := strings.Index(sel, marker)
+	if i < 0 {
+		return sel
+	}
+	end := i + len(marker)
+	start := strings.LastIndex(sel[:i], ",")
+	if start < 0 {
+		return sel
+	}
+	return sel[:start] + sel[end:]
 }
 
 // rowsToMaps 泛化扫描：列别名即 JSON 键；time.Time 走 RFC3339Nano 由 encoding/json 处理

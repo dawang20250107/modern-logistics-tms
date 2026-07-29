@@ -186,10 +186,22 @@ func main() {
 		p.Post("/api/v1/waybills/{no}/sign", waybillH.Sign)
 		p.Post("/api/v1/waybills/{no}/stop-event", waybillH.StopEvent)
 		// 主数据与标准资源：一份读写配置驱动全套 CRUD
-		p.Route("/api/v1/customers", mdH.CRUD(masterdata.CustomersCfg, masterdata.CustomerWrite))
+		p.Route("/api/v1/customers", func(rt chi.Router) {
+			mdH.CRUD(masterdata.CustomersCfg, masterdata.CustomerWrite)(rt)
+			rt.Get("/{id}/context", mdH.CustomerContext)
+			rt.Get("/{id}/lane-suggest", mdH.CustomerLaneSuggest)
+		})
 		p.Route("/api/v1/vehicles", mdH.CRUD(masterdata.VehiclesCfg, masterdata.VehicleWrite))
-		p.Route("/api/v1/drivers", mdH.CRUD(masterdata.DriversCfg, masterdata.DriverWrite))
-		p.Route("/api/v1/carriers", mdH.CRUD(masterdata.CarriersCfg, masterdata.CarrierWrite))
+		p.Route("/api/v1/drivers", func(rt chi.Router) {
+			rt.Get("/lookup", mdH.DriverLookup) // detail=False，必须排在 {id} 之前
+			mdH.CRUD(masterdata.DriversCfg, masterdata.DriverWrite)(rt)
+			rt.Post("/{id}/refresh-stats", mdH.DriverRefreshStats)
+		})
+		p.Route("/api/v1/carriers", func(rt chi.Router) {
+			mdH.CRUD(masterdata.CarriersCfg, masterdata.CarrierWrite)(rt)
+			rt.Get("/{id}/performance", mdH.CarrierPerformance)
+			rt.Post("/{id}/blacklist", mdH.CarrierBlacklist)
+		})
 		p.Route("/api/v1/b2b-partners", mdH.CRUD(masterdata.B2BCfg, masterdata.B2BWrite))
 		p.Route("/api/v1/routes", mdH.CRUD(masterdata.RoutesCfg, masterdata.RouteWrite))
 		p.Route("/api/v1/carrier-lane-prices", mdH.CRUD(masterdata.LanePricesCfg, masterdata.LanePriceWrite))

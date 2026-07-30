@@ -108,7 +108,17 @@ export function DispatchBoardPage() {
   const queryClient = useQueryClient();
   const [active, setActive] = useState<Order | null>(null);
   const [tab, setTab] = useState<DrawerTab>("dispatch");
-  const [focusIdx, setFocusIdx] = useState(-1);
+  // 光标锚在订单 id 上，不是数组下标。
+  //
+  // 原来是 `useState(-1)` 的下标。而 rows 每次渲染都重跑 sortUrgent（把
+  // 临期/超时/VIP 顶到最前），三个池子又都是 15 秒轮询——一旦某单的 SLA 翻成
+  // 临期被顶上去，它下面所有行下移一位，而 focusIdx 不动：
+  // 高亮框还停在原来那个 y，Enter 拉出的是**另一张单**的派单抽屉。
+  // 调度台上这就是派错货。
+  //
+  // 锚 id 之后，下标每次从 rows 里推。焦点单要是离开了列表（被别人派掉了），
+  // 下标变 -1、Enter 什么都不做——宁可丢光标，也不能对错的行动手。
+  const [focusId, setFocusId] = useState<string | null>(null);
   const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
   const [showBuilder, setShowBuilder] = useState(false);
   const [poolSearch, setPoolSearch] = useState("");
@@ -418,6 +428,10 @@ export function DispatchBoardPage() {
     searchLc ? rowsBase.filter((o) => `${o.order_no} ${o.customer_name ?? ""} ${o.origin ?? ""} ${o.destination ?? ""}`.toLowerCase().includes(searchLc)) : rowsBase,
     model, DISPATCH_FILTER_FIELDS,
   );
+  // 光标下标每次从 rows 里推：rows 一重排，下标跟着走，指向的还是同一张单。
+  // 焦点单不在当前列表里（被别人派掉 / 被筛选条件排除）→ -1，Enter 不动手。
+  const focusIdx = focusId ? rows.findIndex((o) => o.id === focusId) : -1;
+  const focusOrder = focusIdx >= 0 ? rows[focusIdx] : null;
   const anyPoolFilter = Boolean(searchLc) || urgentOnly || filterActive > 0;
   const poolLoading = poolTab === "unassigned" ? poolFree.isLoading : poolTab === "dispatchable" ? poolMine.isLoading : dispatchedQ.isLoading;
   const poolError = poolTab === "unassigned" ? poolFree.isError : poolTab === "dispatchable" ? poolMine.isError : dispatchedQ.isError;
@@ -445,13 +459,13 @@ export function DispatchBoardPage() {
       if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey) return;
       const target = e.target instanceof Element ? e.target : null;
       if (target?.closest(KEYBOARD_NAV_EXCLUSION_SELECTOR)) return;
-      if (e.key === "ArrowDown") { e.preventDefault(); setFocusIdx((i) => Math.min(i + 1, rows.length - 1)); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); setFocusIdx((i) => Math.max(i <= 0 ? 0 : i - 1, 0)); }
-      else if (e.key === "Enter" && poolTab === "dispatchable" && focusIdx >= 0 && focusIdx < rows.length) { e.preventDefault(); openWb(rows[focusIdx]); }
+      if (e.key === "ArrowDown") { e.preventDefault(); setFocusId(rows[Math.min(focusIdx + 1, rows.length - 1)]?.id ?? null); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setFocusId(rows[Math.max(focusIdx <= 0 ? 0 : focusIdx - 1, 0)]?.id ?? null); }
+      else if (e.key === "Enter" && poolTab === "dispatchable" && focusOrder) { e.preventDefault(); openWb(focusOrder); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, rows, focusIdx]);
+  }, [active, rows, focusIdx, focusOrder, poolTab]);
 
   // 抽屉「轨迹」tab 的轨迹数据（已派单订单才有运单轨迹）
   const traj = useQuery<Trajectory>({
@@ -605,7 +619,7 @@ export function DispatchBoardPage() {
             onToggleAll={() => setPicked((s) => s.size >= rows.length && rows.length > 0 ? new Set() : new Set(rows.map((o) => o.id)))}
             stickyFirst rowMenu={poolRowMenu}
             onRowDoubleClick={(o) => { if (poolTab === "dispatchable" && o.dispatchable !== false) openWb(o); else if (poolTab === "unassigned") setExcOrder(o); }}
-            rowClassName={(o) => `pool-row${active?.id === o.id ? " row-active" : ""}${rows[focusIdx]?.id === o.id ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
+            rowClassName={(o) => `pool-row${active?.id === o.id ? " row-active" : ""}${focusId === o.id ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
             emptyState={
               <StateView
                 kind="empty"

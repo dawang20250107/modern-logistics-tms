@@ -60,7 +60,7 @@ export function SpotlightCommandBar() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<AgentResponse | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -123,20 +123,30 @@ export function SpotlightCommandBar() {
 
   const showAi = query.trim().length > 0 && !query.trim().startsWith("/");
   // 可选中的扁平结果：答案动作 + 命中记录（可跳转）+ 命令 + （可选）AI 分析行
+  // 每条结果带一个稳定 key，光标存 key 而不是下标（见 test/cursor-identity.test.ts）。
+  // 这里的重排是异步的：`hits` 由 lookupQ 拉回来，插在命令之前。
+  // 用户在 hits 到达前按了两下 ↓（下标 2 指着某个命令），hits 一到，
+  // 下标 2 已经是另一条记录了——Enter 跳到别处。
+  // 后果比调度台派错货轻得多，但是同一类问题，而且改起来就是加个 key。
   const results = useMemo(
     () => [
-      ...answerActions.map((a) => ({ kind: "answer" as string, cmd: null, hit: null as LookupResult | null, act: a })),
-      ...hits.map((h) => ({ kind: "hit" as string, cmd: null, hit: h, act: null })),
-      ...matched.map((c) => ({ kind: c.kind as string, cmd: c, hit: null as LookupResult | null, act: null })),
-      ...(showAi ? [{ kind: "ai" as string, cmd: null, hit: null as LookupResult | null, act: null }] : []),
+      ...answerActions.map((a) => ({ key: `act:${a.label}`, kind: "answer" as string, cmd: null, hit: null as LookupResult | null, act: a })),
+      ...hits.map((h) => ({ key: `hit:${h.kind}:${h.path}`, kind: "hit" as string, cmd: null, hit: h, act: null })),
+      ...matched.map((c) => ({ key: `cmd:${c.id}`, kind: c.kind as string, cmd: c, hit: null as LookupResult | null, act: null })),
+      ...(showAi ? [{ key: "ai", kind: "ai" as string, cmd: null, hit: null as LookupResult | null, act: null }] : []),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [matched, showAi, lookup, hasAnswer, answerActions.length, hits.length],
   );
 
   useEffect(() => {
-    setSelectedIndex(0);
+    setSelectedKey(null);
   }, [query]);
+
+  // 下标每次从当前 results 里推。选中项被异步到达的结果挤走 → -1，
+  // 此时 ↑↓ 从头开始、Enter 落在第一条（而不是落在错的那条）。
+  const selectedIndex = selectedKey ? results.findIndex((r) => r.key === selectedKey) : -1;
+  const cursor = selectedIndex >= 0 ? selectedIndex : 0;
 
   const run = (idx: number) => {
     const item = results[idx];
@@ -177,15 +187,15 @@ export function SpotlightCommandBar() {
       // 是把面板内除输入框以外的一切（清空按钮、答案卡动作行）都变成鼠标专用。
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIndex((prev) => (results.length ? (prev + 1) % results.length : 0));
+        if (results.length) setSelectedKey(results[(cursor + 1) % results.length].key);
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setSelectedIndex((prev) => (results.length ? (prev - 1 + results.length) % results.length : 0));
+        if (results.length) setSelectedKey(results[(cursor - 1 + results.length) % results.length].key);
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        run(selectedIndex);
+        run(cursor);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -199,7 +209,7 @@ export function SpotlightCommandBar() {
     if (!isOpen) return;
     setQuery("");
     setResponse(null);
-    setSelectedIndex(0);
+    setSelectedKey(null);
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -208,9 +218,9 @@ export function SpotlightCommandBar() {
     if (e) e.preventDefault();
     const cleanQuery = query.trim();
     // 焦点落在某个命令/记录/动作上 → 直接执行（回车已走 run，此处兜底表单提交）
-    const cur = results[selectedIndex];
+    const cur = results[cursor];
     if (cur && cur.kind !== "ai") {
-      run(selectedIndex);
+      run(cursor);
       return;
     }
     if (!cleanQuery) return;
@@ -245,7 +255,7 @@ export function SpotlightCommandBar() {
             role="combobox"
             aria-expanded="true"
             aria-controls="cmdk-results"
-            aria-activedescendant={results[selectedIndex] ? `cmdk-option-${selectedIndex}` : undefined}
+            aria-activedescendant={results[cursor] ? `cmdk-option-${cursor}` : undefined}
             aria-label="全局搜索与命令：搜索页面、执行动作，或向 AI 提问"
             placeholder="搜索 单号/客户/承运商/车牌/电话，或页面与动作 —— ↑↓ 选择，Enter 直达"
             value={query}
@@ -288,7 +298,7 @@ export function SpotlightCommandBar() {
               {results.map((item) => {
                 renderIdx += 1;
                 const idx = renderIdx;
-                const active = selectedIndex === idx;
+                const active = cursor === idx;
                 if (item.kind === "ai") {
                   // AI 自由问答独立分区：它和上面那些确定性命令的后果完全不同
                   // （一个是"跳到某处"，一个是"发一次请求给模型"）。
@@ -297,7 +307,7 @@ export function SpotlightCommandBar() {
                   return (
                     <div key="ai">
                       <div className="cmdk-section cmdk-section-ai">AI 分析</div>
-                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedKey(item.key)} onClick={() => run(idx)}>
                         <span>用 AI 分析：“{query.trim()}”</span>
                         <span className="cmdk-kbd">Enter ↵</span>
                       </div>
@@ -310,7 +320,7 @@ export function SpotlightCommandBar() {
                   return (
                     <div key={`act-${item.act.label}`}>
                       {header && <div className="cmdk-section">操作</div>}
-                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedKey(item.key)} onClick={() => run(idx)}>
                         <span className="cmdk-item-main"><span className="cmdk-badge">直达</span><span className="cmdk-item-label">{item.act.label}</span></span>
                         <span className="cmdk-item-path">↵</span>
                       </div>
@@ -324,7 +334,7 @@ export function SpotlightCommandBar() {
                   return (
                     <div key={`hit-${h.kind}-${h.title}`}>
                       {header && <div className="cmdk-section">记录</div>}
-                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedKey(item.key)} onClick={() => run(idx)}>
                         <span className="cmdk-item-main">
                           <span className="cmdk-badge cmdk-badge-hit">{HIT_ICON[h.kind] ?? "•"}</span>
                           <span className="cmdk-item-label">{h.title}</span>
@@ -341,7 +351,7 @@ export function SpotlightCommandBar() {
                 return (
                   <div key={c.id}>
                     {header && <div className="cmdk-section">{header}</div>}
-                    <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                    <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item${active ? " active" : ""}`} onMouseEnter={() => setSelectedKey(item.key)} onClick={() => run(idx)}>
                       <span className="cmdk-item-main">
                         {c.kind === "action" && <span className="cmdk-badge">动作</span>}
                         <span className="cmdk-item-label">{c.label}</span>

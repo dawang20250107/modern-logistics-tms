@@ -342,9 +342,17 @@ select {
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: content-box; }
 
 /* ── Layout ─────────────────────────────────────────── */
-/* 侧栏从 clamp(204,15vw,224) 收到 clamp(178,11.5vw,196)：
-   8 个入口不需要 16% 的屏宽，省下的横向空间全给数据列。 */
-.app { display: grid; grid-template-columns: clamp(178px, 11.5vw, 196px) 1fr; height: 100vh; overflow: hidden; }
+/* 侧栏从 224px 收到 192px：8 个入口不需要 16% 的屏宽，省下的横向空间全给数据列。
+   **定值而不是 clamp(…vw…)**：11.5vw 在 1680 下算出 193.2px，小数宽会沿栅格
+   一路传下去，1px 分隔线落在半个像素上被渲成两条 0.5 alpha 的线；
+   同一套导航在 1080p 与 1440p 上也不该有不同的标签换行位置。
+
+   注：我一度以为这条能消掉表格那 3px 的幻影横滚（表格装得下，scrollWidth 却比
+   容器宽 3px）。改成整数后实测**没有**变化，那个假设是错的。
+   3px 的成因至今没查清：排除了右固定列阴影、列右边框、border-collapse、
+   width:100%、单元格 overflow、固定列偏移偏差，只确认"去掉表内任一 sticky 就消失"。
+   它是纯视觉残渣（能滚 3px），不影响可读性与操作，先留着。 */
+.app { display: grid; grid-template-columns: 192px 1fr; height: 100vh; overflow: hidden; }
 .nav-backdrop { display: none; }
 .side {
   position: relative;

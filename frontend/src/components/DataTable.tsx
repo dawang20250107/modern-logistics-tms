@@ -351,6 +351,7 @@ export function DataTable<T>({
 
   const colWidth = (c: DataColumn<T>) => widths[c.key] ?? c.width ?? 140;
 
+
   // ── 固定列偏移：勾选列 + 行号列 + 依序累计的 pin 列 ──
   const checkW = selectable ? 34 : 0;
   const numW = rowNums ? 46 : 0;
@@ -364,6 +365,17 @@ export function DataTable<T>({
     return set;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinned, stickyFirst, visibleCols.map((c) => c.key).join(",")]);
+  // 已知偏差（实测，暂不修）：这里累加的是**声明**宽度，而 table-layout:fixed
+  // + width:100% 在表格装得下时会把富余按比例分给所有列。
+  // 实测勾选列渲染宽：1366 → 34（偏差 0）、1680 → 37.2（3.2）、2560 → 59.2（25.2），
+  // 而第二个固定列的 left 一直写着 34px。
+  //
+  // 不修的理由：这个偏差**看不见**，因为两个条件互斥——
+  // 列被拉伸 ⇔ 表格装得下 ⇔ 从不横滚 ⇔ 固定列从不真正贴边生效。
+  // 试过让一列吸收富余（其余列严格按声明宽渲染），偏移确实全准了，
+  // 但代价是那一列在 1366 下塌成 0px、在 2560 下涨到 1132px —— 拿一个可见的坏
+  // 换一个不可见的坏，不划算。真要修得改成按**实测**宽度累加（ResizeObserver），
+  // 等固定列在宽视口下真的会生效时再说。
   const pinLeft = useMemo(() => {
     const m = new Map<string, number>();
     let acc = checkW + numW;
@@ -386,6 +398,7 @@ export function DataTable<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleCols, widths]);
   const isPinnedR = (key: string) => pinRight.has(key);
+
 
   const exportRows = () => displayRows.map((r) => visibleCols.map((c) => cellValue(c, r)));
 

@@ -254,3 +254,65 @@ describe("DataTable · 视图持久化", () => {
     expect(again.container.querySelector(".dt")!.className).toContain("dt-den-standard");
   });
 });
+
+// ── 键盘：不碰鼠标就能用 ────────────────────────────────
+//
+// 这一组钉的是三个曾经缺失的入口。原实现里 onGridKeyDown 开头是
+// `if (!selF) return`：Tab 进表格再按 ↓ 毫无反应，必须先用鼠标点一个单元格。
+// 一个号称键盘优先的台面，键盘通路却只能靠鼠标进入。同时没有 Enter、没有 Space。
+describe("DataTable · 键盘", () => {
+  const grid = (c: HTMLElement) => c.querySelector(".dt-scroll") as HTMLElement;
+
+  it("没有光标时按 ↓ 从第一格起步，不需要先点鼠标", async () => {
+    const user = userEvent.setup();
+    const { container } = setup();
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(
+      container.querySelector('[data-cell="0-0"]')?.className,
+      "首次按方向键应把光标落在左上角单元格",
+    ).toContain("dt-cellsel");
+  });
+
+  it("Enter 打开光标所在行", async () => {
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+    const { container } = setup({ onRowClick });
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(onRowClick.mock.calls[0][0]).toMatchObject({ id: "2" });
+  });
+
+  it("Space 勾选光标所在行", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    const { container } = setup({ selectable: true, selected: new Set<string>(), onToggle });
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}[Space]");
+    expect(onToggle).toHaveBeenCalledWith("1");
+  });
+
+  it("行级动作按记录 id 找回那一行，列表重排后不会作用到错的行", async () => {
+    // 轮询刷新会插入/重排行。光标停在第 2 行时列表重排，
+    // 若按下标取行，Enter 就落到另一条记录上。
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+    const { container, rerender } = render(
+      <DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey="kb-reorder" onRowClick={onRowClick} />,
+    );
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}"); // 光标 → 第 2 行 = id "2"
+    // 模拟刷新：一条新记录插到最前，原来的第 2 行整体下移一位
+    const shifted: Row[] = [{ id: "9", no: "DD009", customer: "新来的", biz: "整车", amount: 1 }, ...ROWS];
+    rerender(
+      <DataTable<Row> columns={COLS} rows={shifted} rowKey={(r) => r.id} viewKey="kb-reorder" onRowClick={onRowClick} />,
+    );
+    await user.keyboard("{Enter}");
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(
+      onRowClick.mock.calls[0][0],
+      "Enter 应作用于光标记住的那条记录（id 2），而不是当前第 2 行（重排后是 id 1）",
+    ).toMatchObject({ id: "2" });
+  });
+});

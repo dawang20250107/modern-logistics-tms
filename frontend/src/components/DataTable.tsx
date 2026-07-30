@@ -162,6 +162,10 @@ export function DataTable<T>({
   // r/c 为 displayRows 行号 × visibleCols 列号；anchor=起点，focus=活动单元格
   const [selA, setSelA] = useState<{ r: number; c: number } | null>(null);
   const [selF, setSelF] = useState<{ r: number; c: number } | null>(null);
+  // 选区矩形用 {r,c} 是对的——它本来就是一个视觉范围，复制与统计要的就是坐标。
+  // 但"光标这一行是哪条记录"必须单独锚 id：行级动作（Enter/Space）按 id 找回，
+  // 否则轮询刷新插进来一条，动作就落到错的行上（见 test/cursor-identity.test.ts）。
+  const [cursorRowId, setCursorRowId] = useState<string | null>(null);
   const draggingRef = useRef(false);
   const movedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -489,6 +493,7 @@ export function DataTable<T>({
     draggingRef.current = true;
     if (e.shiftKey && selA) setSelF({ r, c });
     else { setSelA({ r, c }); setSelF({ r, c }); }
+    if (displayRows[r]) setCursorRowId(rowKey(displayRows[r]));
   };
   const dragCellSel = (r: number, c: number) => {
     if (!draggingRef.current) return;
@@ -517,8 +522,39 @@ export function DataTable<T>({
       e.preventDefault();
       return;
     }
-    if (!selF) return;
     const maxR = displayRows.length - 1, maxC = visibleCols.length - 1;
+
+    // 行级动作（Enter 打开 / Space 勾选）必须按**记录 id** 找回那一行，
+    // 不能直接取 displayRows[selF.r]。运单页 30s、调度池 15s 都在轮询，
+    // 光标停在第 4 行时刷新插进来一条，第 4 行已经是另一条记录了。
+    // 找不到（那条记录离开了列表）就什么都不做——宁可这一下没反应，
+    // 也不能对错的行动手。
+    const cursorRow = cursorRowId ? displayRows.find((row) => rowKey(row) === cursorRowId) : null;
+    if (e.key === "Enter" && cursorRow) {
+      e.preventDefault();
+      if (onRowClick) onRowClick(cursorRow);
+      else if (onRowDoubleClick) onRowDoubleClick(cursorRow);
+      return;
+    }
+    if (e.key === " " && cursorRow && selectable && onToggle) {
+      // 表格内的 Space 归勾选，不再滚页——Excel 与 Gmail 都是这个约定
+      e.preventDefault();
+      onToggle(rowKey(cursorRow));
+      return;
+    }
+
+    // 没有光标时按方向键 → 从左上角起步。
+    // 原来这里是 `if (!selF) return`：Tab 进表格再按 ↓ 毫无反应，
+    // 必须先用鼠标点一个单元格。一个号称键盘优先的台面，键盘通路却只能靠鼠标进入。
+    if (!selF) {
+      if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(e.key)) return;
+      if (!displayRows.length) return;
+      e.preventDefault();
+      setSelA({ r: 0, c: 0 });
+      setSelF({ r: 0, c: 0 });
+      setCursorRowId(rowKey(displayRows[0]));
+      return;
+    }
     let { r, c } = selF;
     switch (e.key) {
       case "ArrowUp": r = Math.max(0, r - 1); break;
@@ -533,6 +569,7 @@ export function DataTable<T>({
     }
     e.preventDefault();
     setSelF({ r, c });
+    if (displayRows[r]) setCursorRowId(rowKey(displayRows[r]));
     if (!e.shiftKey) setSelA({ r, c });
     // 活动单元格滚动可见
     scrollRef.current?.querySelector(`[data-cell="${r}-${c}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import { toast } from "../api/toast";
+import { useModalA11y } from "../api/useModalA11y";
 import type { LookupResponse, LookupResult, ReplyCardData } from "../api/types";
 
 interface ToolCall {
@@ -62,7 +63,7 @@ export function SpotlightCommandBar() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const { pathname } = useLocation();
   // 上下文加权：当前所在页相关命令优先展示
@@ -159,28 +160,21 @@ export function SpotlightCommandBar() {
     }
   };
 
+  // 标准焦点陷阱 + Esc + 关闭后还原焦点（与确认弹窗、抽屉共用同一实现）
+  useModalA11y(isOpen, panelRef, () => setIsOpen(false));
+
   // 全局快捷键 + 方向键 + 回车
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setIsOpen((prev) => {
-          if (!prev) restoreFocusRef.current = document.activeElement as HTMLElement | null;
-          return !prev;
-        });
+        setIsOpen((prev) => !prev); // 打开前的焦点由 useModalA11y 记录并还原
         return;
       }
       if (!isOpen) return;
-      if (e.key === "Escape") {
-        setIsOpen(false);
-        return;
-      }
-      // 焦点陷阱：命令面板仅单输入框驱动，Tab 不应把焦点带到背景
-      if (e.key === "Tab") {
-        e.preventDefault();
-        inputRef.current?.focus();
-        return;
-      }
+      // Tab 交给 useModalA11y 的标准焦点陷阱处理。
+      // 原来这里是 e.preventDefault() + 把焦点抢回输入框——那不是焦点陷阱，
+      // 是把面板内除输入框以外的一切（清空按钮、答案卡动作行）都变成鼠标专用。
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIndex((prev) => (results.length ? (prev + 1) % results.length : 0));
@@ -199,16 +193,13 @@ export function SpotlightCommandBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, results, selectedIndex]);
 
+  // 只负责清状态。聚焦与关闭后的焦点还原都由 useModalA11y 做——
+  // 原来这里用 setTimeout(…, 50) 抢焦点，慢设备上这 50ms 内焦点可能已经被别处拿走。
   useEffect(() => {
-    if (isOpen) {
-      setQuery("");
-      setResponse(null);
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    } else {
-      restoreFocusRef.current?.focus?.();
-      restoreFocusRef.current = null;
-    }
+    if (!isOpen) return;
+    setQuery("");
+    setResponse(null);
+    setSelectedIndex(0);
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -242,7 +233,7 @@ export function SpotlightCommandBar() {
 
   return (
     <div className="cmdk-overlay" onClick={() => setIsOpen(false)}>
-      <div className="cmdk-panel" role="dialog" aria-modal="true" aria-label="全局搜索与命令" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} className="cmdk-panel" role="dialog" aria-modal="true" aria-label="全局搜索与命令" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSearchSubmit} className="cmdk-input-row">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ opacity: 0.55 }}>
             <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
@@ -299,10 +290,17 @@ export function SpotlightCommandBar() {
                 const idx = renderIdx;
                 const active = selectedIndex === idx;
                 if (item.kind === "ai") {
+                  // AI 自由问答独立分区：它和上面那些确定性命令的后果完全不同
+                  // （一个是"跳到某处"，一个是"发一次请求给模型"）。
+                  // 混在同一个排序列表里，Enter 的后果就不可预测。
+                  lastSection = "AI";
                   return (
-                    <div id={`cmdk-option-${idx}`} key="ai" role="option" aria-selected={active} className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
-                      <span>用 AI 分析：“{query.trim()}”</span>
-                      <span className="cmdk-kbd">Enter ↵</span>
+                    <div key="ai">
+                      <div className="cmdk-section cmdk-section-ai">AI 分析</div>
+                      <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedIndex(idx)} onClick={() => run(idx)}>
+                        <span>用 AI 分析：“{query.trim()}”</span>
+                        <span className="cmdk-kbd">Enter ↵</span>
+                      </div>
                     </div>
                   );
                 }

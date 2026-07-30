@@ -413,9 +413,8 @@ export function WaybillDetailPage() {
         {/* 右侧：财务与签收 */}
         <div className="stack">
           {/* AI 建议 */}
-          <div className="panel" style={{ border: "1px solid var(--violet)" }}>
-            <div className="panel-head" style={{ background: "rgba(139,92,246,0.06)", color: "var(--violet)", borderBottomColor: "var(--violet)" }}>
-              AI 建议            </div>
+          <div className="panel">
+            <div className="panel-head">AI 建议</div>
             {w.agent_suggestions.length === 0 ? (
               <StateView kind="empty" title="暂无建议" compact />
             ) : (
@@ -551,10 +550,12 @@ export function WaybillDetailPage() {
           <div className="panel">
             <div className="panel-head">电子回单与签收</div>
             <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ background: "var(--panel-2)", padding: 16, borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
-                <span className="muted small" style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>上传回单照片</span>
-                <input type="file" ref={fileInput} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); }} />
-                {upload.isPending && <span className="muted small" style={{ color: "var(--brand)" }}> 上传中…</span>}
+              <div style={{ background: "var(--panel-2)", padding: 12, borderRadius: "var(--radius)", border: "1px dashed var(--line-2)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span className="section-label" style={{ marginBottom: 0 }}>上传回单照片</span>
+                <label className="btn-ghost small file-trigger" style={{ cursor: "pointer" }}>
+                  {upload.isPending ? "上传中…" : "选择图片"}
+                  <input className="file-input-accessible" type="file" accept="image/*" ref={fileInput} disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
+                </label>
               </div>
 
               {(receipts.data?.items ?? []).length === 0 ? (

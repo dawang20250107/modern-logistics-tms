@@ -16,7 +16,6 @@ import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconWarning, I
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 import type { Carrier, DispatchSuggestion, Driver, Order, Paginated, Vehicle } from "../api/types";
 import { BODY_TYPE_LABEL, BUSINESS_TYPE_LABEL, DISPATCH_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL, SLA_STATUS_LABEL } from "../api/types";
-import { useEventStream } from "../api/useEventStream";
 
 const enumOpts = (m: Record<string, string>) => Object.entries(m).map(([value, label]) => ({ value, label }));
 
@@ -165,10 +164,6 @@ export function DispatchBoardPage() {
   };
 
   // 订单池实时变化即刷新（多客服建单 / 多调度抢单）
-  useEventStream((e) => {
-    if (["order_pooled", "order_claimed", "order_dispatched"].includes(e.type)) invalidate();
-  });
-
   // 抽屉无障碍：焦点陷阱 / Esc 关闭 / 关闭后焦点归还（右键菜单由 DataTable 内置管理）
   const wbRef = useRef<HTMLElement>(null);
   useModalA11y(Boolean(active), wbRef, closeWb);
@@ -479,7 +474,7 @@ export function DispatchBoardPage() {
     { key: "type", header: "类型", width: 96, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
     { key: "priority", header: "优先级", width: 102, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
     { key: "cargo", header: "货量", width: 106, align: "right", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_volume_cbm}方`, render: (o) => <span className="small">{o.cargo_weight_ton}吨/{o.cargo_volume_cbm}方</span> },
-    { key: "amount", header: "应收", width: 94, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <>{o.quoted_amount ? fmtMoney(o.quoted_amount) : "—"}</> },
+    { key: "amount", header: "应收", width: 94, align: "right", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <>{fmtMoney(o.quoted_amount)}</> },
     { key: "audit", header: "状态 / 时间审计", width: 194, exportValue: (o) => o.lock_state || "", render: (o) => (
       <div className="audit-cell">
         <span className="audit-lock">{renderLock(o)}</span>
@@ -884,8 +879,8 @@ export function DispatchBoardPage() {
                               {suggestion.carrier_recommendations.map((r) => (
                                 <tr key={r.carrier_id} className={carrierId === r.carrier_id ? "row-sel" : ""}>
                                   <td>{r.carrier} <span className="muted small">{r.carrier_grade}</span></td>
-                                  <td className="num">{r.recent_deal_price ? fmtMoney(r.recent_deal_price) : "—"}</td>
-                                  <td className="num">{r.quote != null ? fmtMoney(r.quote) : "—"}</td>
+                                  <td className="num">{fmtMoney(r.recent_deal_price)}</td>
+                                  <td className="num">{fmtMoney(r.quote)}</td>
                                   <td className="num">{r.deals ? `${Math.round(r.on_time_rate * 100)}%` : "—"}</td>
                                   <td className="num">{r.deals ? `${Math.round(r.exception_rate * 100)}%` : "—"}</td>
                                   <td className="num">{r.deals ? `${Math.round(r.receipt_timely_rate * 100)}%` : "—"}</td>

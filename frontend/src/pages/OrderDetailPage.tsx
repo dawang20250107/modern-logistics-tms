@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtDateTime, fmtMoney } from "../api/format";
+import { fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
 import { DocumentLineage } from "../components/DocumentLineage";
 import { CopyCode } from "../components/CopyCode";
@@ -99,7 +99,7 @@ export function OrderDetailPage() {
   const editable = !["converted", "completed", "cancelled"].includes(o.status);
 
   const kv = (label: string, value: ReactNode) => (
-    <div><span>{label}</span><b>{value || "-"}</b></div>
+    <div><span>{label}</span><b>{value || EMPTY}</b></div>
   );
 
   return (
@@ -123,7 +123,7 @@ export function OrderDetailPage() {
           <div>
             <div className="muted small">订单</div>
             <div className="wb-no mono"><CopyCode value={o.order_no} /></div>
-            <div className="muted small">{ORDER_CHANNEL_LABEL[o.channel]} · {SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type} · 建单 {o.created_by_name || "-"}</div>
+            <div className="muted small">{ORDER_CHANNEL_LABEL[o.channel]} · {SOURCE_TYPE_LABEL[o.source_type] ?? o.source_type} · 建单 {o.created_by_name || EMPTY}</div>
           </div>
           <div className="wb-status">
             <StatusTag kind="order" value={o.status} />
@@ -197,10 +197,10 @@ export function OrderDetailPage() {
                 : SETTLEMENT_LABEL[o.settlement_type] ?? o.settlement_type)}
               {kv("报价", editing
                 ? <input className="search" style={{ width: 120 }} value={edit.quoted_amount} onChange={(e) => setEdit({ ...edit, quoted_amount: e.target.value })} />
-                : (Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "-"))}
+                : (fmtMoney(o.quoted_amount)))}
               {kv("货值", editing
                 ? <input className="search" style={{ width: 120 }} value={edit.cargo_value} onChange={(e) => setEdit({ ...edit, cargo_value: e.target.value })} />
-                : (Number(o.cargo_value) > 0 ? fmtMoney(o.cargo_value) : "-"))}
+                : (fmtMoney(o.cargo_value)))}
               {kv("认领调度", o.claimed_by_name)}
             </div>
           </div>
@@ -250,7 +250,7 @@ export function OrderDetailPage() {
                   {o.cargo_items.map((c) => (
                     <tr key={c.id}>
                       <td>{c.name}</td><td>{c.quantity}</td><td>{c.weight_ton}</td><td>{c.volume_cbm}</td>
-                      <td>{c.package_type || "-"}</td><td>{c.temperature_range || "-"}</td>
+                      <td>{c.package_type || EMPTY}</td><td>{c.temperature_range || EMPTY}</td>
                       {splitMode && (
                         <td>
                           <select value={groupOf[c.id ?? ""] ?? 1} onChange={(e) => setGroupOf((m) => ({ ...m, [c.id ?? ""]: Number(e.target.value) }))}>
@@ -336,8 +336,8 @@ export function OrderDetailPage() {
                   {o.attachments.map((a) => (
                     <tr key={a.id}>
                       <td><span className="tag tag-info">{ATTACHMENT_KIND_LABEL[a.kind] ?? a.kind}</span></td>
-                      <td>{a.file_display ? <a className="link" href={a.file_display} target="_blank" rel="noreferrer">{a.name || "查看"}</a> : (a.name || "-")}</td>
-                      <td className="small">{a.uploaded_by_name || "-"}</td>
+                      <td>{a.file_display ? <a className="link" href={a.file_display} target="_blank" rel="noreferrer">{a.name || "查看"}</a> : (a.name || EMPTY)}</td>
+                      <td className="small">{a.uploaded_by_name || EMPTY}</td>
                       <td className="small">{fmtDateTime(a.created_at)}</td>
                       <td><button className="btn-ghost" disabled={delAtt.isPending} onClick={() => delAtt.mutate(a.id)}>删除</button></td>
                     </tr>

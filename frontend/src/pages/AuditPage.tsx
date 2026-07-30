@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { fmtDateTime } from "../api/format";
+import { fmtDateTime, fmtNum0 } from "../api/format";
 import type { AuditLog } from "../api/types";
 import { auditActionLabel, resourceTypeLabel } from "../api/types";
 import { useServerTable } from "../api/useServerTable";
@@ -46,7 +46,7 @@ export function AuditPage() {
       </div>
 
       <div className="panel">
-        <div className="panel-head">操作记录（{t.total.toLocaleString()}）</div>
+        <div className="panel-head">操作记录（{fmtNum0(t.total)}）</div>
         {t.isError ? (
           <StateView kind="error" hint="无权限或加载失败（仅管理员可查）。" onRetry={() => t.refetch()} />
         ) : (

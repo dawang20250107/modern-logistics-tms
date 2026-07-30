@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useRef, useState } from "react";
 
 import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
-import { fmtDateTime } from "../api/format";
+import { fmtDateTime, EMPTY } from "../api/format";
 import { confirmAction } from "../api/confirm";
 import { hasPerm, useAuth } from "../auth/auth";
 import { toast } from "../api/toast";
@@ -105,7 +105,7 @@ function OrgTreeNodeRow({ node, depth }: { node: OrgTreeNode; depth: number }) {
         </td>
         <td><span className="tag">{node.type_label}</span></td>
         <td><span className={`tag tag-${PROPERTY_TAG[node.org_property] ?? "low"}`}>{node.org_property_label}</span></td>
-        <td className="small">{node.manager_name || "-"}</td>
+        <td className="small">{node.manager_name || EMPTY}</td>
         <td className="mono">{node.direct_headcount}</td>
         <td className="mono"><b>{node.total_headcount}</b></td>
       </tr>
@@ -404,8 +404,8 @@ function EmployeesTab() {
               <tr key={e.id}>
                 <td className="mono">{e.employee_no}</td>
                 <td><b>{e.name}</b><div className="muted small">{e.phone}</div></td>
-                <td className="small">{e.organization_name || "-"}</td>
-                <td className="small">{e.position || "-"}</td>
+                <td className="small">{e.organization_name || EMPTY}</td>
+                <td className="small">{e.position || EMPTY}</td>
                 <td className="small">{(e.role_names ?? []).length > 0 ? (e.role_names ?? []).map((r) => <span key={r} className="tag tag-info" style={{ marginRight: 3 }}>{r}</span>) : <span className="muted">未分配</span>}</td>
                 <td className="small">{e.username ? (e.account_active ? <span className="tag tag-low">{e.username}</span> : <span className="tag tag-medium">{e.username}·禁</span>) : <span className="muted">未绑定</span>}</td>
                 <td><span className={`tag tag-${STATUS_TAG[e.status] ?? "low"}`}>{e.status_label}</span></td>
@@ -440,7 +440,7 @@ function EmployeesTab() {
                   <td>{h.from_name}</td><td>{h.to_name}</td>
                   <td className="mono">{h.moved_reports}</td><td className="mono">{h.moved_departments}</td>
                   <td>{h.disabled_account ? "是" : "否"}</td>
-                  <td className="small">{h.reason || "-"}</td>
+                  <td className="small">{h.reason || EMPTY}</td>
                   <td className="small">{fmtDateTime(h.created_at)}</td>
                 </tr>
               ))}
@@ -476,7 +476,7 @@ function CoverageRouter() {
       </div>
       {m.data && (
         <div style={{ padding: "0 16px 14px" }} className="stack">
-          <div className="muted small">目的地：{m.data.destination || "-"}</div>
+          <div className="muted small">目的地：{m.data.destination || EMPTY}</div>
           {m.data.resolved.length === 0 ? (
             <div className="muted small">无可承运网点{m.data.excluded.length > 0 ? "（均被排他规则排除）" : ""}。</div>
           ) : (
@@ -491,7 +491,7 @@ function CoverageRouter() {
                     <td><span className={`tag tag-${r.area_type === "deliver" ? "low" : "medium"}`}>{r.area_type_label}</span></td>
                     <td className="small">{r.region_name}</td>
                     <td className="mono">{r.priority}</td>
-                    <td className="small">{r.manager_name || "-"}</td>
+                    <td className="small">{r.manager_name || EMPTY}</td>
                   </tr>
                 ))}
               </tbody>
@@ -734,8 +734,8 @@ function LoginAuditTab() {
                 <td className="mono small">{fmtDateTime(r.created_at)}</td>
                 <td>{r.username}</td>
                 <td><span className={`tag ${r.success ? "tag-low" : "tag-high"}`}>{r.result_label || (r.success ? "成功" : "失败")}</span></td>
-                <td className="mono small">{r.ip || "-"}</td>
-                <td className="small muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.user_agent}>{r.user_agent || "-"}</td>
+                <td className="mono small">{r.ip || EMPTY}</td>
+                <td className="small muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.user_agent}>{r.user_agent || EMPTY}</td>
               </tr>
             ))}
           </tbody>

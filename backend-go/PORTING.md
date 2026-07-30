@@ -357,11 +357,18 @@ cd backend-go && go run ./cmd/server
   遮蔽：删除语句报错（多半是没收干净的外键）此前会被当成 404 返回，
   「本来就不存在」和「存在但删不掉」是两件事，现在前者 404、后者 500 带原因。
 
-- **SSE 事件流 `/api/v1/stream/events` 不移植，随 Django 一起下线**：现状是 Django SSE
-  依赖 Redis 广播，本地与容器里本就跑不起来，前端也没有消费方。与其把一条没人用的
-  长连接通道原样搬过来，不如就此摘除——事件本身照旧落 `ops_waybill_event` 等台账，
-  没有任何数据丢失。将来真需要推送时，Go 侧用 PG LISTEN/NOTIFY 重做比翻译旧实现更省。
-  同理 `/api/v1/agent/stream`（AI 流式）一并下线，`/agent/chat` 的一次性响应保留。
+- **SSE 事件流 `/api/v1/stream/events` 不移植，随 Django 一起下线**：Django SSE
+  依赖 Redis 广播，本地与容器里本就跑不起来。事件本身照旧落 `ops_waybill_event`
+  等台账，没有任何数据丢失。将来真需要推送时，Go 侧用 PG LISTEN/NOTIFY 重做比
+  翻译旧实现更省。同理 `/api/v1/agent/stream`（AI 流式）一并下线，
+  `/agent/chat` 的一次性响应保留。
+  **更正**：这一条原先写着"前端也没有消费方"——错的，下线前我没 grep 前端。
+  实际有三个消费方（通知铃、驾驶舱、调度台），都通过 `useEventStream` 订阅。
+  端点撤掉后 `EventSource` 按浏览器默认行为**无限自动重连**，于是每个页面都在
+  持续打 404，只是没人看控制台所以没发现。三处回调都只是"收到事件就 invalidate"，
+  而三处本来都有 `refetchInterval` 轮询兜底，故直接删掉 `useEventStream`：
+  功能不丢，刷新从推送退回轮询。教训是删端点前要连着调用方一起查，
+  "没人用"这种判断不能靠印象。
 
 - **权限闸门此前是通用 CRUD 引擎的空档**：Django 侧 16 个 ViewSet 声明了
   `required_permissions`，而引擎只做了鉴权、没做权限点校验——凡是走引擎的资源，

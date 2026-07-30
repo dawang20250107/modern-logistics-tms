@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
-import { fmtDateTime, fmtMoney } from "../api/format";
+import { fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
 import { COD_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
@@ -325,7 +325,7 @@ export function WaybillDetailPage() {
                   {w.stops.map((s) => (
                     <tr key={s.id}>
                       <td style={{ fontWeight: "bold", color: "var(--ink-2)" }}>{s.stop_type_label}</td>
-                      <td className="small">{s.address || s.city || "-"}</td>
+                      <td className="small">{s.address || s.city || EMPTY}</td>
                       <td className="small mono" style={{ color: "var(--brand)" }}>{fmt(s.planned_eta)}</td>
                       <td className="small">
                         {s.actual_arrival_at ? <span style={{ color: "var(--green)", fontWeight: "bold" }}>✓ {fmt(s.actual_arrival_at)}</span> : <span className="muted">未到达</span>}
@@ -366,7 +366,7 @@ export function WaybillDetailPage() {
                     <tr key={ex.id}>
                       <td>{EXC_TYPE_LABEL[ex.exception_type] ?? ex.exception_type}</td>
                       <td><span className={`tag tag-${ex.level === "high" ? "high" : ex.level === "low" ? "low" : "medium"}`}>{RISK_LABEL[ex.level] ?? ex.level}</span></td>
-                      <td className="small">{ex.description || "-"}</td>
+                      <td className="small">{ex.description || EMPTY}</td>
                       <td><Link className="link" to="/dispatch-board">{EXC_STATUS_LABEL[ex.status] ?? ex.status}</Link></td>
                     </tr>
                   ))}

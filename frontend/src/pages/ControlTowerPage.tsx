@@ -3,10 +3,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiGet } from "../api/client";
-import { fmtMoney } from "../api/format";
+import { fmtMoney, fmtWan } from "../api/format";
 import type { CredentialRow, ExpiringCredentials, Order, StatementOverview } from "../api/types";
 import { ORDER_STATUS_LABEL, STATUS_LABEL } from "../api/types";
-import { useEventStream } from "../api/useEventStream";
 import { hasPerm, useAuth } from "../auth/auth";
 import { BusinessMetrics } from "../components/BusinessMetrics";
 import { StateView } from "../components/StateView";
@@ -36,14 +35,6 @@ const WB_PIPELINE: { key: string; color: string }[] = [
 ];
 const WB_ACTIVE = ["dispatched", "loaded", "departed", "in_transit", "arrived"];
 
-// 大额金额紧凑显示（¥万/¥亿），驾驶舱磁贴用；带 ¥ 前缀与其它金额风格统一
-function fmtWan(v: number): string {
-  const n = Math.abs(v);
-  if (n >= 1e8) return `¥${(v / 1e8).toFixed(2)}亿`;
-  if (n >= 1e4) return `¥${(v / 1e4).toFixed(1)}万`;
-  return fmtMoney(v);
-}
-
 type WbStats = { by_status: Record<string, number>; total: number };
 type Funnel = { by_status: Record<string, number>; by_channel: Record<string, number>; today_created: number; total: number };
 type Workbench = {
@@ -67,11 +58,6 @@ export function ControlTowerPage() {
   const compliance = useQuery({ queryKey: ["compliance-mini"], queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30"), refetchInterval: 60000 });
 
   // 实时事件：到达即刷新看板
-  useEventStream(() => {
-    queryClient.invalidateQueries({ queryKey: ["waybills"] });
-    queryClient.invalidateQueries({ queryKey: ["orders"] });
-  });
-
   const primaryQueries = [stats, funnel, wb];
   if (primaryQueries.some((q) => q.isLoading)) return <StateView kind="loading" />;
   if (primaryQueries.some((q) => q.isError)) {

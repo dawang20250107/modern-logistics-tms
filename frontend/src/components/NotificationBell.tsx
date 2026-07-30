@@ -5,7 +5,6 @@ import { useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "../api/client";
 import { fmtRelative } from "../api/format";
 import type { Notification, Paginated } from "../api/types";
-import { useEventStream } from "../api/useEventStream";
 import { StateView } from "./StateView";
 
 export function NotificationBell() {
@@ -47,10 +46,6 @@ export function NotificationBell() {
     enabled: open,
   });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["ntf"] });
-
-  useEventStream((e) => {
-    if (e.type === "notification") invalidate();
-  });
 
   const readAll = useMutation({ mutationFn: () => apiPost("/notifications/read-all", {}), onSuccess: invalidate });
   const readOne = useMutation({

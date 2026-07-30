@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 import { apiDownload, apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
+import { fmtDateTime, fmtMoney, fmtRelative, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
 import type { DispatchBatch, DispatchBatchDetail, Order, OrderEvent, Paginated } from "../api/types";
 import {
@@ -176,7 +176,7 @@ function OrdersTab() {
     { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <><b>{o.origin || "?"}</b> → <b>{o.destination || "?"}</b></> },
     { key: "biz", header: "业务", width: 90, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortField: "business_type", sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
     { key: "cargo", header: "货量", width: 128, align: "right", sortField: "cargo_weight_ton", sortValue: (o) => Number(o.cargo_weight_ton) || 0, exportValue: (o) => `${o.cargo_weight_ton}吨/${o.cargo_quantity}件`, render: (o) => <span className="num">{o.cargo_weight_ton}<span className="cell-unit">吨</span><span className="cell-sub">{o.cargo_quantity}件</span></span> },
-    { key: "amount", header: "报价", width: 110, align: "right", sortField: "quoted_amount", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{Number(o.quoted_amount) > 0 ? fmtMoney(o.quoted_amount) : "—"}</span> },
+    { key: "amount", header: "报价", width: 110, align: "right", sortField: "quoted_amount", sortValue: (o) => Number(o.quoted_amount) || 0, exportValue: (o) => Number(o.quoted_amount) || 0, render: (o) => <span className="num">{fmtMoney(o.quoted_amount)}</span> },
     { key: "priority", header: "优先级", width: 92, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortField: "priority", sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
     { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
     { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortField: "sla_status", sortValue: (o) => o.sla_status, exportValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
@@ -186,8 +186,8 @@ function OrdersTab() {
     {
       key: "created", header: "建单", width: 140, sortField: "created_at",
       sortValue: (o) => o.created_at,
-      filterable: true, filterValue: (o) => o.created_by_name || "-",
-      exportValue: (o) => `${o.created_by_name || "-"} ${fmtDateTime(o.created_at)}`,
+      filterable: true, filterValue: (o) => o.created_by_name || EMPTY,
+      exportValue: (o) => `${o.created_by_name || EMPTY} ${fmtDateTime(o.created_at)}`,
       // 单行：这批单大多来自 API / 客户自助，没有建单人，两行渲染会让整表行高
       // 为一列少数有值的字段全部变高。建单人进 title，要看的时候再看。
       render: (o) => (
@@ -350,7 +350,7 @@ function OrdersTab() {
                 <div><span>业务类型</span><b>{BUSINESS_TYPE_LABEL[drawer.business_type] ?? drawer.business_type}</b></div>
                 <div><span>优先级</span><b>{PRIORITY_LABEL[drawer.priority] ?? drawer.priority}</b></div>
                 <div><span>结算方式</span><b>{SETTLEMENT_LABEL[drawer.settlement_type] ?? drawer.settlement_type ?? "—"}</b></div>
-                <div><span>报价</span><b>{Number(drawer.quoted_amount) > 0 ? fmtMoney(drawer.quoted_amount) : "—"}</b></div>
+                <div><span>报价</span><b>{fmtMoney(drawer.quoted_amount)}</b></div>
                 <div><span>建单人</span><b>{drawer.created_by_name || "—"}</b></div>
                 <div><span>来源</span><b className="small">{drawer.source || "—"}</b></div>
                 <div><span>建单时间</span><b className="small">{fmtDateTime(drawer.created_at)}</b></div>
@@ -539,7 +539,7 @@ function BatchesTab() {
                           <td className="small">{w.customer_name || "散客"}</td>
                           <td className="small">{w.origin} → {w.destination}</td>
                           <td className="num small">{w.cargo_weight_ton}吨</td>
-                          <td className="num">{w.payable != null ? fmtMoney(w.payable) : "—"}</td>
+                          <td className="num">{fmtMoney(w.payable)}</td>
                           <td><StatusTag kind="waybill" value={w.status} /></td>
                         </tr>
                       ))}

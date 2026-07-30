@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { fmtNum0 } from "../api/format";
 
 // Excel 级数据表格：
 // 列显隐 / 列宽拖拽 / 双击自适宽 / 列拖拽重排 / 列固定(pin) / 固定表头
@@ -82,7 +83,8 @@ function parseNum(v: string | number): number | null {
   if (s === "" || !/^-?\d+(\.\d+)?$/.test(s)) return null;
   return Number(s);
 }
-const fmtStat = (n: number) => n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+// 选区统计沿用全站同一套千分位规则，不另起一套
+const fmtStat = (n: number) => fmtNum0(n, 0) === String(n) ? fmtNum0(n) : n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 
 // 中文列排序此前用裸 `<` 比较，那是 UTF-16 码点序：点「客户」升序，第一名是
 // 「宁德时代」（宁 U+5B81）而不是「比亚迪」（比 U+6BD4）——按 Unicode 编号排，
@@ -854,7 +856,7 @@ export function DataTable<T>({
         const to = Math.min(server.page * server.pageSize, server.total);
         return (
           <div className="dt-pager">
-            <span className="muted small">共 <b>{server.total.toLocaleString()}</b> 条 · 第 {from}–{to} 条{server.loading ? " · 加载中…" : ""}</span>
+            <span className="muted small">共 <b>{fmtNum0(server.total)}</b> 条 · 第 {from}–{to} 条{server.loading ? " · 加载中…" : ""}</span>
             {server.onPageSizeChange && (
               <label className="muted small dt-pager-size">每页
                 <select value={server.pageSize} onChange={(e) => server.onPageSizeChange!(Number(e.target.value))}>
@@ -886,7 +888,7 @@ export function DataTable<T>({
 
       {!server && displayRows.length > 0 && (
         <div className="dt-pager">
-          <span className="muted small">共 <b>{displayRows.length.toLocaleString()}</b> 条{activeFilterCount > 0 ? ` · 已按 ${activeFilterCount} 列筛选（原 ${rows.length.toLocaleString()} 条）` : ""}</span>
+          <span className="muted small">共 <b>{fmtNum0(displayRows.length)}</b> 条{activeFilterCount > 0 ? ` · 已按 ${activeFilterCount} 列筛选（原 ${fmtNum0(rows.length)} 条）` : ""}</span>
           {selStats && (
             <span className="dt-selstats" title="选区统计（Ctrl+C 复制选区）">
               计数 {selStats.count}{selStats.numCount > 0 && <> · 求和 <b>{fmtStat(selStats.sum)}</b> · 均值 {fmtStat(selStats.avg)}</>}

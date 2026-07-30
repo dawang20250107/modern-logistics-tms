@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // 设计 token 的引用完整性。
@@ -10,9 +11,8 @@ import { describe, expect, it } from "vitest";
 //
 // 靠肉眼审查抓不住——颜色"看着有"就以为对了。所以钉成测试。
 
-// vitest 的 environment 是 jsdom，import.meta.url 解析出的 pathname 不可靠，
-// 用 cwd（vitest 从 frontend/ 启动）拼绝对路径
-const SRC = join(process.cwd(), "src");
+// 从本文件位置推导 src 根：依赖 process.cwd() 的话，从别的目录启动 vitest 就会扫错地方
+const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {

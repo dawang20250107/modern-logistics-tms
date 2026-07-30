@@ -297,8 +297,8 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
       key: "channel", header: "通道", width: 100, filterable: true, filterValue: (w) => w.channel || "", sortValue: (w) => w.channel || "", exportValue: (w) => w.channel || "",
       render: (w) => w.channel ? <StatusTag kind="channel" value={w.channel} title={w.dispatch_type_label} suffix={w.channel === "网货" && w.platform_name ? `·${w.platform_name}` : ""} /> : <span className="muted">—</span>,
     },
-    { key: "receivable", header: "应收", width: 100, align: "right", sortField: "receivable_total", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{w.receivable_amount ? fmtMoney(w.receivable_amount) : "—"}</> },
-    { key: "payable", header: "应付/成本", width: 110, align: "right", sortField: "payable_total", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{w.payable_amount ? fmtMoney(w.payable_amount) : "—"}</> },
+    { key: "receivable", header: "应收", width: 100, align: "right", sortField: "receivable_total", sortValue: (w) => w.receivable_amount || 0, exportValue: (w) => w.receivable_amount || 0, render: (w) => <>{fmtMoney(w.receivable_amount)}</> },
+    { key: "payable", header: "应付/成本", width: 110, align: "right", sortField: "payable_total", sortValue: (w) => w.payable_amount || 0, exportValue: (w) => w.payable_amount || 0, render: (w) => <>{fmtMoney(w.payable_amount)}</> },
     { key: "cod", header: "代收货款", width: 110, align: "right", sortField: "cod_amount", sortValue: (w) => Number(w.cod_amount) || 0, exportValue: (w) => Number(w.cod_amount) || 0, render: (w) => { const cod = Number(w.cod_amount) || 0; return cod > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>{fmtMoney(cod)}</span> : <>—</>; } },
     { key: "receipt", header: "回单", width: 90, sortField: "receipt_status", sortValue: (w) => w.receipt_status, exportValue: (w) => RECEIPT_LABEL[w.receipt_status] ?? "待追回", render: (w) => <StatusTag kind="receipt" value={w.receipt_status} /> },
     { key: "status", header: "运单状态", width: 100, sortField: "status", sortValue: (w) => w.status, exportValue: (w) => STATUS_LABEL[w.status] ?? w.status, render: (w) => <StatusTag kind="waybill" value={w.status} /> },
@@ -442,9 +442,9 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
 
                 <div className="section-label">费用</div>
                 <div className="kv">
-                  <div><span>应收</span><b className="num">{drawerWaybill.receivable_amount ? fmtMoney(drawerWaybill.receivable_amount) : "—"}</b></div>
-                  <div><span>应付 / 成本</span><b className="num">{drawerWaybill.payable_amount ? fmtMoney(drawerWaybill.payable_amount) : "—"}</b></div>
-                  <div><span>代收货款</span><b className="num" style={{ color: Number(drawerWaybill.cod_amount) > 0 ? "var(--amber)" : undefined }}>{Number(drawerWaybill.cod_amount) > 0 ? fmtMoney(drawerWaybill.cod_amount) : "—"}</b></div>
+                  <div><span>应收</span><b className="num">{fmtMoney(drawerWaybill.receivable_amount)}</b></div>
+                  <div><span>应付 / 成本</span><b className="num">{fmtMoney(drawerWaybill.payable_amount)}</b></div>
+                  <div><span>代收货款</span><b className="num" style={{ color: Number(drawerWaybill.cod_amount) > 0 ? "var(--amber)" : undefined }}>{fmtMoney(drawerWaybill.cod_amount)}</b></div>
                 </div>
 
                 <div className="section-label">单票财务卡</div>

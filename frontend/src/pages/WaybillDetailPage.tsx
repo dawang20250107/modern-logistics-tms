@@ -228,10 +228,10 @@ export function WaybillDetailPage() {
     <div className="stack" style={{ gap: 16 }}>
       {/* 运单头部 */}
       <div className="panel" style={{ overflow: "visible" }}>
-        <div className="waybill-hero" style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", padding: "20px 24px", borderTopLeftRadius: "var(--radius)", borderTopRightRadius: "var(--radius)" }}>
+        <div className="waybill-hero on-dark" style={{ background: "var(--hero-grad)", color: "var(--hero-ink)", padding: "12px 14px" }}>
           <div className="stack waybill-hero-info" style={{ gap: 6 }}>
             <div className="waybill-hero-title">
-              <span className="mono" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}><CopyCode value={w.waybill_no} /></span>
+              <span className="mono" style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-0.02em" }}><CopyCode value={w.waybill_no} /></span>
               <span className="tag" style={{ background: "var(--hero-line)", color: "var(--hero-ink)", border: "1px solid var(--hero-line)", fontWeight: 500 }}>
                 {STATUS_LABEL[w.status] ?? w.status}
               </span>
@@ -245,11 +245,11 @@ export function WaybillDetailPage() {
           </div>
 
           <div className="stack waybill-hero-actions" style={{ gap: 8 }}>
-            <span className={`tag tag-${w.risk_level === 'high' ? 'high' : w.risk_level === 'medium' ? 'medium' : 'low'}`} style={{ fontSize: 12, padding: "4px 10px" }}>
+            <span className={`tag tag-dot tag-${w.risk_level === 'high' ? 'high' : w.risk_level === 'medium' ? 'medium' : 'low'}`}>
               风险 {RISK_LABEL[w.risk_level]}
             </span>
             <div className="row-actions waybill-hero-buttons">
-              <button className="btn-ghost" style={{ color: "var(--hero-ink)", border: "1px solid var(--hero-line)", background: "transparent" }} disabled={analyze.isPending} onClick={() => analyze.mutate()}>
+              <button className="btn-ghost" disabled={analyze.isPending} onClick={() => analyze.mutate()}>
                 风险分析
               </button>
               {w.next_statuses.map((s) => (
@@ -291,7 +291,7 @@ export function WaybillDetailPage() {
           {/* ETA 预测 */}
           {eta.data?.predicted && (
             <div className="panel">
-              <div className="panel-head" style={{ borderLeft: "4px solid var(--brand)" }}>
+              <div className="panel-head">
                 ETA 预测
               </div>
               <div className="kv" style={{ padding: "12px 16px" }}>
@@ -332,10 +332,10 @@ export function WaybillDetailPage() {
                       </td>
                       <td>
                         {!s.actual_arrival_at && (
-                          <button className="btn-primary" style={{ padding: "4px 10px", fontSize: 11 }} disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "arrived" })}>人工到站</button>
+                          <button className="btn-ghost small" disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "arrived" })}>人工到站</button>
                         )}
                         {s.actual_arrival_at && !s.actual_depart_at && (
-                          <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 11 }} disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "departed" })}>发车放行</button>
+                          <button className="btn-ghost small" disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "departed" })}>发车放行</button>
                         )}
                       </td>
                     </tr>
@@ -485,23 +485,23 @@ export function WaybillDetailPage() {
 
           {/* 费用台账 */}
           <div className="panel">
-            <div className="panel-head" style={{ borderLeft: "4px solid var(--brand)" }}>
+            <div className="panel-head">
               费用台账              <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }} disabled={genCosts.isPending} onClick={() => genCosts.mutate()}>重新生成</button>
             </div>
             {costs.data ? (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "16px 20px" }}>
-                  <div style={{ background: "var(--green-weak)", border: "1px solid var(--green-line)", borderRadius: 8, padding: 14 }}>
-                    <div className="muted small" style={{ fontWeight: "bold" }}>向客户应收 (AR)</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--green)", marginTop: 4 }}>{fmtMoney(costs.data.receivable_total)}</div>
+                <div className="money-pair">
+                  <div className="money-cell money-cell-ar">
+                    <div className="money-label">向客户应收 (AR)</div>
+                    <div className="money-value">{fmtMoney(costs.data.receivable_total)}</div>
                   </div>
-                  <div style={{ background: "var(--red-weak)", border: "1px solid var(--red-line)", borderRadius: 8, padding: 14 }}>
-                    <div className="muted small" style={{ fontWeight: "bold" }}>付承运商成本 (AP)</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: "var(--red)", marginTop: 4 }}>{fmtMoney(costs.data.payable_total)}</div>
+                  <div className="money-cell money-cell-ap">
+                    <div className="money-label">付承运商成本 (AP)</div>
+                    <div className="money-value">{fmtMoney(costs.data.payable_total)}</div>
                   </div>
                 </div>
                 <div className="kv" style={{ paddingTop: 0, paddingBottom: 10 }}>
-                  <div><span>账面毛利预估</span><b style={{ fontSize: 16 }}>{fmtMoney(costs.data.gross_profit)}</b></div>
+                  <div><span>账面毛利预估</span><b className={`money-value${Number(costs.data.gross_profit) < 0 ? " neg" : ""}`} style={{ fontSize: 15 }}>{fmtMoney(costs.data.gross_profit)}</b></div>
                   <div><span>毛利率测算</span><b>{(costs.data.gross_margin * 100).toFixed(1)}%</b></div>
                 </div>
                 

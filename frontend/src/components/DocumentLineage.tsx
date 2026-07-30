@@ -5,6 +5,7 @@ import { apiGet } from "../api/client";
 import { fmtMoney } from "../api/format";
 import type { LineageStatement, OrderLineage } from "../api/types";
 import { StateView } from "./StateView";
+import { StatusTag } from "./StatusTag";
 
 const STMT_TONE: Record<string, string> = { draft: "tag-none", confirmed: "tag-info", partial: "tag-medium", settled: "tag-low" };
 
@@ -12,7 +13,7 @@ function StmtChip({ s }: { s: LineageStatement }) {
   return (
     <Link className={`lin-stmt ${s.direction === "receivable" ? "lin-ar" : "lin-ap"}`} to="/reconciliation" title={`${s.counterparty_name} · 应结 ${fmtMoney(s.total_amount)} · 已核销 ${fmtMoney(s.settled_amount)} · 未结 ${fmtMoney(s.outstanding)}`}>
       <span className="mono">{s.statement_no}</span>
-      <span className={`tag ${STMT_TONE[s.status] ?? "tag-none"}`}>{s.status_label}</span>
+      <span className={`tag tag-dot ${STMT_TONE[s.status] ?? "tag-none"}`}>{s.status_label}</span>
       <span className="muted small">未结 {fmtMoney(s.outstanding)}</span>
     </Link>
   );
@@ -38,16 +39,17 @@ export function DocumentLineage({ orderId }: { orderId: string }) {
           <div className="lin-order">
             <div className="lin-row">
               <span className="doc-order mono">{q.data.order.order_no}</span>
-              <span className="tag tag-info">{q.data.order.status_label}</span>
+              <StatusTag kind="order" value={q.data.order.status} />
               <span className="muted small">{q.data.order.customer_name}</span>
               <span style={{ flex: 1 }} />
               <span className="muted small">报价 {fmtMoney(q.data.order.quoted_amount)}</span>
             </div>
             <div className="lin-sum">
               <span>运单 <b>{q.data.summary.waybill_count}</b></span>
-              <span>应收 <b style={{ color: "var(--green)" }}>{fmtMoney(q.data.summary.receivable_total)}</b></span>
-              <span>应付 <b style={{ color: "var(--amber)" }}>{fmtMoney(q.data.summary.payable_total)}</b></span>
-              <span>毛利 <b style={{ color: q.data.summary.gross >= 0 ? "var(--green)" : "var(--red)" }}>{fmtMoney(q.data.summary.gross)}</b></span>
+              <span>应收 <b>{fmtMoney(q.data.summary.receivable_total)}</b></span>
+              <span>应付 <b>{fmtMoney(q.data.summary.payable_total)}</b></span>
+              {/* 应收/应付/正毛利都是正常业务，不该带颜色；只有毛利为负要跳出来 */}
+              <span>毛利 <b style={q.data.summary.gross < 0 ? { color: "var(--red)" } : undefined}>{fmtMoney(q.data.summary.gross)}</b></span>
               <span>对账单 <b>{q.data.summary.statement_count}</b></span>
             </div>
           </div>
@@ -62,7 +64,7 @@ export function DocumentLineage({ orderId }: { orderId: string }) {
                   <div className="lin-wb-head">
                     <span className="lin-conn" aria-hidden>└─</span>
                     <Link className="doc-waybill mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>
-                    <span className="tag tag-none">{w.status_label}</span>
+                    <StatusTag kind="waybill" value={w.status} />
                     {w.carrier_name && <span className="muted small">承运 {w.carrier_name}</span>}
                     {w.batch_no && <span className="tag tag-info" title="派车批次">批次 {w.batch_no}</span>}
                     <span style={{ flex: 1 }} />

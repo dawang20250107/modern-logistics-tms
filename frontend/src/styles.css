@@ -776,6 +776,21 @@ select {
   0%   { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
   70%, 100% { box-shadow: 0 0 0 4px transparent; }
 }
+/* 深底上的标签。
+   .tag 的色阶是按浅色工作面调的（中性态回落 --ink-2/--muted），
+   放到深色门面条上就几乎看不见——运单详情头里的「风险 无」实测就是这样。
+   给深底容器加 .on-dark，标签自己换一套前景，而不是在每处内联硬改。 */
+.on-dark .tag { color: var(--hero-ink); }
+.on-dark .tag-none, .on-dark .tag-sla_pending { color: var(--hero-sub); }
+.on-dark .tag-high, .on-dark .tag-sla_breached { color: #ff9b9f; }
+.on-dark .tag-medium, .on-dark .tag-sla_at_risk { color: #f0c069; }
+.on-dark .tag-low, .on-dark .tag-sla_on_time { color: #6fdcae; }
+.on-dark .tag-info { color: #93b8fb; }
+.on-dark .muted, .on-dark .small.muted { color: var(--hero-sub); }
+/* 深底上的次要按钮：描边与前景都跟门面色走 */
+.on-dark .btn-ghost { background: transparent; color: var(--hero-ink); border-color: var(--hero-line); }
+.on-dark .btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.28); color: #fff; }
+
 /* 纯分类标签（计价方式、承运商类型这种），连点都不要 */
 .tag-plain::before { display: none; }
 
@@ -1443,17 +1458,10 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .bd-foot { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line); }
 @media (max-width: 620px) { .bd-row2 { grid-template-columns: 1fr; } }
 
-/* ── 资源库总览（#12b 资源库深度设计）───────────────── */
-.rh-hero {
-  padding: 16px 20px; border-radius: 14px; border: 1px solid var(--line);
-  background: var(--hero-grad);
-  box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
-}
-.rh-hero::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(620px 120px at 92% -30%, rgba(75,88,240,0.26), transparent 70%); }
-.rh-hero-brand { display: flex; align-items: center; gap: 13px; position: relative; z-index: 1; }
-.rh-hero-ic { width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; color: #fff; background: linear-gradient(135deg, var(--accent), #6d6ff5); box-shadow: 0 6px 18px -6px rgba(75,88,240,0.7); }
-.rh-hero-title { color: #f4f5f8; font-size: 17px; font-weight: 680; letter-spacing: -0.01em; line-height: 1.15; }
-.rh-hero-sub { color: rgba(232,234,240,0.62); font-size: 12px; margin-top: 3px; }
+/* ── 资源库总览 ────────────────────────────────────────
+   这里原有一整块 .rh-hero-* （深色 hero + 径向蓝光 + 渐变图标块）。
+   FleetPage 早先已经把那条 hero 删了（顶栏已经写着「资源库」三个字），
+   CSS 却留着——死代码，一并清掉。 */
 /* 资源库入口：6 张 12px 圆角浮卡（145px 高、彩色图标块、hover 位移）
    改成一条 1px 沟槽分隔的读数带。每格一个彩色图标块 = 六个装饰位；
    图标在标签旁说明不了更多，数字自己会说话。 */
@@ -1680,6 +1688,23 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .table td.dt-empty { color: var(--muted); font-weight: 400; }
 .dt-expandrow > td { padding: 0; background: var(--panel-2); }
 .dt-expandrow:hover > td { background: var(--panel-2); }
+
+/* 应收/应付读数对。
+   原来是两个填充色块：应收粉绿底 + 24px 绿色数字，应付粉红底 + 24px 红色数字。
+   两个问题：一是"付承运商成本"根本不是错误，用红底红字是把正常业务标成异常；
+   二是这两块加起来 200×100px 的高饱和底色，把颜色预算一次花光——
+   同一屏里真正的异常（逾期、超时）就再也喊不响了。
+   现在：无底、墨色数字、方向靠标签和 2px 左轨说明。颜色只留给"毛利为负"。 */
+.money-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.money-cell { position: relative; padding: 9px 12px 10px; }
+.money-cell + .money-cell { border-left: 1px solid var(--line); }
+.money-cell::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--line-2); }
+.money-cell-ar::before { background: var(--green); }
+.money-cell-ap::before { background: var(--ink-3); }
+.money-label { font-size: 11.5px; font-weight: 640; color: var(--muted); }
+.money-value { font-size: 19px; font-weight: 700; color: var(--ink); margin-top: 2px; font-variant-numeric: tabular-nums slashed-zero; letter-spacing: -0.02em; }
+/* 毛利为负才是真的要看的事 */
+.money-value.neg { color: var(--red); }
 
 /* ── Mini stat tile (customer context etc.) ─────────── */
 .stat-mini { text-align: center; padding: 6px 5px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm); }

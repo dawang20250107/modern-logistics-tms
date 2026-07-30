@@ -106,7 +106,7 @@ export function DriverPortalPage() {
     <div className="public-page" style={{ alignItems: "flex-start" }}>
       <div className="public-card driver-card" style={{ padding: 0, overflow: "hidden" }}>
         {/* 顶部司机身份面板 */}
-        <div className="drv-topbar">
+        <div className="drv-topbar on-dark">
           <div className="cluster-between">
             <div className="cluster" style={{ gap: 14 }}>
               <div className="drv-avatar">{tasks?.driver.name?.[0] ?? "司"}</div>

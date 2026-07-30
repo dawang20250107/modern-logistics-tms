@@ -237,8 +237,15 @@ WITH wb AS (
 SELECT json_build_object(
   'order', (SELECT json_build_object(
       'id', o.id::text, 'order_no', o.order_no, 'status', o.status,
-      -- Order.status 未绑定 choices，Django _disp 回落原始值，这里同样返回原值
-      'status_label', o.status,
+      -- 这里原先是 'status_label', o.status —— 直接把原始枚举值当标签返回。
+      -- 那是从 Django 照抄过来的缺陷：get_FOO_display() 在字段没绑 choices 时
+      -- 回落原始值，Order.status 恰好没绑。结果订单详情的单据血缘里显示
+      -- 「pending_confirm」而不是「待确认」。运单和对账单这两行都有 CASE 映射，
+      -- 只有订单这行没有，所以它一直没被发现。
+      'status_label', (CASE o.status WHEN 'draft' THEN '草稿' WHEN 'pending_confirm' THEN '待确认'
+        WHEN 'confirmed' THEN '已确认' WHEN 'pooled' THEN '已进池' WHEN 'dispatching' THEN '调度中'
+        WHEN 'converted' THEN '已转运单' WHEN 'completed' THEN '已完成'
+        WHEN 'cancelled' THEN '已取消' ELSE o.status END),
       'customer_name', COALESCE(c.name,'散客'), 'business_type', o.business_type,
       'quoted_amount', COALESCE(o.quoted_amount,0)::float8, 'created_at', o.created_at)
     FROM ops_order o LEFT JOIN md_customer c ON c.id=o.customer_id WHERE o.id=$1::uuid),

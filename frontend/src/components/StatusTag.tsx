@@ -87,7 +87,9 @@ export function StatusTag({
   const fullTitle = title ? `${label} · ${title}` : m.needsAction ? `${label} · 需处理` : label;
   return (
     <span
-      className={`tag ${TONE_CLASS[m.tone]}${m.needsAction && showAction ? " tag-act" : ""}`}
+      // tag-dot：状态永远带色点，一列点固定在同一个 x 上，扫列不用读字。
+      // 分类型标签（计价方式这种）不走 StatusTag，所以拿不到点——这是有意的。
+      className={`tag tag-dot ${TONE_CLASS[m.tone]}${m.needsAction && showAction ? " tag-act" : ""}`}
       title={fullTitle}
     >
       <span className="tag-label">{label}</span>

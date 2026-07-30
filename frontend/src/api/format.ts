@@ -86,6 +86,31 @@ export function fmtDateTime(iso: string | null | undefined): string {
   });
 }
 
+/** 紧凑绝对时间：`07-19 14:32`，跨年时带年 `25-12-31 09:00`。
+ *
+ * 台账里「11天前」是不够的：对账、查单、追责都要能说出具体是哪天几点。
+ * 相对时间只在**时效本身就是判断对象**的地方才合适（调度池"进池多久了"），
+ * 在需要识别一笔业务的地方它既不精确又不好算。
+ *
+ * 省掉年份是因为绝大多数在看的单都是本年的；跨年时自动补上，
+ * 不会出现"12-31 是哪一年的 12-31"这种歧义。
+ */
+export function fmtDateShort(iso: string | null | undefined): string {
+  if (!iso) return EMPTY;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return EMPTY;
+  const opts: Intl.DateTimeFormatOptions = {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  };
+  // 年份判断也必须在 Asia/Shanghai 下做，否则跨年夜前后本地时区会算错一年
+  const yearOf = (t: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric" }).format(t);
+  if (yearOf(d) !== yearOf(new Date())) opts.year = "2-digit";
+  // en-CA 给出 `MM-DD, HH:mm` 这种稳定的数字格式，去掉逗号即得 `07-19 14:32`
+  return new Intl.DateTimeFormat("en-CA", opts).format(d).replace(",", "");
+}
+
 export function fmtRelative(iso: string | null | undefined): string {
   if (!iso) return "";
   const t = new Date(iso).getTime();

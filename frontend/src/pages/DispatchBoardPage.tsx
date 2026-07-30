@@ -466,7 +466,7 @@ export function DispatchBoardPage() {
     { key: "customer", header: "客户", width: 150, filterable: true, filterValue: (o) => o.customer_name || "散客", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => (
       <span className="small">
         {o.customer_name || "散客"}
-        {o.customer_level && <span className={`tag ${CUST_LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }} title="客户等级">{o.customer_level}</span>}
+        {o.customer_level && <span className={`lvl lvl-${o.customer_level.toLowerCase()}`} title="客户等级">{o.customer_level}</span>}
         {(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="该订单有未闭环异常">⚠ 异常{(o.exception_count ?? 0) > 1 ? `×${o.exception_count}` : ""}</span>}
       </span>
     ) },
@@ -520,34 +520,26 @@ export function DispatchBoardPage() {
 
   return (
     <div className="stack dispatch-page">
-      {/* 调度指挥台：待派→紧急→临期→执行，一眼定位当前该处理什么 */}
+      {/* 计数带：待派→紧急→临期→已选。
+          标题块（图标 + "调度指挥台" + 副标题）已删——标题顶栏已经写了，
+          图标是装饰，只有权限说明是真信息，缩到行尾。整条从 175px 降到 32px。 */}
       <div className="dispatch-deck">
-        <div className="deck-brand">
-          <div className="deck-brand-ic"><IconTruck size={22} /></div>
-          <div>
-            <div className="deck-title">调度指挥台</div>
-            <div className="deck-sub">待分配全量可见 · 可调派/已调派仅本人权限 · 实时刷新</div>
-          </div>
-        </div>
         <div className="deck-metrics">
           <div className="deck-tile deck-tile-neutral">
-            <div className="deck-tile-ic"><IconTruck size={16} /></div>
-            <div className="deck-tile-body"><b>{wf.pending}</b><span>待派订单</span></div>
+            <div className="deck-tile-body"><b>{wf.pending}</b><span>待派</span></div>
           </div>
           <button className={`deck-tile deck-tile-hot deck-clickable${urgentOnly ? " on" : ""}`} onClick={() => setUrgentOnly((v) => !v)} title="仅看紧急" aria-pressed={urgentOnly}>
-            <div className="deck-tile-ic"><IconZap size={16} /></div>
-            <div className="deck-tile-body"><b className={wf.urgent ? "num-hot" : ""}>{wf.urgent}</b><span>紧急 {urgentOnly ? "· 已筛" : ""}</span></div>
+            <div className="deck-tile-body"><b className={wf.urgent ? "num-hot" : ""}>{wf.urgent}</b><span>紧急{urgentOnly ? " · 已筛" : ""}</span></div>
             {wf.urgent > 0 && <span className="deck-pulse" aria-hidden />}
           </button>
           <div className="deck-tile deck-tile-warn">
-            <div className="deck-tile-ic"><IconAlert size={16} /></div>
             <div className="deck-tile-body"><b className={wf.atRisk ? "num-warn" : ""}>{wf.atRisk}</b><span>临期 / 超时</span></div>
           </div>
           <div className="deck-tile deck-tile-accent">
-            <div className="deck-tile-ic"><IconCheckCircle size={16} /></div>
             <div className="deck-tile-body"><b className={wf.picked ? "num-accent" : ""}>{wf.picked}</b><span>已选待排线</span></div>
           </div>
         </div>
+        <span className="deck-sub">待分配全量可见 · 可调派/已调派仅本人权限 · 实时刷新</span>
       </div>
       <div className="panel dispatch-board-panel">
         {/* 三池分区：待分配 → 可调派 → 已调派，全链路带时间审计 */}

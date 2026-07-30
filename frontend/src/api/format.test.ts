@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { EMPTY, fmtDateTime, fmtMoney, fmtMoney0, fmtNum, fmtNum0, fmtRelative, fmtWan, orEmpty } from "./format";
+import { EMPTY, fmtDateShort, fmtDateTime, fmtMoney, fmtMoney0, fmtNum, fmtNum0, fmtRelative, fmtWan, orEmpty } from "./format";
 
 // 展示格式化的行为契约 + 全站一致性守卫。
 //
@@ -83,6 +83,16 @@ describe("格式化 · 时间", () => {
     expect(fmtRelative(new Date(Date.now() + 5_000).toISOString())).toBe("刚刚");
     expect(fmtRelative(new Date(Date.now() - 3 * 60000).toISOString())).toBe("3分钟前");
     expect(fmtRelative(new Date(Date.now() - 5 * 3600_000).toISOString())).toBe("5小时前");
+  });
+
+  it("紧凑绝对时间：本年省年份、跨年补年份，一律 Asia/Shanghai", () => {
+    // 2026-07-19T06:32Z = 北京时间 14:32
+    expect(fmtDateShort("2026-07-19T06:32:00Z")).toBe("07-19 14:32");
+    // 跨年的单必须带年份，否则「12-31」是哪一年的 12-31 说不清
+    const otherYear = new Date().getUTCFullYear() === 2025 ? "2024" : "2025";
+    expect(fmtDateShort(`${otherYear}-12-31T01:00:00Z`)).toMatch(/^\d\d-12-31 09:00$/);
+    expect(fmtDateShort(null)).toBe(EMPTY);
+    expect(fmtDateShort("not-a-date")).toBe(EMPTY);
   });
 });
 

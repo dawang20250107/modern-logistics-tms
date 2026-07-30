@@ -71,8 +71,11 @@ describe("设计 token", () => {
 
     // 暗色不必覆盖全部（间距、字号、圆角等与主题无关），只校验颜色类 token：
     // 这些一旦漏改，暗色下就会沿用亮色值——白底黑字里混进一块亮色。
+    // `row` 这个词根同时命中 --dt-row-bg（颜色）和 --row-h-compact（尺寸），
+    // 所以尺寸类要先排掉，否则会把行高误判成"暗色缺的颜色"。
+    const sizeish = /^--row-h-/;
     const colorish = /(bg|panel|ink|line|muted|faint|surface|row|head|weak|glass|shadow|side|hero|chart|dt-)/;
-    const missing = [...lightNames].filter((n) => colorish.test(n) && !darkNames.has(n));
+    const missing = [...lightNames].filter((n) => colorish.test(n) && !sizeish.test(n) && !darkNames.has(n));
     // 别名层（值本身就是另一个 token，如 --green-bg: var(--green-weak)）不需要在
     // 暗色重定义——它跟着被引用的那个变。自动识别比维护一份手工豁免名单可靠：
     // 名单会过期，别名关系不会。

@@ -112,13 +112,15 @@ describe("DataTable · 密度", () => {
     const user = userEvent.setup();
     const { container } = setup();
     const root = container.querySelector(".dt")!;
+    // 默认档是 compact：这是一天看八小时的台账，不是偶尔瞥一眼的小组件。
+    // 三档同时缩放行高与字号（32/13.5、38/14、46/15），见 .dt-den-* 说明。
+    expect(root.className).toContain("dt-den-compact");
+    await user.click(screen.getByTitle(/行密度/));
     expect(root.className).toContain("dt-den-standard");
     await user.click(screen.getByTitle(/行密度/));
     expect(root.className).toContain("dt-den-relaxed");
     await user.click(screen.getByTitle(/行密度/));
     expect(root.className).toContain("dt-den-compact");
-    await user.click(screen.getByTitle(/行密度/));
-    expect(root.className).toContain("dt-den-standard");
   });
 });
 
@@ -243,12 +245,12 @@ describe("DataTable · 视图持久化", () => {
       <DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey={viewKey} />,
     );
     await user.click(screen.getByTitle(/行密度/));
-    expect(container.querySelector(".dt")!.className).toContain("dt-den-relaxed");
+    expect(container.querySelector(".dt")!.className).toContain("dt-den-standard");
     unmount();
 
     const again = render(
       <DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey={viewKey} />,
     );
-    expect(again.container.querySelector(".dt")!.className).toContain("dt-den-relaxed");
+    expect(again.container.querySelector(".dt")!.className).toContain("dt-den-standard");
   });
 });

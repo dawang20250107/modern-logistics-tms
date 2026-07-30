@@ -141,7 +141,9 @@ export function DataTable<T>({
   const [sorts, setSorts] = useState<SortState[]>(() => saved?.sorts ?? (saved?.sort ? [saved.sort] : []));
   const [order, setOrder] = useState<string[]>(saved?.order ?? []);
   const [pinned, setPinned] = useState<Set<string>>(() => new Set(saved?.pinned ?? []));
-  const [density, setDensity] = useState<Density>(saved?.density ?? "standard");
+  // 默认紧凑：这是一天看八小时的台账，不是偶尔瞥一眼的小组件。
+  // 32px 行高比 40px 一屏多出 6 行，而字号不变（见 .dt-den-* 说明）。
+  const [density, setDensity] = useState<Density>(saved?.density ?? "compact");
   const [rowNums, setRowNums] = useState<boolean>(saved?.rowNums ?? false);
   const [totals, setTotals] = useState<boolean>(saved?.totals ?? false);
   // 用户手动展开的单值列（不持久化：数据一变，该不该折叠也就变了）

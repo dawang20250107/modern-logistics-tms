@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtMoney, fmtNum } from "../api/format";
+import { EMPTY as DASH, fmtMoney, fmtNum } from "../api/format";
 import { toast } from "../api/toast";
 import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
 import { PRICE_TYPE_LABEL } from "../api/types";
@@ -44,6 +44,9 @@ export function PricingPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<RuleForm>(EMPTY);
+  // 新增表单默认收起。新增一条计价规则是一个月一次的事，看规则列表是每天的事——
+  // 实测这张常驻展开的表单吃掉本页 54% 的垂直空间，频率和空间分配完全反了。
+  const [formOpen, setFormOpen] = useState(false);
   const set = <K extends keyof RuleForm>(k: K, v: RuleForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const rules = useQuery({
@@ -65,7 +68,7 @@ export function PricingPage() {
     priority: Number(form.priority) || 0, is_active: form.is_active,
   });
 
-  const reset = () => { setEditing(null); setForm(EMPTY); };
+  const reset = () => { setEditing(null); setForm(EMPTY); setFormOpen(false); };
   const save = useMutation({
     mutationFn: () => editing ? apiPatch(`/finance/pricing-rules/${editing}`, payload()) : apiPost("/finance/pricing-rules", payload()),
     onSuccess: () => { toast.success(editing ? "已更新合同价" : "已新增合同价"); reset(); invalidate(); },
@@ -82,6 +85,7 @@ export function PricingPage() {
 
   const startEdit = (r: PricingRule) => {
     setEditing(r.id);
+    setFormOpen(true);
     setForm({
       name: r.name, price_type: r.price_type, charge_method: r.charge_method ?? "tiered_weight",
       expense_item_code: r.expense_item_code,
@@ -99,10 +103,14 @@ export function PricingPage() {
     <div className="stack">
       <div className="panel">
         <div className="panel-head">
-          {editing ? "编辑合同价 / 计价规则" : "新增合同价 / 计价规则"}
-          
+          {editing ? "编辑合同价 / 计价规则" : "合同价 / 计价规则"}
+          <div className="panel-actions">
+            {formOpen
+              ? <button className="btn-ghost small" onClick={reset}>{editing ? "取消编辑" : "收起"}</button>
+              : <button className="btn-ghost small" onClick={() => setFormOpen(true)}>+ 新增规则</button>}
+          </div>
         </div>
-        <div className="form-section" style={{ borderBottom: "none" }}>
+        <div className="form-section" style={{ borderBottom: "none", display: formOpen ? undefined : "none" }}>
           <div className="grid-form">
             <label>规则名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如：比亚迪-沪蓉整车" /></label>
             <label>价格类型
@@ -148,12 +156,14 @@ export function PricingPage() {
             六种计费方式：整车一口价 / 按重量阶梯 / 按方 / 按件 / 按公里 / 吨公里；均取「最低价」为金额下限并叠加燃油附加。录单"自动报价"按客户/线路匹配优先级最高的收入价规则。
           </div>
         </div>
-        <div className="form-actions">
-          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
-            {editing ? "保存修改" : "新增规则"}
-          </button>
-          {editing && <button className="btn-ghost" onClick={reset}>取消编辑</button>}
-        </div>
+        {formOpen && (
+          <div className="form-actions">
+            <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
+              {editing ? "保存修改" : "新增规则"}
+            </button>
+            <button className="btn-ghost" onClick={reset}>取消</button>
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -177,20 +187,25 @@ export function PricingPage() {
             <tbody>
               {items.map((r) => (
                 <tr key={r.id} style={editing === r.id ? { background: "var(--brand-light)" } : {}}>
-                  <td style={{ fontWeight: "bold" }}>{r.name}</td>
-                  <td><span className={`tag tag-${r.price_type === "income" ? "low" : "medium"}`}>{r.price_type === "income" ? "应收" : "应付"}</span></td>
-                  <td><span className="tag tag-info">{CHARGE_METHOD_LABEL[r.charge_method] ?? r.charge_method}</span></td>
+                  {/* 这一行原来有五个彩色药丸：应收/应付、计费方式、阶梯层数、燃油率、启用。
+                      能分类的东西全做成药丸，结果是一张玩具表。药丸宽度随文字变，
+                      列内左对齐右不齐，扫列时必须逐个读字。
+                      现在：方向用色点（应收绿/应付琥珀），其余一律纯文本。
+                      「启用」列原来同时有勾选框和"启用"标签，两个都长得像能点——留勾选框。 */}
+                  <td style={{ fontWeight: 600 }}>{r.name}</td>
+                  <td><span className={`tag tag-dot tag-${r.price_type === "income" ? "low" : "medium"}`}>{r.price_type === "income" ? "应收" : "应付"}</span></td>
+                  <td>{CHARGE_METHOD_LABEL[r.charge_method] ?? r.charge_method}</td>
                   <td>{r.customer_name || "全局通用"}</td>
                   <td>{r.carrier_name || "全局通用"}</td>
                   <td>{r.route_name || "全局通用"}</td>
-                  <td className="mono" style={{ color: "var(--brand)", fontWeight: "bold" }}>{fmtMoney(r.base_price)}</td>
-                  <td>{r.tier_prices && r.tier_prices.length > 0 ? <span className="tag tag-none">{r.tier_prices.length} 级</span> : "—"}</td>
-                  <td>{r.volumetric_factor}</td>
-                  <td>{Number(r.fuel_surcharge_pct) > 0 ? <span className="tag tag-high">+{fmtNum(Number(r.fuel_surcharge_pct) * 100, 1)}%</span> : "—"}</td>
+                  <td className="mono num" style={{ fontWeight: 600, color: "var(--ink)" }}>{fmtMoney(r.base_price)}</td>
+                  <td className="num">{r.tier_prices && r.tier_prices.length > 0 ? `${r.tier_prices.length} 级` : DASH}</td>
+                  <td className="num">{r.volumetric_factor}</td>
+                  <td className="num">{Number(r.fuel_surcharge_pct) > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>+{fmtNum(Number(r.fuel_surcharge_pct) * 100, 1)}%</span> : DASH}</td>
                   <td>
-                    <label className="switch-mini">
+                    <label className="switch-mini" title={r.is_active ? "已启用，点击停用" : "已停用，点击启用"}>
                       <input type="checkbox" checked={r.is_active} onChange={() => patch.mutate({ id: r.id, is_active: !r.is_active })} />
-                      <span className={`tag tag-${r.is_active ? "low" : "none"}`}>{r.is_active ? "启用" : "停用"}</span>
+                      <span className={r.is_active ? undefined : "muted"}>{r.is_active ? "启用" : "停用"}</span>
                     </label>
                   </td>
                   <td className="row-actions">

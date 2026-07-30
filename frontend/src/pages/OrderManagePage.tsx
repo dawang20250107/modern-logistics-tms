@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 import { apiDownload, apiGet, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtDateTime, fmtMoney, fmtRelative, EMPTY } from "../api/format";
+import { fmtDateShort, fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
 import type { DispatchBatch, DispatchBatchDetail, Order, OrderEvent, Paginated } from "../api/types";
 import {
@@ -171,7 +171,7 @@ function OrdersTab() {
 
   const columns: DataColumn<Order>[] = [
     { key: "order_no", header: "订单号 (DD)", width: 170, alwaysVisible: true, sortField: "order_no", sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="link mono doc-order" to={`/orders/${o.id}`} title="订单">{o.order_no}</Link> },
-    { key: "customer", header: "客户", width: 160, filterable: true, filterValue: (o) => o.customer_name || "散客", sortField: "customer__name", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`tag ${LEVEL_TONE[o.customer_level] ?? "tag-none"}`} style={{ marginLeft: 4 }}>{o.customer_level}</span>}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠{(o.exception_count ?? 0) > 1 ? o.exception_count : ""}</span>}</span> },
+    { key: "customer", header: "客户", width: 160, filterable: true, filterValue: (o) => o.customer_name || "散客", sortField: "customer__name", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => <span>{o.customer_name || "散客"}{o.customer_level && <span className={`lvl lvl-${o.customer_level.toLowerCase()}`}>{o.customer_level}</span>}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠{(o.exception_count ?? 0) > 1 ? o.exception_count : ""}</span>}</span> },
     { key: "channel", header: "渠道", width: 90, filterable: true, filterValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, sortField: "channel", sortValue: (o) => o.channel, exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
     { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin || "?"}→${o.destination || "?"}`, render: (o) => <><b>{o.origin || "?"}</b> → <b>{o.destination || "?"}</b></> },
     { key: "biz", header: "业务", width: 90, filterable: true, filterValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, sortField: "business_type", sortValue: (o) => o.business_type, exportValue: (o) => BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type, render: (o) => <span className="small">{BUSINESS_TYPE_LABEL[o.business_type] ?? o.business_type}{o.business_type === "hazmat" || o.is_hazardous ? <span className="tag tag-high" style={{ marginLeft: 4 }}>危</span> : ""}</span> },
@@ -180,25 +180,27 @@ function OrdersTab() {
     { key: "priority", header: "优先级", width: 92, filterable: true, filterValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, sortField: "priority", sortValue: (o) => o.priority, exportValue: (o) => PRIORITY_LABEL[o.priority] ?? o.priority, render: (o) => <span className={`tag tag-${o.priority === "vip" ? "high" : o.priority === "urgent" ? "medium" : "none"}`}>{PRIORITY_LABEL[o.priority]}</span> },
     { key: "status", header: "订单状态", width: 100, filterable: true, filterValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
     { key: "sla", header: "SLA", width: 84, filterable: true, filterValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, sortField: "sla_status", sortValue: (o) => o.sla_status, exportValue: (o) => SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status, render: (o) => <StatusTag kind="sla" value={o.sla_status} /> },
-    { key: "waybill", header: "关联运单 (YD)", width: 150, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, overflow: "hidden" }}>{o.waybill_nos.slice(0, 1).map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}{o.waybill_nos.length > 1 && <span className="tag tag-none small" title={o.waybill_nos.join("、")}>+{o.waybill_nos.length - 1}</span>}</span> : <span className="muted small">未生成</span> },
+    { key: "waybill", header: "关联运单 (YD)", width: 174, sortValue: (o) => (o.waybill_nos ?? []).length, exportValue: (o) => (o.waybill_nos ?? []).join(" "), render: (o) => (o.waybill_nos ?? []).length > 0 ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, overflow: "hidden" }}>{o.waybill_nos.slice(0, 1).map((no) => <Link key={no} className="doc-waybill mono small" to={`/waybills/${no}`} title="运单">{no}</Link>)}{o.waybill_nos.length > 1 && <span className="tag tag-none small" title={o.waybill_nos.join("、")}>+{o.waybill_nos.length - 1}</span>}</span> : <span className="muted small">未生成</span> },
     // 「谁在什么时候建的」是一件事，不是两件事。合成一列省下 ~90px 横向空间，
     // 正好让整张表落回可视宽度内——否则右固定的操作列会一直压着建单时间。
     {
-      key: "created", header: "建单", width: 140, sortField: "created_at",
+      key: "created", header: "建单", width: 124, sortField: "created_at",
       sortValue: (o) => o.created_at,
       filterable: true, filterValue: (o) => o.created_by_name || EMPTY,
       exportValue: (o) => `${o.created_by_name || EMPTY} ${fmtDateTime(o.created_at)}`,
       // 单行：这批单大多来自 API / 客户自助，没有建单人，两行渲染会让整表行高
       // 为一列少数有值的字段全部变高。建单人进 title，要看的时候再看。
+      // 绝对时间（`07-19 14:32`）而不是「11天前」：这一列是用来识别"哪一笔"的，
+      // 对账和查单都要能说出具体哪天几点。相对时间进 title。
       render: (o) => (
-        <span className="small" title={`${o.created_by_name || "系统"} · ${fmtDateTime(o.created_at)}`}>
-          {fmtRelative(o.created_at)}
+        <span className="small mono" title={`${o.created_by_name || "系统"} · ${fmtDateTime(o.created_at)}`}>
+          {fmtDateShort(o.created_at)}
           {o.created_by_name ? <span className="cell-sub">{o.created_by_name}</span> : null}
         </span>
       ),
     },
     {
-      key: "actions", header: "操作", width: 176, alwaysVisible: true, sticky: "right",
+      key: "actions", header: "操作", width: 130, alwaysVisible: true, sticky: "right",
       render: (o) => (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           {(o.status === "draft" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "confirm", ids: [o.id] })}>确认</button>}
@@ -456,7 +458,7 @@ function BatchesTab() {
     { key: "alloc", header: "分摊", width: 90, sortValue: (b) => b.allocation, exportValue: (b) => b.allocation_label, render: (b) => <span className="small muted">{b.allocation_label}</span> },
     { key: "status", header: "状态", width: 90, sortField: "status", sortValue: (b) => b.status, exportValue: (b) => b.status_label, render: (b) => <StatusTag kind="batch" value={b.status} /> },
     { key: "creator", header: "建批人", width: 100, sortValue: (b) => b.created_by_name, exportValue: (b) => b.created_by_name, render: (b) => <span className="small muted">{b.created_by_name || "—"}</span> },
-    { key: "created", header: "建批时间", width: 130, sortField: "created_at", sortValue: (b) => b.created_at, exportValue: (b) => fmtDateTime(b.created_at), render: (b) => <span className="small" title={fmtDateTime(b.created_at)}>{fmtRelative(b.created_at)}</span> },
+    { key: "created", header: "建批时间", width: 130, sortField: "created_at", sortValue: (b) => b.created_at, exportValue: (b) => fmtDateTime(b.created_at), render: (b) => <span className="small mono" title={fmtDateTime(b.created_at)}>{fmtDateShort(b.created_at)}</span> },
   ];
 
   return (

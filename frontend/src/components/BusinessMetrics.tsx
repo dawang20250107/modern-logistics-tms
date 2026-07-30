@@ -103,9 +103,9 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
   return (
     <div className="stack">
       {financeMetrics.data && (
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }} className="bm-charts">
-          <div className="panel" style={{ padding: 18, height: 380, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div className="bm-charts">
+          <div className="panel bm-chart">
+            <div className="cluster-between" style={{ marginBottom: 10 }}>
               <div className="section-label" style={{ margin: 0 }}>
                 营业额与利润 ({financeMetrics.data.period})
                 {sparse && (
@@ -133,25 +133,25 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={c["--chart-grid"]} />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "var(--muted)" }} tickFormatter={(val) => fmtWan(Number(val), true)} />
-                <Tooltip contentStyle={{ borderRadius: 10, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} formatter={(value) => formatRmb(Number(value))} />
+                <Tooltip contentStyle={{ borderRadius: 4, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} formatter={(value) => formatRmb(Number(value))} />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
                 {sparse ? (
                   <>
-                    <Bar name="主营收入" dataKey="revenue" maxBarSize={44} fill={c["--chart-revenue"]} radius={[3, 3, 0, 0]} />
-                    <Bar name="外协成本/支出" dataKey="cost" maxBarSize={44} fill={c["--chart-cost"]} radius={[3, 3, 0, 0]} />
-                    <Bar name="毛利润" dataKey="profit" maxBarSize={44} fill={c["--chart-profit"]} radius={[3, 3, 0, 0]} />
+                    <Bar name="主营收入" dataKey="revenue" maxBarSize={44} fill={c["--chart-revenue"]} radius={0} />
+                    <Bar name="外协成本/支出" dataKey="cost" maxBarSize={44} fill={c["--chart-cost"]} radius={0} />
+                    <Bar name="毛利润" dataKey="profit" maxBarSize={44} fill={c["--chart-profit"]} radius={0} />
                   </>
                 ) : (
                   <>
                     <Area type="monotone" name="主营收入" dataKey="revenue" fill="url(#colorRevenue)" stroke={c["--chart-revenue"]} strokeWidth={3} />
-                    <Bar name="外协成本/支出" dataKey="cost" barSize={16} fill={c["--chart-cost"]} radius={[4, 4, 0, 0]} />
+                    <Bar name="外协成本/支出" dataKey="cost" barSize={16} fill={c["--chart-cost"]} radius={0} />
                     <Area type="monotone" name="毛利润" dataKey="profit" fill="none" stroke={c["--chart-profit"]} strokeWidth={2} strokeDasharray="5 5" />
                   </>
                 )}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-          <div className="panel" style={{ padding: 18, height: 380, display: "flex", flexDirection: "column" }}>
+          <div className="panel bm-chart">
             <div className="section-label">车队运营成本构成占比</div>
             {pieData.length === 0 ? (
               <div className="muted" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
@@ -160,7 +160,7 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Tooltip formatter={(value) => formatRmb(Number(value))} contentStyle={{ borderRadius: 10, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} />
+                  <Tooltip formatter={(value) => formatRmb(Number(value))} contentStyle={{ borderRadius: 4, border: "none", background: c["--chart-tip-bg"], color: c["--chart-tip-ink"], boxShadow: "var(--chart-tip-shadow)", fontSize: 12 }} />
                   <Legend iconType="circle" layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ fontSize: 12 }} />
                   <Pie data={pieData} cx="40%" cy="50%" innerRadius={65} outerRadius={100} paddingAngle={4} dataKey="value" stroke="none">
                     {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={PIE[index % PIE.length]} />)}
@@ -180,7 +180,7 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
         grouped.map((g) => (
           <div key={g.domain} className="panel">
             <div className="panel-head">{METRIC_DOMAIN_LABEL[g.domain] ?? g.domain}</div>
-            <div className="kpi-row" style={{ padding: 16, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+            <div className="kpi-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(168px, 1fr))" }}>
               {g.items.map((m) => {
                 const delta = trendDelta(trends[m.code]);
                 return (
@@ -196,8 +196,8 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
                     {m.breakdown && m.breakdown.length > 0 && (
                       <div className="kpi-foot" style={{ flexWrap: "wrap" }}>
                         {m.breakdown.slice(0, 4).map((b) => (
-                          <span key={b.key} style={{ background: "var(--panel-3)", padding: "2px 7px", borderRadius: 4 }}>
-                            {b.label ?? b.key}: <b style={{ color: "var(--ink-2)" }}>{b.value}</b>
+                          <span key={b.key} className="kpi-foot-item">
+                            {b.label ?? b.key} <b>{b.value}</b>
                           </span>
                         ))}
                       </div>

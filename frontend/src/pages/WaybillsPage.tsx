@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { apiGet, apiPatch, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
-import { fmtMoney } from "../api/format";
+import { EMPTY, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
 import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
@@ -276,7 +276,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
     {
       key: "waybill_no", header: "运单号", width: 150, alwaysVisible: true,
       sortField: "waybill_no", sortValue: (w) => w.waybill_no, exportValue: (w) => w.waybill_no,
-      render: (w) => <Link className="link mono" to={`/waybills/${w.waybill_no}`}>{w.waybill_no}</Link>,
+      render: (w) => <Link className="doc-waybill" to={`/waybills/${w.waybill_no}`} title="运单">{w.waybill_no}</Link>,
     },
     { key: "customer", header: "客户", width: 130, sortField: "customer__name", sortValue: (w) => w.customer_name || "散客", exportValue: (w) => w.customer_name || "散客", render: (w) => <span title={w.customer_name}>{w.customer_name || "散客"}</span> },
     { key: "route", header: "线路", width: 150, sortValue: (w) => `${w.origin}${w.destination}`, exportValue: (w) => `${w.origin || "?"}→${w.destination || "?"}`, render: (w) => <>{w.origin || "?"} → {w.destination || "?"}</> },
@@ -287,9 +287,9 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
     {
       key: "vehicle", header: "车辆 / 司机", width: 150, exportValue: (w) => w.vehicle_plate || w.carrier_name || w.platform_name || "",
       render: (w) => (
-        <span className="small">
-          {w.vehicle_plate ? <span className="mono">{w.vehicle_plate}</span> : w.carrier_name || (w.channel === "网货" ? (w.platform_name || "平台") : "—")}
-          {w.driver_name && <div className="muted" style={{ fontSize: 11 }}>{w.driver_name} {w.driver_phone}</div>}
+        <span className="cell-stack">
+          <span className="cell-stack-a mono">{w.vehicle_plate || w.carrier_name || (w.channel === "网货" ? (w.platform_name || "平台") : EMPTY)}</span>
+          {w.driver_name && <span className="cell-stack-b">{w.driver_name} {w.driver_phone}</span>}
         </span>
       ),
     },

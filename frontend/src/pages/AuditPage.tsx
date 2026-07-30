@@ -31,22 +31,12 @@ export function AuditPage() {
   ];
 
   return (
+    // 原来这里有三条壳：「审计日志」窗格标题（和顶栏标题重复）、一条搜索行、
+    // 「操作记录（N）」又一条窗格标题，然后才是表格自己的工具条。
+    // 一张表压三层标题带，光壳子就 130px。搜索与计数都塞进 DataTable 的
+    // toolbarLeft 槽位（订单台账一直是这么做的），只剩一条 44px 工具条。
     <div className="stack">
       <div className="panel">
-        <div className="panel-head">审计日志</div>
-        <div className="form-row">
-          <input className="search" placeholder="搜索操作人 / 路径 / 资源 / RequestID" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select value={resource} onChange={(e) => setResource(e.target.value)}>
-            <option value="">全部资源</option>
-            <option value="waybill">运单</option>
-            <option value="order">订单</option>
-            <option value="user">用户</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-head">操作记录（{fmtNum0(t.total)}）</div>
         {t.isError ? (
           <StateView kind="error" hint="无权限或加载失败（仅管理员可查）。" onRetry={() => t.refetch()} />
         ) : (
@@ -57,6 +47,18 @@ export function AuditPage() {
             rowKey={(l) => l.id}
             server={t.server}
             exportName="审计日志"
+            toolbarLeft={
+              <>
+                <span className="om-title">操作记录<span className="muted small" style={{ marginLeft: 6 }}>{fmtNum0(t.total)}</span></span>
+                <input className="search" placeholder="搜索操作人 / 路径 / 资源 / RequestID" value={search} onChange={(e) => setSearch(e.target.value)} />
+                <select className="search" style={{ minWidth: 120 }} value={resource} onChange={(e) => setResource(e.target.value)}>
+                  <option value="">全部资源</option>
+                  <option value="waybill">运单</option>
+                  <option value="order">订单</option>
+                  <option value="user">用户</option>
+                </select>
+              </>
+            }
             emptyState={<StateView kind="empty" title="暂无日志" hint="尚无匹配的审计记录。" compact />}
           />
         )}

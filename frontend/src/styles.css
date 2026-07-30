@@ -1128,6 +1128,11 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 
 /* ── Links ──────────────────────────────────────────── */
 .link { color: var(--accent); text-decoration: none; font-weight: 500; }
+/* 窗格标题条里的导航链接是独立点击目标（不在文本流里），要满足 24px 下限。
+   表格单元格里的行内单号链接不在此列——它们走 WCAG 2.5.8 的 inline 例外。 */
+.panel-head .link, .panel-actions .link, .ct-side-body > .link {
+  display: inline-flex; align-items: center; min-height: 24px; padding: 0 4px; margin-right: -4px;
+}
 .link:hover { text-decoration: underline; }
 .link:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 3px; }
 
@@ -1697,7 +1702,7 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 
 /* 单值列折叠后的标注：这一列本页全是这个值，点一下放回来 */
 .dt-uniform {
-  display: inline-flex; align-items: baseline; gap: 5px; padding: 1px 7px;
+  display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 8px;
   border: 1px dashed var(--line-2); border-radius: var(--radius-xs); background: transparent;
   font-size: var(--text-sm); color: var(--muted); cursor: pointer; white-space: nowrap;
 }
@@ -1796,7 +1801,8 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .form-actions { display: flex; gap: 8px; align-items: center; padding: 10px 12px; flex-wrap: wrap; }
 
 /* ── Mini switch ────────────────────────────────────── */
-.switch-mini { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+/* 整个 label 是点击区（勾选框只有 14px），要满足 24px 下限 */
+.switch-mini { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; cursor: pointer; }
 .switch-mini input { cursor: pointer; accent-color: var(--accent); }
 
 /* ── Public order page ──────────────────────────────── */

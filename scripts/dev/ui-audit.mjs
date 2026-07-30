@@ -130,6 +130,40 @@ const MEASURE = () => {
     if (coloredSamples.length < 8) coloredSamples.push(`${el.className || el.tagName}`.slice(0, 34));
   }
 
+  // 点击目标尺寸（WCAG 2.5.8 AA：≥24×24 CSS px）。
+  // 这一条我此前完全没量过——尺子只关心"看得清吗"，没关心"点得中吗"。
+  // 一天点几百次的界面上，24px 是"不用瞄准"的下限。
+  //
+  // 量的是**有效点击区**，不是控件自己的盒子。两类要特别处理，
+  // 否则会报出一堆其实合规的假阳性：
+  //   1. 控件外面套着更大的可点区域（<label>、勾选列的整个单元格）——
+  //      真实目标是那个外层，14px 的勾选框实际点击区是 34×32 的 td。
+  //   2. WCAG 自己的 inline 例外：目标处在文本流里、高度由行高决定
+  //      （表格单元格里的单号链接就是这种），不适用 24px 要求。
+  const SMALL_TARGET_OK = /dt-resizer|file-input-accessible|sr-only/;
+  // 这些祖先本身就是点击区，控件被它们包着时按祖先量
+  const CLICK_WRAPPER = "label, .cell-check, .file-trigger, .switch-mini, .checkline, .role-pick";
+  const smallTargets = [];
+  for (const el of document.querySelectorAll('button, a[href], input:not([type="hidden"]), select, [role="button"], [role="tab"], [role="option"], summary')) {
+    if (SMALL_TARGET_OK.test(el.className || "")) continue;
+    const wrapper = el.closest(CLICK_WRAPPER);
+    const target = wrapper && wrapper !== el ? wrapper : el;
+    const b = target.getBoundingClientRect();
+    if (b.width === 0 || b.height === 0) continue;         // 未渲染/隐藏
+    if (b.top < 0 || b.bottom > vh) continue;              // 不在首屏
+    // WCAG 2.5.8 的 inline 例外：目标处在文本流里、尺寸由非目标文本的行高决定。
+    // 表格单元格里的单号链接正是这种——它的高度就是行高，而行高是密度档决定的。
+    // （不能用 computed display 判断：外层 span 是 inline-flex 时，
+    //   里面的 <a> 作为 flex item 会被 blockify 成 flex，看着就不像 inline 了。）
+    if (target.tagName === "A" && target.closest("td, p, li")) continue;
+    if (b.width < 24 || b.height < 24) {
+      const id = `${target.tagName.toLowerCase()}.${(target.className || "").split(" ")[0] || "-"}`;
+      smallTargets.push(`${id} ${Math.round(b.width)}×${Math.round(b.height)}`);
+    }
+  }
+  // 同一种控件出现几十次，去重后只报种类
+  const smallTargetKinds = [...new Set(smallTargets)];
+
   // 抽样：正文、次要文字、表头、标签
   const contrast = {};
   for (const [name, sel] of [
@@ -153,6 +187,7 @@ const MEASURE = () => {
     capacity: rowH && chromeTop != null ? Math.floor((vh - chromeTop) / rowH) : null,
     colored,
     coloredSamples,
+    smallTargetKinds,
     chromePct: chromeTop == null ? null : Math.round((chromeTop / vh) * 100),
     chrome,
     cellFont: cell ? px(cell, "fontSize") : null,
@@ -207,6 +242,19 @@ for (const r of results) {
   );
 }
 
+// 点击目标：同一种控件在多页重复，汇总成一张种类表
+const allSmall = new Map();
+for (const r of results) for (const k of r.smallTargetKinds) {
+  if (!allSmall.has(k)) allSmall.set(k, new Set());
+  allSmall.get(k).add(r.name);
+}
+if (allSmall.size) {
+  console.log(`\n✗ 点击目标小于 24×24（WCAG 2.5.8 AA）的 ${allSmall.size} 种：`);
+  for (const [k, pages] of [...allSmall].sort()) console.log(`  ${k}   ← ${[...pages].join("、")}`);
+} else {
+  console.log("\n✓ 首屏点击目标均 ≥ 24×24");
+}
+
 console.log("\n壳子构成（亮色，谁在吃垂直空间）：");
 for (const r of results.filter((x) => x.theme === "light")) {
   const parts = Object.entries(r.chrome).map(([k, v]) => `${k}=${v}`).join(" ");
@@ -252,4 +300,4 @@ if (overBudget.length) {
 } else {
   console.log("\n✓ 各页彩色元素均在预算内");
 }
-process.exit(bad.length || overBudget.length ? 1 : 0);
+process.exit(bad.length || overBudget.length || allSmall.size ? 1 : 0);

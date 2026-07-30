@@ -35,7 +35,10 @@ export function AuditPage() {
     // 「操作记录（N）」又一条窗格标题，然后才是表格自己的工具条。
     // 一张表压三层标题带，光壳子就 130px。搜索与计数都塞进 DataTable 的
     // toolbarLeft 槽位（订单台账一直是这么做的），只剩一条 44px 工具条。
-    <div className="stack">
+    // table-page：表体内滚、分页贴底。没有它时，0 条日志的页面会把
+    // 「暂无日志」和分页条并排堆在 y=270 附近，底下 700px 全空——
+    // 看起来像页面加载了一半就停了。
+    <div className="stack table-page">
       <div className="panel">
         {t.isError ? (
           <StateView kind="error" hint="无权限或加载失败（仅管理员可查）。" onRetry={() => t.refetch()} />
@@ -47,6 +50,7 @@ export function AuditPage() {
             rowKey={(l) => l.id}
             server={t.server}
             exportName="审计日志"
+            fill
             toolbarLeft={
               <>
                 <span className="om-title">操作记录<span className="muted small" style={{ marginLeft: 6 }}>{fmtNum0(t.total)}</span></span>

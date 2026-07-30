@@ -8,7 +8,7 @@ import { NotificationBell } from "./NotificationBell";
 import { SpotlightCommandBar } from "./SpotlightCommandBar";
 import {
   IconTower, IconGrid, IconDatabase, IconTruck,
-  IconReceipt, IconCreditCard, IconShield, IconFileText,
+  IconReceipt, IconCreditCard, IconShield, IconFileText, IconBox,
 } from "./Icons";
 
 type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string };
@@ -36,18 +36,24 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    // 组织 / 用户 / 权限 / 审计——仅超级管理员可见可进
+    // 组织 / 用户 / 权限 / 审计——仅超级管理员可见可进。
+    //
+    // 这里原先只有一个「管理后台」，点进去是一整页两张链接卡片，卡片写着
+    // 「组织与权限」和「审计日志」——一个只用来转发的中转页。侧栏本来就是导航，
+    // 再套一层导航等于每次多点一下、多等一次加载，只为看两个本可以直接列出来的入口。
+    // 现在两个目的地直接进侧栏，/admin 保留为重定向（老书签仍可用）。
     title: "系统",
     items: [
-      { to: "/admin", label: "管理后台", icon: <IconShield size={18} />, superOnly: true },
+      { to: "/org", label: "组织与权限", icon: <IconBox size={18} />, superOnly: true },
+      { to: "/audit", label: "审计日志", icon: <IconShield size={18} />, superOnly: true },
     ],
   },
 ];
 
 
-// 管理后台内的页面 + 个人中心：不在侧栏，但需要正确的顶栏标题
+// 不在侧栏但需要正确顶栏标题的页面
 const SUB_TITLES: Record<string, string> = {
-  "/org": "组织与权限", "/audit": "审计日志", "/profile": "个人中心",
+  "/profile": "个人中心",
 };
 
 function currentPageTitle(pathname: string) {

@@ -180,6 +180,11 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
         grouped.map((g) => (
           <div key={g.domain} className="panel">
             <div className="panel-head">{METRIC_DOMAIN_LABEL[g.domain] ?? g.domain}</div>
+            {/* 试过给格子封宽度上限（3 个指标铺满 1007px 时每格 335px，内容只占左边 140px）。
+                量下来不划算：auto-fit 的列数是按**上限**算的，封 240px 得 4 列、封 260px 只剩 3 列，
+                两种都会让原本一行放得下的 4 个指标折行，面板反而高 24–40px。
+                真正让读数散架的是涨跌幅被 space-between 甩到格子右边，那个已在 .kpi-top 修掉；
+                格子偏宽只是留白多，不影响读。留白比折行便宜，所以宽度维持 1fr。 */}
             <div className="kpi-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(168px, 1fr))" }}>
               {g.items.map((m) => {
                 const delta = trendDelta(trends[m.code]);

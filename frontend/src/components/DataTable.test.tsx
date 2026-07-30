@@ -34,6 +34,20 @@ const COLS: DataColumn<Row>[] = [
   { key: "actions", header: "操作", width: 120, alwaysVisible: true, sticky: "right", render: () => <button>详情</button> },
 ];
 
+// jsdom 不实现 ResizeObserver，而单值列折叠现在要先量容器宽度才决定折不折
+//（不拥挤就不折，见 DataTable 里的说明）。这里给一个可控宽度的替身：
+// 默认 400px < 五列声明宽合计 630px，即"拥挤"，折叠该生效。
+let containerWidth = 400;
+class RO {
+  constructor(private cb: ResizeObserverCallback) {}
+  observe(el: Element) {
+    this.cb([{ contentRect: { width: containerWidth } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+  }
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = RO as unknown as typeof ResizeObserver;
+
 function setup(props: Partial<React.ComponentProps<typeof DataTable<Row>>> = {}) {
   return render(
     <DataTable<Row>
@@ -104,6 +118,35 @@ describe("DataTable · 单值列折叠", () => {
       <DataTable<Row> columns={COLS} rows={ROWS.slice(0, 2)} rowKey={(r) => r.id} viewKey={`t3-${Math.random()}`} />,
     );
     expect(headerNames()).toContain("业务");
+  });
+
+  // 折叠的理由是「腾横向空间」。容器不缺空间时它就没有理由，只剩副作用：
+  // 承运商中心实测 7 列声明宽 770px、容器 1488px，却折掉 5 列，
+  // 剩两列被 table-layout:fixed 拉成 1026+462——一张两列的账本。
+  it("容器宽度够用时不折叠——不缺空间就没有腾空间的理由", () => {
+    const prev = containerWidth;
+    containerWidth = 1400; // > 声明宽合计 630
+    try {
+      render(<DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey={`t4-${Math.random()}`} />);
+      expect(headerNames()).toContain("业务");
+      expect(screen.queryByTitle(/本页「业务」全部为「整车」/)).toBeNull();
+    } finally {
+      containerWidth = prev;
+    }
+  });
+
+  it("折到只剩两列就不折了——两列的表不是台账", () => {
+    const prev = containerWidth;
+    containerWidth = 100;
+    try {
+      // 客户/业务/金额三列全同值：全折就只剩 alwaysVisible 的订单号 + sticky 的操作
+      const rows = ROWS.map((r) => ({ ...r, customer: "同一家", biz: "整车", amount: 100 }));
+      render(<DataTable<Row> columns={COLS} rows={rows} rowKey={(r) => r.id} viewKey={`t5-${Math.random()}`} />);
+      expect(headerNames()).toContain("客户");
+      expect(headerNames()).toContain("业务");
+    } finally {
+      containerWidth = prev;
+    }
   });
 });
 

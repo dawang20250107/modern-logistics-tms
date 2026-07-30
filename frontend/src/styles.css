@@ -583,6 +583,16 @@ select {
 }
 .seg-tabs button:hover { color: var(--ink-2); }
 .seg-tabs button.active { background: none; box-shadow: none; color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+/* 页签上的存量计数。不做填充徽标：那是「有 N 件事等你」的语汇（见 .recon-badge），
+   而这里只是「这个库里有多少条」——它帮你决定点不点，不该抢注意力。
+   tabular-nums 让计数在切页签时不横向抖动。 */
+.seg-n {
+  margin-left: 5px; font-size: 12px; font-weight: 400; color: var(--faint);
+  font-variant-numeric: tabular-nums; letter-spacing: 0;
+}
+.seg-tabs button.active .seg-n { color: var(--muted); }
+/* 预警计数是例外：它确实是待办 */
+.seg-n-alert, .seg-tabs button.active .seg-n-alert { color: var(--red); font-weight: 600; }
 
 /* ── City combobox ──────────────────────────────────── */
 .combobox { display: inline-block; }
@@ -690,7 +700,10 @@ select {
 /* 只有需要动作的读数带颜色轨；蓝色（中性/信息）不带 */
 .kpi-red::before   { background: var(--red); }
 .kpi-amber::before { background: var(--amber); }
-.kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* 涨跌幅紧跟在标签后面，不推到格子右边。
+   space-between 在 335px 宽的读数格里会把「持平」甩到离「运单量」200px 的地方，
+   看上去像另一个独立读数；而它是前一个数的注脚，必须挨着它。 */
+.kpi-top { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .kpi-value {
   margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums slashed-zero; line-height: 1.12; color: var(--ink);
@@ -841,7 +854,7 @@ select {
 button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, summary:focus-visible {
   outline: none; box-shadow: var(--ring);
 }
-:where(.nav-item, .topbar-account, .hub-card, .ct-tile, .ct-chip):focus-visible {
+:where(.nav-item, .topbar-account, .ct-tile, .ct-chip):focus-visible {
   outline: 2px solid var(--accent); outline-offset: -2px;
 }
 
@@ -999,6 +1012,10 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .profile-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .dot-sep { color: var(--line-2); }
 .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+/* 输入框的宽度是一种说明：它在告诉人这里该填多长的东西。
+   密码框、"登录后默认进入"这种下拉，铺满 700px 只会让人以为要写一段话，
+   而且光标离标签越远越难对上。按内容长度封顶。 */
+.profile-grid input:not([type="checkbox"]):not([type="radio"]), .profile-grid select { max-width: 340px; }
 @media (max-width: 980px) { .profile-grid { grid-template-columns: 1fr; } }
 
 /* ── 省市区三级级联选址 ───────────────────────────────── */
@@ -1081,17 +1098,8 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .modal-card > .modal-body { padding: 16px 18px; overflow-y: auto; }
 
 /* ── 管理后台 hub ───────────────────────────────────── */
-.hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; padding: 12px; }
-.hub-card {
-  display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius);
-  text-decoration: none; color: var(--ink); background: var(--panel);
-  transition: border-color var(--speed), box-shadow var(--speed), transform var(--speed);
-}
-.hub-card:hover { border-color: var(--accent); background: var(--panel-2); }
-.hub-icon { flex: none; width: 32px; height: 32px; border-radius: var(--radius); display: grid; place-items: center; color: var(--accent); background: var(--accent-weak); }
-.hub-text { display: flex; flex-direction: column; min-width: 0; }
-.hub-title { font-weight: 600; font-size: 14px; }
-.hub-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* .hub-* 整块删除：它们是「管理后台」中转页的两张链接卡片，
+   而那一页只是把侧栏已有的导航又画了一遍。页删了，样式一起清。 */
 
 /* 分段切换（日/月/年 等）：单线框分段器，无凹槽无阴影 */
 .seg-toggle { display: inline-flex; gap: 0; padding: 0; background: none; border: 1px solid var(--ctl-line); border-radius: var(--radius); overflow: hidden; }
@@ -1156,8 +1164,13 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .timeline .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex: none; box-shadow: 0 0 0 3px var(--accent-weak); }
 .tl-type { font-weight: 600; }
 
-.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; padding: 16px 18px; }
-.kv > div { display: flex; justify-content: space-between; font-size: 13.5px; border-bottom: 1px dashed var(--line); padding-bottom: 6px; font-variant-numeric: tabular-nums slashed-zero; }
+/* 字段-取值对。行内是 space-between（标签靠左、值靠右，值成列好扫）。
+   列数按 240px 起自适应：抽屉里两列，整页宽时排到五六列。
+   再给每格封一个 360px 的上限——否则在 1490px 宽的面板里两格各 730px，
+   「组织总数」和它的「4」隔着近 700px 空白，眼睛得横穿一整屏才能把两者连起来。
+   虚线引线能牵住的距离是有限的，超过大约一行字宽就牵不住了。 */
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 18px; padding: 16px 18px; }
+.kv > div { display: flex; justify-content: space-between; max-width: 360px; font-size: 13.5px; border-bottom: 1px dashed var(--line); padding-bottom: 6px; font-variant-numeric: tabular-nums slashed-zero; }
 .kv span { color: var(--muted); }
 
 .suggestions { list-style: none; margin: 0; padding: 8px 18px 16px; }
@@ -1504,40 +1517,14 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
    这里原有一整块 .rh-hero-* （深色 hero + 径向蓝光 + 渐变图标块）。
    FleetPage 早先已经把那条 hero 删了（顶栏已经写着「资源库」三个字），
    CSS 却留着——死代码，一并清掉。 */
-/* 资源库入口：6 张 12px 圆角浮卡（145px 高、彩色图标块、hover 位移）
-   改成一条 1px 沟槽分隔的读数带。每格一个彩色图标块 = 六个装饰位；
-   图标在标签旁说明不了更多，数字自己会说话。 */
-.rh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0; }
-.rh-card { border-left: 1px solid var(--line); }
-.rh-cards > :first-child { border-left: 0; }
-.rh-card {
-  text-align: left; font: inherit; color: inherit; cursor: pointer; position: relative;
-  padding: 8px 12px 9px; border-radius: 0; border: 0; background: var(--panel);
-  box-shadow: none; transition: background var(--speed);
-  overflow: hidden;
-}
-.rh-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--line-2); }
-.rh-card:hover { background: var(--panel-2); }
-.rh-card:hover::before { background: var(--accent); }
-.rh-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
-/* 彩色图标底块 → 无底线性图标，34 → 16px */
-.rh-card-ic { width: 16px; height: 16px; border-radius: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); background: none; }
-.rh-card-ic svg { width: 16px; height: 16px; }
-.rh-card-go { color: var(--ink-3); opacity: 0; transition: opacity var(--speed), transform var(--speed); }
-/* 只亮不动：位移哪怕只有 2px，也是在光标下面挪东西 */
-.rh-card:hover .rh-card-go { opacity: 1; color: var(--accent); }
-.rh-card-n { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); line-height: 1.1; font-variant-numeric: tabular-nums slashed-zero; }
-.rh-card-l { font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin-top: 2px; }
-.rh-card-s { font-size: 12px; color: var(--muted); margin-top: 1px; }
-.rh-card.rh-blue:hover::before { background: var(--blue); }
-.rh-card.rh-violet:hover::before { background: var(--violet); }
-.rh-card.rh-green:hover::before { background: var(--green); }
-/* 证件预警是唯一常驻带色的格：它本身就是「有东西要过期了」的信号 */
-.rh-card.rh-red::before { background: var(--red); } .rh-card.rh-red .rh-card-ic { color: var(--red); }
-.rh-card.rh-red:hover { background: var(--red-weak); }
+/* 资源库入口卡（.rh-card*，6 张读数卡）整块删除。
+   它们曾是一个「总览」页签的全部内容：六个数 + 840px 空白，还是默认落地页。
+   数字本身有用（哪个库是空的），但它有用的位置是页签标签旁边，不是一整屏卡片。
+   现在计数走 .seg-n，卡片的 CSS 一并清掉。 */
 .rh-alert {
-  display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; font: inherit; font-size: 13px; color: var(--red); text-align: left;
-  padding: 12px 16px; border-radius: var(--radius); border: 1px solid var(--red-line); background: var(--red-weak); border-left: 3px solid var(--red);
+  display: flex; align-items: center; gap: 7px; width: 100%; cursor: pointer; font: inherit; font-size: 12.5px; color: var(--red); text-align: left;
+  padding: 6px 12px; border-radius: 0; border: 0; border-bottom: 1px solid var(--line-2);
+  background: var(--red-weak); box-shadow: inset 2px 0 0 var(--red);
 }
 .rh-alert:hover { background: var(--red-weak); filter: brightness(0.98); }
 
@@ -2337,6 +2324,12 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .sof-batch-grid .table { min-width: 660px; }
 .sof-partner-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
 .sof-partner-card { padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); }
+/* 表单内的子分组。原先是四五个 8px 圆角的灰卡片，嵌在窗格里的表单段里——
+   为了圈住两个下拉框，套了三层盒子；而 8px 这个圆角根本不在 token 里（3/4/6）。
+   其中两个的填充色还跟父级一模一样（--panel 套 --panel），那层 background 什么也没做。
+   子分组用一条细上线加段标题就够了，不需要一个填充盒子把它抬起来。 */
+.sof-group { padding: 12px 0 4px; margin-bottom: 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.sof-group-last { margin-bottom: 0; }
 .sof-grid-2, .sof-grid-finance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sof-grid-3, .sof-grid-special { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .line-row-index {

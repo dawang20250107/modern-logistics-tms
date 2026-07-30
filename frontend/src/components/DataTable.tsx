@@ -244,6 +244,24 @@ export function DataTable<T>({
   // 运营台上「优先级」整列"普通"、「业务」整列"整车"是常态，三列这样的就吃掉
   // 近 300px——而横向空间正是密集账本最缺的东西。信息没丢：chip 上写着值，
   // 点一下就能把列放回来。
+  //
+  // 但它原先无条件触发，于是在**不缺横向空间**的表上也照折。承运商中心实测：
+  // 7 列声明宽合计 770px、容器 1488px，本来富余 718px；6 条演示数据的类型/评级/
+  // 账期/预警/状态五列恰好同值，五列全折进工具栏，剩下 2 列被 table-layout:fixed
+  // 拉宽成 1026 + 462——一张两列的"账本"，右边 460px 全是空的，
+  // 而工具栏右侧多出五个 chip，长得和「已生效的筛选条件」一模一样。
+  // 折叠是为了缓解拥挤；不拥挤时它只是在藏数据。所以先量再折：
+  //   1. 声明宽合计没超过容器 → 不折（没有要腾的空间）；
+  //   2. 折到只剩 3 列以下 → 不折（两列的表不是台账）。
+  const [availW, setAvailW] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setAvailW(Math.round(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const uniformCols = useMemo(() => {
     const m = new Map<string, string>();
     if (displayRows.length < 3) return m;
@@ -257,9 +275,15 @@ export function DataTable<T>({
       const only = seen.size === 1 ? [...seen][0] : "";
       if (only) m.set(c.key, only);
     }
+    // availW === 0：ResizeObserver 还没测到（首帧 / jsdom）。此时按「不拥挤」处理，
+    // 宁可先把列都显示出来，也不要在没量之前就藏东西。
+    const declared = shownCols.reduce((s, c) => s + (widths[c.key] ?? c.width ?? 120), 0)
+      + (selectable ? 34 : 0) + (rowNums ? 44 : 0);
+    if (declared <= availW || availW === 0) m.clear();
+    else if (shownCols.length - m.size < 3) m.clear();
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayRows, shownCols]);
+  }, [displayRows, shownCols, availW, widths, selectable, rowNums]);
 
   const visibleCols = shownCols.filter((c) => !uniformCols.has(c.key) || unfolded.has(c.key));
 

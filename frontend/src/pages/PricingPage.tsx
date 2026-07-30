@@ -101,16 +101,18 @@ export function PricingPage() {
 
   return (
     <div className="stack">
+      {/* 表单收起时整块不渲染。原先它留着一条 35px 的空面板头，
+          上面只写着「合同价 / 计价规则」——顶栏标题已经写着"计价规则"，
+          于是屏幕顶部连着两条各 35px 的横条，说的是同一件事。 */}
+      {formOpen && (
       <div className="panel">
         <div className="panel-head">
-          {editing ? "编辑合同价 / 计价规则" : "合同价 / 计价规则"}
+          {editing ? "编辑合同价规则" : "新增合同价规则"}
           <div className="panel-actions">
-            {formOpen
-              ? <button className="btn-ghost small" onClick={reset}>{editing ? "取消编辑" : "收起"}</button>
-              : <button className="btn-ghost small" onClick={() => setFormOpen(true)}>+ 新增规则</button>}
+            <button className="btn-ghost small" onClick={reset}>{editing ? "取消编辑" : "收起"}</button>
           </div>
         </div>
-        <div className="form-section" style={{ borderBottom: "none", display: formOpen ? undefined : "none" }}>
+        <div className="form-section" style={{ borderBottom: "none" }}>
           <div className="grid-form">
             <label>规则名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如：比亚迪-沪蓉整车" /></label>
             <label>价格类型
@@ -156,22 +158,32 @@ export function PricingPage() {
             六种计费方式：整车一口价 / 按重量阶梯 / 按方 / 按件 / 按公里 / 吨公里；均取「最低价」为金额下限并叠加燃油附加。录单"自动报价"按客户/线路匹配优先级最高的收入价规则。
           </div>
         </div>
-        {formOpen && (
-          <div className="form-actions">
-            <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
-              {editing ? "保存修改" : "新增规则"}
-            </button>
-            <button className="btn-ghost" onClick={reset}>取消</button>
-          </div>
-        )}
+        <div className="form-actions">
+          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
+            {editing ? "保存修改" : "新增规则"}
+          </button>
+          <button className="btn-ghost" onClick={reset}>取消</button>
+        </div>
       </div>
+      )}
 
       <div className="panel">
-        <div className="panel-head">合同价目录 · {rules.data?.total ?? 0}</div>
-        <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-          <button className={`chip${typeFilter === "" ? " chip-on" : ""}`} onClick={() => setTypeFilter("")}>全部</button>
-          <button className={`chip${typeFilter === "income" ? " chip-on" : ""}`} onClick={() => setTypeFilter("income")}>收入价</button>
-          <button className={`chip${typeFilter === "cost" ? " chip-on" : ""}`} onClick={() => setTypeFilter("cost")}>支出价</button>
+        {/* 目录标题 / 方向筛选 / 新增，三件事原先占三条横条共 114px。
+            筛选是这张表的一部分，不是另一个区块；新增是这张表的动作。合成一行。
+            筛选也从圆角药丸改成全站统一的下划线页签语汇（.seg-tabs）——
+            这三个按钮此前是整页唯一的圆角填充控件。 */}
+        <div className="panel-head">
+          合同价目录 · {rules.data?.total ?? 0}
+          <div className="seg-tabs" style={{ marginRight: "auto", marginLeft: 10 }}>
+            {([["", "全部"], ["income", "收入价"], ["cost", "支出价"]] as const).map(([k, label]) => (
+              <button key={k} className={typeFilter === k ? "active" : ""} onClick={() => setTypeFilter(k)}>{label}</button>
+            ))}
+          </div>
+          {!formOpen && (
+            <div className="panel-actions">
+              <button className="btn-ghost small" onClick={() => setFormOpen(true)}>+ 新增规则</button>
+            </div>
+          )}
         </div>
         {rules.isLoading ? (
           <StateView kind="loading" compact />

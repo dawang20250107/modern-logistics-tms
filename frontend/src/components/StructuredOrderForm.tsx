@@ -381,7 +381,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             </div>
             <textarea
               className="search"
-              style={{ width: "100%", height: 220, resize: "none", fontSize: 14, lineHeight: 1.6, padding: 16, borderRadius: 8, background: "var(--panel-3)", border: "1px dashed var(--line-strong)" }}
+              style={{ width: "100%", height: 220, resize: "none", fontSize: 14, lineHeight: 1.6, padding: 16, borderRadius: "var(--radius)", background: "var(--panel-3)", border: "1px dashed var(--line-strong)" }}
               placeholder="请粘贴微信群、邮件中的非结构化发货指令：&#10;&#10;例如：“李总，明天下午2点去苏州工业园区星湖街提货，大概5吨的医疗器械，要求冷链2-8度，送到北京海淀医院，收货人王医生 13800138000。这单加急！”"
               value={paste}
               onChange={(e) => setPaste(e.target.value)}
@@ -484,7 +484,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
               )}
             </div>
 
-            <div className="stack" style={{ gap: 10, background: "var(--panel-2)", padding: 16, borderRadius: 8, border: "1px solid var(--line)" }}>
+            <div className="stack sof-group" style={{ gap: 10 }}>
               <div className="section-label">预览（{bulkRows.length} 行）</div>
               <div style={{ maxHeight: 160, overflowY: "auto", fontSize: 12 }}>
                 <table className="table" style={{ width: "100%" }}>
@@ -671,7 +671,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             <div className="section-label" style={{ marginBottom: 16 }}>时效与运费</div>
             
             {/* 4.1 时效红线 (SLA) */}
-            <div style={{ background: "var(--panel-2)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
+            <div className="sof-group">
               <div className="section-label" style={{ marginBottom: 7 }}>时效要求</div>
               <div className="grid-form sof-grid-2">
                 <label>
@@ -686,7 +686,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             </div>
 
             {/* 4.2 财务核价 (Financial) */}
-            <div style={{ background: "var(--panel)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
+            <div className="sof-group">
               <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>运费与货值</div>
               <div className="grid-form sof-grid-finance">
                 <label>
@@ -734,7 +734,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             </div>
 
             {/* 4.3 特种保障 (Special Care) */}
-            <div style={{ background: "var(--panel)", padding: "14px 16px", borderRadius: 8, border: "1px dashed var(--line-strong)" }}>
+            <div className="sof-group sof-group-last">
               <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>特种运输要求</div>
               <div className="grid-form sof-grid-special">
                 <label>
@@ -745,7 +745,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   温控区间 (冷链)
                   <input className="search" placeholder="例: -18~0℃ 或 2~8℃" value={form.temperature_range} onChange={(e) => set("temperature_range", e.target.value)} />
                 </label>
-                <label className="switch-mini" style={{ padding: "8px 12px", background: form.is_hazardous ? "var(--red-bg)" : "var(--panel-2)", borderRadius: 6, border: `1px solid ${form.is_hazardous ? "var(--red-border)" : "var(--line)"}`, color: form.is_hazardous ? "var(--red)" : "var(--ink-2)" }}>
+                <label className="switch-mini" style={{ padding: "8px 12px", background: form.is_hazardous ? "var(--red-bg)" : "var(--panel-2)", borderRadius: "var(--radius)", border: `1px solid ${form.is_hazardous ? "var(--red-border)" : "var(--line)"}`, color: form.is_hazardous ? "var(--red)" : "var(--ink-2)" }}>
                   <input type="checkbox" style={{ accentColor: "var(--red)" }} checked={form.is_hazardous} onChange={(e) => set("is_hazardous", e.target.checked)} /> 
                   <strong style={{ marginLeft: 4 }}>危化品 / 高危品</strong>
                 </label>

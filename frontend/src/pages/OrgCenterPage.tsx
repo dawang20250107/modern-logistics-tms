@@ -33,56 +33,65 @@ function useOrgOptions() {
 
 type Tab = "overview" | "org" | "employees" | "areas" | "rbac" | "audit";
 
+/** 权限点所属模块的中文名。
+ *
+ * 后端 iam_permission.module 存的是英文 slug（finance / waybill / …），
+ * 矩阵直接把它印在分组行上——整页都是中文，只有这两行是 `finance`、`waybill`。
+ * 这和之前订单状态漏出 `pending_confirm` 是同一类问题：内部标识符走到了界面上。
+ * 未知模块保留原值（不是所有部署的权限表都一样），但至少已知的这些要说人话。
+ */
+const PERM_MODULE_LABEL: Record<string, string> = {
+  waybill: "运单", order: "订单", finance: "财务结算", analytics: "经营分析",
+  carrier: "承运商", masterdata: "主数据", telematics: "车联网", org: "组织与权限",
+  audit: "审计", exception: "异常", dispatch: "调度", 通用: "通用",
+};
+
 const STATUS_TAG: Record<string, string> = { active: "low", disabled: "medium", left: "high" };
 const PROPERTY_TAG: Record<string, string> = {
   self: "low", franchise: "medium", outsource: "medium", partner: "low", jv: "medium",
 };
 
-function OverviewTab() {
+/** 组织中心的存量计数（页签角标用）。
+ *
+ * 这些数原先撑起一个「运营总览」页签：六个读数 + 两张各只有一行的表 + 700px 空白，
+ * 而且是默认落地页。更糟的是排版——`.kv` 两列铺满 1490px 宽的页面后，
+ * 「组织总数」和它的「4」隔着 700px 的空白，眼睛得横扫一整屏才能把标签和数字连起来。
+ *
+ * by_property / by_type 这两张分布表也是多余的：组织架构树每行都带经营属性标签，
+ * 服务区划表每行都带类型列——分布在原表里一眼可数，不需要另开一页复述。
+ */
+function useOrgCounts() {
   const q = useQuery({ queryKey: ["org-overview"], queryFn: () => apiGet<OrgOverview>("/org/overview") });
   const d = q.data;
-  if (q.isLoading) return <StateView kind="loading" />;
-  if (q.isError || !d) return <StateView kind="error" hint="组织概览暂时无法加载。" onRetry={() => q.refetch()} />;
+  return {
+    counts: {
+      org: d?.organizations.total, employees: d?.employees.total, areas: d?.service_areas.total,
+    } as Record<string, number | undefined>,
+    noAccount: d?.employees.active_without_account ?? 0,
+  };
+}
+
+/** 折叠式「新增 X」面板。
+ *
+ * 组织架构 / 员工名录 / 服务区划三个页签，原先每页顶部都常驻一张展开的新增表单，
+ * 各占 160–230px，把真正要看的名录推到折叠线以下。而新增组织这种事一年做几次，
+ * 看名录是每天做几十次——版面按频次排，不按 CRUD 的字母序排。
+ * 收起时只留一条 33px 的触发条，展开后表单原样。
+ */
+function CreatePanel({ title, children, actions }: { title: string; children: React.ReactNode; actions: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="stack">
-      <div className="kv">
-        <div><span>组织总数</span><b>{d.organizations.total}</b></div>
-        <div><span>部门</span><b>{d.departments}</b></div>
-        <div><span>在职员工</span><b>{d.employees.active}</b></div>
-        <div><span>员工总数</span><b>{d.employees.total}</b></div>
-        <div><span>服务区划</span><b>{d.service_areas.total}</b></div>
-        <div>
-          <span>在职无账号</span>
-          <b style={d.employees.active_without_account > 0 ? { color: "var(--red)" } : {}}>
-            {d.employees.active_without_account}
-          </b>
+    <div className="panel">
+      <div className="panel-head">
+        {title}
+        <div className="panel-actions">
+          <button className="btn-ghost small" onClick={() => setOpen((v) => !v)}>{open ? "收起" : `+ ${title}`}</button>
         </div>
       </div>
-      <div className="ct-grid">
-        <div className="panel">
-          <div className="panel-head">经营属性分布</div>
-          <table className="table">
-            <tbody>
-              {Object.entries(d.organizations.by_property).map(([k, v]) => (
-                <tr key={k}><td>{ORG_PROPERTY_LABEL[k] ?? k}</td><td className="mono">{v}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="panel">
-          <div className="panel-head">服务区划构成</div>
-          <table className="table">
-            <tbody>
-              {Object.entries(d.service_areas.by_type).map(([k, v]) => (
-                <tr key={k}><td>{AREA_TYPE_LABEL[k] ?? k}</td><td className="mono">{v}</td></tr>
-              ))}
-              {Object.keys(d.service_areas.by_type).length === 0 && (
-                <tr><td className="muted small" colSpan={2}>暂无区划</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {open && <>
+        <div className="grid-form" style={{ padding: "16px 18px" }}>{children}</div>
+        <div className="form-actions">{actions}</div>
+      </>}
     </div>
   );
 }
@@ -133,9 +142,7 @@ function OrgCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <div className="panel">
-      <div className="panel-head">新增组织</div>
-      <div className="grid-form" style={{ padding: "16px 18px" }}>
+    <CreatePanel title="新增组织" actions={<button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()} title={!form.code ? "请填写编码" : !form.name ? "请填写名称" : undefined}>新增组织</button>}>
         <label>编码 *<input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="如 SH01" /></label>
         <label>名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如 上海分公司" /></label>
         <label>简称<input value={form.short_name} onChange={(e) => set("short_name", e.target.value)} placeholder="如 上海" /></label>
@@ -156,11 +163,7 @@ function OrgCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void
           </select>
         </label>
         <label>负责人<input value={form.manager_name} onChange={(e) => set("manager_name", e.target.value)} placeholder="负责人姓名" /></label>
-      </div>
-      <div className="form-actions">
-        <button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()} title={!form.code ? "请填写编码" : !form.name ? "请填写名称" : undefined}>新增组织</button>
-      </div>
-    </div>
+    </CreatePanel>
   );
 }
 
@@ -217,9 +220,7 @@ function EmployeeCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () =>
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <div className="panel">
-      <div className="panel-head">新增员工</div>
-      <div className="grid-form" style={{ padding: "16px 18px" }}>
+    <CreatePanel title="新增员工" actions={<button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()} title={!form.employee_no ? "请填写工号" : !form.name ? "请填写姓名" : undefined}>新增员工</button>}>
         <label>工号 *<input value={form.employee_no} onChange={(e) => set("employee_no", e.target.value)} placeholder="如 2026001" /></label>
         <label>姓名 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="员工姓名" /></label>
         <label>手机号<input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="手机号" /></label>
@@ -230,11 +231,7 @@ function EmployeeCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () =>
           </select>
         </label>
         <label>职位<input value={form.position} onChange={(e) => set("position", e.target.value)} placeholder="如 调度专员" /></label>
-      </div>
-      <div className="form-actions">
-        <button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()} title={!form.employee_no ? "请填写工号" : !form.name ? "请填写姓名" : undefined}>新增员工</button>
-      </div>
-    </div>
+    </CreatePanel>
   );
 }
 
@@ -523,9 +520,7 @@ function AreaCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => voi
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <div className="panel">
-      <div className="panel-head">新增服务区划</div>
-      <div className="grid-form" style={{ padding: "16px 18px" }}>
+    <CreatePanel title="新增服务区划" actions={<button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()} title={!org ? "请选择组织" : !regionName ? "请填写区划名称" : undefined}>新增区划</button>}>
         <label>归属网点 *
           <select value={org} onChange={(e) => setOrg(e.target.value)}>
             <option value="">选择归属网点</option>
@@ -539,11 +534,7 @@ function AreaCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => voi
         </label>
         <label>区划名称 *<input placeholder="如 上海市浦东新区" value={regionName} onChange={(e) => setRegionName(e.target.value)} /></label>
         <label>优先级<input type="number" placeholder="数值大者优先" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
-      </div>
-      <div className="form-actions">
-        <button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()} title={!org ? "请选择组织" : !regionName ? "请填写区划名称" : undefined}>新增区划</button>
-      </div>
-    </div>
+    </CreatePanel>
   );
 }
 
@@ -667,7 +658,7 @@ function RbacTab() {
               <Fragment key={g.module}>
                 <tr>
                   <td colSpan={matrix.roles.length + 1} className="muted small" style={{ background: "var(--panel-2)", fontWeight: 600 }}>
-                    {g.module}
+                    {PERM_MODULE_LABEL[g.module] ?? g.module}
                   </td>
                 </tr>
                 {g.permissions.map((p) => (
@@ -747,7 +738,6 @@ function LoginAuditTab() {
 }
 
 const TABS: { key: Tab; label: string; perm?: string }[] = [
-  { key: "overview", label: "运营总览" },
   { key: "org", label: "组织架构" },
   { key: "employees", label: "员工名录" },
   { key: "areas", label: "服务区划" },
@@ -757,17 +747,27 @@ const TABS: { key: Tab; label: string; perm?: string }[] = [
 
 export function OrgCenterPage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("org");
+  const { counts, noAccount } = useOrgCounts();
   // 无角色权限管理权的用户看不到「权限授权」页签（后端亦 403 兜底）
   const tabs = TABS.filter((t) => !t.perm || hasPerm(user, t.perm));
   return (
     <div className="stack">
       <div className="seg-tabs">
         {tabs.map((t) => (
-          <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>
+          <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>
+            {t.label}
+            {counts[t.key] !== undefined && <span className="seg-n">{counts[t.key]}</span>}
+          </button>
         ))}
       </div>
-      {tab === "overview" && <OverviewTab />}
+      {/* 「在职但没有账号」是待办不是统计：这人来上班了却登不进系统。
+          它必须跨页签常驻，藏进某个页签等于没提醒。 */}
+      {noAccount > 0 && tab !== "employees" && (
+        <button type="button" className="rh-alert" onClick={() => setTab("employees")}>
+          <span><b>{noAccount}</b> 名在职员工尚未开通系统账号，去员工名录开通 →</span>
+        </button>
+      )}
       {tab === "org" && <OrgTab />}
       {tab === "employees" && <EmployeesTab />}
       {tab === "areas" && <AreasTab />}

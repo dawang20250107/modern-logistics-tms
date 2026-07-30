@@ -201,7 +201,7 @@ export function ProfilePage() {
               )}
             </div>
             {!editing ? (
-              <div className="kv" style={{ gridTemplateColumns: "1fr" }}>
+              <div className="kv">
                 <div><span>姓名 / 昵称</span><b>{user.nickname || "—"}</b></div>
                 <div><span>用户名</span><b className="mono">{user.username}</b></div>
                 <div><span>手机号</span><b>{user.phone || "—"}</b></div>

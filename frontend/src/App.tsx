@@ -1,11 +1,10 @@
-import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
 import { GlobalProgress } from "./components/GlobalProgress";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { StateView } from "./components/StateView";
 import { AuthProvider } from "./auth/auth";
-import { AdminHubPage } from "./pages/AdminHubPage";
 import { AuditPage } from "./pages/AuditPage";
 import { CustomerOrderPage } from "./pages/CustomerOrderPage";
 import { DriverPortalPage } from "./pages/DriverPortalPage";
@@ -48,7 +47,8 @@ export function App() {
               <Route path="fleet" element={<FleetPage />} />
               <Route path="reconciliation" element={<ReconciliationPage />} />
               <Route path="pricing" element={<PricingPage />} />
-              <Route path="admin" element={<AdminHubPage />} />
+              {/* 「管理后台」中转页已删除（侧栏直接列出组织与权限 / 审计日志）；老书签重定向 */}
+              <Route path="admin" element={<Navigate to="/org" replace />} />
               <Route path="org" element={<OrgCenterPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="audit" element={<AuditPage />} />

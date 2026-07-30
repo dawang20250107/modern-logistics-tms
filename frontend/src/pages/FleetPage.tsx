@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { apiGet, apiUpload } from "../api/client";
 import { fmtMoney } from "../api/format";
@@ -10,7 +10,7 @@ import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, ty
 import { LanePriceLib } from "../components/LanePriceLib";
 import { StateView } from "../components/StateView";
 import { useServerTable } from "../api/useServerTable";
-import { IconGitBranch, IconMapPin, IconTruck, IconBox, IconDatabase, IconShield, IconWarning, IconArrowRight } from "../components/Icons";
+import { IconWarning } from "../components/Icons";
 import type {
   Carrier, CarrierLanePrice, CredentialRow, CredSeverity, Customer, Driver, DriverCredential, DriverLookup,
   ExpiringCredentials, Paginated, Vehicle,
@@ -336,64 +336,8 @@ function ComplianceTab() {
   );
 }
 
-// ── 资源库总览：一眼看清全部运力/客户/合规资产，点击直达对应清单 ──────
-function ResourceOverview({ onJump }: { onJump: (tab: string) => void }) {
-  const carriers = useQuery({ queryKey: ["rh-ov-carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=1") });
-  const vehicles = useQuery({ queryKey: ["rh-ov-vehicles"], queryFn: () => apiGet<Paginated<Vehicle>>("/vehicles?page_size=1") });
-  const drivers = useQuery({ queryKey: ["rh-ov-drivers"], queryFn: () => apiGet<Paginated<Driver>>("/drivers?page_size=1") });
-  const lanes = useQuery({ queryKey: ["rh-ov-lanes"], queryFn: () => apiGet<Paginated<CarrierLanePrice>>("/carrier-lane-prices?page_size=1") });
-  const customers = useQuery({ queryKey: ["rh-ov-customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=500") });
-  const cred = useQuery({ queryKey: ["rh-ov-cred"], queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30") });
-
-  // 客户等级分布（资源库同步客户等级 S/A/B/C/D）
-  const levelDist = useMemo(() => {
-    const dist: Record<string, number> = { S: 0, A: 0, B: 0, C: 0, D: 0 };
-    for (const c of customers.data?.items ?? []) dist[c.level || "B"] = (dist[c.level || "B"] || 0) + 1;
-    return dist;
-  }, [customers.data]);
-
-  const credSum = cred.data?.summary;
-  const credAlert = (credSum?.expired ?? 0) + (credSum?.critical ?? 0);
-
-  const cards = [
-    { key: "carriers", icon: <IconGitBranch size={20} />, tone: "accent", n: carriers.data?.total, label: "承运商", sub: "外协运力池", jump: "carriers" },
-    { key: "lanes", icon: <IconMapPin size={20} />, tone: "blue", n: lanes.data?.total, label: "线路价库", sub: "承运商×线路报价", jump: "lanes" },
-    { key: "vehicles", icon: <IconTruck size={20} />, tone: "violet", n: vehicles.data?.total, label: "车辆", sub: "自营 + 挂靠", jump: "vehicles" },
-    { key: "drivers", icon: <IconBox size={20} />, tone: "green", n: drivers.data?.total, label: "司机", sub: "在册驾驶员", jump: "drivers" },
-    { key: "customers", icon: <IconDatabase size={20} />, tone: "accent", n: customers.data?.total, label: "客户", sub: `S${levelDist.S} · A${levelDist.A} · B${levelDist.B} · C${levelDist.C} · D${levelDist.D}`, jump: "customers" },
-    { key: "compliance", icon: credAlert > 0 ? <IconWarning size={20} /> : <IconShield size={20} />, tone: credAlert > 0 ? "red" : "green", n: credAlert, label: "证件预警", sub: credAlert > 0 ? `${credSum?.expired ?? 0} 过期 · ${credSum?.critical ?? 0} 紧急` : "30 天内无临期", jump: "compliance" },
-  ];
-
-  // 原先这里有一条深色 hero，整条 80px 只写了「资源库」三个字——顶栏的页面标题
-  // 已经写着同样三个字。重复一遍不是强调，是把入口卡片往下推了 96px。
-  return (
-    <div className="stack">
-      <div className="rh-cards">
-        {cards.map((c) => (
-          <button key={c.key} className={`rh-card rh-${c.tone}`} onClick={() => onJump(c.jump)}>
-            <div className="rh-card-top">
-              <span className="rh-card-ic">{c.icon}</span>
-              <IconArrowRight size={15} className="rh-card-go" />
-            </div>
-            <div className="rh-card-n">{c.n ?? "—"}</div>
-            <div className="rh-card-l">{c.label}</div>
-            <div className="rh-card-s">{c.sub}</div>
-          </button>
-        ))}
-      </div>
-      {credAlert > 0 && (
-        <button type="button" className="rh-alert" onClick={() => onJump("compliance")}>
-          <IconWarning size={16} className="icon-offset" />
-          <span>有 <b>{credAlert}</b> 项车辆/司机证件已过期或临近到期（≤7天），点击进入「证件合规」处理 →</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
 // 外协为主：承运商与线路价库置顶，自营车辆/司机档案退居其后
-const RESOURCE_TABS: { key: string; label: string; render: (jump: (t: string) => void) => React.ReactNode }[] = [
-  { key: "overview", label: "总览", render: (jump) => <ResourceOverview onJump={jump} /> },
+const RESOURCE_TABS: { key: string; label: string; render: () => React.ReactNode }[] = [
   { key: "carriers", label: "承运商中心", render: () => <CarrierCenter /> },
   { key: "lanes", label: "线路价库", render: () => <LanePriceLib /> },
   { key: "vehicles", label: "车辆档案", render: () => <VehiclesTab /> },
@@ -402,20 +346,66 @@ const RESOURCE_TABS: { key: string; label: string; render: (jump: (t: string) =>
   { key: "compliance", label: "证件合规", render: () => <ComplianceTab /> },
 ];
 
-// 固定布局（表格内滚 + 底部分页贴底）的 Tab：其余（总览/证件合规）为普通纵向流
+// 固定布局（表格内滚 + 底部分页贴底）的 Tab：证件合规为普通纵向流
 const FIXED_TABS = new Set(["carriers", "lanes", "vehicles", "drivers", "customers"]);
 
+/** 各页签的存量计数。
+ *
+ * 这些数字原先自成一个「总览」页签：六张大卡片写着 6 / 0 / 18 / 14 / 5 / 0，
+ * 下面是 840px 空白——一整屏，只说了六个各页签自己也会说的数。而且它是默认落地页，
+ * 意味着每次进资源库都要先看一屏没用的东西再点一下才开始干活。
+ *
+ * 计数本身有用：它告诉你哪个库是空的、值不值得点进去。所以数留下，卡片删掉，
+ * 数字回到它唯一有用的位置——页签标签旁边。页面直接落在承运商中心。
+ */
+function useResourceCounts() {
+  const carriers = useQuery({ queryKey: ["rh-ov-carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=1") });
+  const vehicles = useQuery({ queryKey: ["rh-ov-vehicles"], queryFn: () => apiGet<Paginated<Vehicle>>("/vehicles?page_size=1") });
+  const drivers = useQuery({ queryKey: ["rh-ov-drivers"], queryFn: () => apiGet<Paginated<Driver>>("/drivers?page_size=1") });
+  const lanes = useQuery({ queryKey: ["rh-ov-lanes"], queryFn: () => apiGet<Paginated<CarrierLanePrice>>("/carrier-lane-prices?page_size=1") });
+  const customers = useQuery({ queryKey: ["rh-ov-customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=1") });
+  const cred = useQuery({ queryKey: ["rh-ov-cred"], queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30") });
+  const credSum = cred.data?.summary;
+  const credAlert = (credSum?.expired ?? 0) + (credSum?.critical ?? 0);
+  return {
+    counts: {
+      carriers: carriers.data?.total, lanes: lanes.data?.total, vehicles: vehicles.data?.total,
+      drivers: drivers.data?.total, customers: customers.data?.total, compliance: credAlert,
+    } as Record<string, number | undefined>,
+    credAlert, credSum,
+  };
+}
+
 export function FleetPage() {
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState("carriers");
+  const { counts, credAlert, credSum } = useResourceCounts();
   const current = RESOURCE_TABS.find((t) => t.key === tab) ?? RESOURCE_TABS[0];
   return (
     <div className={`stack${FIXED_TABS.has(tab) ? " table-page" : ""}`}>
       <div className="seg-tabs">
-        {RESOURCE_TABS.map((t) => (
-          <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>
-        ))}
+        {RESOURCE_TABS.map((t) => {
+          const n = counts[t.key];
+          // 证件预警是「有几件事等你处理」，不是存量，所以为 0 时不显示，>0 时标红
+          const alert = t.key === "compliance";
+          if (alert && !credAlert) return (
+            <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>
+          );
+          return (
+            <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>
+              {t.label}
+              <span className={`seg-n${alert ? " seg-n-alert" : ""}`}>{n ?? ""}</span>
+            </button>
+          );
+        })}
       </div>
-      {current.render(setTab)}
+      {/* 证件到期是跨页签的待办：藏在某个页签里等于没提醒 */}
+      {credAlert > 0 && tab !== "compliance" && (
+        <button type="button" className="rh-alert" onClick={() => setTab("compliance")}>
+          <IconWarning size={15} className="icon-offset" />
+          <span><b>{credAlert}</b> 项车辆/司机证件已过期或 7 天内到期（{credSum?.expired ?? 0} 过期 · {credSum?.critical ?? 0} 紧急），去处理 →</span>
+        </button>
+      )}
+      {current.render()}
     </div>
   );
 }

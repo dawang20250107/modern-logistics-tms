@@ -687,7 +687,7 @@ export function DispatchBoardPage() {
                       const orderId = e.dataTransfer.getData("text/plain");
                       if (orderId) handleDropOrderOnTrip(orderId, idx);
                     }}
-                    style={{ border: "1px solid var(--line)", borderRadius: 10, background: "var(--panel-2)", padding: 16, display: "flex", flexDirection: "column", gap: 12, transition: "all 0.2s" }}
+                    style={{ border: "1px solid var(--line-2)", borderRadius: "var(--radius)", background: "var(--panel-2)", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <b style={{ fontSize: 15 }}>{trip.route}</b>
@@ -829,7 +829,7 @@ export function DispatchBoardPage() {
                       </div>
                     )}
 
-                    <div style={{ background: "var(--accent-weak)", border: "1px solid var(--accent-weak-2)", borderRadius: 10, padding: 16 }}>
+                    <div style={{ background: "var(--accent-weak)", border: "1px solid var(--accent-weak-2)", borderRadius: "var(--radius)", padding: 12 }}>
                       {/* 承运商推荐结论：可执行建议 + 风险说明 + 人工确认 */}
                       {suggestion.recommendation ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

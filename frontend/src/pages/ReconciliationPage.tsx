@@ -381,7 +381,7 @@ export function ReconciliationPage() {
   ];
 
   const renderStmtDetail = () => (
-    <div style={{ padding: "16px 20px", background: "var(--panel)", border: "1px solid var(--line-2)", borderRadius: 12, margin: "10px 16px 16px" }}>
+    <div style={{ padding: "12px 14px", background: "var(--panel)", border: "1px solid var(--line-2)", borderRadius: "var(--radius)", margin: "8px 12px 12px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontWeight: 700, fontSize: 14 }}>账单明细审计</div>
         <div className="cluster">

@@ -114,8 +114,8 @@ export function ProjectPicker({ value, valueName, onChange, customer, origin, de
           role="listbox"
           style={{
             position: "absolute", zIndex: 40, top: "calc(100% + 4px)", left: 0, right: 0,
-            background: "var(--surface-solid, #fff)", border: "1px solid var(--line)",
-            borderRadius: "var(--radius-sm, 8px)", boxShadow: "0 8px 28px -12px rgba(0,0,0,.28)",
+            background: "var(--surface-solid)", border: "1px solid var(--line-2)",
+            borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-md)",
             maxHeight: 320, overflowY: "auto", padding: 6,
           }}
         >

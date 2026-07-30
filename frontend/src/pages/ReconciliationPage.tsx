@@ -147,7 +147,9 @@ function OverviewTab() {
         </div>
         <div className="ov-card ov-net">
           <div className="ov-label">净头寸（应收未结 − 应付未结）</div>
-          <div className="ov-value" style={{ color: d.net_position >= 0 ? "var(--green)" : "var(--red)" }}>{fmtMoney(d.net_position)}</div>
+          {/* 净头寸为正是正常状态，不需要颜色——和运单详情的毛利、应收应付同一条规则：
+              颜色只留给要动作的。为负才上红。 */}
+          <div className="ov-value" style={d.net_position < 0 ? { color: "var(--red)" } : undefined}>{fmtMoney(d.net_position)}</div>
           <div className="ov-sub">{d.net_position >= 0 ? "净应收，现金流向好" : "净应付，需备付资金"}</div>
           <div className="ov-split ov-foot">
             <div><span>本期新增单据</span><b>{d.period.count} 张</b></div>

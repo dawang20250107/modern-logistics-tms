@@ -94,6 +94,42 @@ const MEASURE = () => {
     return Math.round(((a + 0.05) / (b + 0.05)) * 100) / 100;
   };
 
+  // 彩色元素计数：颜色预算是否守住了。
+  //
+  // 判定用**绝对色差**（max−min 通道差），不是饱和度。
+  // 第一版用了相对彩度 (mx−mn)/mx，结果暗色主题量出 197 个"彩色元素"——
+  // 深色中性灰 #171a20 的相对彩度是 (32−23)/32 = 0.28，看着像"28% 饱和"，
+  // 实际只差 9/255 ≈ 3.5%，肉眼就是一块中性深灰。分母太小把它放大了。
+  // 绝对色差下：#171a20 → 3.5%（不算）、强调蓝 #2454c8 → 64%、
+  // 红 #c62b30 → 61%、暗色蓝 #6f9cf5 → 53%，量纲在两个主题下一致。
+  const chroma = (c) => {
+    if (!c) return 0;
+    return (Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b)) / 255;
+  };
+  // 图表内部不计入：图表的本职就是用颜色编码，把它算进"颜色预算"没有意义。
+  // 预算管的是台账/表单/导航这些地方的颜色是否泛滥。
+  // 图例色块也算图表的一部分：它和条形/扇形是同一套编码，不是额外的颜色开销。
+  const inChart = (el) => el.closest(".recharts-wrapper, .ct-bar, .ct-legend, svg, .kpi-spark") !== null;
+  let colored = 0;
+  const coloredSamples = [];
+  for (const el of document.querySelectorAll("body *")) {
+    const b = el.getBoundingClientRect();
+    if (b.top < 0 || b.bottom > vh || b.width === 0 || b.height === 0) continue;
+    // 只算叶子节点与小元素，否则一个带色背景的容器会把它所有子节点都算一遍
+    if (el.children.length > 2 || b.width > 400) continue;
+    if (inChart(el)) continue;
+    const cs = getComputedStyle(el);
+    const fg = parse(cs.color), bg = parse(cs.backgroundColor);
+    const hot = chroma(fg) > 0.30 || (bg && bg.a > 0.15 && chroma(bg) > 0.22);
+    if (!hot) continue;
+    // 文本节点或有背景的小块才算；纯容器不算
+    const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    const hasBg = bg && bg.a > 0.15;
+    if (!hasText && !hasBg) continue;
+    colored += 1;
+    if (coloredSamples.length < 8) coloredSamples.push(`${el.className || el.tagName}`.slice(0, 34));
+  }
+
   // 抽样：正文、次要文字、表头、标签
   const contrast = {};
   for (const [name, sel] of [
@@ -115,6 +151,8 @@ const MEASURE = () => {
     // 容量 = 这一屏最多能放几行。"实际可见行数"会被数据量拖低
     // （调度池只有 2 单、计价只有 4 条规则），量不出布局的好坏。
     capacity: rowH && chromeTop != null ? Math.floor((vh - chromeTop) / rowH) : null,
+    colored,
+    coloredSamples,
     chromePct: chromeTop == null ? null : Math.round((chromeTop / vh) * 100),
     chrome,
     cellFont: cell ? px(cell, "fontSize") : null,
@@ -158,14 +196,14 @@ await browser.close();
 const pad = (s, n) => String(s ?? "—").padEnd(n, " ");
 const padL = (s, n) => String(s ?? "—").padStart(n, " ");
 console.log(`\n视口 ${VIEWPORT.width}×${VIEWPORT.height}\n`);
-console.log(`${pad("主题/页面", 22)}${padL("容量", 6)}${padL("实到", 6)}${padL("行高", 6)}${padL("壳高", 6)}${padL("壳占比", 8)}${padL("字号", 6)}   对比度`);
+console.log(`${pad("主题/页面", 22)}${padL("容量", 6)}${padL("实到", 6)}${padL("行高", 6)}${padL("壳高", 6)}${padL("壳占比", 8)}${padL("字号", 6)}${padL("彩色", 6)}   对比度`);
 console.log("─".repeat(110));
 for (const r of results) {
   const c = Object.entries(r.contrast).map(([k, v]) => `${k} ${v}`).join("  ");
   console.log(
     pad(`${r.theme === "light" ? "亮" : "暗"} ${r.name}`, 22) +
     padL(r.capacity, 6) + padL(r.visibleRows, 6) + padL(r.rowH, 6) + padL(r.chromeTop, 6) +
-    padL(r.chromePct == null ? "—" : r.chromePct + "%", 8) + padL(r.cellFont, 6) + "   " + c
+    padL(r.chromePct == null ? "—" : r.chromePct + "%", 8) + padL(r.cellFont, 6) + padL(r.colored, 6) + "   " + c
   );
 }
 
@@ -190,5 +228,28 @@ if (bad.length) {
 } else {
   console.log(`\n✓ 抽样文本对比度均 ≥ AA(${AA})`);
 }
-if (SHOTS) console.log(`\n截图写入 ${SHOTS}/`);
-process.exit(bad.length ? 1 : 0);
+
+// 颜色预算：一屏彩色元素上限。颜色只有稀缺时才是信号——
+// 改版前订单管理首屏有 51 个（17 个蓝单号 + 17 个彩色状态药丸 + 17 个蓝徽标），
+// 到那个密度，真正要紧的东西（逾期、超时、异常）就淹在里面了。
+//
+// 按页面角色分档，不用一个数管到底：
+//   作业面（台账/工作台/表单）——一天盯八小时，颜色必须稀缺，上限 12。
+//   纵览面（驾驶舱）——管理者看几分钟，它的本职就是"哪里不对"，
+//     告警色与趋势色都是信息，上限放到 24。
+// 图表内部与图例不计入（见 inChart）。
+const BUDGET = { 驾驶舱: 24 };
+const BUDGET_DEFAULT = 12;
+const budgetOf = (name) => BUDGET[name] ?? BUDGET_DEFAULT;
+const overBudget = results.filter((r) => r.colored > budgetOf(r.name));
+console.log("\n一屏彩色元素（上限）：");
+for (const r of results.filter((x) => x.theme === "light")) {
+  console.log(`  ${pad(r.name, 14)} ${padL(r.colored, 3)} / ${padL(budgetOf(r.name), 2)}   ${r.coloredSamples.join(", ")}`);
+}
+if (overBudget.length) {
+  console.log(`\n✗ 超出颜色预算的 ${overBudget.length} 处：`);
+  for (const r of overBudget) console.log(`  ${r.theme} ${r.name} = ${r.colored} > ${budgetOf(r.name)}`);
+} else {
+  console.log("\n✓ 各页彩色元素均在预算内");
+}
+process.exit(bad.length || overBudget.length ? 1 : 0);

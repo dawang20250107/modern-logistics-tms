@@ -347,7 +347,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
       {/* 标题 & 药丸标签 */}
       <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 18 }}>新建订单</span>
+          <span style={{ fontSize: 14, fontWeight: 660 }}>新建订单</span>
         </div>
         {templates.data && templates.data.items.length > 0 && (
           <select style={{ width: 140, padding: "4px 8px" }} defaultValue="" onChange={(e) => { if (e.target.value) applyTpl(e.target.value); e.target.value = ""; }}>
@@ -582,9 +582,9 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             {/* 核心上下游实体快速对齐 */}
             <div className="sof-partner-grid">
               <div className="sof-partner-card">
-                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择发货方 / 供应商</span>
+                <span className="section-label" style={{ marginBottom: 0 }}>选择发货方 / 供应商</span>
                 <select 
-                  style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
+                  style={{ width: "100%", height: 28, padding: "0 8px", marginTop: 6, borderRadius: "var(--radius)" }}
                   defaultValue="" 
                   onChange={(e) => { if (e.target.value) handlePartnerSelect("pickup", e.target.value); e.target.value = ""; }}
                 >
@@ -594,9 +594,9 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
               </div>
 
               <div className="sof-partner-card">
-                <span className="muted small" style={{ fontWeight: "bold", color: "var(--primary)" }}>选择收货方 / 仓储网点</span>
+                <span className="section-label" style={{ marginBottom: 0 }}>选择收货方 / 仓储网点</span>
                 <select 
-                  style={{ width: "100%", padding: "6px 8px", marginTop: 6, borderRadius: 6 }}
+                  style={{ width: "100%", height: 28, padding: "0 8px", marginTop: 6, borderRadius: "var(--radius)" }}
                   defaultValue="" 
                   onChange={(e) => { if (e.target.value) handlePartnerSelect("delivery", e.target.value); e.target.value = ""; }}
                 >
@@ -672,7 +672,7 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
             
             {/* 4.1 时效红线 (SLA) */}
             <div style={{ background: "var(--panel-2)", padding: "14px 16px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: "bold", color: "var(--ink-2)", marginBottom: 10 }}>时效要求</div>
+              <div className="section-label" style={{ marginBottom: 7 }}>时效要求</div>
               <div className="grid-form sof-grid-2">
                 <label>
                   期望提货窗口

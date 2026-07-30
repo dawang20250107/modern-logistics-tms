@@ -1747,7 +1747,8 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .check-label { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 13px !important; color: var(--ink) !important; align-self: end; }
 .check-label::before { display: none; }
 .line-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
-.line-row input, .line-row select { padding: 7px 9px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); font-size: 13px; background: var(--panel); }
+/* 和 .grid-form 的输入框对齐到 28px：同一张表单里两种控件高度会看出来 */
+.line-row input, .line-row select { height: 28px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: var(--radius); font-size: 13px; background: var(--panel); }
 .line-row input:focus, .line-row select:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 
 /* 大表单即时校验：必填缺失时高亮定位 */

@@ -1972,19 +1972,25 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .aging-pct { font-size: 12px; color: var(--muted); font-style: normal; }
 
 /* 收付款核销 */
-.settle-list { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
-.settle-item { display: flex; align-items: center; gap: 20px; padding: 14px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); transition: border-color .14s, box-shadow .14s; }
-.settle-item:hover { border-color: var(--accent); box-shadow: var(--shadow-xs); }
+/* 待核销队列。原先是一列 12px 外边距 + 圆角 + 描边的浮卡（每条 98px，卡间还留 10px），
+   是全站最后一处还在用"卡片列表"语汇的地方——别处都是边到边的窗格加 1px 沟槽。
+   三条待办撑掉 330px，下面 1100px 全空；而这是财务每天要逐条处理的队列，
+   一屏能看几条直接决定要滚多少次。改成边到边行：进度条从独占一行改到副行里，
+   每条 98 → 52px，一屏从 8 条变 16 条。 */
+.settle-list { padding: 0; display: flex; flex-direction: column; }
+.settle-item { display: flex; align-items: center; gap: 18px; padding: 8px 12px; background: var(--panel); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; transition: background var(--speed); }
+.settle-item:last-child { border-bottom: 0; }
+.settle-item:hover { background: var(--dt-row-hover); box-shadow: none; }
 .settle-item-main { flex: 1; min-width: 0; }
 .settle-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.settle-item-sub { margin: 5px 0 8px; }
-.settle-progress { height: 5px; background: var(--panel-3); border-radius: 3px; overflow: hidden; max-width: 420px; }
+.settle-item-sub { display: flex; align-items: center; gap: 10px; margin: 3px 0 0; }
+.settle-progress { flex: none; width: 130px; height: 4px; background: var(--panel-3); border-radius: 3px; overflow: hidden; }
 .settle-progress > div { height: 100%; background: var(--green); border-radius: 3px; transition: width .3s; }
-.settle-item-amt { display: flex; gap: 22px; }
-.settle-item-amt > div { display: flex; flex-direction: column; gap: 3px; text-align: right; min-width: 96px; }
+.settle-item-amt { display: flex; gap: 20px; }
+.settle-item-amt > div { display: flex; flex-direction: column; gap: 1px; text-align: right; min-width: 92px; }
 .settle-item-amt .muted { font-size: 12px; }
-.settle-item-amt b { font-variant-numeric: tabular-nums; font-size: 14px; }
-.settle-item > .btn-primary { flex-shrink: 0; padding: 8px 16px; }
+.settle-item-amt b { font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.settle-item > .btn-primary { flex-shrink: 0; height: 26px; min-height: 0; padding: 0 12px; }
 
 .settle-summary { display: flex; gap: 24px; padding: 13px 18px; background: var(--panel-3); border-bottom: 1px solid var(--line); }
 .settle-summary > div { display: flex; flex-direction: column; gap: 4px; }

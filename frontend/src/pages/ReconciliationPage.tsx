@@ -222,8 +222,9 @@ function AgingTab() {
   return (
     <div className="stack">
       <div className="panel">
+        {/* 这里原先在页签左边还写了一遍「账龄分析」，和右上角的一级页签一字不差，
+            而且跟两个子页签同一行同一号字——看起来像第三个页签，只是点不动。 */}
         <div className="panel-head" style={{ gap: 12 }}>
-          <span>账龄分析</span>
           <div className="seg-tabs">
             <button className={isAR ? "active" : ""} onClick={() => setDir("receivable")}>应收账龄</button>
             <button className={!isAR ? "active" : ""} onClick={() => setDir("payable")}>应付账龄</button>
@@ -562,9 +563,9 @@ export function ReconciliationPage() {
                         {overdue && <span className="tag tag-high">已逾期</span>}
                       </div>
                       <div className="settle-item-sub muted small">
-                        账期 {s.period_start}~{s.period_end}{s.due_date ? ` · 到期 ${s.due_date}` : ""} · {s.item_count} 笔
+                        <span>账期 {s.period_start}~{s.period_end}{s.due_date ? ` · 到期 ${s.due_date}` : ""} · {s.item_count} 笔</span>
+                        <div className="settle-progress" title={`已核销 ${(rate * 100).toFixed(0)}%`}><div style={{ width: `${Math.min(rate * 100, 100)}%` }} /></div>
                       </div>
-                      <div className="settle-progress"><div style={{ width: `${Math.min(rate * 100, 100)}%` }} /></div>
                     </div>
                     <div className="settle-item-amt">
                       <div><span className="muted small">应结</span><b>{fmtMoney(s.total_amount)}</b></div>

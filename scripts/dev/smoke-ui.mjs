@@ -15,7 +15,10 @@ const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
 const PAGES = [
   ["驾驶舱", "/"], ["订单管理", "/waybills"], ["调度工作台", "/dispatch-board"],
   ["对账中心", "/reconciliation"], ["资源库", "/fleet"], ["计价规则", "/pricing"],
-  ["组织中心", "/org"], ["管理后台", "/admin"], ["录单", "/intake"], ["审计", "/audit"],
+  ["组织中心", "/org"], ["录单", "/intake"], ["审计", "/audit"],
+  // /admin 那一页（两张链接卡片的中转页）已删，只留重定向；这条留着是为了
+  // 万一哪天重定向掉了能被抓到——老书签打不开是会有人来报的那种问题。
+  ["管理后台旧地址→组织与权限", "/admin"],
 ];
 // 已知会 4xx 且属预期的（例如未配置 AI 时的 503）写在这里，避免噪声掩盖真问题
 const EXPECTED = [/\/ai\/deepseek\/status/];

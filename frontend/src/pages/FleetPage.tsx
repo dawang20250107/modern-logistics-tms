@@ -367,7 +367,7 @@ function ResourceOverview({ onJump }: { onJump: (tab: string) => void }) {
   // 原先这里有一条深色 hero，整条 80px 只写了「资源库」三个字——顶栏的页面标题
   // 已经写着同样三个字。重复一遍不是强调，是把入口卡片往下推了 96px。
   return (
-    <div className="stack" style={{ gap: 16 }}>
+    <div className="stack">
       <div className="rh-cards">
         {cards.map((c) => (
           <button key={c.key} className={`rh-card rh-${c.tone}`} onClick={() => onJump(c.jump)}>

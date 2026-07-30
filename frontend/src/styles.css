@@ -290,6 +290,10 @@ button { -webkit-tap-highlight-color: transparent; }
 h1, h2, h3, h4 { letter-spacing: -0.022em; margin-top: 0; }
 input, select, textarea { color: var(--ink); caret-color: var(--accent); }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+/* 日期/时间控件也要落到 28px，否则同一行里它比搜索框高一档 */
+input[type="date"], input[type="datetime-local"], input[type="time"], input[type="month"] {
+  height: 28px; padding: 0 8px;
+}
 input, select, textarea {
   border-color: var(--line-2);
   transition: border-color var(--speed), box-shadow var(--speed), background var(--speed), color var(--speed);
@@ -598,9 +602,12 @@ select {
    工作面的延续（白），而不是一大块画布灰——后者看着像"页面没加载完"。
    窗格之间的 1px 沟槽由 .stack 自己的底色画（见下），不依赖这里。 */
 .content { padding: 0; max-width: none; margin: 0; width: 100%; flex: 1; min-height: 0; overflow-y: auto; scroll-padding-top: 0; background: var(--panel); }
-/* 窗格之间 1px 沟槽（露出 --bg），取代 16px 卡间距。
-   一屏 4 段就省 60px——刚好两行数据。 */
-.stack { display: flex; flex-direction: column; gap: 1px; background: var(--line-2); }
+/* 窗格之间 1px 沟槽，取代 16px 卡间距。一屏 4 段就省 60px——刚好两行数据。
+   分隔线画在**子元素**上，不用「容器底色 + gap」那招：
+   后者要求每个子元素都是满宽实底的窗格，一旦某个子元素自己是带 gap 的
+   栅格或透明容器，容器底色就从缝里漏出来（实测组织页、驾驶舱右栏都漏了灰）。 */
+.stack { display: flex; flex-direction: column; gap: 0; }
+.stack > * + * { border-top: 1px solid var(--line-2); }
 /* ── 空间节奏工具类（收敛内联样式） ─────────────────── */
 .stack-sm { display: flex; flex-direction: column; gap: var(--sp-2); }
 .stack-md { display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -633,7 +640,8 @@ select {
 /* KPI 从"卡片"降级为"读数格"：无浮卡、无投影、无 hover 位移、无渐变数字。
    格与格之间靠 1px 分隔线，整排读起来是一条仪表带而不是四张卡片。
    数字 30 → 22px：22px 已经足够"这是主数值"，30px 只是把标签挤走。 */
-.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line-2); }
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+.kpi-row > * + * { border-left: 1px solid var(--line); }
 .kpi {
   position: relative; background: var(--panel);
   border: 0; border-radius: 0;
@@ -1107,7 +1115,10 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .sg-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 
 /* ── Control tower ──────────────────────────────────── */
-.ct-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1px; align-items: start; background: var(--line-2); }
+/* 沟槽用边框而不是容器底色：两列不等高时，容器底色会在短的那列下面
+   填出一大块灰（实测驾驶舱右栏短 ~340px）。边框只画在列上，不会漏。 */
+.ct-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 0; align-items: start; background: none; }
+.ct-grid > * + * { border-left: 1px solid var(--line-2); }
 .situation { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px; }
 .route-chip {
   display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line);
@@ -1246,7 +1257,16 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 
 /* ── 司机端布局（收敛内联样式，统一节奏） ───────────── */
 .drv-login-hero { text-align: center; margin-bottom: var(--sp-6); }
-.drv-login-badge { width: 64px; height: 64px; background: var(--grad); border-radius: 16px; margin: 0 auto var(--sp-4); display: grid; place-items: center; box-shadow: 0 10px 20px rgba(75,88,240,0.3); }
+/* ── 司机端：**故意**不跟桌面端的紧凑度 ──
+   桌面台面追求密度，是因为用户坐着、盯屏八小时、用鼠标和键盘。
+   司机端的使用场景是站在货台边、戴着手套、车在震、可能大太阳底下——
+   这里密度要让位给抗干扰：16px 正文、48px 触控目标、圆角大一档。
+   所以下面这些数值不是漏改的桌面遗留，是分开定的一套参数。 */
+.drv-login-badge {
+  width: 52px; height: 52px; background: var(--accent); border-radius: 12px;
+  margin: 0 auto var(--sp-4); display: grid; place-items: center; box-shadow: none;
+  color: #fff; font-size: 24px; font-weight: 700; letter-spacing: 0.02em;
+}
 .drv-login-fields { display: flex; flex-direction: column; gap: var(--sp-4); }
 .drv-login-fields label { display: flex; flex-direction: column; gap: var(--sp-2); font-size: 13px; font-weight: 600; }
 .drv-login-fields input { padding: 14px 16px; font-size: 16px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line-2); }
@@ -1434,27 +1454,36 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .rh-hero-ic { width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; color: #fff; background: linear-gradient(135deg, var(--accent), #6d6ff5); box-shadow: 0 6px 18px -6px rgba(75,88,240,0.7); }
 .rh-hero-title { color: #f4f5f8; font-size: 17px; font-weight: 680; letter-spacing: -0.01em; line-height: 1.15; }
 .rh-hero-sub { color: rgba(232,234,240,0.62); font-size: 12px; margin-top: 3px; }
-.rh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+/* 资源库入口：6 张 12px 圆角浮卡（145px 高、彩色图标块、hover 位移）
+   改成一条 1px 沟槽分隔的读数带。每格一个彩色图标块 = 六个装饰位；
+   图标在标签旁说明不了更多，数字自己会说话。 */
+.rh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0; }
+.rh-card { border-left: 1px solid var(--line); }
+.rh-cards > :first-child { border-left: 0; }
 .rh-card {
   text-align: left; font: inherit; color: inherit; cursor: pointer; position: relative;
-  padding: 15px 16px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel);
-  box-shadow: var(--shadow-xs); transition: border-color var(--speed), box-shadow var(--speed), transform var(--speed);
+  padding: 8px 12px 9px; border-radius: 0; border: 0; background: var(--panel);
+  box-shadow: none; transition: background var(--speed);
   overflow: hidden;
 }
-.rh-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: 0.9; }
-.rh-card:hover { border-color: var(--accent); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
-.rh-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.rh-card-ic { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--accent); background: var(--accent-weak); }
+.rh-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--line-2); }
+.rh-card:hover { background: var(--panel-2); }
+.rh-card:hover::before { background: var(--accent); }
+.rh-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+/* 彩色图标底块 → 无底线性图标，34 → 16px */
+.rh-card-ic { width: 16px; height: 16px; border-radius: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); background: none; }
+.rh-card-ic svg { width: 16px; height: 16px; }
 .rh-card-go { color: var(--ink-3); opacity: 0; transition: opacity var(--speed), transform var(--speed); }
 .rh-card:hover .rh-card-go { opacity: 1; transform: translateX(2px); color: var(--accent); }
-.rh-card-n { font-size: 27px; font-weight: 720; letter-spacing: -0.03em; color: var(--ink); line-height: 1; font-variant-numeric: tabular-nums slashed-zero; }
-.rh-card-l { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-top: 6px; }
-.rh-card-s { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
-.rh-card.rh-blue::before { background: var(--blue); } .rh-card.rh-blue .rh-card-ic { color: var(--blue); background: var(--blue-weak); }
-.rh-card.rh-violet::before { background: var(--violet); } .rh-card.rh-violet .rh-card-ic { color: var(--violet); background: var(--violet-weak); }
-.rh-card.rh-green::before { background: var(--green); } .rh-card.rh-green .rh-card-ic { color: var(--green); background: var(--green-weak); }
-.rh-card.rh-red::before { background: var(--red); } .rh-card.rh-red .rh-card-ic { color: var(--red); background: var(--red-weak); }
-.rh-card.rh-red:hover { border-color: var(--red); }
+.rh-card-n { font-size: 20px; font-weight: 680; letter-spacing: -0.02em; color: var(--ink); line-height: 1.1; font-variant-numeric: tabular-nums slashed-zero; }
+.rh-card-l { font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin-top: 2px; }
+.rh-card-s { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.rh-card.rh-blue:hover::before { background: var(--blue); }
+.rh-card.rh-violet:hover::before { background: var(--violet); }
+.rh-card.rh-green:hover::before { background: var(--green); }
+/* 证件预警是唯一常驻带色的格：它本身就是「有东西要过期了」的信号 */
+.rh-card.rh-red::before { background: var(--red); } .rh-card.rh-red .rh-card-ic { color: var(--red); }
+.rh-card.rh-red:hover { background: var(--red-weak); }
 .rh-alert {
   display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; font: inherit; font-size: 13px; color: var(--red); text-align: left;
   padding: 12px 16px; border-radius: 10px; border: 1px solid var(--red-line); background: var(--red-weak); border-left: 3px solid var(--red);
@@ -1822,29 +1851,36 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ══════════════════ 对账中心（Reconciliation Center） ══════════════════ */
 /* 从深色 hero 挪到浅底后，配色跟着换回常规 token（原来吃的是 --hero-* 那套） */
-.recon-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--panel-3); border-radius: var(--radius-sm); }
-.recon-tabs button { position: relative; padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--ink-3); background: transparent; border: none; border-radius: 7px; cursor: pointer; transition: all .14s; }
-.recon-tabs button:hover { color: var(--ink); background: var(--panel); }
-.recon-tabs button.active { background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-glow); }
-.recon-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 6px; font-size: 10px; font-weight: 700; color: #fff; background: var(--red); border-radius: 8px; }
+/* 和 .seg-tabs 同一套语汇：下划线，不是凹槽里的填充药丸 */
+.recon-tabs { display: inline-flex; gap: 0; padding: 0; background: none; border-radius: 0; }
+.recon-tabs button { position: relative; height: 30px; padding: 0 12px; font-size: 12.5px; font-weight: 560; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; cursor: pointer; transition: color var(--speed), border-color var(--speed); }
+.recon-tabs button:hover { color: var(--ink-2); background: none; }
+.recon-tabs button.active { background: none; color: var(--ink); font-weight: 640; border-bottom-color: var(--accent); box-shadow: none; }
+/* 待办计数保留填充徽标：它是「有 N 件事等你」的信号，属于该抢注意力的少数 */
+.recon-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 4px; margin-left: 5px; font-size: 10px; font-weight: 700; color: #fff; background: var(--red); border-radius: var(--radius-xs); }
 
 /* 总览看板 */
-.ov-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+/* 四张 14px 圆角浮卡（158px 高、带阴影、卡间 14px）改成一条读数带：
+   1px 沟槽分组，顶部彩条改左侧 2px 语义轨，高度 158 → 112px。 */
+.ov-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+.ov-kpis > * + * { border-left: 1px solid var(--line-2); }
 @media (max-width: 1100px) { .ov-kpis { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 620px) { .ov-kpis { grid-template-columns: 1fr; } }
-.ov-card { display: flex; flex-direction: column; min-height: 158px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 15px 17px; box-shadow: var(--shadow-xs); border-top: 3px solid var(--line-2); }
-.ov-ar { border-top-color: var(--green); }
-.ov-ap { border-top-color: var(--amber); }
-.ov-net { border-top-color: var(--accent); }
-.ov-overdue.on { border-top-color: var(--red); }
+.ov-card { position: relative; display: flex; flex-direction: column; min-height: 112px; background: var(--panel); border: 0; border-radius: 0; padding: 9px 12px 10px; box-shadow: none; }
+.ov-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--line-2); }
+.ov-ar::before { background: var(--green); }
+.ov-ap::before { background: var(--amber); }
+.ov-net::before { background: var(--accent); }
+.ov-overdue.on::before { background: var(--red); }
 .ov-label { font-size: 12px; color: var(--muted); font-weight: 600; line-height: 1.3; }
-.ov-value { font-size: 23px; font-weight: 800; margin: 7px 0 3px; font-variant-numeric: tabular-nums; letter-spacing: -0.6px; line-height: 1.1; }
+.ov-value { font-size: 19px; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums slashed-zero; letter-spacing: -0.02em; line-height: 1.15; }
 .ov-sub { font-size: 12px; color: var(--muted); }
-.ov-foot { margin-top: auto; padding-top: 12px; }
-.ov-bar { height: 5px; background: var(--panel-3); border-radius: 3px; overflow: hidden; margin: 0 0 8px; }
-.ov-bar > div { height: 100%; border-radius: 3px; transition: width .3s; }
+.ov-foot { margin-top: auto; padding-top: 8px; }
+.ov-bar { height: 4px; background: var(--panel-3); border-radius: var(--radius-xs); overflow: hidden; margin: 0 0 6px; }
+.ov-bar > div { height: 100%; border-radius: var(--radius-xs); transition: width var(--speed); }
 .ov-status { display: flex; flex-wrap: wrap; gap: 4px; }
-.ov-status .tag { font-size: 10.5px; padding: 1px 6px; line-height: 1.5; }
+.ov-status { gap: 8px; }
+.ov-status .tag { font-size: 11.5px; padding: 0; line-height: 1.4; }
 .ov-split { display: flex; flex-direction: column; gap: 7px; }
 .ov-split > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 12.5px; }
 .ov-split span { color: var(--muted); }
@@ -1862,10 +1898,11 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .top-amt { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; }
 
 /* 账龄 */
-.aging-totals { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
-.aging-tot { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--panel-3); border-radius: 10px; }
-.aging-tot b { font-size: 16px; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
-.aging-tot:last-child { background: var(--accent-weak, var(--panel)); border: 1px solid var(--line-2); }
+.aging-totals { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; padding: 0; border-bottom: 1px solid var(--line-2); }
+.aging-totals > * + * { border-left: 1px solid var(--line); }
+.aging-tot { display: flex; flex-direction: column; gap: 2px; padding: 7px 12px; background: var(--panel); border-radius: 0; }
+.aging-tot b { font-size: 15px; font-variant-numeric: tabular-nums slashed-zero; letter-spacing: -0.02em; }
+.aging-tot:last-child { background: var(--accent-weak); border: 0; }
 .aging-pct { font-size: 11px; color: var(--muted); font-style: normal; }
 
 /* 收付款核销 */
@@ -1973,7 +2010,8 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .ctower .ct-grid { grid-template-columns: minmax(0, 2.1fr) minmax(292px, 1fr); gap: 1px; }
 .ctower .ct-grid .panel { border: 0; border-radius: 0; box-shadow: none; }
 .ctower .ct-grid .panel-head { background: var(--panel-2); }
-.ct-side { gap: 1px; background: var(--line-2); }
+.ct-side { gap: 0; background: none; }
+.ct-side > * + * { border-top: 1px solid var(--line-2); }
 .ct-side-body { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
 .ct-sub-label { font-size: 11.5px; font-weight: 630; letter-spacing: 0.02em; color: var(--muted); margin-top: 5px; }
 
@@ -2064,7 +2102,8 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 /* 经营指标图表区。原来是两个内联 style 的 panel（padding:18 height:380 gap:16），
    数值散在 tsx 里改不动也测不到，现在收进类。380 → 300：
    图表要的是趋势形状，不是高度。 */
-.bm-charts { display: grid; grid-template-columns: 2fr 1fr; gap: 1px; background: var(--line-2); }
+.bm-charts { display: grid; grid-template-columns: 2fr 1fr; gap: 0; background: none; }
+.bm-charts > * + * { border-left: 1px solid var(--line-2); }
 .bm-chart { padding: 10px 12px; height: 300px; display: flex; flex-direction: column; }
 /* KPI 脚注里的分项：原来每项一个写死 --panel-3 的小色块。
    四个色块并排等于把刚拆掉的药丸又画回来——改成竖线分隔的纯文本。 */

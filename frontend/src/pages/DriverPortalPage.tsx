@@ -84,7 +84,7 @@ export function DriverPortalPage() {
       <div className="public-page">
         <div className="public-card driver-card" style={{ padding: "40px 30px" }}>
           <div className="drv-login-hero">
-            <div className="drv-login-badge" />
+            <div className="drv-login-badge" aria-hidden>智</div>
             <div className="public-brand" style={{ fontSize: 24 }}>智运 · 司机端</div>
             <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>手机号 + 身份证后6位 安全登录</p>
           </div>

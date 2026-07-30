@@ -12,6 +12,6 @@
 
 ## 3. Engineering & Iteration Guardrails
 - **Surgical Code Modifications**: Only touch files directly related to the task. Never refactor surrounding code unless explicitly instructed.
-- **Resilient Schemas**: When modifying Django models, ensure fields support optional values (`blank=True, null=True`) because upstream/downstream payloads are often incomplete.
+- **Resilient Schemas**: When adding columns, prefer nullable/defaulted ones — upstream/downstream payloads are often incomplete, and a NOT NULL column with no default turns a partial payload into a 500.
 - **State Machine Integrity**: Always follow established transaction locking (e.g., row-level locking during order dispatching) and status flow events to ensure data bloodline stays correct.
 - **Verification**: Always run migrations, verify health/readiness endpoints, and seed demo data before concluding work.

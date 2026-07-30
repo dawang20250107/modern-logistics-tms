@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { CITIES } from "../data/cities";
+import { ALL_CITIES } from "../data/regions";
+import { FloatingLayer, anchor } from "./FloatingLayer";
+
+// 城市库以全国行政区（省/市/区）派生的完整市级列表为准，补全此前"城市库不全"。
+const CITIES = ALL_CITIES;
 
 /**
  * 城市组合框：可下拉、可模糊检索、可自由录入（表中未含的城市直接输入即可）。
@@ -18,15 +22,25 @@ export function CityCombobox({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !listRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const option = listRef.current?.children[active] as HTMLElement | undefined;
+    option?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
 
   const matches = useMemo(() => {
     const q = value.trim();
@@ -39,6 +53,13 @@ export function CityCombobox({
   return (
     <div className="combobox" ref={ref} style={{ position: "relative", ...style }}>
       <input
+        ref={inputRef}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-activedescendant={open && matches[active] ? `${listId}-${active}` : undefined}
+        aria-label={placeholder}
         value={value}
         placeholder={placeholder}
         onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(0); }}
@@ -52,19 +73,30 @@ export function CityCombobox({
         }}
         style={{ width: "100%" }}
       />
-      {open && matches.length > 0 && (
-        <ul className="combobox-menu">
+      {open && matches.length > 0 && inputRef.current && (
+        <FloatingLayer
+          ref={listRef}
+          origin={anchor(inputRef.current, "start")}
+          id={listId}
+          className="combobox-menu"
+          role="listbox"
+          aria-label="城市建议"
+          style={{ width: inputRef.current.getBoundingClientRect().width }}
+        >
           {matches.map((c, i) => (
-            <li
+            <div
+              id={`${listId}-${i}`}
               key={c}
+              role="option"
+              aria-selected={i === active}
               className={i === active ? "active" : ""}
               onMouseDown={(e) => { e.preventDefault(); choose(c); }}
               onMouseEnter={() => setActive(i)}
             >
               {c}
-            </li>
+            </div>
           ))}
-        </ul>
+        </FloatingLayer>
       )}
     </div>
   );

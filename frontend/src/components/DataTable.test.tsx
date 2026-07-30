@@ -1,0 +1,361 @@
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+import { DataTable, type DataColumn } from "./DataTable";
+
+// DataTable 是自研的（856 行），被 10+ 个页面依赖，此前零测试。
+// 它已经出过三个不该出的 bug，全都是"看起来在工作、其实没生效"那一类：
+//   1. 固定列底色用 color-mix 混了带 alpha 的斑马纹 → 只有 51% 不透明，字摞字
+//   2. JS 生成 .dt-sticky-r、CSS 定义 .dt-sticky-right → 右固定列样式从未生效
+//   3. tbody tr 上一条写死的 height 压过密度三档 → 切密度看着像没反应
+// 这三类都不会报错，只会静默地不对。下面的用例就是钉住这些行为。
+
+interface Row {
+  id: string;
+  no: string;
+  customer: string;
+  biz: string;
+  amount: number;
+}
+
+const ROWS: Row[] = [
+  { id: "1", no: "DD001", customer: "美的集团", biz: "整车", amount: 17620 },
+  { id: "2", no: "DD002", customer: "海尔智家", biz: "整车", amount: 12240 },
+  { id: "3", no: "DD003", customer: "宁德时代", biz: "整车", amount: 23000 },
+  { id: "4", no: "DD004", customer: "比亚迪", biz: "整车", amount: 9000 },
+];
+
+const COLS: DataColumn<Row>[] = [
+  { key: "no", header: "订单号", width: 140, alwaysVisible: true, sortValue: (r) => r.no, exportValue: (r) => r.no, render: (r) => <span>{r.no}</span> },
+  { key: "customer", header: "客户", width: 160, sortValue: (r) => r.customer, exportValue: (r) => r.customer, render: (r) => <span>{r.customer}</span> },
+  { key: "biz", header: "业务", width: 90, sortValue: (r) => r.biz, exportValue: (r) => r.biz, render: (r) => <span>{r.biz}</span> },
+  { key: "amount", header: "金额", width: 120, align: "right", sortValue: (r) => r.amount, exportValue: (r) => r.amount, render: (r) => <span>{r.amount}</span> },
+  { key: "actions", header: "操作", width: 120, alwaysVisible: true, sticky: "right", render: () => <button>详情</button> },
+];
+
+// jsdom 不实现 ResizeObserver，而单值列折叠现在要先量容器宽度才决定折不折
+//（不拥挤就不折，见 DataTable 里的说明）。这里给一个可控宽度的替身：
+// 默认 400px < 五列声明宽合计 630px，即"拥挤"，折叠该生效。
+let containerWidth = 400;
+class RO {
+  constructor(private cb: ResizeObserverCallback) {}
+  observe(el: Element) {
+    this.cb([{ contentRect: { width: containerWidth } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+  }
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = RO as unknown as typeof ResizeObserver;
+
+function setup(props: Partial<React.ComponentProps<typeof DataTable<Row>>> = {}) {
+  return render(
+    <DataTable<Row>
+      columns={COLS}
+      rows={ROWS}
+      rowKey={(r) => r.id}
+      viewKey={`test-${Math.random()}`}
+      {...props}
+    />,
+  );
+}
+
+const headerNames = () =>
+  screen.getAllByRole("columnheader").map((th) => th.textContent?.replace(/[↕▲▼]/g, "").trim() ?? "");
+
+describe("DataTable · 固定列", () => {
+  it("右固定列用 .dt-fixed-r，且与 CSS 里的类名一致", () => {
+    setup();
+    const cells = screen.getAllByRole("cell");
+    const actionCell = cells.find((td) => td.className.includes("dt-fixed-r"));
+    expect(actionCell, "操作列应带 dt-fixed-r（曾经生成 dt-sticky-r 与 CSS 对不上）").toBeTruthy();
+    // 同时必须有基类 dt-fixed，position:sticky 挂在它上面
+    expect(actionCell!.className).toContain("dt-fixed");
+  });
+
+  it("固定列不带任何半透明底色类，避免盖住的列透上来", () => {
+    setup();
+    const html = document.body.innerHTML;
+    // 斑马纹已移除；如果它回来了并被 color-mix 进固定列底色，就会重现字摞字
+    expect(html).not.toContain("dt-zebra");
+  });
+});
+
+describe("DataTable · 单值列折叠", () => {
+  it("整页同值的列被折叠，取值显示在工具栏 chip 上", async () => {
+    setup();
+    // biz 四行全是「整车」→ 该列折叠
+    expect(headerNames()).not.toContain("业务");
+    const chip = screen.getByTitle(/本页「业务」全部为「整车」/);
+    expect(chip).toHaveTextContent("业务");
+    expect(chip).toHaveTextContent("整车");
+  });
+
+  it("点 chip 能把列放回来", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByTitle(/本页「业务」全部为「整车」/));
+    expect(headerNames()).toContain("业务");
+  });
+
+  it("取值不同的列不折叠", () => {
+    setup();
+    expect(headerNames()).toContain("客户");
+    expect(headerNames()).toContain("金额");
+  });
+
+  it("alwaysVisible 与 sticky 列即使同值也不折叠", () => {
+    const rows = ROWS.map((r) => ({ ...r, no: "SAME" }));
+    render(
+      <DataTable<Row> columns={COLS} rows={rows} rowKey={(r) => r.id} viewKey={`t2-${Math.random()}`} />,
+    );
+    expect(headerNames()).toContain("订单号"); // alwaysVisible
+    expect(headerNames()).toContain("操作");   // sticky:right
+  });
+
+  it("少于 3 行时不折叠——样本太小，同值可能只是巧合", () => {
+    render(
+      <DataTable<Row> columns={COLS} rows={ROWS.slice(0, 2)} rowKey={(r) => r.id} viewKey={`t3-${Math.random()}`} />,
+    );
+    expect(headerNames()).toContain("业务");
+  });
+
+  // 折叠的理由是「腾横向空间」。容器不缺空间时它就没有理由，只剩副作用：
+  // 承运商中心实测 7 列声明宽 770px、容器 1488px，却折掉 5 列，
+  // 剩两列被 table-layout:fixed 拉成 1026+462——一张两列的账本。
+  it("容器宽度够用时不折叠——不缺空间就没有腾空间的理由", () => {
+    const prev = containerWidth;
+    containerWidth = 1400; // > 声明宽合计 630
+    try {
+      render(<DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey={`t4-${Math.random()}`} />);
+      expect(headerNames()).toContain("业务");
+      expect(screen.queryByTitle(/本页「业务」全部为「整车」/)).toBeNull();
+    } finally {
+      containerWidth = prev;
+    }
+  });
+
+  it("折到只剩两列就不折了——两列的表不是台账", () => {
+    const prev = containerWidth;
+    containerWidth = 100;
+    try {
+      // 客户/业务/金额三列全同值：全折就只剩 alwaysVisible 的订单号 + sticky 的操作
+      const rows = ROWS.map((r) => ({ ...r, customer: "同一家", biz: "整车", amount: 100 }));
+      render(<DataTable<Row> columns={COLS} rows={rows} rowKey={(r) => r.id} viewKey={`t5-${Math.random()}`} />);
+      expect(headerNames()).toContain("客户");
+      expect(headerNames()).toContain("业务");
+    } finally {
+      containerWidth = prev;
+    }
+  });
+});
+
+describe("DataTable · 密度", () => {
+  it("点「密度」在三档间循环，容器类名跟着变", async () => {
+    const user = userEvent.setup();
+    const { container } = setup();
+    const root = container.querySelector(".dt")!;
+    // 默认档是 compact：这是一天看八小时的台账，不是偶尔瞥一眼的小组件。
+    // 三档同时缩放行高与字号（32/13.5、38/14、46/15），见 .dt-den-* 说明。
+    expect(root.className).toContain("dt-den-compact");
+    await user.click(screen.getByTitle(/行密度/));
+    expect(root.className).toContain("dt-den-standard");
+    await user.click(screen.getByTitle(/行密度/));
+    expect(root.className).toContain("dt-den-relaxed");
+    await user.click(screen.getByTitle(/行密度/));
+    expect(root.className).toContain("dt-den-compact");
+  });
+});
+
+describe("DataTable · 排序", () => {
+  it("中文列按拼音序排，不是 Unicode 码点序", async () => {
+    // 码点序会把「宁德时代」(宁 U+5B81) 排在「比亚迪」(比 U+6BD4) 前面。
+    // 看表的人期望的是拼音 b < h < m < n。
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByText("客户").closest(".dt-sortable")!);
+    const names = screen.getAllByRole("row").slice(1).map((r) => r.textContent ?? "");
+    expect(names[0]).toContain("比亚迪");
+    expect(names[1]).toContain("海尔智家");
+    expect(names[2]).toContain("美的集团");
+    expect(names[3]).toContain("宁德时代");
+  });
+
+  it("单号按自然数序排：DD9 在 DD10 之前", async () => {
+    const user = userEvent.setup();
+    const rows: Row[] = [
+      { id: "a", no: "DD10", customer: "甲", biz: "整车", amount: 1 },
+      { id: "b", no: "DD9", customer: "乙", biz: "整车", amount: 2 },
+      { id: "c", no: "DD100", customer: "丙", biz: "整车", amount: 3 },
+    ];
+    render(<DataTable<Row> columns={COLS} rows={rows} rowKey={(r) => r.id} viewKey={`nat-${Math.random()}`} />);
+    await user.click(screen.getByText("订单号").closest(".dt-sortable")!);
+    const nos = screen.getAllByRole("row").slice(1).map((r) => r.textContent ?? "");
+    expect(nos[0]).toContain("DD9");
+    expect(nos[1]).toContain("DD10");
+    expect(nos[2]).toContain("DD100");
+  });
+
+  it("客户端排序：升 → 降 → 取消", async () => {
+    const user = userEvent.setup();
+    setup();
+    const firstCellText = () => screen.getAllByRole("row")[1].textContent ?? "";
+
+    const th = screen.getByText("客户").closest(".dt-sortable")!;
+    await user.click(th);
+    expect(firstCellText()).toContain("比亚迪");   // 升序（拼音 b 最小）
+    await user.click(th);
+    expect(firstCellText()).toContain("宁德时代"); // 降序（拼音 n 最大）
+    await user.click(th);
+    expect(firstCellText()).toContain("美的集团"); // 取消 → 回原序
+  });
+
+  it("服务端模式下点表头调 onServerSort，不在本地重排", async () => {
+    const user = userEvent.setup();
+    const onServerSort = vi.fn();
+    render(
+      <DataTable<Row>
+        columns={COLS.map((c) => (c.key === "customer" ? { ...c, sortField: "customer__name" } : c))}
+        rows={ROWS} rowKey={(r) => r.id} viewKey={`t4-${Math.random()}`}
+        server={{
+          serverSort: null, onServerSort, page: 1, pageSize: 50, total: 4,
+          onPageChange: vi.fn(),
+        }}
+      />,
+    );
+    await user.click(screen.getByText("客户").closest(".dt-sortable")!);
+    expect(onServerSort).toHaveBeenCalledWith("customer__name");
+    // 本地顺序不变（重排由服务端返回新数据驱动）
+    expect(screen.getAllByRole("row")[1].textContent).toContain("美的集团");
+  });
+});
+
+describe("DataTable · 行选择", () => {
+  it("勾选单行回调 onToggle", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    setup({ selectable: true, selected: new Set<string>(), onToggle, onToggleAll: vi.fn() });
+    const firstRow = screen.getAllByRole("row")[1];
+    await user.click(within(firstRow).getByRole("checkbox"));
+    expect(onToggle).toHaveBeenCalledWith("1");
+  });
+
+  it("选中行带 row-sel 类（左侧色条靠它）", () => {
+    setup({ selectable: true, selected: new Set(["2"]), onToggle: vi.fn(), onToggleAll: vi.fn() });
+    const rows = screen.getAllByRole("row");
+    const selected = rows.filter((r) => r.className.includes("row-sel"));
+    expect(selected).toHaveLength(1);
+    expect(selected[0].textContent).toContain("海尔智家");
+  });
+});
+
+describe("DataTable · 空态", () => {
+  it("无数据时渲染传入的空态", () => {
+    render(
+      <DataTable<Row> columns={COLS} rows={[]} rowKey={(r) => r.id} viewKey={`t5-${Math.random()}`}
+        emptyState={<span>没有匹配的记录</span>} />,
+    );
+    expect(screen.getByText("没有匹配的记录")).toBeInTheDocument();
+  });
+});
+
+describe("DataTable · 列显隐", () => {
+  it("在「列 / 视图」里取消勾选后该列消失", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: "列 / 视图" }));
+    const item = screen.getByRole("checkbox", { name: /客户/ });
+    await user.click(item);
+    expect(headerNames()).not.toContain("客户");
+  });
+
+  it("alwaysVisible 的列不可隐藏", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: "列 / 视图" }));
+    // 订单号是 alwaysVisible，菜单里不该给出可取消的勾选
+    const boxes = screen.getAllByRole("checkbox").map((b) => (b as HTMLInputElement).disabled || !b.getAttribute("name"));
+    expect(boxes.length).toBeGreaterThan(0);
+    expect(headerNames()).toContain("订单号");
+  });
+});
+
+describe("DataTable · 视图持久化", () => {
+  it("密度等视图状态写进 localStorage，重挂载后保留", async () => {
+    const user = userEvent.setup();
+    const viewKey = "persist-check";
+    const { unmount, container } = render(
+      <DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey={viewKey} />,
+    );
+    await user.click(screen.getByTitle(/行密度/));
+    expect(container.querySelector(".dt")!.className).toContain("dt-den-standard");
+    unmount();
+
+    const again = render(
+      <DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey={viewKey} />,
+    );
+    expect(again.container.querySelector(".dt")!.className).toContain("dt-den-standard");
+  });
+});
+
+// ── 键盘：不碰鼠标就能用 ────────────────────────────────
+//
+// 这一组钉的是三个曾经缺失的入口。原实现里 onGridKeyDown 开头是
+// `if (!selF) return`：Tab 进表格再按 ↓ 毫无反应，必须先用鼠标点一个单元格。
+// 一个号称键盘优先的台面，键盘通路却只能靠鼠标进入。同时没有 Enter、没有 Space。
+describe("DataTable · 键盘", () => {
+  const grid = (c: HTMLElement) => c.querySelector(".dt-scroll") as HTMLElement;
+
+  it("没有光标时按 ↓ 从第一格起步，不需要先点鼠标", async () => {
+    const user = userEvent.setup();
+    const { container } = setup();
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(
+      container.querySelector('[data-cell="0-0"]')?.className,
+      "首次按方向键应把光标落在左上角单元格",
+    ).toContain("dt-cellsel");
+  });
+
+  it("Enter 打开光标所在行", async () => {
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+    const { container } = setup({ onRowClick });
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(onRowClick.mock.calls[0][0]).toMatchObject({ id: "2" });
+  });
+
+  it("Space 勾选光标所在行", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    const { container } = setup({ selectable: true, selected: new Set<string>(), onToggle });
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}[Space]");
+    expect(onToggle).toHaveBeenCalledWith("1");
+  });
+
+  it("行级动作按记录 id 找回那一行，列表重排后不会作用到错的行", async () => {
+    // 轮询刷新会插入/重排行。光标停在第 2 行时列表重排，
+    // 若按下标取行，Enter 就落到另一条记录上。
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+    const { container, rerender } = render(
+      <DataTable<Row> columns={COLS} rows={ROWS} rowKey={(r) => r.id} viewKey="kb-reorder" onRowClick={onRowClick} />,
+    );
+    grid(container).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}"); // 光标 → 第 2 行 = id "2"
+    // 模拟刷新：一条新记录插到最前，原来的第 2 行整体下移一位
+    const shifted: Row[] = [{ id: "9", no: "DD009", customer: "新来的", biz: "整车", amount: 1 }, ...ROWS];
+    rerender(
+      <DataTable<Row> columns={COLS} rows={shifted} rowKey={(r) => r.id} viewKey="kb-reorder" onRowClick={onRowClick} />,
+    );
+    await user.keyboard("{Enter}");
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(
+      onRowClick.mock.calls[0][0],
+      "Enter 应作用于光标记住的那条记录（id 2），而不是当前第 2 行（重排后是 id 1）",
+    ).toMatchObject({ id: "2" });
+  });
+});

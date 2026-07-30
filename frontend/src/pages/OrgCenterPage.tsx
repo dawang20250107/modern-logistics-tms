@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 
 import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
+import { fmtDateTime, EMPTY } from "../api/format";
 import { confirmAction } from "../api/confirm";
 import { hasPerm, useAuth } from "../auth/auth";
 import { toast } from "../api/toast";
+import { useModalA11y } from "../api/useModalA11y";
 import type {
   AccountHandover,
   CoverageResult,
@@ -14,9 +16,12 @@ import type {
   OrgTreeNode,
   Paginated,
   RbacMatrix,
+  Role,
+  RoleAssignment,
   ServiceArea,
 } from "../api/types";
 import { AREA_TYPE_LABEL, ORG_PROPERTY_LABEL } from "../api/types";
+import { StateView } from "../components/StateView";
 
 function useOrgOptions() {
   return useQuery({
@@ -28,55 +33,65 @@ function useOrgOptions() {
 
 type Tab = "overview" | "org" | "employees" | "areas" | "rbac" | "audit";
 
+/** 权限点所属模块的中文名。
+ *
+ * 后端 iam_permission.module 存的是英文 slug（finance / waybill / …），
+ * 矩阵直接把它印在分组行上——整页都是中文，只有这两行是 `finance`、`waybill`。
+ * 这和之前订单状态漏出 `pending_confirm` 是同一类问题：内部标识符走到了界面上。
+ * 未知模块保留原值（不是所有部署的权限表都一样），但至少已知的这些要说人话。
+ */
+const PERM_MODULE_LABEL: Record<string, string> = {
+  waybill: "运单", order: "订单", finance: "财务结算", analytics: "经营分析",
+  carrier: "承运商", masterdata: "主数据", telematics: "车联网", org: "组织与权限",
+  audit: "审计", exception: "异常", dispatch: "调度", 通用: "通用",
+};
+
 const STATUS_TAG: Record<string, string> = { active: "low", disabled: "medium", left: "high" };
 const PROPERTY_TAG: Record<string, string> = {
   self: "low", franchise: "medium", outsource: "medium", partner: "low", jv: "medium",
 };
 
-function OverviewTab() {
+/** 组织中心的存量计数（页签角标用）。
+ *
+ * 这些数原先撑起一个「运营总览」页签：六个读数 + 两张各只有一行的表 + 700px 空白，
+ * 而且是默认落地页。更糟的是排版——`.kv` 两列铺满 1490px 宽的页面后，
+ * 「组织总数」和它的「4」隔着 700px 的空白，眼睛得横扫一整屏才能把标签和数字连起来。
+ *
+ * by_property / by_type 这两张分布表也是多余的：组织架构树每行都带经营属性标签，
+ * 服务区划表每行都带类型列——分布在原表里一眼可数，不需要另开一页复述。
+ */
+function useOrgCounts() {
   const q = useQuery({ queryKey: ["org-overview"], queryFn: () => apiGet<OrgOverview>("/org/overview") });
   const d = q.data;
-  if (!d) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
+  return {
+    counts: {
+      org: d?.organizations.total, employees: d?.employees.total, areas: d?.service_areas.total,
+    } as Record<string, number | undefined>,
+    noAccount: d?.employees.active_without_account ?? 0,
+  };
+}
+
+/** 折叠式「新增 X」面板。
+ *
+ * 组织架构 / 员工名录 / 服务区划三个页签，原先每页顶部都常驻一张展开的新增表单，
+ * 各占 160–230px，把真正要看的名录推到折叠线以下。而新增组织这种事一年做几次，
+ * 看名录是每天做几十次——版面按频次排，不按 CRUD 的字母序排。
+ * 收起时只留一条 33px 的触发条，展开后表单原样。
+ */
+function CreatePanel({ title, children, actions }: { title: string; children: React.ReactNode; actions: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="stack">
-      <div className="kv">
-        <div><span>组织总数</span><b>{d.organizations.total}</b></div>
-        <div><span>部门</span><b>{d.departments}</b></div>
-        <div><span>在职员工</span><b>{d.employees.active}</b></div>
-        <div><span>员工总数</span><b>{d.employees.total}</b></div>
-        <div><span>服务区划</span><b>{d.service_areas.total}</b></div>
-        <div>
-          <span>在职无账号</span>
-          <b style={d.employees.active_without_account > 0 ? { color: "var(--red)" } : {}}>
-            {d.employees.active_without_account}
-          </b>
+    <div className="panel">
+      <div className="panel-head">
+        {title}
+        <div className="panel-actions">
+          <button className="btn-ghost small" onClick={() => setOpen((v) => !v)}>{open ? "收起" : `+ ${title}`}</button>
         </div>
       </div>
-      <div className="ct-grid">
-        <div className="panel">
-          <div className="panel-head">经营属性分布</div>
-          <table className="table">
-            <tbody>
-              {Object.entries(d.organizations.by_property).map(([k, v]) => (
-                <tr key={k}><td>{ORG_PROPERTY_LABEL[k] ?? k}</td><td className="mono">{v}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="panel">
-          <div className="panel-head">服务区划构成</div>
-          <table className="table">
-            <tbody>
-              {Object.entries(d.service_areas.by_type).map(([k, v]) => (
-                <tr key={k}><td>{AREA_TYPE_LABEL[k] ?? k}</td><td className="mono">{v}</td></tr>
-              ))}
-              {Object.keys(d.service_areas.by_type).length === 0 && (
-                <tr><td className="muted small" colSpan={2}>暂无区划</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {open && <>
+        <div className="grid-form" style={{ padding: "16px 18px" }}>{children}</div>
+        <div className="form-actions">{actions}</div>
+      </>}
     </div>
   );
 }
@@ -99,7 +114,7 @@ function OrgTreeNodeRow({ node, depth }: { node: OrgTreeNode; depth: number }) {
         </td>
         <td><span className="tag">{node.type_label}</span></td>
         <td><span className={`tag tag-${PROPERTY_TAG[node.org_property] ?? "low"}`}>{node.org_property_label}</span></td>
-        <td className="small">{node.manager_name || "-"}</td>
+        <td className="small">{node.manager_name || EMPTY}</td>
         <td className="mono">{node.direct_headcount}</td>
         <td className="mono"><b>{node.total_headcount}</b></td>
       </tr>
@@ -127,26 +142,28 @@ function OrgCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => void
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <div className="panel">
-      <div className="panel-head">新增组织</div>
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <input className="search" style={{ width: 110 }} placeholder="编码" value={form.code} onChange={(e) => set("code", e.target.value)} />
-        <input className="search" style={{ width: 150 }} placeholder="名称" value={form.name} onChange={(e) => set("name", e.target.value)} />
-        <input className="search" style={{ width: 100 }} placeholder="简称" value={form.short_name} onChange={(e) => set("short_name", e.target.value)} />
-        <select value={form.type} onChange={(e) => set("type", e.target.value)}>
-          {Object.entries(ORG_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select value={form.org_property} onChange={(e) => set("org_property", e.target.value)}>
-          {Object.entries(ORG_PROPERTY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select value={form.parent} onChange={(e) => set("parent", e.target.value)}>
-          <option value="">无上级（根）</option>
-          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <input className="search" style={{ width: 90 }} placeholder="负责人" value={form.manager_name} onChange={(e) => set("manager_name", e.target.value)} />
-        <button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()}>新增</button>
-      </div>
-    </div>
+    <CreatePanel title="新增组织" actions={<button className="btn-primary" disabled={create.isPending || !form.code || !form.name} onClick={() => create.mutate()} title={!form.code ? "请填写编码" : !form.name ? "请填写名称" : undefined}>新增组织</button>}>
+        <label>编码 *<input value={form.code} onChange={(e) => set("code", e.target.value)} placeholder="如 SH01" /></label>
+        <label>名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如 上海分公司" /></label>
+        <label>简称<input value={form.short_name} onChange={(e) => set("short_name", e.target.value)} placeholder="如 上海" /></label>
+        <label>类型
+          <select value={form.type} onChange={(e) => set("type", e.target.value)}>
+            {Object.entries(ORG_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label>经营属性
+          <select value={form.org_property} onChange={(e) => set("org_property", e.target.value)}>
+            {Object.entries(ORG_PROPERTY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label>上级组织
+          <select value={form.parent} onChange={(e) => set("parent", e.target.value)}>
+            <option value="">无上级（根）</option>
+            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+        <label>负责人<input value={form.manager_name} onChange={(e) => set("manager_name", e.target.value)} placeholder="负责人姓名" /></label>
+    </CreatePanel>
   );
 }
 
@@ -172,10 +189,13 @@ function OrgTab() {
         <button className="btn-ghost" style={{ marginLeft: "auto" }} onClick={() => apiDownload("/org/organizations/export", "organizations.csv")}>导出 CSV</button>
       </div>
       {q.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" hint="组织架构暂时无法加载。" onRetry={() => q.refetch()} compact />
       ) : (q.data?.tree.length ?? 0) === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无组织。</div>
+        <StateView kind="empty" title="暂无组织" />
       ) : (
+        <div className="table-wrap">
         <table className="table">
           <thead>
             <tr><th>组织</th><th>类型</th><th>属性</th><th>负责人</th><th>直属</th><th>子树合计</th></tr>
@@ -184,6 +204,7 @@ function OrgTab() {
             {q.data!.tree.map((n) => <OrgTreeNodeRow key={n.id} node={n} depth={0} />)}
           </tbody>
         </table>
+        </div>
       )}
     </div>
     </div>
@@ -199,18 +220,77 @@ function EmployeeCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () =>
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <div className="panel">
-      <div className="panel-head">新增员工</div>
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <input className="search" style={{ width: 110 }} placeholder="工号" value={form.employee_no} onChange={(e) => set("employee_no", e.target.value)} />
-        <input className="search" style={{ width: 110 }} placeholder="姓名" value={form.name} onChange={(e) => set("name", e.target.value)} />
-        <input className="search" style={{ width: 130 }} placeholder="手机号" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
-        <select value={form.organization} onChange={(e) => set("organization", e.target.value)}>
-          <option value="">选择所属组织</option>
-          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <input className="search" style={{ width: 120 }} placeholder="职位" value={form.position} onChange={(e) => set("position", e.target.value)} />
-        <button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()}>新增</button>
+    <CreatePanel title="新增员工" actions={<button className="btn-primary" disabled={create.isPending || !form.employee_no || !form.name} onClick={() => create.mutate()} title={!form.employee_no ? "请填写工号" : !form.name ? "请填写姓名" : undefined}>新增员工</button>}>
+        <label>工号 *<input value={form.employee_no} onChange={(e) => set("employee_no", e.target.value)} placeholder="如 2026001" /></label>
+        <label>姓名 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="员工姓名" /></label>
+        <label>手机号<input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="手机号" /></label>
+        <label>所属组织
+          <select value={form.organization} onChange={(e) => set("organization", e.target.value)}>
+            <option value="">选择所属组织</option>
+            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+        <label>职位<input value={form.position} onChange={(e) => set("position", e.target.value)} placeholder="如 调度专员" /></label>
+    </CreatePanel>
+  );
+}
+
+// 给员工分配角色（落到其登录账号的 RoleAssignment）——权限管理闭环的用户侧。
+function RoleAssignModal({ emp, onClose }: { emp: Employee; onClose: () => void }) {
+  const qc = useQueryClient();
+  const roles = useQuery({ queryKey: ["roles-all"], queryFn: () => apiGet<Paginated<Role>>("/org/roles?page_size=100") });
+  const current = useQuery({ queryKey: ["emp-roles", emp.id], queryFn: () => apiGet<RoleAssignment[]>(`/org/employees/${emp.id}/roles`) });
+  const [sel, setSel] = useState<Set<string> | null>(null);
+  const state = sel ?? new Set((current.data ?? []).map((a) => a.role));
+  const modalRef = useRef<HTMLDivElement>(null);
+  useModalA11y(true, modalRef, onClose);
+
+  const toggle = (id: string) => setSel(() => { const n = new Set(state); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const save = useMutation({
+    mutationFn: () => apiPost(`/org/employees/${emp.id}/roles`, { roles: [...state] }),
+    onSuccess: () => {
+      toast.success(`已更新 ${emp.name} 的角色`);
+      qc.invalidateQueries({ queryKey: ["org-employees"] });
+      qc.invalidateQueries({ queryKey: ["emp-roles", emp.id] });
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div ref={modalRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="分配角色" className="modal-card" style={{ width: "min(520px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="bd-head">
+          <div>
+            <div className="bd-title">分配角色</div>
+            <div className="muted small" style={{ marginTop: 3 }}>{emp.name}（{emp.employee_no}）· {emp.username || "未绑定账号"}</div>
+          </div>
+          <button className="btn-ghost" onClick={onClose}>关闭 [Esc]</button>
+        </div>
+        <div className="bd-body">
+          {!emp.user ? (
+            <StateView kind="empty" title="该员工尚未绑定登录账号" hint="绑定账号后方可分配角色。" />
+          ) : roles.isLoading ? <StateView kind="loading" compact /> : (
+            <div className="stack" style={{ gap: 8 }}>
+              {(roles.data?.items ?? []).map((r) => (
+                <label key={r.id} className="role-pick">
+                  <input type="checkbox" checked={state.has(r.id)} onChange={() => toggle(r.id)} />
+                  <span className="role-pick-body">
+                    <b>{r.name}</b> <span className="muted small mono">{r.code}</span>
+                    <span className="muted small"> · 数据范围 {r.data_scope_label} · {r.permission_count} 权限点</span>
+                  </span>
+                </label>
+              ))}
+              {(roles.data?.items ?? []).length === 0 && <StateView kind="empty" title="暂无角色" hint="先在「权限授权」建立角色并授予权限点。" />}
+            </div>
+          )}
+        </div>
+        <div className="bd-foot">
+          <span className="muted small">角色决定该账号可用功能与数据范围</span>
+          <div style={{ flex: 1 }} />
+          <button className="btn-ghost" onClick={onClose}>取消</button>
+          <button className="btn-primary" disabled={!emp.user || save.isPending} onClick={() => save.mutate()}>{save.isPending ? "保存中…" : "保存角色"}</button>
+        </div>
       </div>
     </div>
   );
@@ -220,6 +300,7 @@ function EmployeesTab() {
   const qc = useQueryClient();
   const orgs = useOrgOptions();
   const [search, setSearch] = useState("");
+  const [roleEmp, setRoleEmp] = useState<Employee | null>(null);
   const q = useQuery({
     queryKey: ["org-employees", search],
     queryFn: () => apiGet<Paginated<Employee>>(`/org/employees?page_size=100&search=${encodeURIComponent(search)}`),
@@ -243,7 +324,15 @@ function EmployeesTab() {
   });
   const resetPwd = useMutation({
     mutationFn: (id: string) => apiPost<{ username: string; password: string }>(`/org/employees/${id}/reset-password`, {}),
-    onSuccess: (d) => toast.success(`新密码（请复制）：${d.username} / ${d.password}`),
+    // 明文凭证不能用自动消失的 toast（易错过），改用需手动确认的弹窗，并尝试写入剪贴板
+    onSuccess: (d) => {
+      navigator.clipboard?.writeText(`${d.username} / ${d.password}`).catch(() => {});
+      confirmAction({
+        title: "密码已重置",
+        message: `账号：${d.username}\n新密码：${d.password}\n\n已尝试复制到剪贴板，请立即转交本人并妥善保管（本弹窗关闭后不再显示）。`,
+        confirmText: "我已复制保存",
+      });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const handover = useMutation({
@@ -290,9 +379,9 @@ function EmployeesTab() {
         <div className="panel-head">
           员工名录
           <div className="form-row" style={{ marginLeft: "auto", gap: 6 }}>
-            <label className="btn-ghost" style={{ cursor: "pointer" }}>
+            <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
               {importCsv.isPending ? "导入中…" : "导入 CSV"}
-              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv.mutate(f); e.target.value = ""; }} />
+              <input className="file-input-accessible" type="file" accept=".csv,text/csv" disabled={importCsv.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv.mutate(f); e.target.value = ""; }} />
             </label>
             <button className="btn-ghost" onClick={() => apiDownload("/org/employees/export", "employees.csv")}>导出 CSV</button>
           </div>
@@ -301,9 +390,10 @@ function EmployeesTab() {
           <input className="search" placeholder="搜索工号/姓名/手机/职位" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} />
           <span className="muted small">共 {q.data?.total ?? 0} 人</span>
         </div>
+        <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>工号</th><th>姓名</th><th>组织</th><th>职位</th><th>直接上级</th><th>账号</th><th>状态</th><th>操作</th></tr>
+            <tr><th>工号</th><th>姓名</th><th>组织</th><th>职位</th><th>角色</th><th>账号</th><th>状态</th><th>操作</th></tr>
           </thead>
           <tbody>
             {employees.length === 0 && <tr><td colSpan={8} className="muted small">暂无员工。</td></tr>}
@@ -311,13 +401,14 @@ function EmployeesTab() {
               <tr key={e.id}>
                 <td className="mono">{e.employee_no}</td>
                 <td><b>{e.name}</b><div className="muted small">{e.phone}</div></td>
-                <td className="small">{e.organization_name || "-"}</td>
-                <td className="small">{e.position || "-"}</td>
-                <td className="small">{e.supervisor_name || "-"}</td>
+                <td className="small">{e.organization_name || EMPTY}</td>
+                <td className="small">{e.position || EMPTY}</td>
+                <td className="small">{(e.role_names ?? []).length > 0 ? (e.role_names ?? []).map((r) => <span key={r} className="tag tag-info" style={{ marginRight: 3 }}>{r}</span>) : <span className="muted">未分配</span>}</td>
                 <td className="small">{e.username ? (e.account_active ? <span className="tag tag-low">{e.username}</span> : <span className="tag tag-medium">{e.username}·禁</span>) : <span className="muted">未绑定</span>}</td>
                 <td><span className={`tag tag-${STATUS_TAG[e.status] ?? "low"}`}>{e.status_label}</span></td>
                 <td>
                   <div className="form-row" style={{ gap: 4 }}>
+                    <button className="btn-ghost small" disabled={!e.user} onClick={() => setRoleEmp(e)}>分配角色</button>
                     {e.status === "active" ? (
                       <button className="btn-ghost small" onClick={() => doDisable(e)}>停用</button>
                     ) : (
@@ -331,11 +422,13 @@ function EmployeesTab() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {(handoverList.data?.items.length ?? 0) > 0 && (
         <div className="panel">
           <div className="panel-head">账号移交记录</div>
+          <div className="table-wrap">
           <table className="table">
             <thead><tr><th>移交人</th><th>接收人</th><th>下属</th><th>部门</th><th>停用账号</th><th>原因</th><th>时间</th></tr></thead>
             <tbody>
@@ -344,14 +437,17 @@ function EmployeesTab() {
                   <td>{h.from_name}</td><td>{h.to_name}</td>
                   <td className="mono">{h.moved_reports}</td><td className="mono">{h.moved_departments}</td>
                   <td>{h.disabled_account ? "是" : "否"}</td>
-                  <td className="small">{h.reason || "-"}</td>
-                  <td className="small">{new Date(h.created_at).toLocaleString("zh-CN")}</td>
+                  <td className="small">{h.reason || EMPTY}</td>
+                  <td className="small">{fmtDateTime(h.created_at)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
+
+      {roleEmp && <RoleAssignModal emp={roleEmp} onClose={() => setRoleEmp(null)} />}
     </div>
   );
 }
@@ -377,10 +473,11 @@ function CoverageRouter() {
       </div>
       {m.data && (
         <div style={{ padding: "0 16px 14px" }} className="stack">
-          <div className="muted small">目的地：{m.data.destination || "-"}</div>
+          <div className="muted small">目的地：{m.data.destination || EMPTY}</div>
           {m.data.resolved.length === 0 ? (
             <div className="muted small">无可承运网点{m.data.excluded.length > 0 ? "（均被排他规则排除）" : ""}。</div>
           ) : (
+            <div className="table-wrap">
             <table className="table">
               <thead><tr><th>排名</th><th>网点</th><th>方式</th><th>命中区划</th><th>优先级</th><th>负责人</th></tr></thead>
               <tbody>
@@ -391,11 +488,12 @@ function CoverageRouter() {
                     <td><span className={`tag tag-${r.area_type === "deliver" ? "low" : "medium"}`}>{r.area_type_label}</span></td>
                     <td className="small">{r.region_name}</td>
                     <td className="mono">{r.priority}</td>
-                    <td className="small">{r.manager_name || "-"}</td>
+                    <td className="small">{r.manager_name || EMPTY}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
           {m.data.excluded.length > 0 && (
             <div className="muted small">
@@ -422,21 +520,21 @@ function AreaCreateForm({ orgs, onDone }: { orgs: OrgOption[]; onDone: () => voi
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <div className="panel">
-      <div className="panel-head">新增服务区划</div>
-      <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-        <select value={org} onChange={(e) => setOrg(e.target.value)}>
-          <option value="">选择归属网点</option>
-          {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <select value={areaType} onChange={(e) => setAreaType(e.target.value)}>
-          {Object.entries(AREA_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <input className="search" style={{ width: 200 }} placeholder="区划名，如 上海市浦东新区" value={regionName} onChange={(e) => setRegionName(e.target.value)} />
-        <input className="search" style={{ width: 90 }} type="number" placeholder="优先级" value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
-        <button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()}>新增</button>
-      </div>
-    </div>
+    <CreatePanel title="新增服务区划" actions={<button className="btn-primary" disabled={create.isPending || !org || !regionName} onClick={() => create.mutate()} title={!org ? "请选择组织" : !regionName ? "请填写区划名称" : undefined}>新增区划</button>}>
+        <label>归属网点 *
+          <select value={org} onChange={(e) => setOrg(e.target.value)}>
+            <option value="">选择归属网点</option>
+            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </label>
+        <label>区划类型
+          <select value={areaType} onChange={(e) => setAreaType(e.target.value)}>
+            {Object.entries(AREA_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label>区划名称 *<input placeholder="如 上海市浦东新区" value={regionName} onChange={(e) => setRegionName(e.target.value)} /></label>
+        <label>优先级<input type="number" placeholder="数值大者优先" value={priority} onChange={(e) => setPriority(Number(e.target.value))} /></label>
+    </CreatePanel>
   );
 }
 
@@ -477,7 +575,7 @@ function AreasTab() {
           </div>
         ))}
         {(q.data?.items.length ?? 0) === 0 && (
-          <div className="muted" style={{ padding: 16 }}>暂无服务区划。</div>
+          <StateView kind="empty" title="暂无服务区划" />
         )}
       </div>
     </div>
@@ -528,9 +626,10 @@ function RbacTab() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (!matrix) return <div className="muted" style={{ padding: 16 }}>加载中…</div>;
+  if (q.isLoading) return <StateView kind="loading" />;
+  if (q.isError || !matrix) return <StateView kind="error" hint="权限矩阵暂时无法加载。" onRetry={() => q.refetch()} />;
   if (matrix.roles.length === 0)
-    return <div className="muted" style={{ padding: 16 }}>暂无角色。</div>;
+    return <StateView kind="empty" title="暂无角色" />;
 
   return (
     <div className="panel">
@@ -558,8 +657,8 @@ function RbacTab() {
             {matrix.modules.map((g) => (
               <Fragment key={g.module}>
                 <tr>
-                  <td colSpan={matrix.roles.length + 1} className="muted small" style={{ background: "var(--panel-2, rgba(255,255,255,0.03))", fontWeight: 600 }}>
-                    {g.module}
+                  <td colSpan={matrix.roles.length + 1} className="muted small" style={{ background: "var(--panel-2)", fontWeight: 600 }}>
+                    {PERM_MODULE_LABEL[g.module] ?? g.module}
                   </td>
                 </tr>
                 {g.permissions.map((p) => (
@@ -611,31 +710,34 @@ function LoginAuditTab() {
         </div>
       </div>
       {q.isLoading ? (
-        <div className="muted" style={{ padding: 16 }}>加载中…</div>
+        <StateView kind="loading" compact />
+      ) : q.isError ? (
+        <StateView kind="error" hint="登录记录暂时无法加载。" onRetry={() => q.refetch()} compact />
       ) : rows.length === 0 ? (
-        <div className="muted" style={{ padding: 16 }}>暂无登录记录。</div>
+        <StateView kind="empty" title="暂无登录记录" />
       ) : (
+        <div className="table-wrap">
         <table className="table">
           <thead><tr><th>时间</th><th>用户名</th><th>结果</th><th>IP</th><th>客户端</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td className="mono small">{new Date(r.created_at).toLocaleString("zh-CN")}</td>
+                <td className="mono small">{fmtDateTime(r.created_at)}</td>
                 <td>{r.username}</td>
                 <td><span className={`tag ${r.success ? "tag-low" : "tag-high"}`}>{r.result_label || (r.success ? "成功" : "失败")}</span></td>
-                <td className="mono small">{r.ip || "-"}</td>
-                <td className="small muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.user_agent}>{r.user_agent || "-"}</td>
+                <td className="mono small">{r.ip || EMPTY}</td>
+                <td className="small muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.user_agent}>{r.user_agent || EMPTY}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
 }
 
 const TABS: { key: Tab; label: string; perm?: string }[] = [
-  { key: "overview", label: "运营总览" },
   { key: "org", label: "组织架构" },
   { key: "employees", label: "员工名录" },
   { key: "areas", label: "服务区划" },
@@ -645,17 +747,27 @@ const TABS: { key: Tab; label: string; perm?: string }[] = [
 
 export function OrgCenterPage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("org");
+  const { counts, noAccount } = useOrgCounts();
   // 无角色权限管理权的用户看不到「权限授权」页签（后端亦 403 兜底）
   const tabs = TABS.filter((t) => !t.perm || hasPerm(user, t.perm));
   return (
     <div className="stack">
       <div className="seg-tabs">
         {tabs.map((t) => (
-          <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>{t.label}</button>
+          <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => setTab(t.key)}>
+            {t.label}
+            {counts[t.key] !== undefined && <span className="seg-n">{counts[t.key]}</span>}
+          </button>
         ))}
       </div>
-      {tab === "overview" && <OverviewTab />}
+      {/* 「在职但没有账号」是待办不是统计：这人来上班了却登不进系统。
+          它必须跨页签常驻，藏进某个页签等于没提醒。 */}
+      {noAccount > 0 && tab !== "employees" && (
+        <button type="button" className="rh-alert" onClick={() => setTab("employees")}>
+          <span><b>{noAccount}</b> 名在职员工尚未开通系统账号，去员工名录开通 →</span>
+        </button>
+      )}
       {tab === "org" && <OrgTab />}
       {tab === "employees" && <EmployeesTab />}
       {tab === "areas" && <AreasTab />}

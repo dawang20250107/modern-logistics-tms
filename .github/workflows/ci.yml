@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  lint-test:
+  gateway:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -19,38 +19,64 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U tms"
           --health-interval 5s --health-timeout 5s --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DJANGO_SETTINGS_MODULE: config.settings.local
-      DJANGO_SECRET_KEY: ci-insecure-secret-min-32-bytes-long
       DATABASE_URL: postgres://tms:tms@localhost:5432/tms
-      REDIS_URL: redis://localhost:6379/0
-      CELERY_BROKER_URL: redis://localhost:6379/1
-      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      DJANGO_SECRET_KEY: ci-insecure-secret-min-32-bytes-long
     defaults:
       run:
-        working-directory: backend
+        working-directory: backend-go
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: "3.13"
-      - run: pip install -r requirements-dev.txt
-      - name: Ruff lint
-        run: ruff check .
-      - name: Migrate
-        run: python manage.py migrate --noinput
+          go-version: "1.25"
+          cache-dependency-path: backend-go/go.sum
+      # runner 上没有中文字体，而水印测试守的正是「本机确实能渲染中文」。
+      # 不装字体就只能把那条断言删掉，等于把生产上"静默不水印"的风险放行。
+      - name: 安装 CJK 字体（水印测试需要）
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
       - name: Test
-        run: pytest
+        run: go test ./...
+      - name: Migrate（空库跑基线 + 增量，确保「从零建库」这条路没断）
+        run: go run ./cmd/migrate
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 22 而不是 20：jsdom 30 依赖 undici 8，后者用到 Node 21.7+ 才有的
+          # webidl.util.markAsUncloneable，在 Node 20 上一 import 就 TypeError。
+          # 而且本地开发用的就是 22 —— CI 与本地不同版本，换来的就是"本地全绿、
+          # CI 红"这种最费时间的失败。Node 20 也已进入弃用轨道。
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      # DataTable 是 10+ 个页面的公共依赖，它坏了整站表格都坏。
+      # 这些用例钉的都是"不报错、只静默失效"那类回归。
+      - name: Test
+        run: npx vitest run
+      - name: Build
+        run: npx vite build
 
   docker-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build backend image
-        run: docker build -t tms-backend:ci backend
+      # 镜像里的字体自检跑在 Dockerfile 的 RUN 里：没有可用 CJK 字体这一步就构建失败
+      - name: Build gateway image
+        run: docker build -t tms-gateway:ci backend-go
+      # 不加管道：静态链接出问题时要让这步真的红，别被 head 的退出码吃掉
+      - name: 冒烟：镜像里的二进制能跑起来
+        run: docker run --rm --entrypoint /app/adminctl tms-gateway:ci -h

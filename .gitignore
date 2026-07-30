@@ -11,6 +11,8 @@ htmlcov/
 .coverage
 db.sqlite3
 db.sqlite3-journal
+*.sqlite3
+dev.sqlite3
 
 # Node / frontend
 node_modules/
@@ -34,7 +36,7 @@ output/*.log
 staticfiles/
 backend/staticfiles/
 media/
-backend/media/
+# （backend/ 已随 Django 退役删除；媒体目录现为顶层 media/）
 celerybeat-schedule*
 
 # Scratch / research artifacts (not part of the project)
@@ -50,3 +52,5 @@ tools/
 Thumbs.db
 dump.rdb
 backend/dump.rdb
+# Go 构建产物
+backend-go/tms-gateway

@@ -21,7 +21,8 @@ export function SignaturePad({ onChange, height = 140 }: { onChange: (dataUrl: s
     if (!drawing.current || !ref.current) return;
     const ctx = ref.current.getContext("2d")!;
     const p = pos(e);
-    ctx.strokeStyle = "#0c1320";
+    // 随主题取签名色（暗色下白底黑线不可见问题）
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#0c1320";
     ctx.lineWidth = 2.2;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -47,13 +48,13 @@ export function SignaturePad({ onChange, height = 140 }: { onChange: (dataUrl: s
         ref={ref}
         width={520}
         height={height}
-        style={{ width: "100%", height, border: "1px dashed var(--line-strong)", borderRadius: 8, touchAction: "none", background: "#fff" }}
+        style={{ width: "100%", height, border: "1px dashed var(--line-strong)", borderRadius: 8, touchAction: "none", background: "var(--panel)" }}
         onPointerDown={start}
         onPointerMove={move}
         onPointerUp={end}
         onPointerLeave={end}
       />
-      <button className="btn-ghost" style={{ marginTop: 8 }} onClick={clear}>清除签名</button>
+      <button type="button" className="btn-ghost" style={{ marginTop: 8 }} onClick={clear}>清除签名</button>
     </div>
   );
 }

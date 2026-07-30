@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiPost } from "../api/client";
+import { IconCheckCircle } from "../components/Icons";
 
 interface Form {
   contact_name: string;
@@ -49,13 +50,13 @@ export function CustomerOrderPage() {
         <div className="public-brand">在线下单</div>
         {done ? (
           <div className="stack" style={{ textAlign: "center", gap: 14, padding: "10px 0" }}>
-            <div style={{ fontSize: 44 }}></div>
+            <div className="public-success-mark" aria-hidden="true"><IconCheckCircle size={30} /></div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>下单成功</div>
             <div className="mono" style={{ fontSize: 16 }}>{done}</div>
             <div className="muted">客服将尽快与您电话确认。请保存订单号，可凭订单号 + 手机号查询进度。</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
               <Link className="btn-primary" to={`/track?order_no=${done}`} style={{ textDecoration: "none" }}>查询进度</Link>
-              <button className="btn-ghost" onClick={() => { setDone(null); setForm(EMPTY); }}>再下一单</button>
+              <button type="button" className="btn-ghost" onClick={() => { setDone(null); setForm(EMPTY); }}>再下一单</button>
             </div>
           </div>
         ) : (
@@ -63,7 +64,7 @@ export function CustomerOrderPage() {
             <p className="muted small" style={{ marginTop: -6 }}>填写下方信息提交运输需求，客服确认后为您安排车辆。</p>
             <div className="grid-form">
               <label>联系人<input value={form.contact_name} onChange={(e) => set("contact_name", e.target.value)} placeholder="您的称呼" /></label>
-              <label>联系电话 *<input value={form.contact_phone} onChange={(e) => set("contact_phone", e.target.value)} placeholder="手机号" /></label>
+              <label>联系电话 *<input value={form.contact_phone} onChange={(e) => set("contact_phone", e.target.value)} placeholder="手机号" inputMode="tel" autoComplete="tel" /></label>
               <label>始发地 *<input value={form.origin} onChange={(e) => set("origin", e.target.value)} placeholder="如 上海" /></label>
               <label>目的地 *<input value={form.destination} onChange={(e) => set("destination", e.target.value)} placeholder="如 成都" /></label>
               <label>货物名称<input value={form.cargo_desc} onChange={(e) => set("cargo_desc", e.target.value)} placeholder="如 电子配件" /></label>
@@ -75,6 +76,7 @@ export function CustomerOrderPage() {
             <button className="btn-primary" style={{ width: "100%", marginTop: 14 }} disabled={!valid || submit.isPending} onClick={() => submit.mutate()}>
               {submit.isPending ? "提交中…" : "提交下单"}
             </button>
+            {submit.isError && <div className="login-error" role="alert">提交失败，请检查网络后重试。</div>}
             {!valid && <div className="muted small" style={{ marginTop: 8, textAlign: "center" }}>请填写联系电话、始发地、目的地</div>}
             <div style={{ textAlign: "center", marginTop: 14 }}>
               <Link className="link small" to="/track">已下单？查询进度 →</Link>

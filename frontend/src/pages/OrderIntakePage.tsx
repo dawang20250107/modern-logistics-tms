@@ -1,170 +1,207 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { apiDownload, apiGet, apiPost } from "../api/client";
-import { confirmAction } from "../api/confirm";
-import { toast } from "../api/toast";
-import type { Order, OrderChannel, Paginated } from "../api/types";
-import { ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, SLA_STATUS_LABEL } from "../api/types";
-import { EmptyState } from "../components/EmptyState";
+import { apiGet } from "../api/client";
+import { useModalA11y } from "../api/useModalA11y";
+import { fmtRelative } from "../api/format";
+import type { Order, Paginated } from "../api/types";
+import { BUSINESS_TYPE_LABEL, ORDER_CHANNEL_LABEL, ORDER_STATUS_LABEL, PRIORITY_LABEL } from "../api/types";
+import { useServerTable } from "../api/useServerTable";
+import { CustomerContextPanel } from "../components/CustomerContextPanel";
+import { DataTable, type DataColumn } from "../components/DataTable";
+import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { OrderLifecycle } from "../components/OrderLifecycle";
+import { StateView } from "../components/StateView";
+import { StatusTag } from "../components/StatusTag";
 import { StructuredOrderForm } from "../components/StructuredOrderForm";
 
-export function OrderIntakePage() {
+const enumOpts = (m: Record<string, string>) => Object.entries(m).map(([value, label]) => ({ value, label }));
+
+const CS_POOL_FILTER_FIELDS: FilterFieldDef[] = [
+  { key: "order_no", label: "订单号", type: "text", accessor: (o) => (o as Order).order_no },
+  { key: "customer", label: "客户", type: "text", accessor: (o) => (o as Order).customer_name || "" },
+  { key: "route", label: "线路", type: "text", accessor: (o) => `${(o as Order).origin || ""}→${(o as Order).destination || ""}` },
+  { key: "status", label: "订单状态", type: "enum", options: enumOpts(ORDER_STATUS_LABEL), accessor: (o) => (o as Order).status },
+  { key: "channel", label: "渠道", type: "enum", options: enumOpts(ORDER_CHANNEL_LABEL), accessor: (o) => (o as Order).channel },
+  { key: "business_type", label: "业务类型", type: "enum", options: enumOpts(BUSINESS_TYPE_LABEL), accessor: (o) => (o as Order).business_type },
+  { key: "priority", label: "优先级", type: "enum", options: enumOpts(PRIORITY_LABEL), accessor: (o) => (o as Order).priority },
+  { key: "exception", label: "异常", type: "enum", options: [{ value: "1", label: "有异常" }, { value: "0", label: "无异常" }], accessor: (o) => ((o as Order).exception_count ?? 0) > 0 ? "1" : "0" },
+  { key: "created_at", label: "建单时间", type: "date", accessor: (o) => (o as Order).created_at },
+];
+
+// 客服订单池：与全站表格能力对齐的 DataTable（服务端搜索/高级筛选/排序/分页）。
+// 双击行/右键可「登记异常」，同步调度与订单管理。
+function CsOrderPool() {
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState("");
-  const [channelFilter, setChannelFilter] = useState("");
+  const [excOrder, setExcOrder] = useState<Order | null>(null);
+  const [onlyException, setOnlyException] = useState(false);
   const [search, setSearch] = useState("");
-  const filterQs = `${statusFilter ? `&status=${statusFilter}` : ""}${channelFilter ? `&channel=${channelFilter}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}`;
-  const orders = useQuery({
-    queryKey: ["orders", statusFilter, channelFilter, search],
-    queryFn: () => apiGet<Paginated<Order>>(`/orders?page_size=50&ordering=-created_at${filterQs}`),
-  });
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orders"] });
+  const [model, setModel] = useState<FilterModel>(EMPTY_MODEL);
+  const [showBuilder, setShowBuilder] = useState(false);
 
-  const ACTION_LABEL: Record<string, string> = { confirm: "已确认", convert: "已转运单" };
-  const act = useMutation({
-    mutationFn: (v: { id: string; action: string }) => apiPost(`/orders/${v.id}/${v.action}`, {}),
-    onSuccess: (_d, v) => { toast.success(ACTION_LABEL[v.action] ?? "操作成功"); invalidate(); },
-  });
-  const clone = useMutation({
-    mutationFn: (id: string) => apiPost<Order>(`/orders/${id}/clone`, {}),
-    onSuccess: (o) => { toast.success(`已复制为草稿：${o.order_no}`); invalidate(); },
-  });
-  const merge = useMutation({
-    mutationFn: (ids: string[]) => apiPost<Order>("/orders/merge", { ids }),
-    onSuccess: (o) => { toast.success(`已合单：${o.order_no}`); setSelected(new Set()); invalidate(); },
-  });
+  const activeCount = activeConditionCount(model, CS_POOL_FILTER_FIELDS);
+  // 「仅看异常」下沉服务端：在筛选模型上附加异常条件（AND 语义）
+  const effectiveModel = useMemo<FilterModel>(() => {
+    if (!onlyException) return model;
+    return {
+      combinator: "and",
+      conditions: [
+        { id: "__exc", field: "exception", op: "in", value: ["1"] },
+        ...(model.combinator === "and" ? model.conditions : []),
+      ],
+    };
+  }, [onlyException, model]);
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const toggle = (id: string) =>
-    setSelected((s) => {
-      const next = new Set(s);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  const BATCH_LABEL: Record<string, string> = { confirm: "确认", pool: "进池", cancel: "取消", delete: "删除" };
-  const batch = useMutation({
-    mutationFn: (v: { action: string; ids: string[] }) =>
-      apiPost<{ ok_count: number; failed: Array<{ order_no: string; error: string }> }>("/orders/batch", v),
-    onSuccess: (r, v) => {
-      const failN = r.failed?.length ?? 0;
-      toast.success(`批量${BATCH_LABEL[v.action]}完成：成功 ${r.ok_count}${failN ? `，失败 ${failN}` : ""}`);
-      setSelected(new Set());
-      invalidate();
-    },
+  const st = useServerTable<Order>({
+    queryKey: ["cs-order-pool"],
+    path: "/orders",
+    pageSize: 50,
+    defaultSort: { field: "created_at", dir: "desc" },
+    model: effectiveModel,
+    search,
   });
-  const runBatch = async (action: string) => {
-    const ids = [...selected];
-    if (ids.length === 0) return;
-    if (action === "cancel" || action === "delete") {
-      const ok = await confirmAction({
-        message: `确定批量${BATCH_LABEL[action]} ${ids.length} 个订单？此操作不可恢复。`,
-        tone: "danger",
-        confirmText: `批量${BATCH_LABEL[action]}`,
-      });
-      if (!ok) return;
-    }
-    batch.mutate({ action, ids });
-  };
+  const anyFilter = Boolean(search.trim()) || onlyException || activeCount > 0;
 
-  const items = orders.data?.items ?? [];
-  const total = orders.data?.total ?? 0;
+  const columns: DataColumn<Order>[] = [
+    { key: "order_no", header: "订单号 (DD)", width: 172, alwaysVisible: true, sortField: "order_no", sortValue: (o) => o.order_no, exportValue: (o) => o.order_no, render: (o) => <Link className="mono small doc-order" to={`/orders/${o.id}`} onClick={(e) => e.stopPropagation()}>{o.order_no}</Link> },
+    { key: "customer", header: "客户", width: 170, sortField: "customer__name", sortValue: (o) => o.customer_name || "", exportValue: (o) => o.customer_name || "散客", render: (o) => (
+      <span className="small">{o.customer_name || "散客"}{(o.exception_count ?? 0) > 0 && <span className={`tag tag-${o.exception_level === "high" ? "high" : o.exception_level === "low" ? "low" : "medium"}`} style={{ marginLeft: 4 }} title="未闭环异常">⚠ 异常{(o.exception_count ?? 0) > 1 ? `×${o.exception_count}` : ""}</span>}</span>
+    ) },
+    { key: "route", header: "线路", width: 150, sortValue: (o) => `${o.origin}${o.destination}`, exportValue: (o) => `${o.origin}→${o.destination}`, render: (o) => <span className="small"><b>{o.origin}</b> → <b>{o.destination}</b></span> },
+    { key: "channel", header: "渠道", width: 100, sortField: "channel", exportValue: (o) => ORDER_CHANNEL_LABEL[o.channel] ?? o.channel, render: (o) => <span className="small muted">{ORDER_CHANNEL_LABEL[o.channel] ?? o.channel}</span> },
+    { key: "status", header: "订单状态", width: 116, sortField: "status", sortValue: (o) => o.status, exportValue: (o) => ORDER_STATUS_LABEL[o.status] ?? o.status, render: (o) => <StatusTag kind="order" value={o.status} /> },
+    { key: "created_at", header: "建单", width: 108, sortField: "created_at", sortValue: (o) => o.created_at, exportValue: (o) => o.created_at, render: (o) => <span className="small muted" title={o.created_at}>{fmtRelative(o.created_at)}</span> },
+    { key: "act", header: "操作", width: 120, alwaysVisible: true, sticky: "right", render: (o) => (
+      <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => setExcOrder(o)}>登记异常</button>
+        <Link className="link small" to={`/orders/${o.id}`}>详情</Link>
+      </div>
+    ) },
+  ];
+
+  const rowMenu = (o: Order) => [
+    { label: "登记异常", onClick: () => setExcOrder(o) },
+    { label: "订单详情", onClick: () => { window.location.href = `/orders/${o.id}`; } },
+  ];
 
   return (
-    <div className="stack">
-      <StructuredOrderForm onCreated={invalidate} />
+    <div className="panel om-panel">
+      {activeCount > 0 && (
+        <div className="om-chips">
+          <span className="muted small">条件（{model.combinator === "and" ? "全部满足" : "任一满足"}）：</span>
+          {model.conditions.map((c) => {
+            const label = describeCondition(c, CS_POOL_FILTER_FIELDS);
+            if (!label) return null;
+            return <span key={c.id} className="filter-chip"><span className="filter-chip-label" title={label}>{label}</span><button type="button" aria-label={`删除条件：${label}`} onClick={() => setModel((m) => ({ ...m, conditions: m.conditions.filter((x) => x.id !== c.id) }))}>×</button></span>;
+          })}
+          <button className="linkish small" onClick={() => setModel(EMPTY_MODEL)}>清空条件</button>
+        </div>
+      )}
+      {st.isError ? (
+        <StateView kind="error" onRetry={() => st.refetch()} />
+      ) : (
+        <DataTable<Order>
+          columns={columns} rows={st.rows} rowKey={(o) => o.id} viewKey="cs-order-pool" exportName="客服订单池"
+          stickyFirst server={st.server} fill hideExport rowMenu={rowMenu} onRowDoubleClick={(o) => setExcOrder(o)}
+          emptyState={anyFilter
+            ? <StateView kind="empty" title="没有匹配的订单" hint="调整筛选条件再试。" />
+            : <StateView kind="empty" title="暂无订单" hint="在「建单工作台」建单后将在此跟进。" />}
+          toolbarLeft={
+            <>
+              <span className="om-title" style={{ marginRight: 2 }}>订单池<span className="ai-pill">{st.total}</span></span>
+              <input className="search" style={{ minWidth: 180, flex: 1, maxWidth: 300 }} placeholder="搜索 订单号 / 客户 / 线路" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div style={{ position: "relative" }}>
+                <button className={`btn-ghost${activeCount > 0 || showBuilder ? " on-accent" : ""}`} onClick={() => setShowBuilder((v) => !v)}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5h18l-7 8v5l-4 2v-7z" /></svg>
+                    高级筛选{activeCount > 0 ? ` · ${activeCount}` : ""}
+                  </span>
+                </button>
+                {showBuilder && <FilterBuilder fields={CS_POOL_FILTER_FIELDS} model={model} onChange={setModel} onClose={() => setShowBuilder(false)} />}
+              </div>
+              <button className={`chip${onlyException ? " chip-on" : ""}`} onClick={() => setOnlyException((v) => !v)}>仅看异常</button>
+            </>
+          }
+          toolbarRight={<Link className="link small" to="/waybills">去订单管理 →</Link>}
+        />
+      )}
 
-      <div className="panel">
-        <div className="panel-head">
-          订单 · {total}
-          <button className="btn-ghost" onClick={() => apiDownload(`/orders/export?page_size=5000${filterQs}`, "orders.csv")}>导出 CSV</button>
+      {excOrder && (
+        <ExceptionRegisterModal
+          order={excOrder}
+          onClose={() => setExcOrder(null)}
+          onDone={() => { setExcOrder(null); queryClient.invalidateQueries({ queryKey: ["cs-order-pool"] }); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// 客服工作台：Tab 切换「建单工作台」（流转纵览 + 全宽建单 + 客户上下文）与「订单池」（登记异常 + 顶级筛选）。
+export function OrderIntakePage() {
+  const queryClient = useQueryClient();
+  const [tab, setTab] = useState<"build" | "pool">("build");
+  const [ctxCustomer, setCtxCustomer] = useState("");
+  const [showCtx, setShowCtx] = useState(false);
+  // Tab 计数徽标：服务端全量计数（page_size=1 仅取 total）
+  const poolQ = useQuery({
+    queryKey: ["cs-order-pool-count"],
+    queryFn: () => apiGet<Paginated<Order>>("/orders?page_size=1"),
+    refetchInterval: 30000,
+  });
+  const poolCount = poolQ.data?.total ?? 0;
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+    queryClient.invalidateQueries({ queryKey: ["cs-order-pool"] });
+  };
+
+  const ctxRef = useRef<HTMLDivElement>(null);
+  useModalA11y(showCtx && Boolean(ctxCustomer), ctxRef, () => setShowCtx(false));
+
+  return (
+    <div className={`stack${tab === "pool" ? " table-page" : ""}`}>
+      <div className="cs-tabbar">
+        <div className="seg-tabs">
+          <button className={tab === "build" ? "active" : ""} onClick={() => setTab("build")}>建单工作台</button>
+          <button className={tab === "pool" ? "active" : ""} onClick={() => setTab("pool")}>订单池{poolCount ? <span className="ai-pill" style={{ marginLeft: 6 }}>{poolCount}</span> : null}</button>
         </div>
-        <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
-          <button className={`chip${statusFilter === "" ? " chip-on" : ""}`} onClick={() => setStatusFilter("")}>全部</button>
-          {["draft", "pending_confirm", "confirmed", "pooled", "dispatching", "converted", "completed", "cancelled"].map((s) => (
-            <button key={s} className={`chip${statusFilter === s ? " chip-on" : ""}`} onClick={() => setStatusFilter(s)}>
-              {ORDER_STATUS_LABEL[s] ?? s}
-            </button>
-          ))}
-          <input
-            className="search"
-            style={{ minWidth: 200, flex: 1 }}
-            placeholder="搜索订单号 / 电话 / 始发 / 目的地"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="form-row" style={{ flexWrap: "wrap", gap: 8, paddingTop: 0 }}>
-          <span className="muted small">来源</span>
-          <button className={`chip${channelFilter === "" ? " chip-on" : ""}`} onClick={() => setChannelFilter("")}>全部</button>
-          {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => (
-            <button key={k} className={`chip${channelFilter === k ? " chip-on" : ""}`} onClick={() => setChannelFilter(k)}>{v}</button>
-          ))}
-        </div>
-        {selected.size > 0 && (
-          <div className="batch-bar">
-            <span>已选 {selected.size} 单</span>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("confirm")}>批量确认</button>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("pool")}>批量进池</button>
-            <button className="btn-ghost" disabled={merge.isPending || selected.size < 2} onClick={async () => {
-              if (await confirmAction({ message: `将选中的 ${selected.size} 张订单合并为一张？原单作废。`, confirmText: "合单" })) merge.mutate([...selected]);
-            }}>合单</button>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("cancel")}>批量取消</button>
-            <button className="btn-ghost" disabled={batch.isPending} onClick={() => runBatch("delete")}>批量删除</button>
-            <button className="btn-ghost" onClick={() => setSelected(new Set())}>清除选择</button>
-          </div>
-        )}
-        {orders.isLoading ? (
-          <div className="muted" style={{ padding: 16 }}>加载中…</div>
-        ) : items.length === 0 ? (
-          <EmptyState
-            title={statusFilter || search ? "没有匹配的订单" : "暂无订单"}
-            hint={statusFilter || search ? "试试调整状态过滤或搜索条件" : "使用上方表单创建订单"}
-          />
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: 36 }}>
-                  <input
-                    type="checkbox"
-                    checked={items.length > 0 && items.every((o) => selected.has(o.id))}
-                    onChange={(e) => setSelected(e.target.checked ? new Set(items.map((o) => o.id)) : new Set())}
-                  />
-                </th>
-                <th>订单号</th><th>渠道</th><th>线路</th><th>货量</th><th>状态</th><th>SLA</th><th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((o) => (
-                <tr key={o.id} style={selected.has(o.id) ? { background: "#f1f5fb" } : {}}>
-                  <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} /></td>
-                  <td className="mono"><Link className="link" to={`/orders/${o.id}`}>{o.order_no}</Link></td>
-                  <td>{ORDER_CHANNEL_LABEL[o.channel]}</td>
-                  <td>{o.origin} → {o.destination}</td>
-                  <td>{o.cargo_weight_ton}吨 / {o.cargo_quantity}件</td>
-                  <td><span className={`tag tag-${o.status === "converted" || o.status === "completed" ? "low" : o.status === "cancelled" ? "none" : "medium"}`}>{ORDER_STATUS_LABEL[o.status] ?? o.status}</span></td>
-                  <td><span className={`tag tag-sla_${o.sla_status}`}>{SLA_STATUS_LABEL[o.sla_status] ?? o.sla_status}</span></td>
-                  <td className="row-actions">
-                    {(o.status === "draft" || o.status === "pending_confirm") && (
-                      <button className="btn-ghost" disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "confirm" })}>确认</button>
-                    )}
-                    {(o.status === "pending_confirm" || o.status === "confirmed") && (
-                      <button className="btn-ghost" disabled={act.isPending} onClick={() => act.mutate({ id: o.id, action: "convert" })}>转运单</button>
-                    )}
-                    <button className="btn-ghost" disabled={clone.isPending} onClick={() => clone.mutate(o.id)}>复制</button>
-                    {(o.waybill_nos ?? []).map((no) => (
-                      <Link key={no} className="link mono small" to={`/waybills/${no}`} style={{ marginLeft: 6 }}>{no}</Link>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <div style={{ flex: 1 }} />
+        <Link className="link small" to="/waybills">订单管理（全量台账）→</Link>
       </div>
+
+      {tab === "build" && (
+        <>
+          <OrderLifecycle />
+          <StructuredOrderForm
+            onCreated={invalidate}
+            onCustomerChange={(id) => { setCtxCustomer(id); setShowCtx(Boolean(id)); }}
+          />
+          {ctxCustomer && !showCtx && (
+            <button className="ctx-reopen" onClick={() => setShowCtx(true)}>
+              查看已选客户上下文（账期/授信/常用线路/未完成单）
+            </button>
+          )}
+        </>
+      )}
+
+      {tab === "pool" && <CsOrderPool />}
+
+      {showCtx && ctxCustomer && (
+        <div className="modal-overlay" onClick={() => setShowCtx(false)}>
+          <div ref={ctxRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="客户上下文" className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span>客户上下文</span>
+              <button className="btn-ghost" onClick={() => setShowCtx(false)}>关闭 [Esc]</button>
+            </div>
+            <div className="modal-body">
+              <CustomerContextPanel customerId={ctxCustomer} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

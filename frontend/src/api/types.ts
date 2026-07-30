@@ -5,11 +5,41 @@ export interface CurrentUser {
   username: string;
   nickname: string;
   phone: string;
+  email: string;
+  avatar_url: string | null;
+  preferences: UserPreferences;
   is_staff: boolean;
   is_superuser: boolean;
   organization_id: string | null;
+  organization_name: string | null;
+  date_joined: string | null;
+  last_login: string | null;
   roles: string[];
+  role_names: string[];
   permissions: string[];
+}
+
+export interface UserPreferences {
+  default_route?: string;
+  table_density?: "standard" | "compact";
+  page_size?: number;
+  notify_desktop?: boolean;
+  notify_email?: boolean;
+}
+
+export interface AuthMethods {
+  password: boolean;
+  wechat: { enabled: boolean; note: string };
+}
+
+export interface LoginAttemptRow {
+  id: string;
+  username: string;
+  success: boolean;
+  result: string;
+  ip: string | null;
+  user_agent: string;
+  created_at: string;
 }
 
 export interface Contract {
@@ -98,6 +128,13 @@ export interface Waybill {
   destination: string;
   status: string;
   dispatch_status: string;
+  dispatch_type: string;
+  dispatch_type_label: string;
+  channel: string;
+  platform_name: string;
+  platform_order_no: string;
+  receivable_amount: number;
+  payable_amount: number;
   risk_level: RiskLevel;
   receipt_status: string;
   eta_drift_minutes: number;
@@ -245,7 +282,7 @@ export interface ExceptionEvent {
   event_time: string;
 }
 export const EXC_EVENT_LABEL: Record<string, string> = {
-  create: "立案", assign: "指派", handle: "处理", ai_resolve: "AI 诊断", close: "闭环",
+  create: "立案", assign: "指派", handle: "处理", close: "闭环",
 };
 
 export interface Receipt {
@@ -382,9 +419,20 @@ export interface Order {
   is_hazardous: boolean;
   temperature_range: string;
   claimed_by_name: string;
+  customer_level?: string;
+  assigned_to?: string | null;
+  assigned_to_name?: string;
+  assigned_by_name?: string;
+  dispatchable?: boolean;
+  lock_state?: "free" | "mine" | "locked" | "assigned_mine" | "assigned_other";
   created_by_name: string;
   sla_status: string;
   pooled_at: string | null;
+  claimed_at?: string | null;
+  assigned_at?: string | null;
+  dispatched_at?: string | null;
+  exception_count?: number;
+  exception_level?: string;
   delivered_at: string | null;
   raw_text: string;
   ai_conversation_id: string;
@@ -449,7 +497,8 @@ export const ATTACHMENT_KIND_LABEL: Record<string, string> = {
   contract: "合同", authorization: "委托书", photo: "货物照片", other: "其他",
 };
 export const SETTLEMENT_LABEL: Record<string, string> = { monthly: "月结", cash: "现结", prepaid: "预付" };
-export const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个人", enterprise: "企业", government: "政府" };
+export const SOURCE_TYPE_LABEL: Record<string, string> = { individual: "个体", enterprise: "企业", government: "政府" };
+export const CUSTOMER_LEVEL_LABEL: Record<string, string> = { S: "S · 战略", A: "A · 重点", B: "B · 常规", C: "C · 一般", D: "D · 观察" };
 
 export const SLA_STATUS_LABEL: Record<string, string> = {
   pending: "进行中", at_risk: "临期", on_time: "准时", breached: "超时",
@@ -460,8 +509,39 @@ export const BODY_TYPE_LABEL: Record<string, string> = {
   hazmat: "危运", fence: "仓栅", wing: "飞翼", tank: "罐式",
 };
 
+export interface CarrierScoreRow {
+  carrier_id: string;
+  carrier: string;
+  carrier_grade: string;
+  quote: number | null;
+  recent_deal_price: number | null;
+  suggested_price_band: [number, number] | null;
+  deals: number;
+  route_hits: number;
+  on_time_rate: number;
+  exception_rate: number;
+  receipt_timely_rate: number;
+  score: number;
+  risk_level: string;
+  label: string;
+  risk_notes: string[];
+}
+
+export interface CarrierRecommendation {
+  carrier_id: string;
+  carrier: string;
+  suggested_price_band: [number, number] | null;
+  risk_level: string;
+  label: string;
+  reasons: string[];
+  risk_notes: string[];
+  needs_approval: boolean;
+}
+
 export interface DispatchSuggestion {
   order_no: string;
+  carrier_recommendations: CarrierScoreRow[];
+  recommendation: CarrierRecommendation | null;
   vehicle_candidates: Array<{ vehicle_id?: string; plate_no: string; utilization: number; compliance?: string[]; compliance_ok?: boolean; body_type?: string; vehicle_length_m?: number }>;
   carrier_quotes: Array<{ carrier_id?: string; carrier: string; quote: number }>;
   ymm_quote?: YmmQuote;
@@ -483,14 +563,73 @@ export interface YmmQuote {
 }
 
 export const BUSINESS_TYPE_LABEL: Record<string, string> = {
-  ftl: "整车", ltl: "零担", express: "快递", coldchain: "冷链",
+  ftl: "整车", ltl: "零担", express: "快递", coldchain: "冷链", hazmat: "危化",
 };
 export const PRIORITY_LABEL: Record<string, string> = {
   normal: "普通", urgent: "加急", vip: "VIP",
 };
 export const DISPATCH_TYPE_LABEL: Record<string, string> = {
-  own_vehicle: "自有单车", fleet: "自有车队", third_party: "三方承运商",
+  own_vehicle: "自营单车", fleet: "自营车队", third_party: "外包承运商", platform: "网货平台",
 };
+// 承运通道大类配色（列表通道标签）
+export const CHANNEL_TAG: Record<string, string> = {
+  自营: "tag-low", 外包: "tag-info", 网货: "tag-medium",
+};
+
+// ── 派车批次（批量派承运商）─────────────────────────────
+export const ALLOCATION_LABEL: Record<string, string> = {
+  by_weight: "按吨占比", even: "均摊", manual: "逐单指定",
+};
+export const BATCH_STATUS_LABEL: Record<string, string> = {
+  draft: "草稿", dispatched: "已派车", partial: "部分完成", completed: "已完成", cancelled: "已取消",
+};
+export interface DispatchBatch {
+  id: string;
+  batch_no: string;
+  dispatch_type: string;
+  dispatch_type_label: string;
+  carrier: string | null;
+  carrier_name: string;
+  platform_name: string;
+  status: string;
+  status_label: string;
+  allocation: string;
+  allocation_label: string;
+  total_payable: string;
+  order_count: number;
+  total_weight_ton: string;
+  note: string;
+  statement_no: string;
+  created_by_name: string;
+  customer_summary: string[];
+  created_at: string;
+}
+export interface BatchWaybill {
+  id: string;
+  waybill_no: string;
+  order_no: string;
+  customer_name: string;
+  origin: string;
+  destination: string;
+  cargo_weight_ton: string;
+  cargo_quantity: number;
+  status: string;
+  status_label: string;
+  payable: number | null;
+}
+export interface DispatchBatchDetail extends DispatchBatch {
+  waybills: BatchWaybill[];
+}
+export interface BatchDispatchResult {
+  batch_no: string;
+  batch_id: string;
+  carrier: string;
+  order_count: number;
+  total_payable: number;
+  ok: Array<{ order_no: string; waybill_no: string; payable: number; customer: string }>;
+  failed: Array<{ order_no: string; reason: string }>;
+  skipped: Array<{ order_no: string; reason: string }>;
+}
 export interface DuplicateOrder {
   id: string;
   order_no: string;
@@ -544,14 +683,31 @@ export interface Statement {
   counterparty_name: string;
   period_start: string;
   period_end: string;
+  due_date: string | null;
   total_amount: string;
   item_count: number;
   external_total: string;
   diff: string;
+  settled_amount: string;
+  outstanding: string;
+  settled_at: string | null;
   status: string;
+  status_label?: string;
   audited_at: string | null;
   created_at: string;
   lines?: StatementLine[];
+}
+export interface StatementPayment {
+  id: string;
+  statement: string;
+  amount: string;
+  method: string;
+  method_label: string;
+  paid_at: string;
+  reference_no: string;
+  remark: string;
+  created_by_name: string;
+  created_at: string;
 }
 export interface StatementAuditResult {
   total_lines: number;
@@ -562,8 +718,121 @@ export interface StatementAuditResult {
 export const STATEMENT_STATUS_LABEL: Record<string, string> = {
   draft: "草稿",
   confirmed: "已确认",
+  partial: "部分结算",
   settled: "已结算",
 };
+export const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  bank: "银行转账",
+  cash: "现金",
+  wechat: "微信",
+  alipay: "支付宝",
+  offset: "冲抵/对冲",
+  acceptance: "承兑汇票",
+  other: "其他",
+};
+
+// ── 对账总览 / 账龄 ─────────────────────────────────────
+export interface DirSummary {
+  total: number;
+  settled: number;
+  outstanding: number;
+  count: number;
+  draft: number;
+  confirmed: number;
+  partial: number;
+  settled_count: number;
+}
+export interface TopCounterparty {
+  counterparty_id: string;
+  counterparty_name: string;
+  outstanding: number;
+  count: number;
+}
+export interface StatementOverview {
+  receivable: DirSummary;
+  payable: DirSummary;
+  overdue: { receivable: { amount: number; count: number }; payable: { amount: number; count: number } };
+  period: { label: string; count: number; receivable: number; payable: number };
+  top_receivable: TopCounterparty[];
+  top_payable: TopCounterparty[];
+  net_position: number;
+}
+export interface AgingRow {
+  counterparty_id: string;
+  counterparty_name: string;
+  b0_30: number;
+  b31_60: number;
+  b61_90: number;
+  b90: number;
+  total: number;
+}
+export interface AgingReport {
+  direction: "receivable" | "payable";
+  rows: AgingRow[];
+  totals: { b0_30: number; b31_60: number; b61_90: number; b90: number; total: number };
+}
+
+// ── 单据血缘（订单 → 运单 → 对账单）──────────────────────
+export interface LineageStatement {
+  id: string;
+  statement_no: string;
+  direction: "receivable" | "payable";
+  counterparty_type: string;
+  counterparty_name: string;
+  status: string;
+  status_label: string;
+  total_amount: number;
+  settled_amount: number;
+  outstanding: number;
+  period_start: string;
+  period_end: string;
+}
+export interface LineageExpense {
+  direction: string;
+  expense_item_code: string;
+  amount: number;
+  payee_type: string;
+  payee_ref: string;
+  risk_status: string;
+}
+export interface LineageWaybill {
+  id: string;
+  waybill_no: string;
+  status: string;
+  status_label: string;
+  carrier_name: string;
+  dispatch_type: string;
+  batch_no: string;
+  receivable: number;
+  payable: number;
+  expenses: LineageExpense[];
+  statements: LineageStatement[];
+}
+export interface LineageBatch {
+  batch_no: string;
+  carrier_name: string;
+  status: string;
+  statement_no: string;
+  order_count: number;
+  total_payable: number;
+}
+export interface OrderLineage {
+  order: {
+    id: string;
+    order_no: string;
+    status: string;
+    status_label: string;
+    customer_name: string;
+    business_type: string;
+    quoted_amount: number;
+    created_at: string;
+  };
+  waybills: LineageWaybill[];
+  batches: LineageBatch[];
+  ar_statements: LineageStatement[];
+  ap_statements: LineageStatement[];
+  summary: { waybill_count: number; receivable_total: number; payable_total: number; gross: number; statement_count: number };
+}
 
 // ── 车队合规预警 ────────────────────────────────────────
 export type CredSeverity = "expired" | "critical" | "warning";
@@ -616,16 +885,84 @@ export const PRICE_TYPE_LABEL: Record<string, string> = { income: "收入价（�
 // ── 主数据(精简) ───────────────────────────────────────
 export interface Customer {
   id: string; code: string; name: string;
+  category?: string; level?: string; level_label?: string;
   contact_name?: string; contact_phone?: string; wechat_group?: string; settlement_type?: string;
   credit_limit?: number | string; credit_days?: number; billing_day?: number; is_active?: boolean;
 }
+export interface CarrierExpiryAlert { field: string; label: string; date: string; expired: boolean }
+export interface CarrierPerformance {
+  deals: number; route_hits: number; on_time_rate: number; exception_rate: number;
+  receipt_timely_rate: number; recent_deal_price: number | null; has_history: boolean;
+  frequent_routes?: Array<{ origin: string; destination: string; deals: number }>;
+}
 export interface Carrier {
   id: string; code: string; name: string;
-  contact_name?: string; contact_phone?: string; settlement_type?: string; is_active?: boolean;
+  carrier_type?: string; carrier_type_label?: string;
+  contact_name?: string; contact_phone?: string; city?: string; service_area?: string;
+  settlement_type?: string; is_active?: boolean;
   grade?: string; grade_label?: string; blacklisted?: boolean; blacklist_reason?: string;
-  business_license_no?: string; qualification_expiry?: string | null;
+  business_license_no?: string; transport_license_no?: string; qualification_expiry?: string | null;
+  contract_expiry?: string | null; insurance_expiry?: string | null; tax_no?: string;
   credit_limit?: number | string; credit_days?: number; billing_day?: number;
   dispatch_blocked?: string;
+  expiry_alerts?: CarrierExpiryAlert[];
+  performance?: CarrierPerformance | null;
+}
+export interface CustomerAddrRow { address: string; contact_name: string; contact_phone: string; count: number }
+export interface CustomerOrderBrief {
+  order_no: string; status: string; status_label: string; route: string; cargo: string;
+  quoted_amount: number; created_at: string | null;
+}
+export interface CustomerContext {
+  customer_id: string; name: string;
+  profile: { settlement_type: string; credit_limit: number; credit_days: number; billing_day: number };
+  credit: { limit: number; outstanding: number; available: number | null; used_pct: number | null; over_limit: boolean };
+  common_routes: string[];
+  common_pickups: CustomerAddrRow[];
+  common_deliveries: CustomerAddrRow[];
+  recent_orders: CustomerOrderBrief[];
+  open_orders: CustomerOrderBrief[];
+  counts: { total: number; open: number; exceptions: number; receipt_pending: number };
+}
+export interface LookupAnswer {
+  kind: "waybill" | "order" | "vehicle" | "driver" | "customer" | "none";
+  title?: string;
+  waybill_no?: string;
+  order_no?: string;
+  customer_id?: string;
+  driver_phone?: string;
+  fields?: Array<{ label: string; value: string }>;
+  actions?: string[];
+}
+export interface LookupResult {
+  kind: "waybill" | "order" | "customer" | "carrier" | "statement";
+  title: string;
+  subtitle: string;
+  path: string;
+}
+export interface LookupResponse {
+  answer: LookupAnswer;
+  results: LookupResult[];
+}
+export interface FinanceCardData {
+  waybill_no: string; customer_name: string; carrier_name: string;
+  receivable: number; payable: number; other_fee: number; gross_margin: number;
+  margin_pct: number | null; exception_deduction: number;
+  receipt_ok: boolean; reconcilable: boolean; blockers: string[];
+}
+export interface ReplyCardData {
+  waybill_no: string; route: string; status: string; status_label: string;
+  driver_name: string; driver_phone: string; plate_no: string;
+  latest_node: { node: string; at: string | null } | null;
+  eta: string | null; receipt_status: string; exception: string | null; copy_text: string;
+}
+export interface CarrierLanePrice {
+  id: string; carrier: string; carrier_name?: string;
+  origin_city: string; dest_city: string; vehicle_type?: string; vehicle_length_m?: number | string;
+  standard_price: number | string; min_price?: number | string; max_price?: number | string;
+  last_deal_price?: number | string;
+  effective_from?: string | null; effective_to?: string | null;
+  is_preferred?: boolean; is_recommended?: boolean; note?: string; is_active?: boolean;
 }
 
 // ── 指标与经营看板 ────────────────────────────────────────────
@@ -635,7 +972,7 @@ export interface MetricCard {
   unit: string;
   domain: string;
   value: number;
-  breakdown?: Array<{ key: string; value: number }>;
+  breakdown?: Array<{ key: string; label?: string; value: number }>;
 }
 export const METRIC_DOMAIN_LABEL: Record<string, string> = {
   ops: "运单 / 履约",
@@ -684,6 +1021,9 @@ export interface DriverLookup {
 export const CRED_TYPE_LABEL: Record<string, string> = {
   vehicle_license: "车头行驶证", trailer_license: "车挂行驶证",
   driving_license: "驾驶证", transport_cert: "道路运输证", id_card: "身份证",
+};
+export const OCR_STATUS_LABEL: Record<string, string> = {
+  pending: "待识别", processing: "识别中", done: "已识别", failed: "识别失败", manual: "待人工",
 };
 
 // ── 通知 / 订单事件 ─────────────────────────────────────
@@ -771,6 +1111,7 @@ export interface Employee {
   user: string | null;
   username: string;
   account_active: boolean;
+  role_names?: string[];
 }
 
 export interface ServiceArea {
@@ -817,6 +1158,26 @@ export interface RbacMatrix {
   modules: Array<{ module: string; permissions: Array<{ id: string; code: string; name: string }> }>;
   roles: Array<{ id: string; code: string; name: string; data_scope: string; is_active: boolean; permission_codes: string[] }>;
   permission_total: number;
+}
+
+export interface Role {
+  id: string;
+  code: string;
+  name: string;
+  data_scope: string;
+  data_scope_label: string;
+  is_active: boolean;
+  permission_codes: string[];
+  permission_count: number;
+}
+
+export interface RoleAssignment {
+  id: string;
+  role: string;
+  role_code: string;
+  role_name: string;
+  username: string;
+  organization_name: string;
 }
 
 export interface OrgOption {
@@ -867,3 +1228,25 @@ export interface AuditLog {
   payload: Record<string, unknown>;
   created_at: string;
 }
+
+// 审计资源类型 → 中文业务名（未知回退原值）
+export const RESOURCE_TYPE_LABEL: Record<string, string> = {
+  waybill: "运单", order: "订单", statement: "对账单", user: "用户", customer: "客户",
+  carrier: "承运商", vehicle: "车辆", driver: "司机", b2bpartner: "业务伙伴",
+  pricingrule: "计价规则", laneprice: "线路价", role: "角色", org: "组织", employee: "员工",
+  template: "模板", credential: "资质证照", payment: "收付款", exception: "异常",
+};
+export const resourceTypeLabel = (t: string): string => RESOURCE_TYPE_LABEL[t] ?? (t || "—");
+
+// 审计动作 → 中文（常见 CRUD/账户动作；agent_tool:* 归为「AI 工具」；未知回退原值）
+const AUDIT_ACTION_LABEL: Record<string, string> = {
+  create: "新建", update: "更新", delete: "删除", read: "查看", list: "列表",
+  login: "登录", logout: "登出", export: "导出", import: "导入",
+  approve: "审批", reject: "驳回", cancel: "取消", void: "作废",
+  dispatch: "派单", transition: "状态流转", settle: "核销", sign: "签收",
+};
+export const auditActionLabel = (a: string): string => {
+  if (!a) return "—";
+  if (a.startsWith("agent_tool:")) return `AI 工具·${a.slice(11)}`;
+  return AUDIT_ACTION_LABEL[a] ?? a;
+};

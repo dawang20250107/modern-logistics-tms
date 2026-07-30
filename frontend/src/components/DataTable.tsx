@@ -603,6 +603,15 @@ export function DataTable<T>({
 
   return (
     <div className={`dt dt-den-${density}${fill ? " dt-fill" : ""}${fullscreen ? " dt-fs" : ""}`}>
+      {/* 批量条**替换**工具条，而不是插在它下面。
+          原来是两条并存：勾选一行，整张表向下跳 55px（实测首行 y 从 171 → 226）。
+          一天勾几百次，每次都丢一遍视线位置——这是坐标恒定原则最贵的一处违反。
+          同位同高换内容之后，勾选只改这条的底色和内容，下面一个像素都不动。
+          选中期间工具条上的筛选被遮住是有意的：拿着一批选中项去改筛选，
+          会让选区底下的行集合变掉，本来就该拦住。 */}
+      {batchBar ? (
+        <div className="dt-toolbar dt-toolbar-batch">{batchBar}</div>
+      ) : (
       <div className="dt-toolbar">
         <div className="dt-toolbar-main">{toolbarLeft}</div>
         <div className="dt-toolbar-actions">
@@ -677,8 +686,7 @@ export function DataTable<T>({
           )}
         </div>
       </div>
-
-      {batchBar}
+      )}
 
       {server && <div className={`dt-loadbar${server.loading ? " on" : ""}`} aria-hidden />}
 

@@ -1285,12 +1285,18 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 .preset-x:hover { color: var(--red); background: var(--red-weak); border-color: var(--red-line); }
 
 /* ── Batch bar ──────────────────────────────────────── */
+/* 批量条现在住在工具条里（见 DataTable 的注释），所以不需要自己的内衬、
+   底色、边框和 sticky —— 外层 .dt-toolbar-batch 全包了。
+   nowrap 是必须的：一旦换行，这条就变高，替换在位就白做了。 */
 .batch-bar {
-  display: flex; align-items: center; gap: 10px; padding: 10px 18px; flex-wrap: wrap;
-  background: var(--accent-weak); border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 500; color: var(--ink-2);
-  position: sticky; top: 0; z-index: 4; /* 长表滚动时批量动作条常驻可见 */
-  backdrop-filter: var(--glass-blur);
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+  font-size: 12.5px; font-weight: 500; color: var(--ink-2);
 }
+.batch-bar::-webkit-scrollbar { display: none; }
+.batch-bar > * { flex: none; }
+/* 换底色让「现在处于批量模式」一眼可见，高度与常态工具条完全一致 */
+.dt-toolbar-batch { background: var(--accent-weak); box-shadow: inset 2px 0 0 var(--accent); }
 
 /* ── 司机端布局（收敛内联样式，统一节奏） ───────────── */
 .drv-login-hero { text-align: center; margin-bottom: var(--sp-6); }
@@ -1529,9 +1535,18 @@ button:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible, s
 @media (max-width: 1100px) { .cs-workbench { grid-template-columns: 1fr; } }
 
 /* ── DataTable（列显隐/排序/列宽/固定列/保存视图） ──── */
-/* 工具条 64 → 44px。里面装的是搜索框 + 一排按钮，28px 控件 + 8px 内衬就够。 */
-.dt-toolbar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--line-2); background: var(--panel-2); }
-.dt-toolbar-main { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; min-width: 0; }
+/* 工具条 64 → 44px。里面装的是搜索框 + 一排按钮，28px 控件 + 8px 内衬就够。
+   高度用 min-height 钉死而不是靠内容撑：批量条会替换它（见 .dt-toolbar-batch），
+   两种模式的内容高度略有差别（实测差 6px），不钉死的话勾选一行整张表还是会跳。
+   flex-wrap: nowrap + 内部横向滚动：控件多到装不下时让它自己滚，不换行长高。 */
+.dt-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  min-height: 44px; height: 44px; flex-wrap: nowrap; overflow: hidden;
+  border-bottom: 1px solid var(--line-2); background: var(--panel-2);
+}
+.dt-toolbar-main { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: nowrap; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.dt-toolbar-main::-webkit-scrollbar { display: none; }
+.dt-toolbar-main > * { flex: none; }
 .dt-toolbar-actions { display: flex; align-items: center; gap: 6px; position: relative; flex: none; }
 .dt-toolbar-actions .btn-ghost { padding-inline: 11px; }
 /* 空态不该独占半屏。表格空的时候用户要么去建单、要么去改筛选，

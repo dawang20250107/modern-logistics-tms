@@ -90,7 +90,11 @@ func (e *testEnv) mkUser(superuser bool, perms ...string) string {
 		e.t.Fatalf("建账号失败：%v", err)
 	}
 	e.t.Cleanup(func() {
-		_, _ = e.pool.Exec(context.Background(), `DELETE FROM accounts_user WHERE id=$1::uuid`, uid.String())
+		ctx := context.Background()
+		_, _ = e.pool.Exec(ctx, `DELETE FROM iam_role_assignment WHERE user_id=$1::uuid`, uid.String())
+		_, _ = e.pool.Exec(ctx, `DELETE FROM iam_login_attempt WHERE user_id=$1::uuid`, uid.String())
+		_, _ = e.pool.Exec(ctx, `DELETE FROM iam_token_denylist WHERE user_id=$1::uuid`, uid.String())
+		_, _ = e.pool.Exec(ctx, `DELETE FROM accounts_user WHERE id=$1::uuid`, uid.String())
 	})
 
 	if len(perms) > 0 {
@@ -102,7 +106,13 @@ func (e *testEnv) mkUser(superuser bool, perms ...string) string {
 			e.t.Fatalf("建角色失败：%v", err)
 		}
 		e.t.Cleanup(func() {
-			_, _ = e.pool.Exec(context.Background(), `DELETE FROM iam_role WHERE id=$1::uuid`, rid.String())
+			// 依赖顺序：分配 → 角色权限 → 角色。少了前两条，角色删不掉（外键挡着），
+			// 而错误在这里是被忽略的，于是库里会一轮一轮攒下 authz_test_role_*。
+			// 测试留垃圾比测试失败更坏：它让人开始不信任这套用例。
+			ctx := context.Background()
+			_, _ = e.pool.Exec(ctx, `DELETE FROM iam_role_assignment WHERE role_id=$1::uuid`, rid.String())
+			_, _ = e.pool.Exec(ctx, `DELETE FROM iam_role_permissions WHERE role_id=$1::uuid`, rid.String())
+			_, _ = e.pool.Exec(ctx, `DELETE FROM iam_role WHERE id=$1::uuid`, rid.String())
 		})
 		for _, p := range perms {
 			if _, err := e.pool.Exec(ctx, `

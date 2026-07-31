@@ -39,10 +39,15 @@ jobs:
         run: go vet ./...
       - name: Build
         run: go build ./...
-      - name: Test
-        run: go test ./...
       - name: Migrate（空库跑基线 + 增量，确保「从零建库」这条路没断）
         run: go run ./cmd/migrate
+      # 播种必须在测试之前：数据范围那组用例要判断「收窄生效」还是「本来就没数据」，
+      # 空库上它们只能 skip —— 而那恰恰是最值得测的一组。
+      # 顺带也验了 seed 本身在空库上跑得通（它有 8 个域的外键顺序要对）。
+      - name: Seed（演示数据，让数据范围用例有东西可测）
+        run: go run ./cmd/seed
+      - name: Test
+        run: go test ./...
 
   frontend:
     runs-on: ubuntu-latest

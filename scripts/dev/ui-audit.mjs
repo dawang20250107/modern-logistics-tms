@@ -110,8 +110,18 @@ const MEASURE = () => {
   // 预算管的是台账/表单/导航这些地方的颜色是否泛滥。
   // 图例色块也算图表的一部分：它和条形/扇形是同一套编码，不是额外的颜色开销。
   const inChart = (el) => el.closest(".recharts-wrapper, .ct-bar, .ct-legend, svg, .kpi-spark") !== null;
-  let colored = 0;
-  const coloredSamples = [];
+  // 数的是**颜色角色的种类**，不是被染色的 DOM 节点个数。
+  //
+  // 第一版按节点计数。库里铺进演示数据之后，同一批页面立刻从 10 涨到 14——
+  // 多出来的全是行数带来的重复：8 个承运商名就是 8 个 `link`，
+  // 4 行启用勾选框就是 4 个 `INPUT`。可那是**同一个决定**被应用了 N 次，
+  // 不是界面上多出了 N 种颜色信号。按节点数的话，预算会随数据量涨，
+  // 于是要么天天误报，要么被迫把上限调高到失去意义——两条路都通向"尺子不再有用"。
+  //
+  // 预算真正要管的是「这一屏用了几种颜色去说事」：
+  // 蓝色链接是一种、琥珀状态是一种、红色告警是一种。种类少，颜色才是信号。
+  // 所以按 (类名 + 前景色 + 背景色) 归并，同一角色只计一次。
+  const roles = new Map();
   for (const el of document.querySelectorAll("body *")) {
     const b = el.getBoundingClientRect();
     if (b.top < 0 || b.bottom > vh || b.width === 0 || b.height === 0) continue;
@@ -126,9 +136,15 @@ const MEASURE = () => {
     const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
     const hasBg = bg && bg.a > 0.15;
     if (!hasText && !hasBg) continue;
-    colored += 1;
-    if (coloredSamples.length < 8) coloredSamples.push(`${el.className || el.tagName}`.slice(0, 34));
+    const key = `${el.className || el.tagName}|${cs.color}|${hasBg ? cs.backgroundColor : ""}`;
+    if (!roles.has(key)) roles.set(key, { label: `${el.className || el.tagName}`.slice(0, 30), n: 0 });
+    roles.get(key).n += 1;
   }
+  const colored = roles.size;
+  // 样本带上出现次数：`link ×8` 一眼看得出"这是一种角色重复了 8 次"
+  const coloredSamples = [...roles.values()]
+    .sort((a, b) => b.n - a.n).slice(0, 8)
+    .map((r) => (r.n > 1 ? `${r.label} ×${r.n}` : r.label));
 
   // 点击目标尺寸（WCAG 2.5.8 AA：≥24×24 CSS px）。
   // 这一条我此前完全没量过——尺子只关心"看得清吗"，没关心"点得中吗"。
@@ -277,17 +293,20 @@ if (bad.length) {
   console.log(`\n✓ 抽样文本对比度均 ≥ AA(${AA})`);
 }
 
-// 颜色预算：一屏彩色元素上限。颜色只有稀缺时才是信号——
-// 改版前订单管理首屏有 51 个（17 个蓝单号 + 17 个彩色状态药丸 + 17 个蓝徽标），
-// 到那个密度，真正要紧的东西（逾期、超时、异常）就淹在里面了。
+// 颜色预算：一屏**颜色角色种类**的上限（不是被染色的节点数，见上面的说明）。
+// 颜色只有稀缺时才是信号——改版前订单管理首屏光"角色"就有十几种
+// （蓝单号、彩色状态药丸、蓝徽标、彩色渠道标…），真正要紧的东西
+// （逾期、超时、异常）就淹在里面了。
 //
 // 按页面角色分档，不用一个数管到底：
-//   作业面（台账/工作台/表单）——一天盯八小时，颜色必须稀缺，上限 12。
+//   作业面（台账/工作台/表单）——一天盯八小时，颜色必须稀缺，上限 10。
 //   纵览面（驾驶舱）——管理者看几分钟，它的本职就是"哪里不对"，
-//     告警色与趋势色都是信息，上限放到 24。
+//     告警色与趋势色都是信息，上限放到 16。
+// 数的口径从"节点"改成"种类"之后，同一批页面的读数降了三到四成，
+// 上限跟着一起收紧；不收的话等于偷偷放宽了标准。
 // 图表内部与图例不计入（见 inChart）。
-const BUDGET = { 驾驶舱: 24 };
-const BUDGET_DEFAULT = 12;
+const BUDGET = { 驾驶舱: 16 };
+const BUDGET_DEFAULT = 10;
 const budgetOf = (name) => BUDGET[name] ?? BUDGET_DEFAULT;
 const overBudget = results.filter((r) => r.colored > budgetOf(r.name));
 console.log("\n一屏彩色元素（上限）：");

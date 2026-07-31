@@ -124,6 +124,13 @@ func (s *seeder) reset() {
 		`DELETE FROM md_customer WHERE code LIKE 'SEED_%'`,
 		`DELETE FROM iam_role_assignment WHERE user_id IN (SELECT id FROM accounts_user WHERE username LIKE 'seed_%')`,
 		`DELETE FROM iam_role_permissions WHERE role_id IN (SELECT id FROM iam_role WHERE code LIKE 'SEED_%')`,
+		// 登录审计与令牌黑名单都外键指向用户。演示账号只要登录过一次
+		// （走查、演示、跑一遍权限验证都会），这两张表就有行，
+		// 于是 accounts_user 删不掉，接着 iam_organization 也删不掉——
+		// -reset 从第二次起就一直报两条错。删之前先把引用清掉。
+		`DELETE FROM iam_login_attempt WHERE user_id IN (SELECT id FROM accounts_user WHERE username LIKE 'seed_%')`,
+		`DELETE FROM iam_token_denylist WHERE user_id IN (SELECT id FROM accounts_user WHERE username LIKE 'seed_%')`,
+		`DELETE FROM ntf_notification WHERE recipient_id IN (SELECT id FROM accounts_user WHERE username LIKE 'seed_%')`,
 		`DELETE FROM accounts_user WHERE username LIKE 'seed_%'`,
 		`DELETE FROM iam_role WHERE code LIKE 'SEED_%'`,
 		`DELETE FROM iam_organization WHERE code LIKE 'SEED_%'`,
@@ -236,10 +243,15 @@ func (s *seeder) rolesAndUsers() {
 
 func (s *seeder) customers() {
 	type c struct{ code, name, level string }
+	// 名字刻意与既有演示数据不重名。第一版用了「美的集团」「海尔智家」这些
+	// 库里已经有的名字，结果命令面板搜「美的」出来两个同名客户、
+	// 驾驶舱的「应收 Top 对手方」也并排列两行「美的集团」——
+	// 看着像去重坏了，其实是两条真实存在的不同客户记录。
+	// 演示数据要能一眼认出是演示数据，也不能给真数据制造歧义。
 	for _, x := range []c{
-		{"SEED_C1", "美的集团", "S"}, {"SEED_C2", "海尔智家", "A"},
-		{"SEED_C3", "宁德时代物流", "A"}, {"SEED_C4", "比亚迪供应链", "B"},
-		{"SEED_C5", "示例小客户", "C"},
+		{"SEED_C1", "演示·华东制造", "S"}, {"SEED_C2", "演示·家电集团", "A"},
+		{"SEED_C3", "演示·新能源物流", "A"}, {"SEED_C4", "演示·汽车供应链", "B"},
+		{"SEED_C5", "演示·小微客户", "C"},
 	} {
 		s.exec("customer "+x.code, `
 			INSERT INTO md_customer (id, created_at, updated_at, code, name, category, level,
@@ -257,10 +269,10 @@ func (s *seeder) carriers() {
 		code, name, city, grade, typ string
 	}
 	for _, x := range []c{
-		{"SEED_R1", "顺丰承运", "上海", "A", "fleet"},
-		{"SEED_R2", "德邦物流", "杭州", "B", "fleet"},
-		{"SEED_R3", "安能物流", "上海", "B", "individual"},
-		{"SEED_R4", "百世快运", "宁波", "C", "individual"},
+		{"SEED_R1", "演示·甲承运", "上海", "A", "fleet"},
+		{"SEED_R2", "演示·乙物流", "杭州", "B", "fleet"},
+		{"SEED_R3", "演示·丙运输", "上海", "B", "individual"},
+		{"SEED_R4", "演示·丁快运", "宁波", "C", "individual"},
 	} {
 		s.exec("carrier "+x.code, `
 			INSERT INTO md_carrier (id, created_at, updated_at, code, name, contact_name, contact_phone,
@@ -360,8 +372,8 @@ func (s *seeder) ordersAndWaybills() {
 			  customer_id, created_by_id, pooled_at)
 			VALUES ($1::uuid, now() - ($2 || ' days')::interval, now(), $3, 'cs', $4, '',
 			        '演示货物', $5, $6::numeric, $7::numeric, 'cs', '联系人', '13800000000',
-			        $8, $9, '{}'::jsonb, '', 'ftl', 0, '', '', '', false, false, 'pallet',
-			        '', '', '', 'normal', $10::numeric, 'monthly', 'manual', '', 'pending',
+			        $8, $9, '{}'::jsonb, '', 'ftl', 0, '', '', '', false, false, $14,
+			        '', '', '', 'normal', $10::numeric, 'monthly', $15, '', 'pending',
 			        '', 'none', '', 0, 'none', 'consignor', 'prepaid',
 			        $11::uuid, $12::uuid, $13::timestamptz)
 			ON CONFLICT (order_no) DO UPDATE SET status=EXCLUDED.status, updated_at=now()`,
@@ -369,7 +381,14 @@ func (s *seeder) ordersAndWaybills() {
 			10+i*3, 2.5+float64(i), 8.0+float64(i), route[1], route[0],
 			12000+i*1500,
 			id("cust/"+custs[i%len(custs)]), id("user/seed_"+[]string{"cs", "dispatcher"}[i%2]),
-			pooledAt(st))
+			pooledAt(st),
+			// package_type 是自由文本（建单表单的占位符就写着「例: 托盘 / 木箱 / 裸装」），
+			// source_type 的取值是 enterprise/individual —— 这两个字段第一版分别写成了
+			// 'pallet' 和 'manual'，界面上就显示成「包装 pallet」「客户分类 manual」。
+			// 那看着像是界面漏了枚举翻译，其实是**播种数据用错了词汇表**。
+			// 演示数据必须长得像真数据，否则拿它走查界面会走出一堆假 bug。
+			[]string{"托盘", "木箱", "裸装", "纸箱"}[i%4],
+			[]string{"enterprise", "individual"}[i%2])
 	}
 
 	// 后 8 张转运单，状态铺满在途 → 已签收

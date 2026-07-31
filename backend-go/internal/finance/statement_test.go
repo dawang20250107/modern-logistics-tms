@@ -41,6 +41,12 @@ type stmtFixture struct {
 	custID   string
 	waybills []string // waybill ids
 	expenses []string // expense record ids
+	// 用例临时建的额外组织。**不能各自挂 t.Cleanup**：Cleanup 是 LIFO，
+	// 后注册的先跑，于是"删这个组织"会排在夹具"删运单"之前，
+	// 而运单外键指向它 —— 删不掉，错误又被忽略，库里就攒下孤儿组织。
+	// CI 的 Postgres 日志里那条 ops_waybill_organization_id_..._fk 违例就是它。
+	// 统一收进夹具的清理函数，跟在运单之后删。
+	extraOrgs []string
 }
 
 func newStmtFixture(t *testing.T) *stmtFixture {
@@ -84,6 +90,9 @@ func (f *stmtFixture) seed() {
 		_, _ = f.pool.Exec(ctx, `DELETE FROM ops_waybill WHERE id = ANY($1)`, f.waybills)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM md_customer WHERE id = $1::uuid`, f.custID)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM iam_organization WHERE id = $1::uuid`, f.orgID)
+		if len(f.extraOrgs) > 0 {
+			_, _ = f.pool.Exec(ctx, `DELETE FROM iam_organization WHERE id = ANY($1)`, f.extraOrgs)
+		}
 	})
 }
 
@@ -420,9 +429,7 @@ func TestCollectionRespectsOrgScope(t *testing.T) {
 	otherExp := f.mkExpense(oid.String(), "9999.00")
 	f.expenses = append(f.expenses, otherExp)
 	f.waybills = append(f.waybills, oid.String())
-	t.Cleanup(func() {
-		_, _ = f.pool.Exec(context.Background(), `DELETE FROM iam_organization WHERE id=$1::uuid`, otherOrg)
-	})
+	f.extraOrgs = append(f.extraOrgs, otherOrg)
 
 	// 按 f.orgID 收窄后，他组织那笔不该出现
 	rows, err := f.pool.Query(ctx, `

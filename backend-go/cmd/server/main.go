@@ -64,7 +64,7 @@ func main() {
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
-	finH := &finance.Handler{DB: pool}
+	finH := &finance.Handler{DB: pool, Svc: authSvc}
 	orderH.Projects = finH // 建单表单可直接新建项目
 	anaH := &analytics.Handler{DB: pool, Svc: authSvc}
 	orgH := &org.Handler{DB: pool, Svc: authSvc, MD: mdH}
@@ -84,6 +84,11 @@ func main() {
 	telH := &telematics.Handler{DB: pool, Svc: authSvc, In: ingestor}
 	// 指标按日物化，替代 Django 的 materialize_metrics 命令（趋势图的数据来源）
 	analytics.StartMaterializer(context.Background(), pool, 1*time.Hour, 30)
+	// 权限点规范目录落库：库里原先只有 3 行（Django 演示数据残留），而代码校验 12 个，
+	// 差额那些在权限矩阵界面上没有行、没法勾选，等于永久 403。见 auth/permcatalog.go。
+	if err := auth.EnsurePermissions(ctx, pool); err != nil {
+		slog.Warn("permission catalog", "err", err)
+	}
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
@@ -303,6 +308,9 @@ func main() {
 		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
 		p.Get("/api/v1/finance/statements/{id}", func(w http.ResponseWriter, rq *http.Request) {
+			if authSvc.Guard(w, rq, finance.PermView, "无财务查看权限") == nil {
+				return
+			}
 			mdH.Retrieve(w, rq, finance.StatementDetailCfg, finance.StatementWrite)
 		})
 		p.Get("/api/v1/finance/aging", finH.Aging)

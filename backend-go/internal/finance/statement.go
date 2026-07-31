@@ -50,6 +50,10 @@ type statementReq struct {
 
 // GenerateStatement POST /finance/statements/generate
 func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
+	actor := h.Svc.Guard(w, r, PermManage, denyManage)
+	if actor == nil {
+		return
+	}
 	ctx := r.Context()
 	var req statementReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -108,11 +112,26 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 归集也要收窄到调用者的数据范围：否则一个只管本网点的角色，
+	// 生成对账单时照样能把全集团的费用收进自己这张单里——读路径拦住了、
+	// 写路径没拦，等于没拦。
+	scopeSQL := "true"
+	if actor.ScopeIDs != nil {
+		if len(actor.ScopeIDs) == 0 {
+			scopeSQL = "false"
+		} else {
+			args = append(args, actor.ScopeIDs)
+			scopeSQL = fmt.Sprintf("w.organization_id::text = ANY($%d)", len(args))
+		}
+	}
+
 	rows, err := h.DB.Query(ctx, `
-		SELECT e.id::text, COALESCE(w.waybill_no,''), e.expense_item_code, e.amount, e.occurred_at
+		SELECT e.id::text, COALESCE(w.waybill_no,''), e.expense_item_code, e.amount, e.occurred_at,
+		       w.organization_id::text
 		FROM fin_expense_record e
 		JOIN ops_waybill w ON w.id = e.waybill_id
-		WHERE e.direction = $1
+		WHERE `+scopeSQL+`
+		  AND e.direction = $1
 		  AND e.occurred_at IS NOT NULL
 		  AND (e.occurred_at AT TIME ZONE 'Asia/Shanghai')::date >= $2::date
 		  AND (e.occurred_at AT TIME ZONE 'Asia/Shanghai')::date <= $3::date
@@ -129,20 +148,37 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		expenseID, waybillNo, itemCode string
 		amount                         decimal.Decimal
 		occurredAt                     time.Time
+		orgID                          *string
 	}
 	lines := []lineRow{}
 	total := decimal.Zero
+	// 对账单的归属组织 = 全部明细所属运单的组织，且必须唯一。
+	// 跨组织（或存在无组织归属的运单）时留 NULL —— 在 scope 语义里 NULL 只有
+	// all 档看得见，这是保守且正确的答案，比随便挑一个组织"归错档"强。
+	orgs := map[string]struct{}{}
+	orgUnknown := false
 	for rows.Next() {
 		var l lineRow
-		if err := rows.Scan(&l.expenseID, &l.waybillNo, &l.itemCode, &l.amount, &l.occurredAt); err != nil {
+		if err := rows.Scan(&l.expenseID, &l.waybillNo, &l.itemCode, &l.amount, &l.occurredAt, &l.orgID); err != nil {
 			rows.Close()
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取失败")
 			return
 		}
 		lines = append(lines, l)
 		total = total.Add(l.amount)
+		if l.orgID == nil {
+			orgUnknown = true
+		} else {
+			orgs[*l.orgID] = struct{}{}
+		}
 	}
 	rows.Close()
+	var stmtOrg any
+	if !orgUnknown && len(orgs) == 1 {
+		for id := range orgs {
+			stmtOrg = id
+		}
+	}
 
 	var cpName string
 	table := "md_customer"
@@ -168,12 +204,12 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO fin_statement (id, created_at, updated_at, statement_no, direction,
 		  counterparty_type, counterparty_id, counterparty_name, period_start, period_end, due_date,
 		  total_amount, item_count, external_total, settled_amount, status,
-		  scope_type, scope_id, scope_name)
+		  scope_type, scope_id, scope_name, organization_id)
 		VALUES ($1, now(), now(), $2, $3, $4, $5, $6, $7::date, $8::date, $9::date,
-		        $10::numeric, $11, $12::numeric, 0, 'draft', $13, $14::uuid, $15)`,
+		        $10::numeric, $11, $12::numeric, 0, 'draft', $13, $14::uuid, $15, $16::uuid)`,
 		sid.String(), stmtNo, req.Direction, req.CounterpartyType, req.CounterpartyID, cpName,
 		req.Start, req.End, nullIfEmpty(req.DueDate), total.String(), len(lines),
-		orZeroStr(req.ExternalTotal), req.ScopeType, scopeIDArg(req), scopeName); err != nil {
+		orZeroStr(req.ExternalTotal), req.ScopeType, scopeIDArg(req), scopeName, stmtOrg); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "建单失败："+err.Error())
 		return
 	}
@@ -236,6 +272,9 @@ func shanghai() *time.Location {
 
 // ConfirmStatement POST /finance/statements/{id}/confirm
 func (h *Handler) ConfirmStatement(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -266,6 +305,9 @@ func (h *Handler) ConfirmStatement(w http.ResponseWriter, r *http.Request) {
 
 // AuditStatement POST /finance/statements/{id}/audit —— 按同科目同方向历史均值检出异常高费用
 func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -360,6 +402,9 @@ type settleReq struct {
 
 // SettleStatement POST /finance/statements/{id}/settle —— 登记一笔实际收/付款（支持分次核销）
 func (h *Handler) SettleStatement(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -444,6 +489,9 @@ func (h *Handler) SettleStatement(w http.ResponseWriter, r *http.Request) {
 
 // StatementPayments GET /finance/statements/{id}/payments —— 该单的收付款流水
 func (h *Handler) StatementPayments(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermView, denyView) == nil {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", "No Statement matches the given query.")

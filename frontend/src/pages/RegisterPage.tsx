@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { ApiError } from "../api/client";
+import { useAuthMethods } from "../api/useAuthMethods";
 import { useAuth } from "../auth/auth";
 import { PasswordField } from "../auth/PasswordField";
 import { passwordStrength } from "../auth/password";
@@ -18,9 +19,33 @@ export function RegisterPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const { registrationEnabled, data: methods } = useAuthMethods();
+
   useEffect(() => {
     if (user) navigate("/profile", { replace: true });
   }, [user, navigate]);
+
+  // 直接输地址进来的也要拦住：入口藏了不等于路由没了。
+  // 等 methods 到手再判，否则首帧会闪一下"未开放"。
+  if (methods && !registrationEnabled) {
+    return (
+      <div className="auth-page">
+        <AuthHero />
+        <main className="auth-form-wrap">
+          <div className="auth-form">
+            <h1 className="auth-title">未开放自助注册</h1>
+            <p className="muted" style={{ marginTop: 8 }}>
+              本系统的账号由管理员在「组织与权限 → 员工名录」中开通，开通时即绑定组织与角色。
+              请联系你所在网点的管理员。
+            </p>
+            <div className="auth-alt" style={{ marginTop: 18 }}>
+              <Link className="link" to="/login">返回登录</Link>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   const strength = useMemo(() => passwordStrength(password), [password]);
   const mismatch = confirm.length > 0 && confirm !== password;

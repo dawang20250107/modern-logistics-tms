@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { ApiError } from "../api/client";
+import { useAuthMethods } from "../api/useAuthMethods";
 import { useAuth } from "../auth/auth";
 import { PasswordField } from "../auth/PasswordField";
 import { AuthHero } from "../components/AuthHero";
@@ -14,6 +15,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const remembered = localStorage.getItem(REMEMBER_KEY) ?? "";
   const [method, setMethod] = useState<Method>("password");
+  const { registrationEnabled } = useAuthMethods();
   const [username, setUsername] = useState(remembered);
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(Boolean(remembered));
@@ -135,9 +137,11 @@ export function LoginPage() {
             </div>
           )}
 
-          <div className="auth-alt">
-            还没有账号？<Link className="link" to="/register">注册新账号</Link>
-          </div>
+          {registrationEnabled && (
+            <div className="auth-alt">
+              还没有账号？<Link className="link" to="/register">注册新账号</Link>
+            </div>
+          )}
         </div>
       </main>
     </div>

@@ -19,6 +19,17 @@ type Config struct {
 	MediaRoot     string // 媒体文件落盘根目录（对齐 Django MEDIA_ROOT）
 	Debug         bool   // 对齐 settings.DEBUG（仅影响调试期的额外响应字段）
 
+	// AllowSelfRegistration 是否开放自助注册（POST /auth/register）。
+	//
+	// 默认**关闭**。这是一套 B2B 内部系统：账号该由管理员在「组织与权限 →
+	// 员工名录」里开，开出来就带组织归属与角色。自助注册出来的账号
+	// organization_id 为 NULL、无角色无权限点——在数据范围语义里"看不见任何东西"，
+	// 业务上没有任何用处，却是一个任何人都能自助获得的、已认证的身份。
+	// 已认证本身就是攻击面：所有只判「登录了没有」的端点对它敞开。
+	//
+	// 想开放（对外客户门户自助开户之类）就置 TMS_ALLOW_SELF_REGISTRATION=1。
+	AllowSelfRegistration bool
+
 	// MQTT 终端接入。Host 为空即不启用——绝大多数部署没有 broker，
 	// 默认连一个不存在的地址只会让日志里滚重连错误。
 	MQTTHost     string
@@ -50,6 +61,8 @@ func Load() Config {
 		RefreshDays:   7,
 		MediaRoot:     env("MEDIA_ROOT", "./media"),
 		Debug:         strings.EqualFold(env("DJANGO_DEBUG", "true"), "true"),
+		// 默认 "0"：不配就是关。开放注册必须是一个显式动作。
+		AllowSelfRegistration: env("TMS_ALLOW_SELF_REGISTRATION", "0") == "1",
 
 		MQTTHost:     env("MQTT_HOST", ""),
 		MQTTPort:     atoi(env("MQTT_PORT", "1883"), 1883),

@@ -30,6 +30,8 @@ export interface UserPreferences {
 export interface AuthMethods {
   password: boolean;
   wechat: { enabled: boolean; note: string };
+  /** 自助注册默认关闭（B2B 内部系统，账号由管理员在员工名录里开） */
+  registration: { enabled: boolean };
 }
 
 export interface LoginAttemptRow {

@@ -60,7 +60,8 @@ func main() {
 	authSvc := &auth.Service{DB: pool}
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
 	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.PublicBase,
-		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug}
+		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug,
+		AllowSelfRegistration: cfg.AllowSelfRegistration}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}

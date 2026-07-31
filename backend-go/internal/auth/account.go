@@ -61,6 +61,15 @@ func randomString(n int) string {
 
 // Register POST /auth/register —— 创建基础账号并直接签发 JWT（自动登录）
 func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
+	// 默认关闭。理由见 config.Config.AllowSelfRegistration：
+	// 自助注册出来的账号业务上什么也干不了（无组织、无角色、数据范围为空），
+	// 但它是一个任何人都能自助拿到的**已认证身份**——所有只判「登录了没有」
+	// 的端点对它敞开。10/min 的限流挡的是批量刷号，不是"该不该给"这件事。
+	if !h.AllowSelfRegistration {
+		httpx.Err(w, http.StatusForbidden, "REGISTRATION_CLOSED",
+			"本系统不开放自助注册，请联系管理员开通账号。")
+		return
+	}
 	if !registerThrottle.Guard(w, r) {
 		return
 	}
@@ -245,6 +254,9 @@ func pyISO(t time.Time) string {
 func (h *Handlers) AuthMethods(w http.ResponseWriter, _ *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"password": true,
+		// 自助注册默认关闭。告诉前端，是为了让登录页直接不显示「注册新账号」——
+		// 留一个点进去必然 403 的入口，比没有入口更糟。
+		"registration": map[string]any{"enabled": h.AllowSelfRegistration},
 		"wechat": map[string]any{
 			"enabled": strings.EqualFold(os.Getenv("WECHAT_LOGIN_ENABLED"), "true"),
 			"note":    "微信扫码登录为预留能力，配置微信开放平台/企业微信后启用。",

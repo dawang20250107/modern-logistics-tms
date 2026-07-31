@@ -31,6 +31,8 @@ type Handlers struct {
 	MediaRoot string
 	// Debug 对齐 settings.DEBUG：仅调试期在找回密码响应里附 dev_code
 	Debug bool
+	// AllowSelfRegistration 见 config.Config 同名字段：默认关闭
+	AllowSelfRegistration bool
 }
 
 // RequireAuth Bearer 校验中间件：任何原生路由的鉴权入口。

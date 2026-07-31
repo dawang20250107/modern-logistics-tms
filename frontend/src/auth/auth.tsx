@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, clearTokens, hasToken, setTokens } from "../api/client";
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, clearTokens, getRefreshToken, hasToken, setTokens } from "../api/client";
 import type { CurrentUser, UserPreferences } from "../api/types";
 
 export interface RegisterInput {
@@ -94,7 +94,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    await apiPost("/auth/change-password", { old_password: oldPassword, new_password: newPassword });
+    // 改密码会在服务端踢掉该账号的全部会话（包括正在用的这一个）。
+    // 服务端顺手回一对新券，这里必须收下——不收的话用户改完密码立刻被登出，
+    // 而这一步本来可以无缝。
+    const res = await apiPost<{ access?: string; refresh?: string }>(
+      "/auth/change-password", { old_password: oldPassword, new_password: newPassword },
+    );
+    if (res?.access && res?.refresh) setTokens(res.access, res.refresh);
   }
 
   async function refreshMe(): Promise<void> {
@@ -103,6 +109,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout(): void {
+    // 先把 refresh 交回服务端作废，再清本地。
+    // 只清本地是不够的——券本身还有效到自然过期（默认 7 天），
+    // 在共用电脑或凭证已泄漏的场景里，"退出登录"等于什么也没做。
+    //
+    // 不 await：退出是个不该等待的动作，网络慢不能把人卡在页面上。
+    // 失败也不回滚本地清理——用户要的是"我这台机器上退出了"，
+    // 服务端那一步是加固，不是前提。
+    const refresh = getRefreshToken();
+    if (refresh) {
+      void apiPost("/auth/logout", { refresh }).catch(() => {});
+    }
     clearTokens();
     setUser(null);
   }

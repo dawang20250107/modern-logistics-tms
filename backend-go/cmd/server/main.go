@@ -89,6 +89,8 @@ func main() {
 	if err := auth.EnsurePermissions(ctx, pool); err != nil {
 		slog.Warn("permission catalog", "err", err)
 	}
+	// 令牌黑名单只需覆盖「券还没自然过期」那段窗口，过期条目留着只会让表无限长
+	auth.StartDenylistPurger(context.Background(), pool, 1*time.Hour)
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
@@ -140,6 +142,7 @@ func main() {
 		p.Post("/api/v1/auth/me/avatar", authH.Avatar)
 		p.Delete("/api/v1/auth/me/avatar", authH.Avatar)
 		p.Post("/api/v1/auth/change-password", authH.ChangePassword)
+		p.Post("/api/v1/auth/logout", authH.Logout)
 		p.Get("/api/v1/auth/login-history", authH.LoginHistory)
 		p.Get("/api/v1/orders", orderH.List)
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)

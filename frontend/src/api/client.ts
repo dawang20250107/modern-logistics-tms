@@ -22,6 +22,11 @@ export class ApiError extends Error {
 let accessToken = localStorage.getItem("access") ?? "";
 let refreshToken = localStorage.getItem("refresh") ?? "";
 
+/** 退出登录时要把 refresh 交回服务端作废，所以需要读得到它。 */
+export function getRefreshToken(): string {
+  return refreshToken;
+}
+
 export function setTokens(access: string, refresh: string): void {
   accessToken = access;
   refreshToken = refresh;

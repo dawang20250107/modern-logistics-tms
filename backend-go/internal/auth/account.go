@@ -163,7 +163,22 @@ func (h *Handlers) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]string{"detail": "密码已更新"})
+	// 改密码必须踢掉所有已存在的会话，否则"我怀疑密码泄漏了所以改一下"这个动作
+	// 起不到任何作用——攻击者手里的 access/refresh 照样能用到自然过期。
+	if err := RevokeAllForUser(ctx, h.Svc.DB, u.ID); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "作废旧会话失败")
+		return
+	}
+	// 顺手把新券发回去：不然用户刚改完密码就被自己的水位线踢下线，
+	// 体验上像是"改密码 = 被登出"，而这一步本来可以无缝。
+	access, refresh, err := h.Issuer.IssuePair(u.ID)
+	if err != nil {
+		httpx.JSON(w, http.StatusOK, map[string]string{"detail": "密码已更新，请重新登录"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{
+		"detail": "密码已更新", "access": access, "refresh": refresh,
+	})
 }
 
 func pwUser(u *UserRow) *PasswordUser {
@@ -397,6 +412,11 @@ func (h *Handlers) PasswordResetConfirm(w http.ResponseWriter, r *http.Request) 
 	if _, err := h.Svc.DB.Exec(r.Context(), "UPDATE accounts_user SET password=$2 WHERE id=$1::uuid",
 		u.ID, MakeDjangoPassword(body.NewPassword)); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
+		return
+	}
+	// 找回密码是"我进不去了"或"我怀疑被盗了"，正是最需要踢掉既有会话的场景
+	if err := RevokeAllForUser(r.Context(), h.Svc.DB, u.ID); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "作废旧会话失败")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"detail": "密码已重置，请用新密码登录"})

@@ -57,6 +57,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	r := buildRouter(ctx, pool, cfg)
+
+	slog.Info("gateway up", "addr", cfg.ListenAddr)
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
+	if err := srv.ListenAndServe(); err != nil {
+		slog.Error("server", "err", err)
+		os.Exit(1)
+	}
+}
+
+// buildRouter 组装全部依赖与 155 条路由，返回可直接 ServeHTTP 的处理器。
+//
+// 从 main 里拆出来只为一件事：**让路由可被 httptest 打**。
+// 在此之前全库没有一个 HTTP 层测试（唯一一处 httptest 是 agent 包里的假 MCP server），
+// 于是「这条路由挂没挂权限闸」只能靠人手 curl 去试——而财务那个洞正是这么漏掉的：
+// 没有任何自动化能发现「新加了一条路由但忘了加闸」。
+// 拆出来之后，router_test.go 就能把那张手工探针表钉成回归用例。
+func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) http.Handler {
 	authSvc := &auth.Service{DB: pool}
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
 	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.PublicBase,
@@ -389,10 +407,5 @@ func main() {
 		httpx.Err(w, http.StatusNotFound, "not_found", "未找到。")
 	})
 
-	slog.Info("gateway up", "addr", cfg.ListenAddr)
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
-	if err := srv.ListenAndServe(); err != nil {
-		slog.Error("server", "err", err)
-		os.Exit(1)
-	}
+	return r
 }

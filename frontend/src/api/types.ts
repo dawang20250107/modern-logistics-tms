@@ -30,6 +30,8 @@ export interface UserPreferences {
 export interface AuthMethods {
   password: boolean;
   wechat: { enabled: boolean; note: string };
+  /** 自助注册默认关闭（B2B 内部系统，账号由管理员在员工名录里开） */
+  registration: { enabled: boolean };
 }
 
 export interface LoginAttemptRow {
@@ -972,6 +974,10 @@ export interface MetricCard {
   unit: string;
   domain: string;
   value: number;
+  /** 比率类指标的分子/分母。分母为 0 表示**样本为空**，不是"比率是 0"——
+   *  两者显示成同一个 0.0% 会把「这段时间没有可统计的单」说成「准班率为零」。 */
+  numerator?: number;
+  denominator?: number;
   breakdown?: Array<{ key: string; label?: string; value: number }>;
 }
 export const METRIC_DOMAIN_LABEL: Record<string, string> = {

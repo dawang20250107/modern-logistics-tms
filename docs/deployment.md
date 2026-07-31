@@ -1,56 +1,164 @@
 # 部署指南（本地预演 → 腾讯云）
 
+> 本文在 Django 退役后重写过一次。旧版描述的是 gunicorn + Celery + Redis 的形态，
+> 那套东西已经不存在了——照着旧文档部署会去找几个根本没有的服务。
+
 ## 架构
 
 ```
-客户端 → Nginx(web 容器, :80, 反代 + 前端静态)
-           ├─ /            → 前端 SPA (dist)
-           ├─ /api,/admin… → backend (gunicorn + uvicorn worker, :8000)
-           └─ /api/v1/stream → backend (SSE, 关闭缓冲)
-backend ── PostgreSQL / Redis / 对象存储
-worker/beat ── Celery（轨迹削峰落库、ETA/回单扫描、Webhook 投递）
+客户端 ──→ Nginx（web 容器, :80）
+              ├─ /            前端 SPA（静态文件）
+              └─ /api/*       反代到 gateway:8000
+gateway（唯一的应用进程，Go 单二进制）
+              ├─ 全部 /api/v1 路由
+              ├─ /media/*     用户上传物直出（nosniff、不开目录列表）
+              ├─ schema 迁移  启动时内嵌执行
+              └─ 进程内后台：轨迹削峰落库 / 掉线扫描 / 指标物化 /
+                            MQTT 订阅 / 令牌黑名单清理
+              ↓
+        PostgreSQL 16
 ```
+
+没有 Redis、没有 Celery、没有单独的 worker/beat。需要横向扩容时 gateway
+可以多副本（无状态），但**进程内的定时任务会在每个副本上各跑一份**——
+指标物化与掉线扫描是幂等的，多跑无害；真要精确控制时把它们拆成
+单副本的 CronJob。
 
 ## 本地生产预演
 
-```powershell
-# 强随机密钥与口令写入 deploy/.env.prod（参考 .env.example）
+```bash
+cp deploy/.env.prod.example deploy/.env.prod
+# 至少要改 DJANGO_SECRET_KEY / POSTGRES_PASSWORD / DJANGO_CORS_ORIGINS / PUBLIC_BASE_URL
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --build
-docker compose -f deploy/docker-compose.prod.yml exec backend python manage.py createsuperuser
-# 访问 http://127.0.0.1/ （前端）、http://127.0.0.1/api/docs 、/healthz
+
+# 开第一个超管（Django 的 createsuperuser 已随之退役）
+docker compose -f deploy/docker-compose.prod.yml exec gateway /app/adminctl -u admin -p '<强口令>'
+
+# 可选：铺一份演示数据（幂等，可反复跑；-reset 清掉重来）
+docker compose -f deploy/docker-compose.prod.yml exec gateway /app/seed
 ```
 
-> 注意：与开发编排（`docker-compose.yml`）端口不同，生产用 80。两者不要同时占用同一 DB 卷。
+访问 <http://127.0.0.1/>。探针：`/healthz`（存活）、`/readyz`（就绪，会 ping 库）。
 
-## 关键环境变量（生产必设）
+> 生产编排用 80 端口，开发编排（`docker-compose.yml`）用别的；
+> 两者不要同时挂同一个 DB 卷。
 
-| 变量 | 说明 |
+## 启动前置检查
+
+`DJANGO_DEBUG=false` 时，网关在监听之前会自检配置，不通过就**拒绝启动**：
+
+| 检查 | 为什么是致命的 |
 |---|---|
-| `DJANGO_SECRET_KEY` | 强随机 ≥32 字节 |
-| `DJANGO_ALLOWED_HOSTS` | 域名/IP，逗号分隔 |
-| `DJANGO_CSRF_TRUSTED_ORIGINS` | 前端 https 源 |
-| `DJANGO_SSL_REDIRECT` | 启用 TLS 后置 `true` |
-| `DATABASE_URL` / `REDIS_URL` | 托管 PG/Redis 时替换为云上地址 |
-| `DEEPSEEK_API_KEY` | 启用真实 AI 对话/客服话术 |
+| `DJANGO_SECRET_KEY` 非空、≥32 字节、不是已知占位值 | 这把钥匙同时签发内部用户令牌与司机端令牌。留着 `CHANGE-ME-IN-PRODUCTION...` 等于任何人都能自签一张管理员令牌进来，而这类问题在测试环境永远不会暴露——那里本来就用默认值 |
+| `DJANGO_CORS_ORIGINS` 不含 `*` | 通配符 + 带凭证的跨站请求 = 任意站点可代表已登录用户发请求 |
+
+另有几条只警告不阻断（`PUBLIC_BASE_URL` 还是 127.0.0.1、CORS 仍是开发默认值、
+生产开着自助注册），会在启动日志里以 `配置提醒` 打出来。
+
+## 关键环境变量
+
+| 变量 | 必设 | 说明 |
+|---|:--:|---|
+| `DJANGO_SECRET_KEY` | ✅ | 强随机 ≥32 字节。`openssl rand -base64 48` |
+| `DATABASE_URL` | ✅ | 托管 PG 时换成云上地址即可，无需改代码 |
+| `DJANGO_CORS_ORIGINS` | ✅ | 前端来源，逗号分隔，写明确不写 `*` |
+| `PUBLIC_BASE_URL` | ✅ | 对外可访问的基址；头像/回单的绝对地址靠它拼 |
+| `DJANGO_DEBUG` | ✅ | 生产必须 `false`，否则前置检查整个跳过 |
+| `TMS_ALLOW_SELF_REGISTRATION` | | 默认 `0`（关）。账号应由管理员在「组织与权限 → 员工名录」开通，开出来就带组织与角色。仅对外客户门户需要自助开户时置 `1` |
+| `MEDIA_ROOT` | | 上传物落盘根目录，容器里挂卷 |
+| `DEEPSEEK_API_KEY` | | 不配则 AI 相关端点返回 503，其余功能不受影响 |
+| `MQTT_HOST` | | 不配则不启用车载终端 MQTT 接入 |
+| `AMAP_KEY` | | 地图/地理编码 |
+
+## 首次上线检查清单
+
+- [ ] `.env.prod` 里的密钥与口令都换成强随机，且**不在版本库里**
+- [ ] 前置网关（Nginx / CLB）终止 TLS，80 跳 443
+- [ ] `docker compose ps` 里 gateway 是 `healthy`（它探的是 `/readyz`，会 ping 库）
+- [ ] 用 `/app/adminctl` 开的超管能登录，随后**立刻改掉命令行里用过的口令**
+  （命令行参数会进 shell history 与进程列表）
+- [ ] 跑过 `seed` 的话，把 `seed_*` 四个演示账号删掉——它们是公开的弱口令
+- [ ] 备份跑起来了（见下节），并且**至少演练过一次恢复**
+
+## 备份与恢复
+
+系统的全部状态在两个地方：**PostgreSQL** 与 **媒体卷**（回单、证件、
+打卡照片、合同扫描件）。备份必须同时覆盖两者——只备库的话，
+对账单还在但作为凭证的回单照片没了，等于账对不上还拿不出证据。
+
+### 备份
+
+```bash
+# 数据库（自定义格式，支持并行恢复与按表挑选）
+docker compose -f deploy/docker-compose.prod.yml exec -T db \
+  pg_dump -U tms -d tms -Fc > backup/tms-$(date +%F-%H%M).dump
+
+# 媒体卷
+docker run --rm -v deploy_media:/media -v "$PWD/backup:/backup" alpine \
+  tar czf /backup/media-$(date +%F-%H%M).tar.gz -C /media .
+```
+
+建议每日一次全量 + 异地留存。托管 PG（TencentDB）自带自动备份与 PITR，
+用托管的就不必自己跑 `pg_dump`，但**媒体卷仍需单独备份**——
+它不在数据库里。
+
+### 恢复演练
+
+没演练过的备份等于没有备份。至少走一遍：
+
+```bash
+# 1) 起一个干净的库
+docker compose -f deploy/docker-compose.prod.yml down
+docker volume rm deploy_pgdata
+docker compose -f deploy/docker-compose.prod.yml up -d db
+
+# 2) 恢复
+docker compose -f deploy/docker-compose.prod.yml exec -T db \
+  pg_restore -U tms -d tms --clean --if-exists < backup/tms-<时间戳>.dump
+
+# 3) 媒体卷
+docker run --rm -v deploy_media:/media -v "$PWD/backup:/backup" alpine \
+  sh -c 'rm -rf /media/* && tar xzf /backup/media-<时间戳>.tar.gz -C /media'
+
+# 4) 起网关，确认 /readyz 200、能登录、随便点开一张运单能看到回单图
+docker compose -f deploy/docker-compose.prod.yml up -d
+curl -f http://127.0.0.1:8000/readyz
+```
+
+第 4 步的「能看到回单图」不是可选项——它是唯一能证明**两份备份对得上**
+的检查。库恢复到 T1、媒体恢复到 T2 的话，T1 到 T2 之间的单据会指向不存在的文件。
+
+### schema 升级
+
+网关启动时自动跑内嵌迁移器（只前进不回滚）。所以顺序是：
+**先备份 → 再滚动新版本**。迁移失败会导致启动失败并退出，
+容器不会带着半吊子 schema 对外服务。
 
 ## 迁移到腾讯云
 
 ### 方案 A：CVM 单机（最快）
-1. CVM 安装 Docker + Compose；安全组放行 80/443。
-2. 拉取代码，写 `deploy/.env.prod`（强密钥、域名、口令）。
-3. 建议改用**托管服务**：TencentDB for PostgreSQL、TencentDB for Redis、COS 对象存储 —— 仅改 `DATABASE_URL` / `REDIS_URL` / 存储配置即可，无需改代码（12-Factor）。
-4. `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --build`。
-5. 前置 Nginx/CLB 终止 TLS，置 `DJANGO_SSL_REDIRECT=true`、`SECURE_PROXY_SSL_HEADER` 已配置。
 
-### 方案 B：TKE（Kubernetes，面向超大并发）
-1. 镜像推送 TCR：`tms-backend:prod`、`tms-frontend:prod`。
-2. backend Deployment 多副本（无状态，HPA 按 CPU/QPS 自动扩缩）；worker/beat 各自 Deployment（beat 单副本）。
-3. 托管 PostgreSQL（读写分离 + 只读副本）、Redis（集群）、COS。
-4. Ingress（CLB）路由 + TLS；`/api/v1/stream` 关闭缓冲、长连接超时。
-5. 配置经 ConfigMap/Secret 注入；探针用 `/healthz`(liveness)、`/readyz`(readiness)。
-6. 指标 `/metrics` 接入 Prometheus + Grafana；日志 JSON 采集到 CLS。
+1. CVM 装 Docker + Compose，安全组放行 80/443。
+2. 拉代码，写 `deploy/.env.prod`。
+3. 建议改用托管服务：TencentDB for PostgreSQL + COS 对象存储 ——
+   只改 `DATABASE_URL` 与存储配置，不改代码。
+4. `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --build`
+5. 前置 CLB 终止 TLS。
+
+### 方案 B：TKE（Kubernetes）
+
+1. 镜像推 TCR：`tms-gateway:prod`、`tms-frontend:prod`。
+2. gateway Deployment 多副本（无状态，HPA 按 CPU/QPS）。
+   注意进程内定时任务会每副本各跑一份，见「架构」一节。
+3. 托管 PostgreSQL（读写分离）、COS。
+4. Ingress 路由 + TLS。
+5. 探针：`livenessProbe` → `/healthz`，`readinessProbe` → `/readyz`。
+   **两者不能都用 `/healthz`**：它恒回 200，连不上库的副本会被判定健康、
+   继续接流量，每个请求都 500。
+6. 配置经 Secret 注入；JSON 结构化日志采集到 CLS。
 
 ## 容量与压测
 
-上线前用 `deploy/loadtest/k6-smoke.js` 对**扩缩容后的部署**压测，校准副本数与 DB 规格；
-写热点（轨迹上报）走 Redis 队列削峰，验证 worker 消费速率与积压告警。
+上线前用 `deploy/loadtest/k6-smoke.js` 对**扩缩容后的部署**压测，
+校准副本数与 DB 规格。写热点（轨迹上报）走进程内有界队列削峰，
+关注队列积压与批量落库速率。

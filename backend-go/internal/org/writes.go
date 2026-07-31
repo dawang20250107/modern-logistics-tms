@@ -181,6 +181,9 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	hash := auth.MakeDjangoPassword(newPwd)
 	var username string
 	_ = h.DB.QueryRow(ctx, `UPDATE accounts_user SET password=$2 WHERE id=$1::uuid RETURNING username`, *userID, hash).Scan(&username)
+	// 管理员重置密码同样要作废该账号既有会话：常见触发原因就是"这人离职了"
+	// 或"账号可能被盗"，不踢会话等于只改了个门锁没换掉已配出去的钥匙。
+	_ = auth.RevokeAllForUser(ctx, h.DB, *userID)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"employee_no": empNo, "username": username, "password": newPwd,
 	})

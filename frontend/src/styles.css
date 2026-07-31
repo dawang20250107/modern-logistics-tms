@@ -500,8 +500,11 @@ select {
 .cmdk-answercard-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
 /* 定宽标签列而不是 space-between：三个短字段在一列宽度里被两端对齐，
    标签和值离得太远，读起来像两组无关的东西。 */
-.cmdk-answercard-fields > div { display: grid; grid-template-columns: 44px 1fr; gap: 8px; font-size: 12.5px; align-items: baseline; }
-.cmdk-answercard-fields span { color: var(--muted); }
+/* 标签列原先写死 44px。「在途运单」四个汉字约 50px，放不下就换行，
+   于是卡片上出现「在途运 / 单」这种把词从中间劈开的字段名。
+   字段名是短标签，任何时候都不该折行；宽度交给内容自己定。 */
+.cmdk-answercard-fields > div { display: grid; grid-template-columns: max-content 1fr; gap: 8px; font-size: 12.5px; align-items: baseline; }
+.cmdk-answercard-fields span { color: var(--muted); white-space: nowrap; }
 .cmdk-answercard-fields b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: left; min-width: 0; overflow-wrap: anywhere; }
 .cmdk-answer { padding: 11px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; gap: 8px; margin: 4px; }
 .cmdk-answer-head { font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -727,6 +730,9 @@ select {
 .kpi-delta.flat { color: var(--muted); }
 .kpi-spark { margin-top: 5px; }
 .kpi-foot { margin-top: 4px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+/* 「本期无可统计样本」：读数显示 — 时必须说清为什么，
+   否则看的人只会以为是加载失败或者接口坏了。 */
+.kpi-note { margin-top: 2px; font-size: 12px; color: var(--faint); }
 
 /* ── Pane — 边到边窗格，不是浮卡 ──
    无圆角、无投影、无边框：分隔靠 .stack 的 1px 沟槽。

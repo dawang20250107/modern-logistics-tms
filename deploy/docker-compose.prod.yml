@@ -30,10 +30,17 @@ services:
     environment:
       GO_LISTEN_ADDR: ":8000"
       DATABASE_URL: ${DATABASE_URL:-postgres://tms:tms_prod_pwd@db:5432/tms}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-CHANGE-ME-IN-PRODUCTION-USE-32BYTES+}
+      # 没有默认值是有意的：漏配就起不来，好过带着占位密钥跑起来。
+      # 网关的启动前置检查（config.Preflight）在 DJANGO_DEBUG=false 时
+      # 会拒绝弱密钥/占位密钥——这把钥匙同时签发内部用户令牌与司机端令牌。
+      #   生成：openssl rand -base64 48
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?必须设置强随机密钥，见 deploy/.env.prod.example}
       DJANGO_DEBUG: "false"
-      DJANGO_CORS_ORIGINS: ${DJANGO_CORS_ORIGINS:-}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      DJANGO_CORS_ORIGINS: ${DJANGO_CORS_ORIGINS:?必须写明确的前端来源，不能用 *}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?必须是对外可访问的基址，媒体文件绝对地址靠它}
+      # 自助注册默认关闭：账号应由管理员在「组织与权限 → 员工名录」开通。
+      # 对外客户门户需要自助开户时才置 1。
+      TMS_ALLOW_SELF_REGISTRATION: ${TMS_ALLOW_SELF_REGISTRATION:-0}
       MEDIA_ROOT: /app/media
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
@@ -51,6 +58,10 @@ services:
       - media:/app/media
     depends_on:
       db: { condition: service_healthy }
+    # healthcheck 由镜像自带（探 /readyz，会 ping 库）。
+    # 存活探针 /healthz 不查库是有意的：库抖一下就重启应用是错的处置，只会让恢复更慢。
+    # web 依赖 gateway 的 healthy 而不是 started —— 否则前端先起来，
+    # 用户看到的是一屏 502。
     restart: always
 
   web:
@@ -61,7 +72,7 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - gateway
+      gateway: { condition: service_healthy }
     restart: always
 
 volumes:

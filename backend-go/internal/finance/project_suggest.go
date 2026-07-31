@@ -27,6 +27,9 @@ import (
 
 // SuggestProjects GET /finance/projects/suggest?customer=&origin=&destination=&q=
 func (h *Handler) SuggestProjects(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermView, denyView) == nil {
+		return
+	}
 	q := r.URL.Query()
 	customer := strings.TrimSpace(q.Get("customer"))
 	origin := strings.TrimSpace(q.Get("origin"))

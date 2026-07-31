@@ -219,10 +219,23 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 // Funnel GET /api/v1/orders/funnel —— 建单工作台管道计数
 func (h *Handler) Funnel(w http.ResponseWriter, r *http.Request) {
+	// 原先这条不带数据范围：一个什么权限都没有的账号能拿到全库订单漏斗
+	// （总量、分状态、分渠道、今日建单）。/orders 列表是按建单人组织收窄的，
+	// 同一批数据换个聚合口径就全量放出去，等于列表那道收窄白做。
+	// 口径必须和列表一致——用 cb.organization_id（建单人所属组织），不是 o.organization_id。
+	actor := h.Svc.Guard(w, r, "", "")
+	if actor == nil {
+		return
+	}
 	ctx := r.Context()
+	args := &filters.Args{}
+	scope := actor.ScopeSQL("cb.organization_id::text", args)
 	byStatus, byChannel := map[string]int{}, map[string]int{}
 	rows, err := h.DB.Query(ctx, `
-		SELECT status, channel, count(*) FROM ops_order WHERE NOT is_deleted GROUP BY status, channel`)
+		SELECT o.status, o.channel, count(*)
+		FROM ops_order o LEFT JOIN accounts_user cb ON cb.id = o.created_by_id
+		WHERE NOT o.is_deleted AND `+scope+`
+		GROUP BY o.status, o.channel`, args.Values...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
@@ -241,10 +254,13 @@ func (h *Handler) Funnel(w http.ResponseWriter, r *http.Request) {
 		total += n
 	}
 	var today int
+	targs := &filters.Args{}
+	tscope := actor.ScopeSQL("cb.organization_id::text", targs)
 	_ = h.DB.QueryRow(ctx, `
-		SELECT count(*) FROM ops_order
-		WHERE NOT is_deleted AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date`,
-	).Scan(&today)
+		SELECT count(*) FROM ops_order o LEFT JOIN accounts_user cb ON cb.id = o.created_by_id
+		WHERE NOT o.is_deleted AND `+tscope+`
+		  AND (o.created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date`,
+		targs.Values...).Scan(&today)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"by_status": byStatus, "by_channel": byChannel, "today_created": today, "total": total,
 	})

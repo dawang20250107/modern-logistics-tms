@@ -39,6 +39,17 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	cfg := config.Load()
 
+	// 生产配置前置检查：把「配错了也能跑起来」改成开不了机。
+	// 最要紧的一条是 DJANGO_SECRET_KEY 还留着占位值——它同时签发内部用户令牌
+	// 与司机端令牌，而这类问题在测试环境永远不会暴露（那里本来就用默认值）。
+	if err := cfg.Preflight(); err != nil {
+		slog.Error("启动前置检查失败", "err", err)
+		os.Exit(1)
+	}
+	for _, w := range cfg.Warnings() {
+		slog.Warn("配置提醒", "msg", w)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
@@ -57,14 +68,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	r := buildRouter(ctx, pool, cfg)
+
+	slog.Info("gateway up", "addr", cfg.ListenAddr)
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
+	if err := srv.ListenAndServe(); err != nil {
+		slog.Error("server", "err", err)
+		os.Exit(1)
+	}
+}
+
+// buildRouter 组装全部依赖与 155 条路由，返回可直接 ServeHTTP 的处理器。
+//
+// 从 main 里拆出来只为一件事：**让路由可被 httptest 打**。
+// 在此之前全库没有一个 HTTP 层测试（唯一一处 httptest 是 agent 包里的假 MCP server），
+// 于是「这条路由挂没挂权限闸」只能靠人手 curl 去试——而财务那个洞正是这么漏掉的：
+// 没有任何自动化能发现「新加了一条路由但忘了加闸」。
+// 拆出来之后，router_test.go 就能把那张手工探针表钉成回归用例。
+func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) http.Handler {
 	authSvc := &auth.Service{DB: pool}
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
 	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.PublicBase,
-		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug}
+		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug,
+		AllowSelfRegistration: cfg.AllowSelfRegistration}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
-	finH := &finance.Handler{DB: pool}
+	finH := &finance.Handler{DB: pool, Svc: authSvc}
 	orderH.Projects = finH // 建单表单可直接新建项目
 	anaH := &analytics.Handler{DB: pool, Svc: authSvc}
 	orgH := &org.Handler{DB: pool, Svc: authSvc, MD: mdH}
@@ -84,6 +114,13 @@ func main() {
 	telH := &telematics.Handler{DB: pool, Svc: authSvc, In: ingestor}
 	// 指标按日物化，替代 Django 的 materialize_metrics 命令（趋势图的数据来源）
 	analytics.StartMaterializer(context.Background(), pool, 1*time.Hour, 30)
+	// 权限点规范目录落库：库里原先只有 3 行（Django 演示数据残留），而代码校验 12 个，
+	// 差额那些在权限矩阵界面上没有行、没法勾选，等于永久 403。见 auth/permcatalog.go。
+	if err := auth.EnsurePermissions(ctx, pool); err != nil {
+		slog.Warn("permission catalog", "err", err)
+	}
+	// 令牌黑名单只需覆盖「券还没自然过期」那段窗口，过期条目留着只会让表无限长
+	auth.StartDenylistPurger(context.Background(), pool, 1*time.Hour)
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
@@ -107,9 +144,23 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(httpx.Recover, httpx.AccessLog, httpx.CORS(cfg.CORSOrigins))
 
-	// 健康探针（Go 自身）
+	// 存活探针：进程还在、HTTP 还能响应。**刻意不查库**——
+	// 库抖一下就重启应用进程是错的处置，那只会让恢复更慢。
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok", "engine": "go"})
+	})
+	// 就绪探针：能不能接流量。这条必须查库——
+	// 原先只有 /healthz 且恒回 200，于是一个连不上数据库的网关会被
+	// 编排器判定为健康、继续往它身上打流量，每个请求都 500。
+	// 存活与就绪是两件事，探针也得是两个。
+	r.Get("/readyz", func(w http.ResponseWriter, rq *http.Request) {
+		c, cancel := context.WithTimeout(rq.Context(), 2*time.Second)
+		defer cancel()
+		if err := pool.Ping(c); err != nil {
+			httpx.Err(w, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "数据库不可用")
+			return
+		}
+		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready", "engine": "go"})
 	})
 
 	// ── 已移植域：Go 原生处理 ──
@@ -135,6 +186,7 @@ func main() {
 		p.Post("/api/v1/auth/me/avatar", authH.Avatar)
 		p.Delete("/api/v1/auth/me/avatar", authH.Avatar)
 		p.Post("/api/v1/auth/change-password", authH.ChangePassword)
+		p.Post("/api/v1/auth/logout", authH.Logout)
 		p.Get("/api/v1/auth/login-history", authH.LoginHistory)
 		p.Get("/api/v1/orders", orderH.List)
 		p.Get("/api/v1/orders/funnel", orderH.Funnel)
@@ -303,6 +355,9 @@ func main() {
 		p.Get("/api/v1/finance/statement-overview", finH.StatementOverview)
 		p.Get("/api/v1/finance/statements", finH.Statements(mdH))
 		p.Get("/api/v1/finance/statements/{id}", func(w http.ResponseWriter, rq *http.Request) {
+			if authSvc.Guard(w, rq, finance.PermView, "无财务查看权限") == nil {
+				return
+			}
 			mdH.Retrieve(w, rq, finance.StatementDetailCfg, finance.StatementWrite)
 		})
 		p.Get("/api/v1/finance/aging", finH.Aging)
@@ -377,10 +432,5 @@ func main() {
 		httpx.Err(w, http.StatusNotFound, "not_found", "未找到。")
 	})
 
-	slog.Info("gateway up", "addr", cfg.ListenAddr)
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
-	if err := srv.ListenAndServe(); err != nil {
-		slog.Error("server", "err", err)
-		os.Exit(1)
-	}
+	return r
 }

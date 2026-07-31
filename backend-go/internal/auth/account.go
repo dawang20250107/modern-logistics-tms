@@ -61,6 +61,15 @@ func randomString(n int) string {
 
 // Register POST /auth/register —— 创建基础账号并直接签发 JWT（自动登录）
 func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
+	// 默认关闭。理由见 config.Config.AllowSelfRegistration：
+	// 自助注册出来的账号业务上什么也干不了（无组织、无角色、数据范围为空），
+	// 但它是一个任何人都能自助拿到的**已认证身份**——所有只判「登录了没有」
+	// 的端点对它敞开。10/min 的限流挡的是批量刷号，不是"该不该给"这件事。
+	if !h.AllowSelfRegistration {
+		httpx.Err(w, http.StatusForbidden, "REGISTRATION_CLOSED",
+			"本系统不开放自助注册，请联系管理员开通账号。")
+		return
+	}
 	if !registerThrottle.Guard(w, r) {
 		return
 	}
@@ -163,7 +172,22 @@ func (h *Handlers) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]string{"detail": "密码已更新"})
+	// 改密码必须踢掉所有已存在的会话，否则"我怀疑密码泄漏了所以改一下"这个动作
+	// 起不到任何作用——攻击者手里的 access/refresh 照样能用到自然过期。
+	if err := RevokeAllForUser(ctx, h.Svc.DB, u.ID); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "作废旧会话失败")
+		return
+	}
+	// 顺手把新券发回去：不然用户刚改完密码就被自己的水位线踢下线，
+	// 体验上像是"改密码 = 被登出"，而这一步本来可以无缝。
+	access, refresh, err := h.Issuer.IssuePair(u.ID)
+	if err != nil {
+		httpx.JSON(w, http.StatusOK, map[string]string{"detail": "密码已更新，请重新登录"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{
+		"detail": "密码已更新", "access": access, "refresh": refresh,
+	})
 }
 
 func pwUser(u *UserRow) *PasswordUser {
@@ -230,6 +254,9 @@ func pyISO(t time.Time) string {
 func (h *Handlers) AuthMethods(w http.ResponseWriter, _ *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"password": true,
+		// 自助注册默认关闭。告诉前端，是为了让登录页直接不显示「注册新账号」——
+		// 留一个点进去必然 403 的入口，比没有入口更糟。
+		"registration": map[string]any{"enabled": h.AllowSelfRegistration},
 		"wechat": map[string]any{
 			"enabled": strings.EqualFold(os.Getenv("WECHAT_LOGIN_ENABLED"), "true"),
 			"note":    "微信扫码登录为预留能力，配置微信开放平台/企业微信后启用。",
@@ -397,6 +424,11 @@ func (h *Handlers) PasswordResetConfirm(w http.ResponseWriter, r *http.Request) 
 	if _, err := h.Svc.DB.Exec(r.Context(), "UPDATE accounts_user SET password=$2 WHERE id=$1::uuid",
 		u.ID, MakeDjangoPassword(body.NewPassword)); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
+		return
+	}
+	// 找回密码是"我进不去了"或"我怀疑被盗了"，正是最需要踢掉既有会话的场景
+	if err := RevokeAllForUser(r.Context(), h.Svc.DB, u.ID); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "作废旧会话失败")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"detail": "密码已重置，请用新密码登录"})

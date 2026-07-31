@@ -22,8 +22,15 @@ frontend/vite.config.d.ts
 frontend/vite.config.js
 
 # Env / secrets
+# `deploy/.env` 只匹配那一个确切路径 —— deploy/.env.prod 是漏网的，
+# 而部署文档正让人建这个文件。用通配符兜住所有 .env*，
+# 再把 .example 模板显式放回来（它本来就该进版本库）。
 .env
+.env.*
 deploy/.env
+deploy/.env.*
+!.env.example
+!deploy/.env.prod.example
 *.local.env
 
 # Docker

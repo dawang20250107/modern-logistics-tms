@@ -19,6 +19,9 @@ import (
 
 // BatchStatement POST /api/v1/dispatch-batches/{id}/statement {external_total}
 func (h *Handler) BatchStatement(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {

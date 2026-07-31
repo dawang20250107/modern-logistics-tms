@@ -202,10 +202,20 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 // Stats GET /api/v1/waybills/stats —— 状态药丸计数
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
+	// 这条原先既没有权限闸也没有数据范围：任何登录账号都能拿到全库运单的
+	// 状态分布与总数。是 cmd/server/authz_test.go 第一次跑就抓出来的——
+	// 和财务域同一类漏（手写 handler 忘了挂闸），只是当初手工探针没打到这条。
+	actor := h.Svc.Guard(w, r, "waybill.view", "无运单查看权限")
+	if actor == nil {
+		return
+	}
 	ctx := r.Context()
 	byStatus := map[string]int{}
 	total := 0
-	rows, err := h.DB.Query(ctx, "SELECT status, count(*) FROM ops_waybill GROUP BY status")
+	args := &filters.Args{}
+	scope := actor.ScopeSQL("w.organization_id::text", args)
+	rows, err := h.DB.Query(ctx,
+		"SELECT w.status, count(*) FROM ops_waybill w WHERE "+scope+" GROUP BY w.status", args.Values...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return

@@ -22,6 +22,9 @@ var costItems = map[string]string{
 
 // DashboardMetrics GET /api/v1/finance/dashboard-metrics
 func (h *Handler) DashboardMetrics(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermView, denyView) == nil {
+		return
+	}
 	ctx := r.Context()
 	days := 7
 	if v, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil {

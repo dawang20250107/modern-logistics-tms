@@ -39,6 +39,17 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	cfg := config.Load()
 
+	// 生产配置前置检查：把「配错了也能跑起来」改成开不了机。
+	// 最要紧的一条是 DJANGO_SECRET_KEY 还留着占位值——它同时签发内部用户令牌
+	// 与司机端令牌，而这类问题在测试环境永远不会暴露（那里本来就用默认值）。
+	if err := cfg.Preflight(); err != nil {
+		slog.Error("启动前置检查失败", "err", err)
+		os.Exit(1)
+	}
+	for _, w := range cfg.Warnings() {
+		slog.Warn("配置提醒", "msg", w)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
@@ -133,9 +144,23 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 	r := chi.NewRouter()
 	r.Use(httpx.Recover, httpx.AccessLog, httpx.CORS(cfg.CORSOrigins))
 
-	// 健康探针（Go 自身）
+	// 存活探针：进程还在、HTTP 还能响应。**刻意不查库**——
+	// 库抖一下就重启应用进程是错的处置，那只会让恢复更慢。
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok", "engine": "go"})
+	})
+	// 就绪探针：能不能接流量。这条必须查库——
+	// 原先只有 /healthz 且恒回 200，于是一个连不上数据库的网关会被
+	// 编排器判定为健康、继续往它身上打流量，每个请求都 500。
+	// 存活与就绪是两件事，探针也得是两个。
+	r.Get("/readyz", func(w http.ResponseWriter, rq *http.Request) {
+		c, cancel := context.WithTimeout(rq.Context(), 2*time.Second)
+		defer cancel()
+		if err := pool.Ping(c); err != nil {
+			httpx.Err(w, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "数据库不可用")
+			return
+		}
+		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready", "engine": "go"})
 	})
 
 	// ── 已移植域：Go 原生处理 ──

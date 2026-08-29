@@ -33,8 +33,18 @@ jobs:
           cache-dependency-path: backend-go/go.sum
       # runner 上没有中文字体，而水印测试守的正是「本机确实能渲染中文」。
       # 不装字体就只能把那条断言删掉，等于把生产上"静默不水印"的风险放行。
+      # apt 源偶发抖动（实测挂过一次：装字体这一步 5 秒就失败，
+      # 后面 Vet/Build/Test 全部 skipped，CI 一片红而代码毫无问题）。
+      # 和代码无关的红会让人开始无视 CI，所以退避重试三次再放弃。
       - name: 安装 CJK 字体（水印测试需要）
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont && exit 0
+            echo "第 $i 次失败，等 $((i * 5)) 秒重试"
+            sleep $((i * 5))
+          done
+          echo "装字体连试三次都失败——这一步失败会让水印测试无法验证中文渲染" >&2
+          exit 1
       - name: Vet
         run: go vet ./...
       - name: Build

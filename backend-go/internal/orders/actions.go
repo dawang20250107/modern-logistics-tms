@@ -277,6 +277,36 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "SPLIT_NEEDS_GROUPS", "至少拆成两组（每组至少一项货物）。")
 		return
 	}
+	// 每一项货物明细都必须被分到某一组，且只能进一组。
+	//
+	// 拆单会把明细搬到子订单、然后把原单作废。没被任何一组选中的明细
+	// 就留在那张已作废的原单上——从流程里消失，不报错、不提示。
+	// 实测 3 项只分 2 项：60 件 / 12 吨，拆完只剩 30 件 / 6 吨，而接口回 201。
+	//
+	// 界面上不会发出这种请求（未分组的默认归第 1 组），但这个端点对所有
+	// 已鉴权调用方开放，而"货不能凭空少"该由服务端保证。
+	assigned := map[string]bool{}
+	dupCount := 0
+	for _, g := range valid {
+		for _, i := range g {
+			if assigned[i] {
+				dupCount++
+			}
+			assigned[i] = true
+		}
+	}
+	if dupCount > 0 {
+		// 同一项被分进两组：搬运是"最后一次写入生效"，等于凭空少一份货
+		httpx.Err(w, http.StatusBadRequest, "SPLIT_ITEM_DUPLICATED",
+			fmt.Sprintf("有 %d 项货物被分到了多个组里，请检查分组。", dupCount))
+		return
+	}
+	if missing := len(items) - len(assigned); missing > 0 {
+		httpx.Err(w, http.StatusBadRequest, "SPLIT_ITEMS_UNASSIGNED",
+			fmt.Sprintf("还有 %d 项货物没有分到任何一组。拆单会作废原单，"+
+				"没分组的货会跟着原单一起失效——请把每一项都分到组里。", missing))
+		return
+	}
 
 	childIDs := []string{}
 	childNos := []string{}
@@ -402,6 +432,25 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := recomputeCargo(ctx, tx, mid); err != nil {
+			return err
+		}
+		// 没有货物明细行的订单，货量只写在表头。
+		//
+		// recomputeCargo 带着 "EXISTS 明细行" 的条件（对拆单是对的），
+		// 于是这种订单合完之后，新单的表头是从第一张源单**整列复制**来的：
+		// 合并 A(3 件) 和 B(7 件) 得到一张写着 7 件的新单，另一张的货凭空没了。
+		// 而这恰恰是最常见的订单形态——库里 5 万单只有 28 单有明细行。
+		if _, err := tx.Exec(ctx, `
+			UPDATE ops_order o SET
+			  cargo_quantity = t.q, cargo_weight_ton = t.w, cargo_volume_cbm = t.v,
+			  updated_at = now()
+			FROM (SELECT COALESCE(sum(cargo_quantity),0) q,
+			             COALESCE(sum(cargo_weight_ton),0) w,
+			             COALESCE(sum(cargo_volume_cbm),0) v
+			      FROM ops_order WHERE id::text = ANY($2)) t
+			WHERE o.id = $1::uuid
+			  AND NOT EXISTS (SELECT 1 FROM ops_order_cargo_item WHERE order_id = $1::uuid)`,
+			mid, ids); err != nil {
 			return err
 		}
 		return txEvent(ctx, tx, mid, "created", "", base.status, me.ID, "merge",

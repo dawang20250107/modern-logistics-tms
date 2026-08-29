@@ -53,6 +53,11 @@ if [ -d frontend/node_modules ]; then
     && ok "vitest" || bad "vitest（见 /tmp/rc-vitest.log）"
   ( cd frontend && npx vite build ) >/tmp/rc-vite.log 2>&1 \
     && ok "vite build" || bad "vite build（见 /tmp/rc-vite.log）"
+  # 分页口径走查不需要起服务，纯静态扫描
+  node scripts/dev/paging-audit.mjs >/tmp/rc-paging.log 2>&1 \
+    && ok "分页口径（没有把「当前页条数」当总数）" \
+    || { bad "分页口径走查有发现："; sed 's/^/      /' /tmp/rc-paging.log; }
+
   # 走查要连开发服务器。连不上时必须报"没跑"，不能报"没过"——
   # 把"跑不起来"记成失败，几次之后大家就开始无视这一项了。
   if curl -sf -o /dev/null http://127.0.0.1:5173/ 2>/dev/null; then

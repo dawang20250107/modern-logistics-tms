@@ -453,7 +453,7 @@ export function ReconciliationPage() {
         </span>
         <div className="recon-tabs" role="tablist" aria-label="对账中心视图">
           {([["overview", "对账总览"], ["statements", "对账单台账"], ["aging", "账龄分析"], ["settle", "收付款核销"]] as const).map(([k, label]) => (
-            <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleQueue.length > 0 ? <span className="recon-badge">{settleQueue.length}</span> : null}</button>
+            <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleTotal > 0 ? <span className="recon-badge">{fmtNum0(settleTotal)}</span> : null}</button>
           ))}
         </div>
       </div>

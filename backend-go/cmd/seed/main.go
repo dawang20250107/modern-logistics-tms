@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -215,14 +216,18 @@ func (s *seeder) rolesAndUsers() {
 
 	hash := auth.MakeDjangoPassword("Demo12345!")
 	type user struct {
-		name, nick, org, role string
-		super                 bool
+		// org 是**账号**的组织归属（数据范围按它收窄）；empOrg 是员工档案挂在
+		// 组织树的哪一格。超管账号刻意不挂组织（挂了会让"看全部"这件事
+		// 变得难以分辨是超管特权还是范围恰好够），但它的员工档案要有位置，
+		// 否则员工名录里那一行是悬空的。
+		name, nick, org, empOrg, role, position string
+		super                                   bool
 	}
 	for _, u := range []user{
-		{"seed_admin", "演示超管", "", "", true},
-		{"seed_dispatcher", "演示调度", "org/EAST", "SEED_DISPATCH", false},
-		{"seed_finance", "演示财务", "org/GROUP", "SEED_FINANCE", false},
-		{"seed_cs", "演示客服", "org/SH", "SEED_CS", false},
+		{"seed_admin", "演示超管", "", "org/GROUP", "", "系统管理员", true},
+		{"seed_dispatcher", "演示调度", "org/EAST", "org/EAST", "SEED_DISPATCH", "调度员", false},
+		{"seed_finance", "演示财务", "org/GROUP", "org/GROUP", "SEED_FINANCE", "财务专员", false},
+		{"seed_cs", "演示客服", "org/SH", "org/SH", "SEED_CS", "客服专员", false},
 	} {
 		uid := id("user/" + u.name)
 		var orgID any
@@ -245,6 +250,21 @@ func (s *seeder) rolesAndUsers() {
 				WHERE NOT EXISTS (SELECT 1 FROM iam_role_assignment WHERE user_id=$2::uuid AND role_id=$3::uuid)`,
 				id("assign/"+u.name), uid, id("role/"+u.role))
 		}
+		// 员工档案。账号和员工是两张表（iam_employee.user_id 指向账号），
+		// 而「组织与权限 → 员工名录」正是文档里让管理员开通账号的地方。
+		// 原先 seed 只建账号不建员工档案，于是演示库里「员工名录 0」——
+		// 那一页的主体内容是空的，角色授权、交接、重置密码这些
+		// 挂在员工行上的动作全都没有对象可点。
+		// 客户第一天确实是 0 个员工，但**演示数据的作用是让人看见功能长什么样**。
+		s.exec("employee "+u.name, `
+			INSERT INTO iam_employee (id, created_at, updated_at, employee_no, name, phone, email,
+			  id_no, position, status, hire_date, department_id, organization_id, supervisor_id, user_id)
+			VALUES ($1::uuid, now(), now(), $2, $3, '', '', '', $4, 'active', current_date,
+			        NULL, $5::uuid, NULL, $6::uuid)
+			ON CONFLICT (employee_no) DO UPDATE SET name=EXCLUDED.name, position=EXCLUDED.position,
+			  organization_id=EXCLUDED.organization_id, user_id=EXCLUDED.user_id, updated_at=now()`,
+			id("employee/"+u.name), "E_"+strings.ToUpper(strings.TrimPrefix(u.name, "seed_")),
+			u.nick, u.position, id(u.empOrg), uid)
 	}
 }
 

@@ -832,8 +832,17 @@ func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) 
 		}
 		amt, _ := decimal.NewFromString(amount)
 		if remit {
+			// 已回款和还没代收是两件事，报错不能都说成"仅已代收的货款可回款"——
+			// 那句话会让操作员以为漏了代收那一步，于是回头去点「已代收」，
+			// 而钱其实早就回过了。回款不做幂等（重复回款是真金白银），
+			// 但至少要把话说清楚。
+			if codStatus == "remitted" {
+				return httpErr{http.StatusConflict, "COD_ALREADY_REMITTED",
+					"该运单的代收货款已经回款过了，无需重复操作。"}
+			}
 			if codStatus != "collected" {
-				return httpErr{http.StatusConflict, "COD_NOT_COLLECTED", "仅已代收的货款可回款。"}
+				return httpErr{http.StatusConflict, "COD_NOT_COLLECTED",
+					"该运单还没有确认代收，请先确认收到货款再回款。"}
 			}
 			if _, err := tx.Exec(ctx, `UPDATE ops_waybill SET cod_status='remitted',
 				cod_remitted_at=now(), updated_at=now() WHERE id=$1::uuid`, id); err != nil {
@@ -848,6 +857,17 @@ func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) 
 		}
 		if codStatus == "remitted" {
 			return httpErr{http.StatusConflict, "COD_REMITTED", "代收货款已回款，不能重复代收。"}
+		}
+		// 已经代收过就什么都不做。
+		//
+		// 原先这里只挡了"已回款"，于是再点一次「已代收」会重写 cod_collected_at：
+		// 司机 10:00 收的现金，下午有人手滑再点一次，记录变成 15:00——
+		// 而这条时间戳正是现金纠纷时唯一能拿出来的东西。顺带时间线上还会多出
+		// 一条「已代收」，看起来像收了两次。
+		// 不报错而是直接返回当前状态：重复提交多半是网络重试或手滑，
+		// 报一个错只会让人以为出了问题，幂等地什么都不做才是对的。
+		if codStatus == "collected" {
+			return nil
 		}
 		if _, err := tx.Exec(ctx, `UPDATE ops_waybill SET cod_status='collected',
 			cod_collected_at=now(), updated_at=now() WHERE id=$1::uuid`, id); err != nil {

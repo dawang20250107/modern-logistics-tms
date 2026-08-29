@@ -90,6 +90,11 @@ jobs:
       # 纯静态、无依赖，适合进 CI（浏览器类检查进不来）。
       # 抓的是"前端调的接口后端没有"——恒定 405/404，而失败常被 catch 吞掉。
       - name: 前后端接口对齐走查
+        # working-directory 必须写：这个 job 默认 cd 到 frontend/，
+        # 不写的话脚本路径找不到，步骤会在 0 秒内失败——
+        # 看起来像"检查抓到问题了"，其实是检查自己没跑起来。
+        # 隔壁「分页口径走查」早就写了这一行，我照抄的时候漏了。
+        working-directory: .
         run: python3 scripts/dev/route-match.py
       - name: 分页口径走查
         working-directory: .

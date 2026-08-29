@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { apiGet, apiPost } from "../api/client";
+import { ApiError, apiGet, apiPost } from "../api/client";
 import { toast } from "../api/toast";
 import { useModalA11y } from "../api/useModalA11y";
 import type { LookupResponse, LookupResult, ReplyCardData } from "../api/types";
@@ -90,6 +90,18 @@ export function SpotlightCommandBar() {
   // 搜索即工作台：输入车牌/电话/单号/客户/承运商 → 精确答案卡 + 跨实体可跳转结果
   const lookup = query.trim();
   const lookupOn = lookup.length >= 2 && !lookup.startsWith("/") && !loading && !response;
+  // AI 是否已接入。这个部署没配 DEEPSEEK_API_KEY 时，后端会明确回
+  // DEEPSEEK_NOT_CONFIGURED——那是个不会因为"稍后重试"而改变的状态，
+  // 所以要在用户按下去之前就告诉他，而不是等他试了再说一句含糊的失败。
+  // 和地图 Key 没配时降级成列表视图是同一套做法。
+  const aiStatus = useQuery({
+    queryKey: ["ai", "status"],
+    queryFn: () => apiGet<{ configured: boolean }>("/ai/deepseek/status"),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const aiReady = aiStatus.data?.configured !== false;
+
   const lookupQ = useQuery({
     queryKey: ["cmdk-lookup", lookup],
     queryFn: () => apiGet<LookupResponse>(`/lookup?q=${encodeURIComponent(lookup)}`),
@@ -231,8 +243,16 @@ export function SpotlightCommandBar() {
       const data = await apiPost<AgentResponse>("/agent/chat", { message: cleanQuery });
       setResponse(data);
       toast.success("分析已完成");
-    } catch {
-      toast.error("分析失败，请稍后重试");
+    } catch (e) {
+      // 原先这里是 `catch { toast.error("分析失败，请稍后重试") }`。
+      // 而本部署没配 AI 时后端回的是 DEEPSEEK_NOT_CONFIGURED——
+      // 那是个"稍后"也不会变的状态，让人一次次重试永远等不到结果。
+      // 后端的报错文案本来就说清楚了，照实转达即可。
+      if (e instanceof ApiError && e.code === "DEEPSEEK_NOT_CONFIGURED") {
+        toast.error("本部署未接入 AI（未配置 DEEPSEEK_API_KEY），该功能不可用。");
+      } else {
+        toast.error(e instanceof ApiError ? e.message : "分析失败，请稍后重试");
+      }
     } finally {
       setLoading(false);
     }
@@ -309,7 +329,9 @@ export function SpotlightCommandBar() {
                       <div className="cmdk-section cmdk-section-ai">AI 分析</div>
                       <div id={`cmdk-option-${idx}`} role="option" aria-selected={active} className={`cmdk-item cmdk-ai${active ? " active" : ""}`} onMouseEnter={() => setSelectedKey(item.key)} onClick={() => run(idx)}>
                         <span>用 AI 分析：“{query.trim()}”</span>
-                        <span className="cmdk-kbd">Enter ↵</span>
+                        {aiReady
+                          ? <span className="cmdk-kbd">Enter ↵</span>
+                          : <span className="cmdk-kbd" title="未配置 DEEPSEEK_API_KEY">未接入</span>}
                       </div>
                     </div>
                   );

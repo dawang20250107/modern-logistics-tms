@@ -138,3 +138,43 @@ func (e *testEnv) mkOrder() string {
 	})
 	return id
 }
+
+// TestOrderDetailIncludesAttachments 传上去的附件必须出现在订单详情里。
+//
+// 前端整页只取 /orders/{id} 这一个接口，附件那一栏读的是它返回的 attachments。
+// 而这个键在组装详情行时被写死成了空数组——另有一个
+// GET /orders/{id}/attachments 端点能查到，但页面从来不调它。
+// 结果：传成功了、库里也有，附件栏永远显示"暂无附件"。
+// 上传这个功能整体上等于不存在，而且不报任何错。
+func TestOrderDetailIncludesAttachments(t *testing.T) {
+	e := newTestEnv(t)
+	token := e.mkUser(true)
+	orderID := e.mkOrder()
+	content := []byte("DETAIL-ATTACHMENT-OK")
+
+	if rec := e.uploadAttachment(token, orderID, "磅单.txt", content); rec.Code != http.StatusCreated {
+		t.Fatalf("上传返回 %d：%s", rec.Code, rec.Body.String())
+	}
+
+	rec := e.call(token, "GET", "/api/v1/orders/"+orderID, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("取详情返回 %d", rec.Code)
+	}
+	var out struct {
+		Data struct {
+			Attachments []struct {
+				Name        string `json:"name"`
+				FileDisplay string `json:"file_display"`
+			} `json:"attachments"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("解析详情失败：%v", err)
+	}
+	if len(out.Data.Attachments) == 0 {
+		t.Fatal("详情里的 attachments 是空的 —— 页面上会一直显示「暂无附件」")
+	}
+	if out.Data.Attachments[0].FileDisplay == "" {
+		t.Error("详情里的附件没有可打开的地址")
+	}
+}

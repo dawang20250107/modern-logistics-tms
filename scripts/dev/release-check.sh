@@ -71,6 +71,11 @@ if [ -d frontend/node_modules ]; then
       node scripts/dev/e2e-flow.mjs >/tmp/rc-e2e.log 2>&1 \
         && ok "端到端业务链（建单→检索→详情→计数一致→翻页）" \
         || { bad "端到端业务链失败："; tail -10 /tmp/rc-e2e.log | sed 's/^/      /'; }
+      # 写操作要真按一次。这一轮三个凭证上传的问题（丢字节、400、页面上不显示）
+      # 上面那两个脚本一个都没抓到：一个只加载页面，一个只走建单那条链。
+      node scripts/dev/write-paths.mjs >/tmp/rc-write.log 2>&1 \
+        && ok "各页写操作（上传的凭证能取回原件）" \
+        || { bad "写操作走查有发现："; tail -10 /tmp/rc-write.log | sed 's/^/      /'; }
     else
       skip "端到端业务链：网关没起"
     fi

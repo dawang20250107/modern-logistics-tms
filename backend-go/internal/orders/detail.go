@@ -59,6 +59,19 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取行失败")
 		return
 	}
+	rows.Close()
+	// 附件单查一次，只在详情里查。
+	//
+	// scanOrder 把 attachments 写死成空数组（列表页每行都去查附件是 N+1，
+	// 列表也不显示附件，所以那样是对的）——但详情页也走同一个组装函数，
+	// 于是这一栏永远是空的。前端整页只取 /orders/{id} 这一个接口，
+	// 附件栏读的就是它，所以传上去的合同、磅单一律显示"暂无附件"：
+	// 传成功了、库里也有、接口也 201，就是页面上看不见。
+	// 另有一个 GET /orders/{id}/attachments 端点能查到，但没有任何页面调它。
+	if list, aerr := h.childRows(ctx, attachmentSelect+
+		" WHERE a.order_id=$1::uuid ORDER BY a.created_at, a.id", id); aerr == nil {
+		it["attachments"] = normalizeAttachments(list)
+	}
 	httpx.JSON(w, http.StatusOK, it)
 }
 

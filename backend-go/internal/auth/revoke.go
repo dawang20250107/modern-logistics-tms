@@ -112,3 +112,28 @@ func StartDenylistPurger(ctx context.Context, db *pgxpool.Pool, interval time.Du
 		}
 	}()
 }
+
+// StartRuntimeStatePurger 定期清理短命的共享运行时状态。
+//
+// 三张表都带 expires_at，各自的读路径也顺手删过期行，但那只覆盖「被访问到的键」。
+// 一个再没人登录的用户名、一个再没人碰的限流键，会一直留着。
+// 这些表的行本身很小，但没有兜底清理就是单调增长——迟早变成一张没人记得的大表。
+func StartRuntimeStatePurger(ctx context.Context, db *pgxpool.Pool, interval time.Duration) {
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			// 登录锁定：窗口与锁都过期了才删，否则会把锁中的记录一起清掉
+			_, _ = db.Exec(ctx, `DELETE FROM iam_login_throttle
+				WHERE window_end < now() - interval '1 hour'
+				  AND (locked_until IS NULL OR locked_until < now())`)
+			_, _ = db.Exec(ctx, `DELETE FROM iam_rate_hit WHERE hit_at < now() - interval '1 day'`)
+			_, _ = db.Exec(ctx, `DELETE FROM iam_reset_code WHERE expires_at < now()`)
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
+}

@@ -10,6 +10,21 @@ PGBIN=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | tail -1)
 
 start_pg() {
   if pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null; then echo "postgres 已在运行"; return; fi
+  # 容器重建后 PGDATA 会整个消失，脚本原先直接 pg_ctl start 然后报"启动失败"，
+  # 每次都要手工 initdb + 建角色建库。既然这脚本的卖点就是"一条命令拉起全栈"，
+  # 空目录就自己初始化——从零到能用是它该负责的事。
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    echo "PGDATA 为空，初始化数据库…"
+    mkdir -p "$PGDATA" /var/run/postgresql
+    chown -R postgres:postgres "$PGDATA" /var/run/postgresql 2>/dev/null || true
+    su postgres -c "$PGBIN/initdb -D $PGDATA -U postgres --encoding=UTF8 --locale=C" >/dev/null 2>&1
+    su postgres -c "$PGBIN/pg_ctl -D $PGDATA -l /tmp/pg.log -o '-p 5432 -k /var/run/postgresql' start" >/dev/null 2>&1
+    for _ in $(seq 1 20); do pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null && break; sleep 0.5; done
+    su postgres -c "psql -q -c \"CREATE ROLE tms LOGIN PASSWORD 'tms' SUPERUSER\"" >/dev/null 2>&1
+    su postgres -c "psql -q -c 'CREATE DATABASE tms OWNER tms'" >/dev/null 2>&1
+    echo "数据库已初始化（角色/库均为 tms）"
+    return
+  fi
   su postgres -c "$PGBIN/pg_ctl -D $PGDATA -l /tmp/pg.log -o '-p 5432 -k /var/run/postgresql' start" >/dev/null 2>&1
   for _ in $(seq 1 20); do pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null && break; sleep 0.5; done
   pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null && echo "postgres 已启动" || echo "postgres 启动失败，见 /tmp/pg.log"

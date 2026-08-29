@@ -7,10 +7,12 @@ import { passwordStrength } from "../auth/password";
 import { AuthHero } from "../components/AuthHero";
 
 interface RequestResult {
+  /** false = 本部署未开通自助找回（未配下发通道）。此时不能进第二步。 */
   sent: boolean;
   target?: string;
   channel?: string;
   dev_code?: string;
+  detail?: string;
 }
 
 export function ForgotPasswordPage() {
@@ -33,6 +35,13 @@ export function ForgotPasswordPage() {
     setError(""); setBusy(true);
     try {
       const res = await apiPost<RequestResult>("/auth/password-reset/request", { identifier: identifier.trim() });
+      // 未开通自助找回时不要进第二步：那会让人对着一个永远等不到码的输入框干等。
+      // 后端此前无论如何都回 sent=true（验证码只写进了服务器日志），
+      // 前端也就一路往下走——两边一起把"断了"演成了"发出去了"。
+      if (!res.sent) {
+        setError(res.detail || "本系统未开通自助找回密码，请联系管理员重置。");
+        return;
+      }
       setTarget(res.target);
       setDevCode(res.dev_code);
       if (res.dev_code) setCode(res.dev_code);

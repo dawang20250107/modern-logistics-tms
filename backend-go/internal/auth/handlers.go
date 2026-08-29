@@ -33,6 +33,9 @@ type Handlers struct {
 	Debug bool
 	// AllowSelfRegistration 见 config.Config 同名字段：默认关闭
 	AllowSelfRegistration bool
+	// ResetSender 密码找回验证码的下发通道。nil = 未开通自助找回。
+	// 刻意不给默认实现：原先"默认写日志"等于验证码人人可读（见 notify.go）。
+	ResetSender Sender
 }
 
 // RequireAuth Bearer 校验中间件：任何原生路由的鉴权入口。

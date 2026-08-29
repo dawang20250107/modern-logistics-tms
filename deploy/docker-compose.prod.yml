@@ -71,6 +71,14 @@ services:
     image: tms-frontend:prod
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      # TLS 证书。生产挂云厂商签发的证书或 certbot 的 live 目录；
+      # 本地预演先跑 `bash deploy/gen-dev-cert.sh` 生成自签证书。
+      # 目录不存在时 nginx 起不来——这是有意的：静默退回明文比起不来危险得多。
+      - ./certs:/etc/nginx/certs:ro
+      # certbot webroot 校验落点（用 Let's Encrypt 时需要）
+      - certbot-www:/var/www/certbot
     depends_on:
       gateway: { condition: service_healthy }
     restart: always
@@ -78,3 +86,4 @@ services:
 volumes:
   pgdata:
   media:
+  certbot-www:

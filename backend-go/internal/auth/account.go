@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
@@ -282,8 +283,25 @@ const resetCodeTTL = 10 * time.Minute
 func issueResetCode(identifier string) string {
 	n, _ := rand.Int(rand.Reader, big.NewInt(1_000_000))
 	code := fmt.Sprintf("%06d", n.Int64())
+	key := strings.ToLower(strings.TrimSpace(identifier))
+	// 验证码放进程内 map，在多副本下是**功能断裂**而不只是弱化：
+	// A 副本发的码，请求落到 B 副本时查无此码，用户永远重置不了密码。
+	// 落库之后哪个副本接手都认。
+	if sharedDB != nil {
+		ctx, cancel := guardCtx()
+		defer cancel()
+		if _, err := sharedDB.Exec(ctx, `
+			INSERT INTO iam_reset_code (identifier, code, expires_at)
+			VALUES ($1, $2, now() + $3::interval)
+			ON CONFLICT (identifier) DO UPDATE SET
+			  code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, created_at = now()`,
+			key, code, resetCodeTTL.String()); err != nil {
+			slog.Error("验证码写库失败", "err", err)
+		}
+		return code
+	}
 	resetMu.Lock()
-	resetCodes[strings.ToLower(strings.TrimSpace(identifier))] = resetCode{code, time.Now().Add(resetCodeTTL)}
+	resetCodes[key] = resetCode{code, time.Now().Add(resetCodeTTL)}
 	resetMu.Unlock()
 	return code
 }
@@ -291,6 +309,21 @@ func issueResetCode(identifier string) string {
 // verifyResetCode 一次性校验（命中即作废），比较用恒定时间避免计时侧信道
 func verifyResetCode(identifier, code string) bool {
 	key := strings.ToLower(strings.TrimSpace(identifier))
+	if sharedDB != nil {
+		ctx, cancel := guardCtx()
+		defer cancel()
+		// DELETE ... RETURNING：取出即作废，一条语句里完成，
+		// 两个并发请求不可能都拿到同一个码。
+		var stored string
+		err := sharedDB.QueryRow(ctx, `
+			DELETE FROM iam_reset_code
+			 WHERE identifier = $1 AND expires_at > now()
+			RETURNING code`, key).Scan(&stored)
+		if err != nil {
+			return false
+		}
+		return subtle.ConstantTimeCompare([]byte(stored), []byte(code)) == 1
+	}
 	resetMu.Lock()
 	defer resetMu.Unlock()
 	rc, ok := resetCodes[key]
@@ -335,6 +368,18 @@ func maskTarget(u *UserRow) (string, string) {
 	return "", ""
 }
 
+// fullTarget 返回未掩码的下发目标（优先邮箱，其次手机号）。
+// 与 maskTarget 的优先级必须一致，否则响应里说"发到邮箱"而实际发了短信。
+func fullTarget(u *UserRow) string {
+	if strings.Contains(u.Email, "@") {
+		return u.Email
+	}
+	if len([]rune(u.Phone)) >= 7 {
+		return u.Phone
+	}
+	return ""
+}
+
 // PasswordResetRequest POST /auth/password-reset/request
 //
 // 不泄露账号是否存在：无论是否命中都返回 sent=true —— 这是防账号枚举的关键，
@@ -354,18 +399,39 @@ func (h *Handlers) PasswordResetRequest(w http.ResponseWriter, r *http.Request) 
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"detail": "请输入邮箱或手机号"})
 		return
 	}
+	// 没有配下发通道时，直说没开通，不要假装发出去了。
+	// 原先这里无论如何都回 sent=true，而验证码只写进了 stderr——
+	// 用户永远收不到，日志却人人可读（见 notify.go）。
+	if h.ResetSender == nil {
+		httpx.JSON(w, http.StatusOK, map[string]any{
+			"sent": false, "target": nil, "channel": nil,
+			"detail": "本系统未开通自助找回密码，请联系管理员重置。",
+		})
+		return
+	}
+
 	payload := map[string]any{"sent": true}
 	if u := h.findUserByIdentifier(r, ident); u != nil {
 		target, channel := maskTarget(u)
-		code := issueResetCode(ident)
-		ch := channel
-		if ch == "" {
-			ch = "log"
+		full := fullTarget(u)
+		if full == "" {
+			// 账号没留邮箱/手机号：同样不能泄露"这个账号存在但没联系方式"，
+			// 响应保持与命中不到时一致
+			httpx.JSON(w, http.StatusOK, payload)
+			return
 		}
-		// 下发网关预留点：接入短信/邮件/企业微信后在此实发，当前仅留痕
-		fmt.Fprintf(os.Stderr, "[password-reset] user=%s channel=%s code=%s\n", u.Username, ch, code)
+		code := issueResetCode(ident)
+		if err := h.ResetSender.Send(r.Context(), full, code); err != nil {
+			// 失败只记通道与用户名，**绝不记验证码，也不记完整目标**
+			slog.Error("验证码下发失败", "user", u.Username, "channel", h.ResetSender.Channel(), "err", err)
+			httpx.Err(w, http.StatusBadGateway, "SEND_FAILED", "验证码发送失败，请稍后重试或联系管理员。")
+			return
+		}
 		payload["target"] = nilIfEmpty(target)
 		payload["channel"] = nilIfEmpty(channel)
+		// dev_code 只在 DEBUG 下回给前端，方便本地联调；生产 DEBUG 必须是 false
+		//（config.Preflight 不检查这一条，因为 DEBUG=true 时它整个不跑——
+		// 所以"生产别开 DEBUG"这条在部署文档里是硬要求）
 		if h.Debug {
 			payload["dev_code"] = code
 		}

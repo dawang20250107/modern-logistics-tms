@@ -90,7 +90,8 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
 	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.PublicBase,
 		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug,
-		AllowSelfRegistration: cfg.AllowSelfRegistration}
+		AllowSelfRegistration: cfg.AllowSelfRegistration,
+		ResetSender:           auth.NewSender()}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
 	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
@@ -121,6 +122,12 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 	}
 	// 令牌黑名单只需覆盖「券还没自然过期」那段窗口，过期条目留着只会让表无限长
 	auth.StartDenylistPurger(context.Background(), pool, 1*time.Hour)
+	// 登录锁定 / 限流 / 找回密码验证码从进程内 map 改为共享存储。
+	// 不注入的话它们仍走进程内 map —— 那在单副本下没问题，多副本下
+	// 前两者是安全闸被稀释、后者是功能直接断（见 007 迁移的说明）。
+	auth.UseSharedStore(pool)
+	httpx.UseSharedStore(pool)
+	auth.StartRuntimeStatePurger(context.Background(), pool, 30*time.Minute)
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	if err := agent.EnsureSchema(ctx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)

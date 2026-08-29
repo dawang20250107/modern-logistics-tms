@@ -8,6 +8,8 @@ package httpx
 // AI 闸防 LLM token 成本 DoS —— 原生化时必须一并带过来。
 
 import (
+	"context"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,9 +17,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Throttle struct {
+	scope  string // 库模式下的闸名（取自环境变量名，如 THROTTLE_REGISTER）
 	mu     sync.Mutex
 	hits   map[string][]time.Time
 	limit  int
@@ -50,11 +55,80 @@ func NewThrottle(envKey, fallback string) *Throttle {
 			window = 24 * time.Hour
 		}
 	}
-	return &Throttle{hits: map[string][]time.Time{}, limit: limit, window: window}
+	return &Throttle{scope: envKey, hits: map[string][]time.Time{}, limit: limit, window: window}
+}
+
+// sharedDB 由 UseSharedStore 在启动期注入。为空时限流退回进程内 map。
+//
+// 为什么要能共享：限流是**安全闸**（注册 10/min 防批量刷号、找回密码 8/min
+// 防验证码爆破、AI 30/min 防 token 成本 DoS）。计数在进程内的话，
+// 副本数一乘闸就形同虚设——两个副本等于把每个闸的额度直接翻倍。
+// "要不要多副本"不该由这个实现细节决定。
+var sharedDB *pgxpool.Pool
+
+// UseSharedStore 让所有限流器改用库做计数（多副本部署必须调用）。
+func UseSharedStore(db *pgxpool.Pool) { sharedDB = db }
+
+// allowShared 用库做滑动窗口：先删过期命中，再数窗口内的行数，未超则插一行。
+// 单条 SQL 里完成，避免"读-判-写"之间的竞态。
+func (t *Throttle) allowShared(key string) (bool, int, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	scope := t.scope
+	if scope == "" {
+		scope = "default"
+	}
+	var allowed bool
+	var oldest *time.Time
+	err := sharedDB.QueryRow(ctx, `
+		WITH purged AS (
+		  DELETE FROM iam_rate_hit
+		   WHERE scope = $1 AND key = $2 AND hit_at < now() - $3::interval
+		), cur AS (
+		  SELECT count(*) AS n, min(hit_at) AS oldest
+		    FROM iam_rate_hit WHERE scope = $1 AND key = $2 AND hit_at >= now() - $3::interval
+		), ins AS (
+		  INSERT INTO iam_rate_hit (scope, key)
+		  SELECT $1, $2 FROM cur WHERE cur.n < $4
+		  RETURNING 1
+		)
+		SELECT (SELECT count(*) FROM ins) > 0, (SELECT oldest FROM cur)`,
+		scope, key, t.window.String(), t.limit).Scan(&allowed, &oldest)
+	if err != nil {
+		// 库出问题时**放行**而不是拒绝。限流不是鉴权：把所有人挡在门外
+		// 换来的不是安全，是自己制造的全站不可用。降级的方向要选对。
+		slog.Warn("限流查询失败，本次放行", "scope", scope, "err", err)
+		return true, 0, true
+	}
+	if allowed {
+		return true, 0, true
+	}
+	wait := 1
+	if oldest != nil {
+		if w := int(time.Until(oldest.Add(t.window)).Seconds()) + 1; w > wait {
+			wait = w
+		}
+	}
+	return false, wait, true
+}
+
+// PurgeExpiredRateHits 清理过期命中行。allowShared 里那条 DELETE 只清
+// 「本 key 本 scope」的，从没被访问过的旧 key 需要这个兜底。
+func PurgeExpiredRateHits(ctx context.Context, db *pgxpool.Pool, keep time.Duration) (int64, error) {
+	tag, err := db.Exec(ctx, `DELETE FROM iam_rate_hit WHERE hit_at < now() - $1::interval`, keep.String())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 // Allow 返回是否放行；被限时给出建议重试秒数（向上取整，对齐 DRF）
 func (t *Throttle) Allow(key string) (bool, int) {
+	if sharedDB != nil {
+		if ok, wait, handled := t.allowShared(key); handled {
+			return ok, wait
+		}
+	}
 	now := time.Now()
 	cutoff := now.Add(-t.window)
 

@@ -16,7 +16,9 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-QUICK=0; [ "${1:-}" = "--quick" ] && QUICK=1
+# 既认参数也认环境变量。原先只认 --quick：写 QUICK=1 bash release-check.sh
+# 会被静默忽略，跑的其实是全量——不报错、只是慢，人会以为自己跳过了压测。
+QUICK="${QUICK:-0}"; [ "${1:-}" = "--quick" ] && QUICK=1
 
 PASS=0; FAIL=0; SKIP=0
 ok()   { echo "  ✓ $1"; PASS=$((PASS+1)); }
@@ -255,7 +257,22 @@ else
     skip "压测：网关没起（bash scripts/dev/up.sh）"
   fi
 
-  sect "备份恢复演练"
+  sect "从零起库"
+# 别的检查都跑在一个早就建好的库上。这一条回答的是另一个问题：
+# **新客户拿到这套东西，从一个空库开始，能不能跑起来。**
+# 这一轮就靠它抓到两个只有从零跑才看得见的问题：
+# 演示司机没有身份证号（司机端一个都登不进去）、演示账号没有员工档案。
+if [ "$QUICK" = 1 ]; then
+  skip "从零起库：QUICK 模式跳过（会建临时库，约 30 秒）"
+else
+  if bash scripts/dev/coldstart.sh >/tmp/rc-cold.log 2>&1; then
+    ok "空库 → 迁移 → 播种 → 起服务 → 登录 → 关键接口全通"
+  else
+    bad "从零起库失败："; grep -E "✗" /tmp/rc-cold.log | sed 's/^/      /'
+  fi
+fi
+
+sect "备份恢复演练"
   if [ "${RELEASE_CHECK_DRILL:-0}" = 1 ]; then
     bash scripts/dev/backup-drill.sh >/tmp/rc-drill.log 2>&1 \
       && ok "备份→删库→恢复→取件校验全通过" \

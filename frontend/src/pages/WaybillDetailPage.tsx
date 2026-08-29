@@ -220,6 +220,7 @@ export function WaybillDetailPage() {
   if (detail.isError || !detail.data) return <StateView kind="error" title="运单无法打开" hint="运单不存在、无权访问或数据暂时不可用。" onRetry={() => detail.refetch()} />;
   
   const w = detail.data;
+  const c = contract.data ?? null;
   const editable = !["settled", "cancelled", "voided"].includes(w.status);
   
   const currentStepIdx = WORKFLOW_STEPS.findIndex(s => s.status === w.status);
@@ -544,6 +545,69 @@ export function WaybillDetailPage() {
             ) : (
               <div className="muted small" style={{ padding: 24, textAlign: "center" }}>加载费用数据…</div>
             )}
+          </div>
+
+          {/* 承运合同。
+              这三个 mutation（genContract / sendContract / confirmContract）
+              早就写在这个文件里，但一直没有任何地方把它们渲染出来——
+              而后端那条路由此前也只有 GET。两边各缺一半，
+              于是「承运合同」这一整段功能从界面上完全够不着：
+              工作流面板上「承运合同 未生成」会一直挂着，没有任何东西能改变它。
+              合同是承运责任、运费金额、异常责任的书面依据，
+              司机跑了一趟没有合同，出事时双方各说各话。 */}
+          <div className="panel">
+            <div className="panel-head">承运合同</div>
+            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+              {c ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: "bold", fontSize: 13 }}>{c.contract_no}</span>
+                    <span className={`tag tag-${c.confirm_status === "confirmed" ? "low" : c.confirm_status === "rejected" ? "high" : "medium"}`}>
+                      {c.status_label}
+                    </span>
+                    <span className="small muted">承运司机 {c.driver_name || EMPTY}</span>
+                    {c.sent_at && <span className="small muted">发送于 {fmtDateTime(c.sent_at)}</span>}
+                    {c.confirmed_at && <span className="small muted">确认于 {fmtDateTime(c.confirmed_at)}</span>}
+                  </div>
+                  {c.driver_reply && <div className="small">司机回复：{c.driver_reply}</div>}
+                  <details>
+                    <summary className="linkish small">查看合同正文</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, background: "var(--panel-2)", padding: 12, borderRadius: "var(--radius)", border: "1px solid var(--line)", marginTop: 8 }}>
+                      {c.content}
+                    </pre>
+                  </details>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {c.confirm_status === "pending" && (
+                      <button className="btn-primary small" disabled={sendContract.isPending} onClick={() => sendContract.mutate()}>
+                        {sendContract.isPending ? "发送中…" : "发送给司机"}
+                      </button>
+                    )}
+                    {c.confirm_status === "sent" && (
+                      <>
+                        <button className="btn-primary small" disabled={confirmContract.isPending} onClick={() => confirmContract.mutate(true)}>司机已确认</button>
+                        <button className="btn-ghost small" disabled={confirmContract.isPending} onClick={() => confirmContract.mutate(false)}>司机拒签</button>
+                      </>
+                    )}
+                    {c.confirm_status !== "confirmed" && (
+                      <button className="btn-ghost small" disabled={genContract.isPending} onClick={() => genContract.mutate()}>
+                        {genContract.isPending ? "生成中…" : "重新生成"}
+                      </button>
+                    )}
+                    {c.pdf_url && <a className="btn-ghost small" href={c.pdf_url} target="_blank" rel="noreferrer">下载 PDF</a>}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <StateView kind="empty" title="尚未生成承运合同" hint="合同在派单指派司机时自动生成；派单时未指派司机的运单可在此补出。" compact />
+                  <div>
+                    <button className="btn-primary small" disabled={genContract.isPending || !w.driver_name} onClick={() => genContract.mutate()}>
+                      {genContract.isPending ? "生成中…" : "生成合同"}
+                    </button>
+                    {!w.driver_name && <span className="small muted" style={{ marginLeft: 8 }}>该运单还没有指派司机，先派司机才能出合同。</span>}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {/* 电子回单与签收 */}

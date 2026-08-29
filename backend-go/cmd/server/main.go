@@ -319,6 +319,8 @@ func buildRouter(startCtx, workerCtx context.Context, pool *pgxpool.Pool, cfg co
 		p.Get("/api/v1/waybills/{no}/finance-card", waybillH.FinanceCard)
 		p.Get("/api/v1/waybills/{no}/reply-card", waybillH.ReplyCard)
 		p.Get("/api/v1/waybills/{no}/contract", waybillH.Contract)
+		// POST 是「按需生成」。此前只有 GET，前端写好的 genContract 打过来是 405。
+		p.Post("/api/v1/waybills/{no}/contract", waybillH.ContractGenerate)
 		p.Get("/api/v1/waybills/{no}/reminders", waybillH.Reminders)
 		p.Get("/api/v1/waybills/{no}/tracking", telH.WaybillTracking)
 		p.Post("/api/v1/tracking/points", telH.TrackingIngest)

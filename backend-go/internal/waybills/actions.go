@@ -30,6 +30,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/contracts"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
 
@@ -310,6 +311,129 @@ func (h *Handler) latestContract(ctx context.Context, waybillID string) (id, sta
 		driverID = *drv
 	}
 	return id, status, driverID, true
+}
+
+// ContractGenerate POST /api/v1/waybills/{no}/contract —— 按需生成承运合同。
+//
+// 派单时带司机会自动生成一份，但派单时**没有**司机的运单（后补司机是常规操作）
+// 就永远拿不到合同——「发送给司机」「司机确认」两步也跟着走不到，
+// 工作流面板上「承运合同 未生成」会一直挂着。
+// 前端早就写好了 genContract/sendContract/confirmContract 三个 mutation
+// （genContract 正是 POST 到这个地址），但它们一个都没有被渲染出来，
+// 而后端这条路由此前也只注册了 GET——两边各缺一半，
+// 于是「承运合同」这一整段功能从界面上完全够不着。
+//
+// 正文模板与派单那条路共用 internal/contracts.Generate ——
+// 出事时双方拿的是同一份东西，不能因为入口不同而条款不同。
+func (h *Handler) ContractGenerate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, no, ok := h.resolve(w, r, "waybill.manage")
+	if !ok {
+		return
+	}
+	// 已确认的那份是双方已经达成的约定，不能一键覆盖——
+	// 否则就有了「先让司机签，再改运费」这条路。
+	if _, status, _, found := h.latestContract(ctx, id); found && status == "confirmed" {
+		httpx.Err(w, http.StatusConflict, "CONTRACT_CONFIRMED",
+			"该运单的合同已由司机确认，不能重新生成。如需变更请走变更流程。")
+		return
+	}
+
+	var in contracts.Input
+	// 这些列都可能是 NULL（司机未指派、没挂车、没有费用记录），
+	// 一律扫进指针再取值——直接扫进 string 会让整条查询报错，
+	// 而报出来的是"读取运单失败"，看不出真正缺的是哪一样。
+	var driverID, driverName, plate, trailer *string
+	var weight, quantity, agreed *string
+	err := h.DB.QueryRow(ctx, `
+		SELECT wb.id::text, wb.waybill_no, wb.driver_id::text, d.name, v.plate_no,
+		       wb.trailer_id::text, COALESCE(wb.origin,'')||'→'||COALESCE(wb.destination,''),
+		       COALESCE(o.cargo_desc,''), wb.cargo_weight_ton::text, wb.cargo_quantity::text,
+		       (SELECT sum(c.amount)::text FROM fin_expense_record c
+		         WHERE c.waybill_id = wb.id AND c.direction='payable')
+		FROM ops_waybill wb
+		LEFT JOIN md_driver d ON d.id = wb.driver_id
+		LEFT JOIN md_vehicle v ON v.id = wb.vehicle_id
+		LEFT JOIN ops_order o ON o.id = wb.order_id
+		WHERE wb.id=$1::uuid`, id).
+		Scan(&in.WaybillID, &in.WaybillNo, &driverID, &driverName, &plate,
+			&trailer, &in.Route, &in.CargoDesc, &weight, &quantity, &agreed)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取运单失败："+err.Error())
+		return
+	}
+	in.DriverID = deref(driverID)
+	if in.DriverID == "" {
+		// 承运人空着的合同不是合同。宁可不生成，也不出一份签不了的。
+		httpx.Err(w, http.StatusBadRequest, "NO_DRIVER",
+			"该运单还没有指派司机，无法生成承运合同。请先指派司机。")
+		return
+	}
+	in.DriverName = deref(driverName)
+	in.VehiclePlate = deref(plate)
+	in.TrailerID = trailer
+	in.Weight = decFrom(weight)
+	in.Quantity = intFrom(quantity)
+	if agreed != nil {
+		d := decFrom(agreed)
+		in.Agreed = &d
+	}
+
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := contracts.Generate(ctx, tx, in); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "合同生成失败："+err.Error())
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交失败")
+		return
+	}
+	cid, _, _, found := h.latestContract(ctx, id)
+	if !found {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回读失败")
+		return
+	}
+	_ = no
+	var out json.RawMessage
+	if err := h.DB.QueryRow(ctx, contractJSON+" WHERE c.id=$1::uuid", cid).Scan(&out); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回读失败")
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, out)
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func decFrom(s *string) decimal.Decimal {
+	if s == nil {
+		return decimal.Zero
+	}
+	d, err := decimal.NewFromString(*s)
+	if err != nil {
+		return decimal.Zero
+	}
+	return d
+}
+
+func intFrom(s *string) int {
+	if s == nil {
+		return 0
+	}
+	d, err := decimal.NewFromString(*s)
+	if err != nil {
+		return 0
+	}
+	return int(d.IntPart())
 }
 
 // ContractSend POST /api/v1/waybills/{no}/contract/send

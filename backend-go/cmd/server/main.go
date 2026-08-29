@@ -143,9 +143,9 @@ func buildRouter(startCtx, workerCtx context.Context, pool *pgxpool.Pool, cfg co
 		MediaRoot: cfg.MediaRoot, Blob: store, Debug: cfg.Debug,
 		AllowSelfRegistration: cfg.AllowSelfRegistration,
 		ResetSender:           auth.NewSender()}
-	orderH := &orders.Handler{DB: pool, Svc: authSvc}
+	orderH := &orders.Handler{DB: pool, Svc: authSvc, MediaRoot: cfg.MediaRoot, Blob: store}
 	waybillH := &waybills.Handler{DB: pool, Svc: authSvc}
-	mdH := &masterdata.Handler{DB: pool, Svc: authSvc}
+	mdH := &masterdata.Handler{DB: pool, Svc: authSvc, MediaRoot: cfg.MediaRoot, Blob: store}
 	finH := &finance.Handler{DB: pool, Svc: authSvc}
 	orderH.Projects = finH // 建单表单可直接新建项目
 	anaH := &analytics.Handler{DB: pool, Svc: authSvc}

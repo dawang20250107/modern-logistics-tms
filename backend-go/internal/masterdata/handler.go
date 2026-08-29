@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
@@ -28,6 +29,9 @@ type Handler struct {
 	// CRUD 子路由是挂载式的，未声明的自定义动作（如 /carriers/{id}/blacklist）
 	// 不会回到父路由，必须在子路由上显式兜底，否则会被误判成 404。
 	Fallback http.Handler
+	// Blob 上传文件的存放。为 nil 时退回 MediaRoot 落盘。
+	Blob      blob.Store
+	MediaRoot string
 }
 
 type ResourceCfg struct {

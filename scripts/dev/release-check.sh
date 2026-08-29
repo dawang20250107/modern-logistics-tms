@@ -191,6 +191,34 @@ for kv in "PublicTrack:trackByOrderThrottle:backend-go/internal/orders/public.go
   fi
 done
 
+sect "凭证上传"
+# 回单、附件、司机证件是对账吵起来时唯一拿得出的东西。
+# 这三条路径都曾经"看起来成功、其实没存"或"存了但打不开"。
+if grep -q "Upload: &upl{" backend-go/internal/resources/registry.go; then
+  ok "回单资源声明了文件上传"
+else
+  bad "ReceiptWrite 没声明 Upload —— 运单详情页传回单会 400"
+fi
+if grep -q "Upload: &UploadCfg{" backend-go/internal/masterdata/writecfg.go; then
+  ok "司机证件资源声明了文件上传"
+else
+  bad "DriverCredWrite 没声明 Upload —— 资源库传证件会 400"
+fi
+if grep -q "h.store().Put" backend-go/internal/orders/actions.go; then
+  ok "订单附件的字节会真的落盘"
+else
+  bad "AddAttachment 没有存文件 —— 只记了文件名"
+fi
+# 链接必须指向 file_display：file_url 对上传上来的文件是空串，渲染出死链
+# 只看 .tsx（真正的渲染处）。第一版扫了整个 src/，结果匹配到了
+# file-link.test.ts 注释里那句"href={x.file_url}"——检查被自己的说明文字绊倒，
+# 报了一个不存在的问题。规则写在注释里的检查，扫描范围要绕开注释。
+if grep -rn --include=*.tsx 'href={[^}]*\.file_url' frontend/src >/dev/null 2>&1; then
+  bad "前端有 href 绑到 file_url —— 上传的凭证点开是死链（详见 file-link.test.ts）"
+else
+  ok "凭证链接都走 file_display"
+fi
+
 sect "HTTPS"
 grep -q 'listen 443 ssl' deploy/nginx.conf && ok "nginx 配了 443 + TLS" || bad "nginx 没有 443"
 grep -q 'Strict-Transport-Security' deploy/nginx.conf && ok "配了 HSTS" || bad "缺 HSTS"

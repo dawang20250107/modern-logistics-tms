@@ -24,6 +24,7 @@ type (
 	cfg = masterdata.ResourceCfg
 	wcf = masterdata.WriteCfg
 	fld = masterdata.Field
+	upl = masterdata.UploadCfg
 	ff  = filters.FilterField
 )
 
@@ -221,7 +222,9 @@ var ReceiptsCfg = cfg{
 	SelectSQL: `
 SELECT rc.id::text AS id, rc.waybill_id::text AS waybill, COALESCE(wb.waybill_no,'') AS waybill_no,
        rc.receipt_type, rc.status, NULLIF(rc.file,'') AS file,
-       COALESCE(NULLIF(rc.file,''), rc.file_url) AS file_display, rc.file_url,
+       -- file_display 是前端直接塞进 <a href> 的值：落盘的文件要带 /media/ 前缀，
+       -- 只给存放键（receipts/xxx）的话点开是 404——库里有文件、页面上打不开。
+       (CASE WHEN rc.file <> '' THEN '/media/' || rc.file ELSE rc.file_url END) AS file_display, rc.file_url,
        rc.ocr_status, rc.ocr_result, rc.signatory, rc.signed_at, rc.created_at,
        rc.outcome, rc.total_quantity::text AS total_quantity, rc.signed_quantity::text AS signed_quantity,
        rc.damaged_quantity::text AS damaged_quantity, rc.shortage_quantity::text AS shortage_quantity,
@@ -257,6 +260,8 @@ var ReceiptWrite = wcf{
 	ModelDefaults: map[string]any{"status": "uploaded", "ocr_status": "pending", "ocr_result": "{}"},
 	BeforeCreate:  stampUploadedBy,
 	AfterWrite:    kickReceiptOCR, // 对齐 perform_create 里的 process_receipt_ocr.delay
+	// 运单详情页传回单走的是 multipart（WaybillDetailPage），必须声明才收得下文件。
+	Upload: &upl{Field: "file", Prefix: "receipts/"},
 }
 
 // DispatchBatchesCfg /api/v1/dispatch-batches（ReadOnlyModelViewSet）

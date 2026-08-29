@@ -11,11 +11,14 @@ package masterdata
 //   - 写入后一律用列表列面回读，保证读写序列化完全一致
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,6 +27,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
 
@@ -116,6 +120,123 @@ type WriteCfg struct {
 	NoCreate bool
 	NoUpdate bool
 	NoDelete bool
+
+	// Upload 声明本资源接受 multipart 文件上传，并指定存到哪儿。
+	// 不声明的资源收到 multipart 会被明确拒绝，而不是继续按 JSON 解析
+	// 然后回一句"请求体不是合法 JSON"——那句话把"这个接口不收文件"
+	// 说成了"你的请求写错了"，排查方向整个反了。
+	Upload *UploadCfg
+}
+
+// UploadCfg 一个资源上的文件字段。
+type UploadCfg struct {
+	// Field 表单里的文件字段名，同时也是落库的列名（如 "file"）
+	Field string
+	// Prefix 存放键前缀，对齐 Django 的 upload_to（如 "receipts/"）
+	Prefix string
+	// MaxBytes 单文件上限，0 表示用 defaultUploadMax
+	MaxBytes int64
+}
+
+// defaultUploadMax 凭证类文件的默认上限。回单、证件多是手机拍的照片。
+const defaultUploadMax = 32 << 20
+
+// decodeWriteBody 解请求体：JSON 照旧，multipart 则把表单字段铺成 map，
+// 并把上传的文件真的存下来、把存放键写进 wc.Upload.Field。
+//
+// 为什么要在引擎这一层做：/receipts 和 /driver-credentials 前端都是 multipart
+// （运单详情传回单、资源库传证件），而引擎只解 JSON，于是这两个功能在页面上
+// 是**按下去就 400**的。司机自己那条路（/driver/credentials）另有实现且是好的，
+// 所以只用 App 验收不会发现。放在引擎里是因为往后每个带 FileField 的资源
+// 都会遇到同一件事，各写一份必然又会漏掉某一个。
+func (h *Handler) decodeWriteBody(w http.ResponseWriter, r *http.Request, wc WriteCfg) (map[string]any, bool) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+				map[string]any{"detail": []string{"请求体不是合法 JSON。"}})
+			return nil, false
+		}
+		return body, true
+	}
+	if wc.Upload == nil {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{"该接口不接受文件上传，请用 JSON 提交。"}})
+		return nil, false
+	}
+	maxBytes := wc.Upload.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultUploadMax
+	}
+	if err := r.ParseMultipartForm(maxBytes); err != nil {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{"表单解析失败，请确认文件大小。"}})
+		return nil, false
+	}
+	body := map[string]any{}
+	for k, v := range r.MultipartForm.Value {
+		if len(v) > 0 {
+			body[k] = v[0]
+		}
+	}
+	// 存放键由服务端生成，客户端传什么都不算数——否则表单里塞一个
+	// file=../../etc/x 就能指到任意路径。
+	delete(body, wc.Upload.Field)
+
+	f, fh, err := r.FormFile(wc.Upload.Field)
+	if err != nil {
+		return body, true // 没带文件也允许：纯字段的 multipart 提交
+	}
+	defer f.Close()
+	buf, rerr := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if rerr != nil {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{"文件读取失败。"}})
+		return nil, false
+	}
+	if int64(len(buf)) > maxBytes {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{fmt.Sprintf("文件过大，请控制在 %dMB 内。", maxBytes>>20)}})
+		return nil, false
+	}
+	rel := wc.Upload.Prefix + uuid.NewString() + safeExt(fh.Filename)
+	if err := h.store().Put(r.Context(), rel, bytes.NewReader(buf),
+		int64(len(buf)), http.DetectContentType(buf)); err != nil {
+		// 存不下就报错。静默建一条没有文件的行，等于告诉用户"传好了"，
+		// 而凭证其实不存在——那比直接报错坏得多。
+		slog.Error("上传文件写入失败", "err", err, "table", wc.Table)
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "文件保存失败，请重试。")
+		return nil, false
+	}
+	body[wc.Upload.Field] = rel
+	return body, true
+}
+
+// safeExt 从用户给的文件名里取一个能安全拼进存放键的扩展名。
+// 只留纯字母数字的短扩展名；拿不到就不要——键本来是 uuid，扩展名只为方便人看。
+func safeExt(filename string) string {
+	ext := filepath.Ext(filename)
+	if len(ext) < 2 || len(ext) > 12 {
+		return ""
+	}
+	for _, c := range ext[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return ""
+		}
+	}
+	return ext
+}
+
+// store 取媒体存放实现。Blob 为 nil 时退回本地盘（老的构造方式）。
+func (h *Handler) store() blob.Store {
+	if h.Blob != nil {
+		return h.Blob
+	}
+	root := h.MediaRoot
+	if root == "" {
+		root = "./media"
+	}
+	return blob.NewLocal(root)
 }
 
 // uniqueMsg 对齐 Django Model.unique_error_message：具有 <字段 verbose_name> 的 <模型 verbose_name> 已存在。
@@ -362,10 +483,8 @@ func (h *Handler) Retrieve(w http.ResponseWriter, r *http.Request, cfg ResourceC
 // Create POST /<res>
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg, wc WriteCfg) {
 	ctx := r.Context()
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
-			map[string]any{"detail": []string{"请求体不是合法 JSON。"}})
+	body, ok := h.decodeWriteBody(w, r, wc)
+	if !ok {
 		return
 	}
 	// 先跑字段级校验再跑钩子：DRF 是 is_valid() 通过后才进 create()，
@@ -450,10 +569,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		return
 	}
 	id := chi.URLParam(r, "id")
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
-			map[string]any{"detail": []string{"请求体不是合法 JSON。"}})
+	body, ok := h.decodeWriteBody(w, r, wc)
+	if !ok {
 		return
 	}
 	// PUT 全量、PATCH 局部：二者都只写传入字段（DRF 的 required 校验仅 PUT 生效）

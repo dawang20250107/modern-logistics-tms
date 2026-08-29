@@ -585,7 +585,16 @@ export function WaybillDetailPage() {
                             <strong>签收人：</strong> {r.signatory}
                           </div>
                         )}
-                        <a href={r.file_url} target="_blank" className="link small">查看原件</a>
+                        {/* 这里原先取的是 file_url——那是"外链回单"用的字段。
+                            后台上传的回单存的是 file，file_url 是空串，于是
+                            href="" 的链接点开是刷新当前页：回单在，看不了。
+                            file_display 是后端算好的"能打开的地址"（落盘的带 /media/
+                            前缀，外链的回落到 file_url），两种来源都覆盖。 */}
+                        {r.file_display ? (
+                          <a href={r.file_display} target="_blank" rel="noreferrer" className="link small">查看原件</a>
+                        ) : (
+                          <span className="small" style={{ color: "var(--muted)" }}>无原件</span>
+                        )}
                       </div>
                     </div>
                   ))}

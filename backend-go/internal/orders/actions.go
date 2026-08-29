@@ -13,10 +13,14 @@ package orders
 // batch_orders, batch_update_orders, import_orders} 与 OrderViewSet.attachments。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -684,7 +688,7 @@ func (h *Handler) Attachments(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
 		return
 	}
-	kind, name, fileURL := "other", "", ""
+	kind, name, fileURL, fileRel := "other", "", "", ""
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -698,16 +702,45 @@ func (h *Handler) Attachments(w http.ResponseWriter, r *http.Request) {
 			kind = v
 		}
 		name, fileURL = r.FormValue("name"), r.FormValue("file_url")
-		if _, fh, err := r.FormFile("file"); err == nil && name == "" {
-			name = fh.Filename
+		// 这里原先只取了文件名，字节直接丢掉：库里 file='' ，
+		// 前端拿到的 file_display 是空串，那一行渲染成不可点的纯文字，
+		// 而 toast 照样说"附件已上传"。合同、磅单、回单是这门生意的凭证，
+		// 上传的人不会去点开验一遍，等到对账要证据那天才发现没有——
+		// 那时候文件早就找不着了。
+		if f, fh, err := r.FormFile("file"); err == nil {
+			defer f.Close()
+			if name == "" {
+				name = fh.Filename
+			}
+			buf, rerr := io.ReadAll(io.LimitReader(f, attachmentMaxBytes+1))
+			if rerr != nil {
+				httpx.Err(w, http.StatusBadRequest, "UPLOAD_FAILED", "文件读取失败。")
+				return
+			}
+			if int64(len(buf)) > attachmentMaxBytes {
+				httpx.Err(w, http.StatusBadRequest, "FILE_TOO_LARGE", "文件过大，请控制在 32MB 内。")
+				return
+			}
+			// 文件名不进存放路径：用户可以传"../../x"这种名字。
+			// 只留扩展名，且扩展名本身也要过滤掉分隔符。
+			rel := "attachments/" + uuid.NewString() + safeExt(fh.Filename)
+			if err := h.store().Put(ctx, rel, bytes.NewReader(buf),
+				int64(len(buf)), http.DetectContentType(buf)); err != nil {
+				// 存不下就必须报错，不能静默建一条没有文件的附件行——
+				// 那正是修之前的行为，用户以为存下了。
+				slog.Error("附件写入失败", "err", err, "order", id)
+				httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "文件保存失败，请重试。")
+				return
+			}
+			fileRel = rel
 		}
 	}
 	aid, _ := uuid.NewV7()
 	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_order_attachment (id, created_at, updated_at, order_id, kind, name,
 		  file, file_url, uploaded_by_id)
-		VALUES ($1, now(), now(), $2::uuid, $3, $4, '', $5, $6::uuid)`,
-		aid.String(), id, kind, name, fileURL, nilIfBlank(me.ID)); err != nil {
+		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, $6, $7::uuid)`,
+		aid.String(), id, kind, name, fileRel, fileURL, nilIfBlank(me.ID)); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
 		return
 	}
@@ -745,6 +778,27 @@ func normalizeAttachments(rows []map[string]any) []map[string]any {
 	return out
 }
 
+// attachmentMaxBytes 单个附件上限。与前端 ParseMultipartForm 的 32MB 对齐。
+const attachmentMaxBytes = 32 << 20
+
+// safeExt 从用户给的文件名里取一个可以安全拼进存放路径的扩展名。
+//
+// filepath.Ext("../../etc/passwd") 会给出 ""，但 Ext("x.tar/../../y") 之类
+// 仍可能带出分隔符，所以拿到之后再筛一遍：只留字母数字。
+// 拿不到干净扩展名就不要——存放键本来就是 uuid，扩展名只是方便人看。
+func safeExt(filename string) string {
+	ext := filepath.Ext(filename)
+	if len(ext) < 2 || len(ext) > 12 {
+		return ""
+	}
+	for _, c := range ext[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return ""
+		}
+	}
+	return ext
+}
+
 // DeleteAttachment DELETE /api/v1/orders/{id}/attachments/{att_id}
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.resolveOrder(w, r)
@@ -753,8 +807,16 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	attID := chi.URLParam(r, "att_id")
 	if _, err := uuid.Parse(attID); err == nil {
-		_, _ = h.DB.Exec(r.Context(),
-			`DELETE FROM ops_order_attachment WHERE id=$1::uuid AND order_id=$2::uuid`, attID, id)
+		// 先取存放键再删行：删完就没地方查了，文件会一直留在盘上/桶里。
+		// 存放键是每行一个 uuid，不会有第二行引用它，删掉是安全的。
+		var rel string
+		_ = h.DB.QueryRow(r.Context(),
+			`SELECT COALESCE(file,'') FROM ops_order_attachment WHERE id=$1::uuid AND order_id=$2::uuid`,
+			attID, id).Scan(&rel)
+		if _, derr := h.DB.Exec(r.Context(),
+			`DELETE FROM ops_order_attachment WHERE id=$1::uuid AND order_id=$2::uuid`, attID, id); derr == nil && rel != "" {
+			_ = h.store().Delete(r.Context(), rel)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

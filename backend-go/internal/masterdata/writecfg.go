@@ -201,7 +201,9 @@ SELECT dc.id::text AS id, dc.driver_id::text AS driver, COALESCE(d.name,'') AS d
                           WHEN 'id_card' THEN '身份证' ELSE dc.cred_type END) AS cred_type_label,
        dc.side,
        (CASE dc.side WHEN 'main' THEN '主页/正面' WHEN 'back' THEN '副页/反面' ELSE dc.side END) AS side_label,
-       NULLIF(dc.file,'') AS file, COALESCE(NULLIF(dc.file,''), dc.file_url) AS file_display, dc.file_url,
+       NULLIF(dc.file,'') AS file,
+       -- 同 ReceiptsCfg：落盘的文件要带 /media/ 前缀才是能打开的地址
+       (CASE WHEN dc.file <> '' THEN '/media/' || dc.file ELSE dc.file_url END) AS file_display, dc.file_url,
        dc.ocr_status, dc.ocr_result, dc.holder_name, dc.cert_no,
        dc.expiry_date::text AS expiry_date, dc.self_uploaded, dc.created_at`,
 	FromClause:   "FROM md_driver_credential dc LEFT JOIN md_driver d ON d.id = dc.driver_id",
@@ -232,6 +234,8 @@ var DriverCredWrite = WriteCfg{
 		"file":          {Kind: FText, Default: ""},
 	},
 	AfterWrite: CredentialAfterWrite, // 上传即触发 OCR 建档
+	// 资源库里传证件走的是 multipart（FleetPage），必须声明才收得下文件。
+	Upload: &UploadCfg{Field: "file", Prefix: "credentials/"},
 }
 
 // 导出既有列表配置供路由绑定；详情态补上 DRF 里「仅 retrieve 计算」的重聚合字段

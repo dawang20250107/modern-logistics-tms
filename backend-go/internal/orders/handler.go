@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
@@ -38,6 +39,21 @@ type Handler struct {
 	Svc *auth.Service
 	// Projects 建单表单里直接新建项目时用；为 nil 时该能力静默关闭
 	Projects ProjectResolver
+	// Blob 附件存放。为 nil 时退回 MediaRoot 落盘（老的构造方式）。
+	Blob      blob.Store
+	MediaRoot string
+}
+
+// store 取媒体存放实现。
+func (h *Handler) store() blob.Store {
+	if h.Blob != nil {
+		return h.Blob
+	}
+	root := h.MediaRoot
+	if root == "" {
+		root = "./media"
+	}
+	return blob.NewLocal(root)
 }
 
 // ordering= 白名单：前端 sortField → SQL 列（防注入 + 契约文档化）

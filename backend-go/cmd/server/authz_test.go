@@ -434,6 +434,28 @@ func TestScopeOnlyEndpointsReturnNothingForOrglessUser(t *testing.T) {
 		}
 	})
 
+	// pool-counts 是后加的聚合出口。加它的时候就该想到这一条：
+	// 每开一个新的聚合口径，就等于给同一批数据开了一个新出口，
+	// 而数据范围是按出口挂的，不是按数据挂的。
+	t.Run("orders/pool-counts 不泄漏全库计数", func(t *testing.T) {
+		rec := e.call(token, "GET", "/api/v1/orders/pool-counts", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("期望 200，实际 %d", rec.Code)
+		}
+		var env struct {
+			Data map[string]int `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+			t.Fatal(err)
+		}
+		for k, v := range env.Data {
+			if v != 0 {
+				t.Errorf("无组织账号在 %s 上看到 %d（库里共 %d 单）——"+
+					"计数口径绕过了数据范围", k, v, total)
+			}
+		}
+	})
+
 	t.Run("workbench 不泄漏订单池", func(t *testing.T) {
 		rec := e.call(token, "GET", "/api/v1/workbench", "")
 		if rec.Code != http.StatusOK {

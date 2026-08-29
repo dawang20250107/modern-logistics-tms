@@ -12,7 +12,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tms}
       POSTGRES_USER: ${POSTGRES_USER:-tms}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tms_prod_pwd}
+      # 同样不给默认值。一个写在仓库里的"生产默认口令"，
+      # 等于所有按文档部署的实例共用同一把钥匙——而且没人会想起来改。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?必须设置数据库口令，见 deploy/.env.prod.example}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,7 +31,7 @@ services:
     image: tms-gateway:prod
     environment:
       GO_LISTEN_ADDR: ":8000"
-      DATABASE_URL: ${DATABASE_URL:-postgres://tms:tms_prod_pwd@db:5432/tms}
+      DATABASE_URL: ${DATABASE_URL:?必须与上面的库口令一致，见 deploy/.env.prod.example}
       # 没有默认值是有意的：漏配就起不来，好过带着占位密钥跑起来。
       # 网关的启动前置检查（config.Preflight）在 DJANGO_DEBUG=false 时
       # 会拒绝弱密钥/占位密钥——这把钥匙同时签发内部用户令牌与司机端令牌。
@@ -42,6 +44,22 @@ services:
       # 对外客户门户需要自助开户时才置 1。
       TMS_ALLOW_SELF_REGISTRATION: ${TMS_ALLOW_SELF_REGISTRATION:-0}
       MEDIA_ROOT: /app/media
+      # 连接池上限。不设的话 pgx 默认 max(4, NumCPU)——4 条连接会成为整个
+      # 网关的吞吐天花板（5 万单实测锁死在 221 req/s）。
+      # 注意 池大小 × 副本数 不能超过 PG 的 max_connections（默认 100）。
+      DB_MAX_CONNS: ${DB_MAX_CONNS:-20}
+      DB_MIN_CONNS: ${DB_MIN_CONNS:-4}
+      # /metrics 的访问凭证。留空则该端点直接 404——指标里有内网结构与
+      # 流量画像，不该裸奔。接 Prometheus 时才配。
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # 验证码下发通道。留空 = 不开自助找回，前端会明确告诉用户"请联系管理员"，
+      # 而不是让人对着一个永远等不到码的输入框干等。
+      TMS_RESET_CHANNEL: ${TMS_RESET_CHANNEL:-}
+      TMS_SMTP_HOST: ${TMS_SMTP_HOST:-}
+      TMS_SMTP_PORT: ${TMS_SMTP_PORT:-587}
+      TMS_SMTP_USER: ${TMS_SMTP_USER:-}
+      TMS_SMTP_PASS: ${TMS_SMTP_PASS:-}
+      TMS_SMTP_FROM: ${TMS_SMTP_FROM:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}

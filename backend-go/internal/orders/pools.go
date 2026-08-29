@@ -67,6 +67,12 @@ func (h *Handler) poolPage(w http.ResponseWriter, r *http.Request, extraWhere fu
 		where = append(where, sw)
 	}
 	where = append(where, extraWhere(args, me, canViewAll)...)
+	// 检索/筛选/仅看紧急交给库去做。以前这些全在前端对着取回来的那一页做，
+	// 一页装不下就等于只在 20 条里搜——数据一多就悄悄变成了抽样。
+	where = append(where, searchAndFilterWhere(q, args)...)
+	if frag := filters.Apply(q.Get("filter"), filterFields, args); frag != "" {
+		where = append(where, frag)
+	}
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
 
 	var total int
@@ -76,8 +82,7 @@ func (h *Handler) poolPage(w http.ResponseWriter, r *http.Request, extraWhere fu
 	}
 	limitPh := args.Add(pageSize)
 	offsetPh := args.Add((page - 1) * pageSize)
-	rows, err := h.DB.Query(ctx, selectOrderSQL+fromClause+" "+whereSQL+" "+orderSQL+
-		fmt.Sprintf(" LIMIT %s OFFSET %s", limitPh, offsetPh), args.Values...)
+	rows, err := h.DB.Query(ctx, pagedOrderSQL(whereSQL, orderSQL, limitPh, offsetPh), args.Values...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
 		return
@@ -116,11 +121,11 @@ func mineFilter(args *filters.Args, me *auth.UserRow) string {
 	return fmt.Sprintf("(o.claimed_by_id::text = %s OR o.assigned_to_id::text = %s)", ph, ph)
 }
 
-// PoolList GET /api/v1/orders/pool
-func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	scope, mine := q.Get("scope"), q.Get("mine")
-	h.poolPage(w, r, func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
+// poolWhere 待分配/可调派池的谓词。计数端点与列表端点共用同一份，
+// 免得哪天改了一处忘了另一处——那种不一致的表现是「计数说 8336、
+// 点进去只有 20 条」，而且很难第一时间怀疑到是两份谓词不同步。
+func poolWhere(scope, mine string) func(*filters.Args, *auth.UserRow, bool) []string {
+	return func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
 		where := []string{"o.status IN ('pooled','dispatching')"}
 		switch {
 		case scope == "free":
@@ -131,14 +136,12 @@ func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
 			where = append(where, mineFilter(args, me))
 		}
 		return where
-	}, "ORDER BY o.priority DESC, o.pooled_at, o.id")
+	}
 }
 
-// Dispatched GET /api/v1/orders/dispatched
-func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	scope, mine := q.Get("scope"), q.Get("mine")
-	h.poolPage(w, r, func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
+// dispatchedWhere 已调派池的谓词
+func dispatchedWhere(scope, mine string) func(*filters.Args, *auth.UserRow, bool) []string {
+	return func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
 		where := []string{"o.status = 'converted'"}
 		switch {
 		case scope == "all" && canAll:
@@ -146,7 +149,21 @@ func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
 			where = append(where, mineFilter(args, me))
 		}
 		return where
-	}, "ORDER BY o.created_at DESC, o.id")
+	}
+}
+
+// PoolList GET /api/v1/orders/pool
+func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	h.poolPage(w, r, poolWhere(q.Get("scope"), q.Get("mine")),
+		"ORDER BY o.priority DESC, o.pooled_at, o.id")
+}
+
+// Dispatched GET /api/v1/orders/dispatched
+func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	h.poolPage(w, r, dispatchedWhere(q.Get("scope"), q.Get("mine")),
+		"ORDER BY o.created_at DESC, o.id")
 }
 
 // Dispatchers GET /api/v1/orders/dispatchers
@@ -308,4 +325,109 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		_ = cw.Write(rec)
 	}
 	cw.Flush()
+}
+
+// PoolCounts GET /api/v1/orders/pool-counts
+//
+// 调度工作台顶部那排计数（待派 / 紧急 / 临期超时）和三个池的角标。
+//
+// 为什么要单独一个端点：这些数以前是前端拿 items.length 数出来的。
+// 演示库十几单时一页装得下全部，数出来正好是对的；真实数据量下
+// 一页只有 20 条，于是「待分配 20」其实是 8336、「紧急 40」其实是两千多。
+// 这类错误不会报错、不会变形，只是安静地把全量说成了一页——
+// 而调度员正是照着这几个数决定今天先派哪一批。
+//
+// 计数走的谓词与列表端点是同一份（poolWhere / dispatchedWhere / urgentSQL），
+// 所以「计数说有多少」和「点进去能翻到多少」不会各说各话。
+func (h *Handler) PoolCounts(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return
+	}
+	canAll, err := h.canViewAll(r, me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取数据范围失败")
+		return
+	}
+	scope, mine := q.Get("scope"), q.Get("mine")
+
+	// count 用主表 + 建单人关联即可：数据范围看 cb.organization_id，
+	// 其余关联对计数没有影响，不必拖进来。
+	count := func(build func(*filters.Args, *auth.UserRow, bool) []string, extra string) (int, error) {
+		args := &filters.Args{}
+		where := []string{"NOT o.is_deleted"}
+		sw, err := h.scopeWhere(r, me, args)
+		if err != nil {
+			return 0, err
+		}
+		if sw != "" {
+			where = append(where, sw)
+		}
+		where = append(where, build(args, me, canAll)...)
+		if extra != "" {
+			where = append(where, extra)
+		}
+		var n int
+		err = h.DB.QueryRow(ctx, `SELECT count(*) FROM ops_order o
+			LEFT JOIN accounts_user cb ON cb.id = o.created_by_id
+			WHERE `+strings.Join(where, " AND "), args.Values...).Scan(&n)
+		return n, err
+	}
+
+	free := poolWhere("free", "")
+	minePool := poolWhere(scope, mine)
+	disp := dispatchedWhere(scope, mine)
+
+	// 待派/紧急/临期这三个数**不能**用「待分配 + 可调派」相加。
+	//
+	// 两池对普通调度是不相交的（未认领 vs 本人已认领），加起来没问题；
+	// 但超管选「全部」时可调派池就是整个订单池，把待分配池整个包含在内，
+	// 相加等于每张单数两遍——8336 + 8336 = 16672，而池里一共只有 8336 张。
+	// 前端原来的 freeOrders.length + mineOrders.length 就是这么写的，
+	// 演示库里 12 + 12 = 24 也一样是错的，只是没人会去核对那个数。
+	//
+	// 所以这里按「我能看见的整个待派池」一次数完，谓词取两池的并集。
+	visible := func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
+		where := []string{"o.status IN ('pooled','dispatching')"}
+		if scope == "all" && canAll {
+			return where // 全量可见：并集就是整池
+		}
+		// 未认领未分派（人人可见） OR 本人认领/被分派
+		where = append(where, "((o.claimed_by_id IS NULL AND o.assigned_to_id IS NULL) OR "+
+			mineFilter(args, me)+")")
+		return where
+	}
+
+	type job struct {
+		key   string
+		build func(*filters.Args, *auth.UserRow, bool) []string
+		extra string
+	}
+	out := map[string]int{}
+	for _, j := range []job{
+		{"unassigned", free, ""},
+		{"dispatchable", minePool, ""},
+		{"dispatched", disp, ""},
+		{"pending", visible, ""},
+		{"urgent", visible, urgentSQL},
+		{"at_risk", visible, "o.sla_status IN ('at_risk','breached')"},
+	} {
+		n, err := count(j.build, j.extra)
+		if err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "统计失败")
+			return
+		}
+		out[j.key] = n
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"unassigned":   out["unassigned"],
+		"dispatchable": out["dispatchable"],
+		"dispatched":   out["dispatched"],
+		"pending":      out["pending"],
+		"urgent":       out["urgent"],
+		"at_risk":      out["at_risk"],
+	})
 }

@@ -52,7 +52,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := newPool(ctx, cfg)
 	if err != nil {
 		slog.Error("db connect", "err", err)
 		os.Exit(1)
@@ -85,6 +85,30 @@ func main() {
 // 于是「这条路由挂没挂权限闸」只能靠人手 curl 去试——而财务那个洞正是这么漏掉的：
 // 没有任何自动化能发现「新加了一条路由但忘了加闸」。
 // 拆出来之后，router_test.go 就能把那张手工探针表钉成回归用例。
+// newPool 建连接池，并且**显式**设定池大小。
+//
+// 原来是裸的 pgxpool.New(ctx, url)，池大小走 pgx 默认的 max(4, NumCPU)。
+// 这个默认值在演示数据上看不出问题（查询快到连接根本不会被占住），
+// 一旦数据上量就变成整个网关的吞吐天花板：
+// 实测 5 万单时，4 条连接把吞吐锁死在 221 req/s，p95 124ms；
+// 池开到 20 之后同样的压测跑到 —— 见 cmd/loadtest 的说明。
+//
+// MaxConnLifetime 存在的理由不是性能，是运维：连接活得越久，
+// 越可能在某次 failover / 连接池代理重启之后拿着一条实际已死的连接。
+// 定期回收让这类故障自愈，代价只是偶尔多握一次手。
+func newPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
+	pc, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	pc.MaxConns = cfg.DBMaxConns
+	pc.MinConns = cfg.DBMinConns
+	pc.MaxConnLifetime = 30 * time.Minute
+	pc.MaxConnIdleTime = 5 * time.Minute
+	pc.HealthCheckPeriod = 30 * time.Second
+	return pgxpool.NewWithConfig(ctx, pc)
+}
+
 func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) http.Handler {
 	authSvc := &auth.Service{DB: pool}
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
@@ -205,6 +229,7 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 		p.Get("/api/v1/orders/pool", orderH.PoolList)
 		p.Get("/api/v1/orders/dispatched", orderH.Dispatched)
 		p.Get("/api/v1/orders/dispatchers", orderH.Dispatchers)
+		p.Get("/api/v1/orders/pool-counts", orderH.PoolCounts)
 		p.Get("/api/v1/orders/customer-addresses", orderH.CustomerAddresses)
 		p.Get("/api/v1/orders/export", orderH.Export)
 		p.Post("/api/v1/orders/intake", orderH.Intake)

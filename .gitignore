@@ -64,3 +64,4 @@ backend-go/tms-gateway
 
 # TLS 私钥绝不进版本库（deploy/gen-dev-cert.sh 生成的自签证书也一样）
 deploy/certs/
+backend-go/internal/config/releasecheck_tmp/

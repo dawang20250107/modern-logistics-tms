@@ -67,11 +67,15 @@ services:
       # 验证码下发通道。留空 = 不开自助找回，前端会明确告诉用户"请联系管理员"，
       # 而不是让人对着一个永远等不到码的输入框干等。
       TMS_RESET_CHANNEL: ${TMS_RESET_CHANNEL:-}
-      TMS_SMTP_HOST: ${TMS_SMTP_HOST:-}
-      TMS_SMTP_PORT: ${TMS_SMTP_PORT:-587}
-      TMS_SMTP_USER: ${TMS_SMTP_USER:-}
-      TMS_SMTP_PASS: ${TMS_SMTP_PASS:-}
-      TMS_SMTP_FROM: ${TMS_SMTP_FROM:-}
+      # 变量名必须和代码里读的一致（internal/auth/notify.go）。
+      # 这几个原先写成 TMS_SMTP_*，而代码读的是 SMTP_*——运维把五个都填好、
+      # 重启，邮件仍然一封发不出去，日志里那句警告还在要一个他配置文件里
+      # 根本没有的 SMTP_HOST。设了没用比没得设更难查。
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       # 对公开放端点的限流。/track 的"密码"只是手机号后 4 位、订单号顺序可猜，
       # 没有闸时穷举四位组合只要 60 秒。详见 docs/deployment.md「对公开放的面」。
       THROTTLE_TRACK_ORDER: ${THROTTLE_TRACK_ORDER:-10/min}
@@ -82,7 +86,6 @@ services:
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
       ALERT_SPEED_LIMIT_KMH: ${ALERT_SPEED_LIMIT_KMH:-90}
       DEVICE_OFFLINE_MINUTES: ${DEVICE_OFFLINE_MINUTES:-10}
-      AMAP_KEY: ${AMAP_KEY:-}
       AGENT_MCP_SERVERS: ${AGENT_MCP_SERVERS:-}
       MQTT_HOST: ${MQTT_HOST:-}
       MQTT_PORT: ${MQTT_PORT:-1883}
@@ -103,6 +106,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
+      args:
+        # 构建期变量，见 Dockerfile.frontend 里的说明
+        VITE_AMAP_KEY: ${VITE_AMAP_KEY:-}
     image: tms-frontend:prod
     ports:
       - "80:80"

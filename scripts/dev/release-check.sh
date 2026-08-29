@@ -235,6 +235,16 @@ else
   ok "凭证链接都走 file_display"
 fi
 
+sect "部署配置与代码对得上"
+# SMTP 那五个变量在模板里叫 TMS_SMTP_*，代码读的是 SMTP_*：运维照着模板
+# 全填好、重启，邮件一封也发不出去，而且没有任何一处会报错。
+# 设了没用比没得设更难查——配置看起来是齐的，功能就是不工作。
+if python3 scripts/dev/env-match.py >/tmp/rc-env.log 2>&1; then
+  ok "$(tail -1 /tmp/rc-env.log)"
+else
+  bad "部署配置里有设了没用的变量："; grep -E "✗|      " /tmp/rc-env.log | sed 's/^/      /'
+fi
+
 sect "HTTPS"
 grep -q 'listen 443 ssl' deploy/nginx.conf && ok "nginx 配了 443 + TLS" || bad "nginx 没有 443"
 grep -q 'Strict-Transport-Security' deploy/nginx.conf && ok "配了 HSTS" || bad "缺 HSTS"

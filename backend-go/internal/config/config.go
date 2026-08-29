@@ -67,13 +67,15 @@ func Load() Config {
 		origins[i] = strings.TrimSpace(origins[i])
 	}
 	return Config{
-		ListenAddr:    env("GO_LISTEN_ADDR", ":8000"),
-		DatabaseURL:   env("DATABASE_URL", "postgres://tms:tms_dev_pwd@127.0.0.1:5432/tms"),
-		SecretKey:     env("DJANGO_SECRET_KEY", "dev-insecure-secret-change-me-min-32-bytes"),
-		PublicBase:    env("PUBLIC_BASE_URL", "http://127.0.0.1:8000"),
-		CORSOrigins:   origins,
-		AccessMinutes: 30,
-		RefreshDays:   7,
+		ListenAddr:  env("GO_LISTEN_ADDR", ":8000"),
+		DatabaseURL: env("DATABASE_URL", "postgres://tms:tms_dev_pwd@127.0.0.1:5432/tms"),
+		SecretKey:   env("DJANGO_SECRET_KEY", "dev-insecure-secret-change-me-min-32-bytes"),
+		PublicBase:  env("PUBLIC_BASE_URL", "http://127.0.0.1:8000"),
+		CORSOrigins: origins,
+		// 令牌有效期是个正经的安全旋钮，.env 模板里也一直写着这两项——
+		// 但代码原先写死 30/7，改了不生效。要求更短会话的客户会以为自己配上了。
+		AccessMinutes: atoi(env("JWT_ACCESS_MIN", "30"), 30),
+		RefreshDays:   atoi(env("JWT_REFRESH_DAYS", "7"), 7),
 		MediaRoot:     env("MEDIA_ROOT", "./media"),
 		DBMaxConns:    int32(atoi(env("DB_MAX_CONNS", "20"), 20)),
 		DBMinConns:    int32(atoi(env("DB_MIN_CONNS", "4"), 4)),

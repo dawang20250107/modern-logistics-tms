@@ -161,6 +161,17 @@ PLACE=$(grep -nE '^\s+(DJANGO_SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL):.*:-' \
 [ -z "$PLACE" ] && ok "生产编排里密钥/口令都是必填（:?），没有可用的默认值" \
                 || { bad "生产编排给了默认口令，按文档部署的实例会共用同一把钥匙："; echo "$PLACE" | sed 's/^/      /'; }
 
+sect "交付材料"
+for f in docs/delivery-notes.md docs/deployment.md docs/integrations.md; do
+  [ -s "$f" ] && ok "$f 存在" || bad "$f 缺失或为空"
+done
+# 交付说明里必须写到三件会被问到的事，漏一条就会在验收现场变成纠纷
+for kw in "OCR" "MEDIA_BACKEND" "adminctl"; do
+  grep -q "$kw" docs/delivery-notes.md \
+    && ok "交付说明覆盖了「$kw」" \
+    || bad "交付说明没提到「$kw」"
+done
+
 sect "对公开放端点的限流"
 # 免登录端点没有闸 = 互联网可以直接刷。/track 尤其要紧：
 # 它的"密码"只有手机号后 4 位，没有闸时 60 秒能穷举完。
@@ -224,7 +235,8 @@ echo
 echo "机器判不了、仍需人工确认的（脚本不该假装它能替你判）："
 echo "  · 真实域名的证书链在浏览器里不报警"
 echo "  · 恢复出来的库里，随便点开一张运单，回单图片能显示"
-echo "  · 三处 OCR 仍是「尚未接入实现」，交付说明里要写清楚"
+echo "  · 三处 OCR 仍是「尚未接入实现」——已写进 docs/delivery-notes.md，"
+echo "    交付/验收前请与客户当面对齐这一条"
 echo "  · 多副本部署必须把 MEDIA_BACKEND 改成 s3——默认的 local 是写容器本地盘，"
 echo "    多副本下会间歇性丢文件，而且预发（单副本）复现不出来"
 echo "  · S3 那条实现的签名没有对着真实端点验过（本机没有凭据）。"

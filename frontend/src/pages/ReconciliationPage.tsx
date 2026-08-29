@@ -114,6 +114,9 @@ function OverviewTab() {
   const d = ov.data;
   const collectRate = d.receivable.total > 0 ? d.receivable.settled / d.receivable.total : 0;
   const payRate = d.payable.total > 0 ? d.payable.settled / d.payable.total : 0;
+  // 「还没有任何单据」与「金额恰好是零」要分开：前者不该被下任何结论。
+  const hasAnyStatement =
+    d.receivable.total !== 0 || d.payable.total !== 0 || d.period.count > 0;
 
   const StatusChips = ({ s }: { s: StatementOverview["receivable"] }) => (
     <div className="ov-status">
@@ -150,7 +153,14 @@ function OverviewTab() {
           {/* 净头寸为正是正常状态，不需要颜色——和运单详情的毛利、应收应付同一条规则：
               颜色只留给要动作的。为负才上红。 */}
           <div className="ov-value" style={d.net_position < 0 ? { color: "var(--red)" } : undefined}>{fmtMoney(d.net_position)}</div>
-          <div className="ov-sub">{d.net_position >= 0 ? "净应收，现金流向好" : "净应付，需备付资金"}</div>
+          {/* 一张单据都没有的时候不能说"现金流向好"——那是在没有依据的情况下
+              下判断。这跟准班率那条是同一条规则：「没有可统计的样本」和
+              「统计结果是零」是相反的两件事，前者要说"还没有"，不能说"很好"。
+              新客户第一天打开系统，看到的应该是"还没有单据"，不是一句体检结论。 */}
+          <div className="ov-sub">
+            {!hasAnyStatement ? "尚无对账单据"
+              : d.net_position >= 0 ? "净应收，现金流向好" : "净应付，需备付资金"}
+          </div>
           <div className="ov-split ov-foot">
             <div><span>本期新增单据</span><b>{d.period.count} 张</b></div>
             <div><span>本期应收</span><b>{fmtMoney(d.period.receivable)}</b></div>
@@ -162,7 +172,12 @@ function OverviewTab() {
           <div className="ov-value" style={{ color: (d.overdue.receivable.amount + d.overdue.payable.amount) > 0 ? "var(--red)" : "var(--muted)" }}>
             {fmtMoney(d.overdue.receivable.amount + d.overdue.payable.amount)}
           </div>
-          <div className="ov-sub">{(d.overdue.receivable.amount + d.overdue.payable.amount) > 0 ? "需重点催收/排款" : "无逾期，账期健康"}</div>
+          {/* 同上：没有单据时说"账期健康"是无依据的结论 */}
+          <div className="ov-sub">
+            {!hasAnyStatement ? "尚无对账单据"
+              : (d.overdue.receivable.amount + d.overdue.payable.amount) > 0
+                ? "需重点催收/排款" : "无逾期，账期健康"}
+          </div>
           <div className="ov-split ov-foot">
             <div><span>逾期应收</span><b style={d.overdue.receivable.amount > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(d.overdue.receivable.amount)}（{d.overdue.receivable.count}）</b></div>
             <div><span>逾期应付</span><b style={d.overdue.payable.amount > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(d.overdue.payable.amount)}（{d.overdue.payable.count}）</b></div>

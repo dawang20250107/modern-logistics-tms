@@ -169,7 +169,11 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
             <div className="section-label">车队运营成本构成占比</div>
             {pieData.length === 0 ? (
               <div className="muted" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-                近 {financeMetrics.data?.period ?? ""} 内暂无应付成本记录
+                {/* period 后端给的就是「近 N 天」，自带「近」字。
+                    前面再拼一个就成了「近 近 30 天 内暂无…」——这行字在驾驶舱首屏，
+                    是新客户第一眼会看到的地方。同一个 period 在上面标题里
+                    （营业额与利润 (近 30 天)）用法是对的，只有这一处多加了。 */}
+                {financeMetrics.data?.period ?? "本期"}内暂无应付成本记录
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">

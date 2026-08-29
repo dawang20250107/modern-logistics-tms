@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // lookupActive 「在途」口径，对齐 lookup._ACTIVE
@@ -43,7 +45,7 @@ type lookupWaybill struct {
 func waybillCard(wb lookupWaybill) map[string]any {
 	fields := []map[string]string{
 		{"label": "线路", "value": orDash(wb.Origin) + "→" + orDash(wb.Destination)},
-		{"label": "状态", "value": labelOr(waybillStatusLabels, wb.Status)},
+		{"label": "状态", "value": labelOr(wbstatus.Label, wb.Status)},
 	}
 	if wb.Plate != "" {
 		fields = append(fields, map[string]string{"label": "车牌", "value": wb.Plate})
@@ -246,7 +248,7 @@ func (h *Handler) Lookup(w http.ResponseWriter, r *http.Request) {
 			if rows.Scan(&no, &origin, &dest, &status, &cust) != nil {
 				break
 			}
-			sub := orDash(origin) + "→" + orDash(dest) + " · " + labelOr(waybillStatusLabels, status)
+			sub := orDash(origin) + "→" + orDash(dest) + " · " + labelOr(wbstatus.Label, status)
 			if cust != "" {
 				sub += " · " + cust
 			}

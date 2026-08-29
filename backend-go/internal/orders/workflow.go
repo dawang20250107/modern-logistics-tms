@@ -16,14 +16,10 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
-var wbStatusLabel = map[string]string{
-	"draft": "草稿", "pending_dispatch": "待调度", "dispatched": "已派车", "loaded": "已装车",
-	"departed": "已发车", "in_transit": "运输中", "arrived": "已到达", "partially_signed": "部分签收",
-	"rejected": "已拒收", "signed": "已签收", "delivered": "已送达", "settled": "已结算",
-	"cancelled": "已取消", "voided": "已作废",
-}
 var orderStatusLabel = map[string]string{
 	"draft": "草稿", "pending_confirm": "待确认", "confirmed": "已确认", "pooled": "订单池",
 	"dispatching": "调度中", "converted": "已派单", "completed": "已完成", "cancelled": "已取消",
@@ -138,7 +134,7 @@ func (h *Handler) Workflow(w http.ResponseWriter, r *http.Request) {
 	}
 	transitLabel := "—"
 	if hasWb {
-		transitLabel = wbStatusLabel[deref(wbStatus)]
+		transitLabel = wbstatus.Label[deref(wbStatus)]
 	}
 	dispatchDetail := "待派单"
 	if hasWb {
@@ -251,11 +247,10 @@ SELECT json_build_object(
     FROM ops_order o LEFT JOIN md_customer c ON c.id=o.customer_id WHERE o.id=$1::uuid),
   'waybills', COALESCE((SELECT json_agg(json_build_object(
       'id', w.id::text, 'waybill_no', w.waybill_no, 'status', w.status,
-      'status_label', (CASE w.status WHEN 'draft' THEN '草稿' WHEN 'pending_dispatch' THEN '待调度'
-        WHEN 'dispatched' THEN '已派车' WHEN 'loaded' THEN '已装车' WHEN 'departed' THEN '已发车'
-        WHEN 'in_transit' THEN '运输中' WHEN 'arrived' THEN '已到达' WHEN 'partially_signed' THEN '部分签收'
-        WHEN 'rejected' THEN '已拒收' WHEN 'signed' THEN '已签收' WHEN 'delivered' THEN '已送达'
-        WHEN 'settled' THEN '已结算' WHEN 'cancelled' THEN '已取消' WHEN 'voided' THEN '已作废' ELSE w.status END),
+      -- 第 6 份状态词表原本就写死在这段 SQL 里。它比 Go 里那 5 份更难发现：
+      -- grep 状态标签时不会想到去翻查询字符串，加了新状态这里会静默漏掉，
+      -- 表现是同一个状态在别处显示「已中止」、在这个接口里显示 aborted。
+      'status_label', `+wbstatus.LabelCaseSQL("w.status")+`,
       'carrier_name', w.carrier_nm, 'dispatch_type', w.dispatch_type, 'batch_no', w.batch_nm,
       'receivable', COALESCE((SELECT sum(amount) FROM exp e WHERE e.wid=w.id AND e.direction='receivable'),0)::float8,
       'payable', COALESCE((SELECT sum(amount) FROM exp e WHERE e.wid=w.id AND e.direction='payable'),0)::float8,

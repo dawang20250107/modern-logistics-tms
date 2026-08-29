@@ -16,6 +16,8 @@ package resources
 import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type (
@@ -647,13 +649,13 @@ var ReimbursementWrite = wcf{
 	ModelDefaults: map[string]any{"status": "submitted"},
 }
 
-// waybillStatusLabel 运单状态中文标签（与 waybills 域保持同一份口径）
-const waybillStatusLabel = `(CASE w.status
-    WHEN 'draft' THEN '草稿' WHEN 'pending_dispatch' THEN '待调度' WHEN 'dispatched' THEN '已派车'
-    WHEN 'loaded' THEN '已装车' WHEN 'departed' THEN '已发车' WHEN 'in_transit' THEN '运输中'
-    WHEN 'arrived' THEN '已到达' WHEN 'partially_signed' THEN '部分签收' WHEN 'rejected' THEN '已拒收'
-    WHEN 'signed' THEN '已签收' WHEN 'delivered' THEN '已送达' WHEN 'settled' THEN '已结算'
-    WHEN 'cancelled' THEN '已取消' WHEN 'voided' THEN '已作废' ELSE w.status END)`
+// waybillStatusLabel 运单状态中文标签。
+//
+// 原来这里是一份写死的 CASE，注释还写着"与 waybills 域保持同一份口径"——
+// 而"保持同一份口径"恰恰是拷贝做不到的事：加一个状态就得记得回来改这里，
+// 漏了的表现是同一个状态在别处显示中文、在这个接口里显示原始英文码。
+// 现在从 wbstatus 生成，口径只有一处。
+var waybillStatusLabel = wbstatus.LabelCaseSQL("w.status")
 
 // ─────────────────────────── finance：运输合同（商务/价格合同）───────────────────────────
 

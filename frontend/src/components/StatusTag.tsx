@@ -27,6 +27,10 @@ const WAYBILL: Record<string, StatusMeta> = {
   delivered: { label: "已送达", tone: "success", priority: 2, needsAction: false },
   settled: { label: "已结算", tone: "success", priority: 0, needsAction: false },
   voided: { label: "已作废", tone: "danger", priority: 1, needsAction: false },
+  // 中止：车已发出但送不到了。needsAction=true 是有意的——中止之后
+  // 空驶费/半程运费/货损基本都要算一笔，这张单还等着财务处理，
+  // 不是一个可以放下的终态。priority 给到最高：它是异常，不是流程的一步。
+  aborted: { label: "已中止", tone: "danger", priority: 6, needsAction: true },
 };
 const ORDER: Record<string, StatusMeta> = {
   draft: { label: "草稿", tone: "neutral", priority: 2, needsAction: false },

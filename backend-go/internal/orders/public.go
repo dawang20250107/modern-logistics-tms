@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // PublicIntake POST /api/v1/public/orders —— 客户自助下单（免登录）
@@ -154,7 +156,7 @@ func (h *Handler) PublicTrack(w http.ResponseWriter, r *http.Request) {
 			etaOut = pyISO(*eta)
 		}
 		shipment = map[string]any{
-			"waybill_no": wbNo, "status": labelOr(waybillStatusLabels, wbStatus),
+			"waybill_no": wbNo, "status": labelOr(wbstatus.Label, wbStatus),
 			"estimated_arrival": etaOut, "receipt_status": receiptStatus, "position": position,
 		}
 	}
@@ -194,11 +196,4 @@ var orderStatusLabels = map[string]string{
 
 var businessTypeLabels = map[string]string{
 	"ftl": "整车", "ltl": "零担", "express": "快递", "coldchain": "冷链", "hazmat": "危化",
-}
-
-var waybillStatusLabels = map[string]string{
-	"draft": "草稿", "pending_dispatch": "待调度", "dispatched": "已派车", "loaded": "已装车",
-	"departed": "已发车", "in_transit": "运输中", "arrived": "已到达", "partially_signed": "部分签收",
-	"rejected": "已拒收", "signed": "已签收", "delivered": "已送达", "settled": "已结算",
-	"cancelled": "已取消", "voided": "已作废",
 }

@@ -23,12 +23,6 @@ type Handler struct {
 
 var cstZone = time.FixedZone("CST", 8*3600)
 
-var wbStatusLabel = map[string]string{
-	"draft": "草稿", "pending_dispatch": "待调度", "dispatched": "已派车", "loaded": "已装车",
-	"departed": "已发车", "in_transit": "运输中", "arrived": "已到达", "partially_signed": "部分签收",
-	"rejected": "已拒收", "signed": "已签收", "delivered": "已送达", "settled": "已结算",
-	"cancelled": "已取消", "voided": "已作废",
-}
 var alertTypeLabel = map[string]string{
 	"overspeed": "超速", "fatigue": "疲劳驾驶", "deviation": "偏航", "abnormal_stop": "异常停车",
 	"geofence": "围栏进出", "temperature": "温度异常", "fuel": "油量异常", "offline": "设备离线",
@@ -134,7 +128,7 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	metrics = append(metrics, card("ops.waybill_count", "运单量", "单", "ops", wbCount, map[string]any{
 		"breakdown": h.breakdown(ctx, `SELECT status, count(*) FROM ops_waybill
 			WHERE (created_at `+cstDate+`)::date BETWEEN $1::date AND $2::date
-			GROUP BY status ORDER BY count(*) DESC`, wbStatusLabel, s, e),
+			GROUP BY status ORDER BY count(*) DESC`, wbstatus.Label, s, e),
 	}))
 
 	// ops.in_transit（snapshot）

@@ -63,6 +63,19 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err := migrate.Run(ctx, pool); err != nil {
 		t.Fatalf("迁移失败：%v", err)
 	}
+	// 每个用例各建一个池，用完必须关。
+	//
+	// 原先不关也没事，因为池的 MinConns 是 0，空闲池几乎不占连接。
+	// 后来给生产配上 DB_MIN_CONNS=4（4 条连接曾是整个网关的吞吐天花板），
+	// 每个池就常驻 4 条了——30 个用例 × 4 = 120 条，而 max_connections 是 100，
+	// 于是后面的用例连不上库。
+	// 症状很有迷惑性：失败的是"建账号"这种和连接数毫无关系的地方，
+	// 而且哪个用例先挂取决于执行顺序。
+	//
+	// 注册在这里（最早）意味着它最后执行：t.Cleanup 是后进先出，
+	// 后面 mkUser 注册的删数据要先跑完，再关池。反过来的话删不掉。
+	t.Cleanup(pool.Close)
+
 	cfg := config.Load()
 	if err := auth.EnsurePermissions(ctx, pool); err != nil {
 		t.Fatalf("权限目录失败：%v", err)

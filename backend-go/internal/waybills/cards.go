@@ -16,6 +16,8 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 var costItems = map[string]string{
@@ -29,12 +31,6 @@ var incomeItems = map[string]string{
 }
 var payeeLabels = map[string]string{
 	"carrier": "承运商", "driver": "司机", "fuel_card": "油卡商", "customer": "客户", "other": "其他",
-}
-var wbStatusLabel = map[string]string{
-	"draft": "草稿", "pending_dispatch": "待调度", "dispatched": "已派车", "loaded": "已装车",
-	"departed": "已发车", "in_transit": "运输中", "arrived": "已到达", "partially_signed": "部分签收",
-	"rejected": "已拒收", "signed": "已签收", "delivered": "已送达", "settled": "已结算",
-	"cancelled": "已取消", "voided": "已作废",
 }
 
 func itemLabel(code string) string {
@@ -402,7 +398,7 @@ func (h *Handler) ReplyCard(w http.ResponseWriter, r *http.Request) {
 	_ = h.DB.QueryRow(ctx, `SELECT exception_type FROM ops_exception
 		WHERE waybill_id=$1::uuid AND status <> 'resolved' ORDER BY created_at DESC LIMIT 1`, id).Scan(&excType)
 
-	statusLbl := wbStatusLabel[status]
+	statusLbl := wbstatus.Label[status]
 	receiptLbl := "待回收"
 	switch receiptStatus {
 	case "returned":

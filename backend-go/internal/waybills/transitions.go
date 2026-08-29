@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // 合法状态流转表（对齐 ALLOWED_TRANSITIONS + _VOIDABLE_FROM）
@@ -27,16 +29,22 @@ var allowedTransitions = map[string][]string{
 	"pending_dispatch": {"dispatched", "cancelled", "voided"},
 	"dispatched":       {"loaded", "pending_dispatch", "cancelled", "voided"},
 	"loaded":           {"departed", "voided"},
-	"departed":         {"in_transit"},
-	"in_transit":       {"arrived"},
+	// 发车之后就不能再「作废」了——车真的开出去过，人和车真的被占用过，
+	// 说"当它没发生过"是在抹掉事实。能走的是「中止」：见 wbstatus.Aborted。
+	"departed":         {"in_transit", wbstatus.Aborted},
+	"in_transit":       {"arrived", wbstatus.Aborted},
 	"arrived":          {"signed", "partially_signed", "rejected"},
 	"partially_signed": {"signed", "delivered", "rejected"},
 	"rejected":         {"settled", "cancelled"},
 	"signed":           {"delivered"},
 	"delivered":        {"settled"},
-	"settled":          {},
-	"cancelled":        {},
-	"voided":           {},
+	// 中止唯一的出口是结算：空驶费、半程运费、货损基本都要算一笔。
+	// 不给它直连终态，是因为让一趟出过车的运输悄悄消失才是坏设计；
+	// 确实没有费用时，结算 0 元也是一次明确的确认。
+	wbstatus.Aborted: {"settled"},
+	"settled":        {},
+	"cancelled":      {},
+	"voided":         {},
 }
 
 var milestoneField = map[string]string{
@@ -94,6 +102,17 @@ func lockWaybill(ctx context.Context, tx pgx.Tx, no string) (*wbRow, error) {
 func doTransition(ctx context.Context, tx pgx.Tx, w *wbRow, to, remark string) (int, string, string) {
 	if !canGo(w.Status, to) {
 		return 409, "INVALID_TRANSITION", "不允许从 " + w.Status + " 流转到 " + to + "。"
+	}
+	// 中止必须写明原因。
+	//
+	// 别的流转都是业务正常往前走，事后看状态本身就说明了发生过什么；
+	// 中止不是——它意味着一趟已经出车的运输被人为终止，后面必然跟着
+	// 费用争议（空驶费怎么算、半程运费给不给）和责任认定。
+	// 那时候唯一能还原现场的就是这条原因，没有它只剩一个"已中止"，
+	// 谁也说不清当时发生了什么。
+	if to == wbstatus.Aborted && strings.TrimSpace(remark) == "" {
+		return 400, "ABORT_REASON_REQUIRED",
+			"中止运输必须填写原因（事故 / 客户取消 / 装错货 / 车辆故障等），后续费用认定要依据它。"
 	}
 	from := w.Status
 	set := "status=$2, updated_at=now()"

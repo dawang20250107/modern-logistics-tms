@@ -28,6 +28,8 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type Handler struct {
@@ -45,13 +47,6 @@ var loginThrottle = httpx.NewThrottle("THROTTLE_DRIVER_LOGIN", "10/min")
 // 在途运单状态集（司机端只看这些）
 var activeWaybillStatuses = []string{
 	"dispatched", "loaded", "departed", "in_transit", "arrived", "pending_dispatch",
-}
-
-var waybillStatusLabel = map[string]string{
-	"draft": "草稿", "pending_dispatch": "待调度", "dispatched": "已派车", "loaded": "已装车",
-	"departed": "已发车", "in_transit": "运输中", "arrived": "已到达", "partially_signed": "部分签收",
-	"rejected": "已拒收", "signed": "已签收", "delivered": "已送达", "settled": "已结算",
-	"cancelled": "已取消", "voided": "已作废",
 }
 
 // checkinNodes 打卡节点 → 中文名（对齐 DriverCheckin.NODE_CHOICES，顺序即业务顺序）
@@ -209,7 +204,7 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 		}
 		wbs = append(wbs, map[string]any{
 			"waybill_no": no, "route_name": route, "origin": origin, "destination": dest,
-			"status": status, "status_label": labelOr(waybillStatusLabel, status),
+			"status": status, "status_label": labelOr(wbstatus.Label, status),
 			"pickup_address": pickAddr, "delivery_address": delAddr,
 			"pickup_contact_phone": pickPhone, "delivery_contact_phone": delPhone,
 			"next_step": step, "cod_amount": cod,

@@ -301,6 +301,13 @@ export interface Receipt {
   created_at: string;
 }
 
+// 运单状态标签。**必须与后端 internal/wbstatus/wbstatus.go 的 Label 完全一致**，
+// 由 cmd/server 的 TestStatusLabelsMatchFrontend 逐键比对着。
+//
+// 加这条约束是因为两边本来就已经漂了：partially_signed 和 rejected
+// 后端有、这里没有，于是「部分签收」和「已拒收」的运单在界面上显示成
+// 原始英文码（渲染处是 STATUS_LABEL[s] ?? s，缺键就露出 key）。
+// 不报错、不崩，只是用户看到一串看不懂的英文。
 export const STATUS_LABEL: Record<string, string> = {
   draft: "草稿",
   pending_dispatch: "待调度",
@@ -309,11 +316,16 @@ export const STATUS_LABEL: Record<string, string> = {
   departed: "已发车",
   in_transit: "运输中",
   arrived: "已到达",
+  partially_signed: "部分签收",
+  rejected: "已拒收",
   signed: "已签收",
   delivered: "已送达",
   settled: "已结算",
   cancelled: "已取消",
   voided: "已作废",
+  // 中止：车已发出但这一趟不会送到了。与「已取消」（车还没走）和
+  // 「已作废」（当它没发生过）是三件不同的事，见后端 wbstatus 包的说明。
+  aborted: "已中止",
 };
 
 // ── 车联网监控 ──────────────────────────────────────────

@@ -20,6 +20,8 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // metricOrder 目录与 dashboard 的输出次序 = definitions.py 里的注册次序
@@ -32,7 +34,7 @@ var metricOrder = []string{
 
 // dimLabels 各维度的取值→中文标签，对齐 definitions._dim_choices
 var dimLabels = map[string]map[string]string{
-	"ops.waybill_count/status":     wbStatusLabel,
+	"ops.waybill_count/status":     wbstatus.Label,
 	"ops.waybill_count/risk_level": {"high": "高", "medium": "中", "low": "低", "none": "无"},
 	"fleet.alert_count/alert_type": alertTypeLabel,
 	"fleet.alert_count/level":      {"info": "提示", "medium": "中", "high": "高"},

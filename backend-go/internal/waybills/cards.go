@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
@@ -494,6 +496,80 @@ func (h *Handler) Reminders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// SendReminder POST /api/v1/waybills/{no}/reminders —— 给这张运单的司机发作业提醒。
+//
+// 运单详情页上那颗「发送提醒」按钮打的就是这里，而此前只注册了 GET，恒定 405。
+// 司机端那一侧一直是全的：/driver/tasks 会把待确认的提醒当强制弹窗推给司机，
+// /driver/reminders/{id}/ack 收确认。收的一头做好了，发的一头没有——
+// 「装车前先拍照」「这批货不能倒放」发不出去，调度员只能打电话，
+// 而电话说过的话，出事时谁都不认。
+func (h *Handler) SendReminder(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, _, ok := h.resolve(w, r, "waybill.manage")
+	if !ok {
+		return
+	}
+	var body struct {
+		Template    string `json:"template"`
+		Title       string `json:"title"`
+		Content     string `json:"content"`
+		AckRequired *bool  `json:"ack_required"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	// 模板只是把正文填进来的快捷方式；正文才是发给司机的东西。
+	content := strings.TrimSpace(body.Content)
+	var tplID any
+	if body.Template != "" {
+		if _, err := uuid.Parse(body.Template); err == nil {
+			var tplContent string
+			if h.DB.QueryRow(ctx, `SELECT content FROM ops_reminder_template
+				WHERE id=$1::uuid AND NOT is_deleted`, body.Template).Scan(&tplContent) == nil {
+				tplID = body.Template
+				if content == "" {
+					content = strings.TrimSpace(tplContent)
+				}
+			}
+		}
+	}
+	if content == "" {
+		httpx.Err(w, http.StatusBadRequest, "REMINDER_CONTENT", "提醒内容不能为空。")
+		return
+	}
+
+	// 提醒是发给**人**的：司机端按 driver_id 拉待办，绑不上就永远收不到。
+	// 与其落一条没人会看到的记录，不如直接说清楚。
+	var driverID *string
+	_ = h.DB.QueryRow(ctx, `SELECT driver_id::text FROM ops_waybill WHERE id=$1::uuid`, id).Scan(&driverID)
+	if driverID == nil || *driverID == "" {
+		httpx.Err(w, http.StatusBadRequest, "NO_DRIVER",
+			"该运单还没有指派司机，提醒发不出去。请先指派司机。")
+		return
+	}
+
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		title = "作业提醒"
+	}
+	ack := true
+	if body.AckRequired != nil {
+		ack = *body.AckRequired
+	}
+	rid, _ := uuid.NewV7()
+	if _, err := h.DB.Exec(ctx, `
+		INSERT INTO ops_driver_reminder (id, created_at, updated_at, waybill_id, driver_id,
+		  template_id, title, content, ack_required, status, level, sent_at)
+		VALUES ($1, now(), now(), $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, '`+wbstatus.ReminderPending+`', 'important', now())`,
+		rid.String(), id, *driverID, tplID, title, content, ack); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, map[string]any{
+		"id": rid.String(), "title": title, "content": content,
+		"ack_required": ack, "status": wbstatus.ReminderPending,
+	})
 }
 
 var cardCST = time.FixedZone("CST", 8*3600)

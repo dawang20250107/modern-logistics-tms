@@ -87,6 +87,10 @@ jobs:
       # 纯静态扫描，不需要起服务。钉的是"把当前页条数当总数"这一类——
       # 调度工作台、登录审计、待核销队列都犯过，而且都是"单页看着正常、
       # 数字在说谎"，逐页冒烟一个都抓不到。
+      # 纯静态、无依赖，适合进 CI（浏览器类检查进不来）。
+      # 抓的是"前端调的接口后端没有"——恒定 405/404，而失败常被 catch 吞掉。
+      - name: 前后端接口对齐走查
+        run: python3 scripts/dev/route-match.py
       - name: 分页口径走查
         working-directory: .
         run: node scripts/dev/paging-audit.mjs

@@ -105,6 +105,13 @@ func main() {
   seed_finance    财务，只有 finance.view（用来验"能看不能核销"）
   seed_cs         客服，只看本网点
 
+司机端（/driver，手机号 + 身份证后 6 位）：
+  13700000001 / 010101      SEED_司机1
+  13700000002 / 010202      SEED_司机2
+  13700000003 / 010303      SEED_司机3
+  13700000004 / 010404      SEED_司机4
+  13700000005 / 010505      SEED_司机5
+
 提示：这些账号是演示用的弱口令，正式环境跑完 seed 请删掉或改密。`)
 }
 
@@ -300,14 +307,23 @@ func (s *seeder) vehiclesAndDrivers() {
 	}
 	for i := 1; i <= 5; i++ {
 		name := fmt.Sprintf("SEED_司机%d", i)
+		// 身份证号必须有值：司机端登录是「手机号 + 身份证后 6 位」，
+		// 而档案缺身份证号时后端会直接拒绝登录（缺了就没法验证身份，
+		// 那条判断是对的）。原先这里写死空串，结果**没有一个演示司机能登进司机端**——
+		// 验收时客户点开司机端，用哪个司机都是"手机号或身份证后 6 位不匹配"。
+		// 取值是可预期的：第 i 个司机身份证后 6 位是 0i0i0i 那一组（见 seed 结束时的打印）。
+		// 这里用 DO UPDATE 而不是 DO NOTHING：已经跑过 seed 的库里司机档案是缺身份证号的，
+		// DO NOTHING 意味着那些库重跑 seed 也修不好——而"重跑一遍 seed"正是
+		// 遇到演示数据不对时所有人的第一反应。
+		idNo := fmt.Sprintf("31010119900101%04d", i*100+i)
 		s.exec("driver "+name, `
 			INSERT INTO md_driver (id, created_at, updated_at, name, phone, id_no, license_no,
 			  is_active, is_deleted, license_type, qualification_cert_no, employment_type,
 			  app_registered, cumulative_freight, cumulative_waybills, wechat)
-			VALUES ($1::uuid, now(), now(), $2, $3, '', '', true, false, 'A2', '', 'employee',
+			VALUES ($1::uuid, now(), now(), $2, $3, $4, '', true, false, 'A2', '', 'employee',
 			        false, 0, 0, '')
-			ON CONFLICT DO NOTHING`,
-			id(fmt.Sprintf("driver/%d", i)), name, fmt.Sprintf("1370000%04d", i))
+			ON CONFLICT (id) DO UPDATE SET id_no=EXCLUDED.id_no, updated_at=now()`,
+			id(fmt.Sprintf("driver/%d", i)), name, fmt.Sprintf("1370000%04d", i), idNo)
 	}
 }
 

@@ -232,7 +232,7 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 		SELECT dr.id::text, dr.title, dr.content, dr.level, dr.ack_required,
 		       COALESCE(wb.waybill_no,'')
 		FROM ops_driver_reminder dr LEFT JOIN ops_waybill wb ON wb.id = dr.waybill_id
-		WHERE dr.driver_id=$1::uuid AND dr.status='pending'
+		WHERE dr.driver_id=$1::uuid AND dr.status='`+wbstatus.ReminderPending+`'
 		ORDER BY dr.sent_at DESC, dr.id`, d.ID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
@@ -291,7 +291,7 @@ func (h *Handler) AckReminder(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != "acknowledged" { // 幂等
 		if _, err := h.DB.Exec(ctx, `
-			UPDATE ops_driver_reminder SET status='acknowledged', acknowledged_at=now(), updated_at=now()
+			UPDATE ops_driver_reminder SET status='`+wbstatus.ReminderAcknowledged+`', acknowledged_at=now(), updated_at=now()
 			WHERE id=$1::uuid`, id); err != nil {
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 			return

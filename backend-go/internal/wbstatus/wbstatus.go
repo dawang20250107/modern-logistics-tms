@@ -166,3 +166,15 @@ func ReceiptLabelOf(s string) string {
 	}
 	return s
 }
+
+// ── 司机提醒状态 ──────────────────────────────────────────
+//
+// 只有两个取值，但它们分布在三个包里（driver 拉待办、resources 收确认、
+// waybills 发提醒），第三个是后补的——补的时候写成了 'sent'，
+// 而司机端拉待办的条件是 status='pending'，于是**发出去的提醒司机永远看不到**。
+// 接口返回 201、列表里也有那一条，只是司机端那个强制弹窗不会弹。
+// 端到端跑一遍才发现：发完之后司机的待确认列表还是 0 条。
+const (
+	ReminderPending      = "pending"      // 已发出、等司机确认（司机端按这个拉强制弹窗）
+	ReminderAcknowledged = "acknowledged" // 司机已确认
+)

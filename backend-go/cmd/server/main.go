@@ -322,6 +322,8 @@ func buildRouter(startCtx, workerCtx context.Context, pool *pgxpool.Pool, cfg co
 		// POST 是「按需生成」。此前只有 GET，前端写好的 genContract 打过来是 405。
 		p.Post("/api/v1/waybills/{no}/contract", waybillH.ContractGenerate)
 		p.Get("/api/v1/waybills/{no}/reminders", waybillH.Reminders)
+		// 发提醒。此前只有 GET，页面上那颗「发送提醒」按钮恒定 405。
+		p.Post("/api/v1/waybills/{no}/reminders", waybillH.SendReminder)
 		p.Get("/api/v1/waybills/{no}/tracking", telH.WaybillTracking)
 		p.Post("/api/v1/tracking/points", telH.TrackingIngest)
 		p.Post("/api/v1/telematics/ingest", telH.Ingest)

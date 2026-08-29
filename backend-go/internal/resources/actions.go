@@ -126,7 +126,7 @@ func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != "acknowledged" { // 幂等：已确认则原样返回
 		if _, err := h.DB.Exec(ctx, `
-			UPDATE ops_driver_reminder SET status='acknowledged', acknowledged_at=now(), updated_at=now()
+			UPDATE ops_driver_reminder SET status='`+wbstatus.ReminderAcknowledged+`', acknowledged_at=now(), updated_at=now()
 			WHERE id=$1::uuid`, id); err != nil {
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 			return

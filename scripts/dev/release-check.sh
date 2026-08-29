@@ -196,6 +196,15 @@ for kv in "PublicTrack:trackByOrderThrottle:backend-go/internal/orders/public.go
   fi
 done
 
+sect "前后端接口对齐"
+# 前端把请求发到一个后端没注册的方法/路径上，恒定 405/404，
+# 而失败常被 catch 吞掉、界面照样报成功。发布前这一轮抓到三处。
+if python3 scripts/dev/route-match.py >/tmp/rc-route.log 2>&1; then
+  ok "$(tail -1 /tmp/rc-route.log)"
+else
+  bad "有前端调用对不上后端路由："; sed 's/^/      /' /tmp/rc-route.log
+fi
+
 sect "凭证上传"
 # 回单、附件、司机证件是对账吵起来时唯一拿得出的东西。
 # 这三条路径都曾经"看起来成功、其实没存"或"存了但打不开"。

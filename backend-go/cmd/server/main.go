@@ -329,6 +329,8 @@ func buildRouter(startCtx, workerCtx context.Context, pool *pgxpool.Pool, cfg co
 		p.Get("/api/v1/telematics/waybills/{no}/trajectory", telH.Trajectory)
 		p.Get("/api/v1/telematics/command-center/summary", telH.CommandCenterSummary)
 		p.Get("/api/v1/waybills/{no}", waybillH.Detail)
+		// PATCH 只开放回单状态一个字段（运单列表的批量「标记已回收」打这里）。
+		p.Patch("/api/v1/waybills/{no}", waybillH.Patch)
 		p.Post("/api/v1/waybills/{no}/transition", waybillH.Transition)
 		p.Post("/api/v1/waybills/{no}/sign", waybillH.Sign)
 		p.Post("/api/v1/waybills/{no}/stop-event", waybillH.StopEvent)

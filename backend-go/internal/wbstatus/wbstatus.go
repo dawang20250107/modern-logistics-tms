@@ -105,3 +105,64 @@ func LabelCaseSQL(col string) string {
 	b.WriteString(" ELSE " + col + " END)")
 	return b.String()
 }
+
+// ── 回单状态 ──────────────────────────────────────────────
+//
+// 和上面的运单状态是同一个故事的第二遍：后端写的值和前端认得的值**完全不重叠**。
+//
+//	后端写入   received（签收/部分签收/流转到已签收三处）、confirmed（回单确认）
+//	前端词表   pending 待追回 / returned 已回收 / audited 已核销
+//
+// 交集为空。也就是说，一张运单只要走过签收，回单那一列就会显示原始英文
+// （渲染处是 RECEIPT_LABEL[x] ?? x，缺键就把 key 露出来），
+// 而「回单状态」筛选器里根本没有能选中它的选项——那批单子筛不出来。
+// 回单是回单付结算的前提，筛不出来就意味着催不了款。
+//
+// 收敛到库里实际在用的那套（pending / returned / audited），
+// 并保留把历史值映射过来的入口。
+const (
+	ReceiptPending  = "pending"  // 待追回：回单还没回来
+	ReceiptReturned = "returned" // 已回收：回单收到了
+	ReceiptAudited  = "audited"  // 已核销：回单已核验，可以据此结算
+)
+
+// ReceiptLabel 回单状态词表。必须与前端 RECEIPT_LABEL 逐键一致
+// （由 TestReceiptStatusLabelsMatchFrontend 盯着）。
+var ReceiptLabel = map[string]string{
+	ReceiptPending:  "待追回",
+	ReceiptReturned: "已回收",
+	ReceiptAudited:  "已核销",
+}
+
+// receiptAliases 历史上写进过库的别名。
+//
+// 留着它不是为了兼容代码——代码里的写入点已经全部改成常量了——
+// 而是为了兼容**已经落在库里的行**。删掉这张表，那些行会在界面上
+// 重新变回英文码，而且没有任何报错提示发生了什么。
+var receiptAliases = map[string]string{
+	"received":  ReceiptReturned, // 签收时写的"收到回单"，与"已回收"同义
+	"confirmed": ReceiptAudited,  // 回单确认通过，与"已核销"同义
+}
+
+// NormalizeReceipt 把历史别名折算成正式取值；未知值原样返回。
+func NormalizeReceipt(s string) string {
+	if v, ok := receiptAliases[s]; ok {
+		return v
+	}
+	return s
+}
+
+// ValidReceipt 该取值是否可以由接口写入。
+// 别名只读不写：允许写入 received 等于允许把词表再分叉一次。
+func ValidReceipt(s string) bool {
+	_, ok := ReceiptLabel[s]
+	return ok
+}
+
+// ReceiptLabelOf 取回单状态标签（先折算别名）。
+func ReceiptLabelOf(s string) string {
+	if v, ok := ReceiptLabel[NormalizeReceipt(s)]; ok {
+		return v
+	}
+	return s
+}

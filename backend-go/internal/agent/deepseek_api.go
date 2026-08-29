@@ -16,6 +16,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // DeepSeekChat POST /api/v1/ai/deepseek/chat {messages, model, temperature}
@@ -97,7 +98,10 @@ func (h *Handler) QueryWaybill(w http.ResponseWriter, r *http.Request) {
 		where = append(where, fmt.Sprintf(
 			"(w.waybill_no ILIKE %s OR w.route_name ILIKE %s OR c.name ILIKE %s OR v.plate_no ILIKE %s)", p, p, p, p))
 	} else {
-		where = append(where, "(w.risk_level IN ('high','medium') OR w.receipt_status = 'pending')")
+		// 回单状态取值走 wbstatus 常量：这是个读条件，写错不会报错，
+		// 只会安静地一条都匹配不上——而这一支正是"没给关键词时给什么"的默认结果。
+		where = append(where, "(w.risk_level IN ('high','medium') OR w.receipt_status = '"+
+			wbstatus.ReceiptPending+"')")
 	}
 	items, err := waybills.SerializeWhere(ctx, h.DB, strings.Join(where, " AND "), 10, args...)
 	if err != nil {

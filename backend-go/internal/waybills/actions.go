@@ -32,6 +32,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/contracts"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // splittableFrom 只有还没进入执行的运单可拆/可合
@@ -311,6 +312,53 @@ func (h *Handler) latestContract(ctx context.Context, waybillID string) (id, sta
 		driverID = *drv
 	}
 	return id, status, driverID, true
+}
+
+// Patch PATCH /api/v1/waybills/{no} —— 只开放回单状态一个字段。
+//
+// 运单列表上的批量「标记回单已回收」就是打这里。此前这条路径只注册了 GET，
+// 前端每一条都吃 405，而失败被 catch 吞掉，最后照样弹一个**成功**提示
+// 「已标记 0/5 条运单回单为「已回收」」——绿色对勾、语气笃定，什么都没发生。
+// 回单是回单付结算的前提，操作员以为标完了，财务那边却一条都催不动。
+//
+// 字段白名单而不是通用 PATCH：运单上挂着状态机、司机车辆、金额，
+// 开一个什么都能改的 PATCH 等于绕开状态机和所有业务校验。
+// 批量标回单这一个需求，不值这个代价。
+func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, _, ok := h.resolve(w, r, "waybill.manage")
+	if !ok {
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_BODY", "请求体不是合法 JSON。")
+		return
+	}
+	// 多传一个字段就整体拒绝，不做"忽略未知字段"。
+	// 静默忽略会让调用方以为改成功了——这正是这一条要修的那个毛病。
+	for k := range body {
+		if k != "receipt_status" {
+			httpx.Err(w, http.StatusBadRequest, "FIELD_NOT_PATCHABLE",
+				"该接口只支持修改 receipt_status，不接受字段："+k)
+			return
+		}
+	}
+	rs, _ := body["receipt_status"].(string)
+	if !wbstatus.ValidReceipt(rs) {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_RECEIPT_STATUS",
+			"回单状态取值非法："+rs)
+		return
+	}
+	if _, err := h.DB.Exec(ctx,
+		`UPDATE ops_waybill SET receipt_status=$2, updated_at=now() WHERE id=$1::uuid`,
+		id, rs); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"id": id, "receipt_status": rs, "receipt_status_label": wbstatus.ReceiptLabelOf(rs),
+	})
 }
 
 // ContractGenerate POST /api/v1/waybills/{no}/contract —— 按需生成承运合同。
@@ -625,7 +673,7 @@ func (h *Handler) PartialSign(w http.ResponseWriter, r *http.Request) {
 		}
 		finalStatus = wb.Status
 		if _, err := tx.Exec(ctx,
-			`UPDATE ops_waybill SET receipt_status='received', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
+			`UPDATE ops_waybill SET receipt_status='`+wbstatus.ReceiptReturned+`', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
 			return err
 		}
 		level := "medium"
@@ -701,7 +749,7 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 		}
 		finalStatus = wb.Status
 		if _, err := tx.Exec(ctx,
-			`UPDATE ops_waybill SET receipt_status='received', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
+			`UPDATE ops_waybill SET receipt_status='`+wbstatus.ReceiptReturned+`', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
 			return err
 		}
 		return openDeliveryException(ctx, tx, wb.ID, "customer_complaint", "high", "整车拒收："+body.Reason, me.ID)

@@ -20,6 +20,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type Handler struct {
@@ -101,7 +102,7 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 	// 回写运单回单状态
 	if waybillID != nil && status == "confirmed" {
 		_, _ = h.DB.Exec(ctx, `
-			UPDATE ops_waybill SET receipt_status='confirmed', updated_at=now() WHERE id=$1::uuid`, *waybillID)
+			UPDATE ops_waybill SET receipt_status='`+wbstatus.ReceiptAudited+`', updated_at=now() WHERE id=$1::uuid`, *waybillID)
 	}
 	h.echo(w, r, ReceiptsCfg, "rc.id = $1::uuid", id)
 }

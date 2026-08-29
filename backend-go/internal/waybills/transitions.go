@@ -259,7 +259,7 @@ func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, code, appCode, msg)
 		return
 	}
-	if _, err := tx.Exec(ctx, "UPDATE ops_waybill SET receipt_status='received', updated_at=now() WHERE id=$1::uuid", wb.ID); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE ops_waybill SET receipt_status='"+wbstatus.ReceiptReturned+"', updated_at=now() WHERE id=$1::uuid", wb.ID); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回单状态更新失败")
 		return
 	}

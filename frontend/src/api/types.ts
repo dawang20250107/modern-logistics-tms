@@ -76,6 +76,19 @@ export interface Reimbursement {
   created_at: string;
 }
 
+// 回单状态词表。**必须与后端 internal/wbstatus 的 ReceiptLabel 完全一致**，
+// 由 cmd/server 的 TestReceiptStatusLabelsMatchFrontend 逐键比对着。
+//
+// 这两份表本来就已经漂了，而且漂得比运单状态那次更彻底：后端签收时写
+// received、回单确认时写 confirmed，前端只认 pending/returned/audited——
+// **交集为空**。于是一张运单只要走过签收，回单那一列就显示原始英文
+// （渲染处是 RECEIPT_LABEL[x] ?? x，缺键就把 key 露出来），
+// 而「回单状态」筛选器里根本没有能选中它的选项，那批单子筛不出来。
+// 回单是回单付结算的前提，筛不出来就催不了款。
+export const RECEIPT_LABEL: Record<string, string> = {
+  pending: "待追回", returned: "已回收", audited: "已核销",
+};
+
 export const REIMB_CATEGORY_LABEL: Record<string, string> = {
   freight_advance: "运费垫付", toll: "过路费", fuel: "油费",
   loading: "装卸费", lodging: "食宿", other: "其他",

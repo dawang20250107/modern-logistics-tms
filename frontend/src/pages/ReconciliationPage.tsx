@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
 import { useModalA11y } from "../api/useModalA11y";
-import { fmtDateTime, fmtMoney } from "../api/format";
+import { fmtDateTime, fmtMoney, fmtNum0 } from "../api/format";
 import { toast } from "../api/toast";
 import type {
   AgingReport, Carrier, Customer, Paginated, Statement, StatementAuditResult,
@@ -339,6 +339,7 @@ export function ReconciliationPage() {
   const items = st.rows; // 当前页
   const stmtActiveCount = activeConditionCount(stmtModel, STMT_FILTER_FIELDS);
   const settleQueue = settleQ.data?.items ?? [];
+  const settleTotal = settleQ.data?.total ?? settleQueue.length;
 
   const auditOne = useMutation({
     mutationFn: (id: string) => apiPost<StatementAuditResult>(`/finance/statements/${id}/audit`, {}),
@@ -537,9 +538,15 @@ export function ReconciliationPage() {
       {tab === "settle" && (
         <div className="panel" style={{ flex: 1 }}>
           <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
-            <span>待核销队列<span className="ai-pill">{settleQueue.length}</span></span>
+            {/* 角标读服务端 total，不读 settleQueue.length —— 后者最多 200，
+                真到 200 张待核销时会把「至少 200」显示成「正好 200」。
+                下面的列表仍只列 200 条，所以超出时把话说明白。 */}
+            <span>待核销队列<span className="ai-pill">{fmtNum0(settleTotal)}</span></span>
             <div style={{ flex: 1 }} />
-            <span className="muted small">已确认 / 部分结算且仍有未结余额的对账单</span>
+            <span className="muted small">
+              已确认 / 部分结算且仍有未结余额的对账单
+              {settleTotal > settleQueue.length && ` · 下表为最早的 ${settleQueue.length} 张`}
+            </span>
           </div>
           {settleQ.isLoading ? (
             <StateView kind="loading" compact />

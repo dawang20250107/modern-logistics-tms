@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useRef, useState } from "react";
 
 import { apiDownload, apiGet, apiPost, apiUpload } from "../api/client";
-import { fmtDateTime, EMPTY } from "../api/format";
+import { fmtDateTime, fmtNum0, EMPTY } from "../api/format";
 import { confirmAction } from "../api/confirm";
 import { hasPerm, useAuth } from "../auth/auth";
 import { toast } from "../api/toast";
@@ -697,12 +697,38 @@ function LoginAuditTab() {
     queryFn: () => apiGet<Paginated<LoginAttempt>>(`/org/login-audit?page_size=100&ordering=-created_at${qs}`),
     refetchInterval: 30000,
   });
+  // 「共多少条、其中失败多少」必须问服务端全量，不能数当前这一页。
+  //
+  // 原先是 rows.length 和 rows.filter(!success).length——数的是取回来的 100 条。
+  // 实测库里 528 条、失败 402 时，界面写的是「100 条 · 失败 80」。
+  // 这里是**安全审计**页：有人正是来看有没有人在爆破的，
+  // 把 402 次失败显示成 80 次，比不显示更坏——它给了一个"看起来还好"的假象。
+  //
+  // 取数用 page_size=1 只读 total，跟资源库总览一个路子：
+  // 不新开端点，就没有第二份数据范围逻辑要跟着演化。
+  const totalQ = useQuery({
+    queryKey: ["login-audit-total", only],
+    queryFn: () => apiGet<Paginated<LoginAttempt>>(`/org/login-audit?page_size=1${qs}`),
+    refetchInterval: 30000,
+  });
+  const failQ = useQuery({
+    queryKey: ["login-audit-fails"],
+    queryFn: () => apiGet<Paginated<LoginAttempt>>("/org/login-audit?page_size=1&success=false"),
+    refetchInterval: 30000,
+  });
   const rows = q.data?.items ?? [];
-  const fails = rows.filter((r) => !r.success).length;
+  const total = totalQ.data?.total ?? 0;
+  const fails = failQ.data?.total ?? 0;
+  const truncated = total > rows.length;
   return (
     <div className="panel">
       <div className="panel-head">
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>登录审计<span className="ai-pill">{rows.length} 条 · 失败 {fails}</span></span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          登录审计
+          <span className="ai-pill">共 {fmtNum0(total)} 条 · 失败 {fmtNum0(fails)}</span>
+          {/* 列表只列最近 100 条。写出来，免得"共 528 条"配着 100 行看起来像丢了数据 */}
+          {truncated && <span className="muted small">下表为最近 {rows.length} 条</span>}
+        </span>
         <div className="panel-actions">
           <button className={`chip${only === "" ? " chip-on" : ""}`} onClick={() => setOnly("")}>全部</button>
           <button className={`chip${only === "success" ? " chip-on" : ""}`} onClick={() => setOnly("success")}>成功</button>

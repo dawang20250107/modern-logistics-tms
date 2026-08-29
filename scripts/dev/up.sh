@@ -40,10 +40,45 @@ start_gateway() {
     rm -f "$pidf"
   fi
   (cd "$ROOT/backend-go" && go build -o /tmp/tms-gateway ./cmd/server) || { echo "网关构建失败"; return 1; }
-  MEDIA_ROOT="$ROOT/media" setsid /tmp/tms-gateway > /tmp/gw.log 2>&1 &
-  echo $! > "$pidf"
-  for _ in $(seq 1 20); do curl -sf -o /dev/null http://127.0.0.1:8000/healthz && break; sleep 0.3; done
-  curl -sf -o /dev/null http://127.0.0.1:8000/healthz && echo "网关已启动 (pid $(cat $pidf))" || echo "网关启动失败，见 /tmp/gw.log"
+
+  # 起之前先确认端口是空的。
+  #
+  # 走到这里时旧进程应该已经被 pid 文件停掉了；如果 /healthz 还有人应答，
+  # 说明有个我们**管不到**的进程占着端口（上一次泄漏的、或者手工起的）。
+  # 这时候接着起是没意义的：新进程 bind 失败会退出，而 /healthz 由那个野进程
+  # 答 200，脚本就会报告「网关已启动」——报告的是成功，跑着的是别人。
+  # 排查时看到的现象是「代码改了、重启了、行为没变」。
+  if curl -sf -o /dev/null http://127.0.0.1:8000/healthz 2>/dev/null; then
+    echo "网关启动中止：8000 端口已被一个不在 $pidf 里的进程占着。"
+    echo "  先确认它是什么：ps -eo pid,cmd | grep '[t]ms-gateway'"
+    return 1
+  fi
+
+  # 用 nohup 而不是 setsid：`setsid cmd &` 的 $! 是 setsid 自己的 pid，
+  # 而 setsid 在调用方已是进程组长时会**再 fork 一次**然后退出——
+  # 于是 pid 文件里记的进程立刻就死了，真正的网关跑在另一个 pid 下。
+  # 后果是「停旧进程」这一步实际上什么也没停。
+  MEDIA_ROOT="$ROOT/media" nohup /tmp/tms-gateway > /tmp/gw.log 2>&1 &
+  local pid=$!
+  echo "$pid" > "$pidf"
+
+  # 等到「端口通」**且**「我们记的 pid 还活着」同时成立。
+  # 只等端口通是不够的——第一版就是这么写的，结果健康检查被野进程秒答，
+  # 循环第一轮就跳出，那时新进程还在连库、还没走到 bind，kill -0 自然是活的，
+  # 断言就这么被绕过去了。这是个时序坑，不是逻辑坑。
+  local ok=0
+  for _ in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then break; fi
+    if curl -sf -o /dev/null http://127.0.0.1:8000/healthz 2>/dev/null; then ok=1; break; fi
+    sleep 0.3
+  done
+  if [ "$ok" != 1 ] || ! kill -0 "$pid" 2>/dev/null; then
+    echo "网关启动失败。日志最后几行："
+    tail -3 /tmp/gw.log 2>/dev/null | sed 's/^/    /'
+    rm -f "$pidf"
+    return 1
+  fi
+  echo "网关已启动 (pid $pid)"
 }
 
 token() {

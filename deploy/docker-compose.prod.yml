@@ -44,6 +44,18 @@ services:
       # 对外客户门户需要自助开户时才置 1。
       TMS_ALLOW_SELF_REGISTRATION: ${TMS_ALLOW_SELF_REGISTRATION:-0}
       MEDIA_ROOT: /app/media
+      # 媒体存放。默认 local = 写容器本地盘，**只适用于单副本**：
+      # 起两个副本之后，上传落在 A 的盘上、下一次 GET 路由到 B 就 404，
+      # 而且是间歇性的（取决于路由到哪个副本），预发单副本永远复现不出来。
+      # 多副本部署前必须改成 s3 并配齐下面五项。
+      MEDIA_BACKEND: ${MEDIA_BACKEND:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      # MinIO、以及多数自建 S3 网关只支持 path-style；AWS/COS 两种都行
+      S3_PATH_STYLE: ${S3_PATH_STYLE:-0}
       # 连接池上限。不设的话 pgx 默认 max(4, NumCPU)——4 条连接会成为整个
       # 网关的吞吐天花板（5 万单实测锁死在 221 req/s）。
       # 注意 池大小 × 副本数 不能超过 PG 的 max_connections（默认 100）。

@@ -6,9 +6,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/analytics"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/audit"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/driver"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/exceptions"
@@ -110,10 +114,18 @@ func newPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 }
 
 func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) http.Handler {
+	// 媒体存放。配错（比如 MEDIA_BACKEND=s3 但少了 S3_BUCKET）就直接退出，
+	// 不静默退回本地盘——退回去会让多副本部署"看起来正常"地间歇丢文件。
+	store, err := blob.FromEnv()
+	if err != nil {
+		slog.Error("媒体存储配置有误", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("媒体存储", "backend", store.Kind())
 	authSvc := &auth.Service{DB: pool}
 	issuer := auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays)
 	authH := &auth.Handlers{Svc: authSvc, Issuer: issuer, MediaBase: cfg.PublicBase,
-		MediaRoot: cfg.MediaRoot, Debug: cfg.Debug,
+		MediaRoot: cfg.MediaRoot, Blob: store, Debug: cfg.Debug,
 		AllowSelfRegistration: cfg.AllowSelfRegistration,
 		ResetSender:           auth.NewSender()}
 	orderH := &orders.Handler{DB: pool, Svc: authSvc}
@@ -126,7 +138,7 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 	excH := &exceptions.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	ntfH := &notifications.Handler{DB: pool, Svc: authSvc, MD: mdH}
 	resH := &resources.Handler{DB: pool, Svc: authSvc, MD: mdH}
-	drvH := &driver.Handler{DB: pool, Secret: cfg.SecretKey, MediaRoot: cfg.MediaRoot}
+	drvH := &driver.Handler{DB: pool, Secret: cfg.SecretKey, MediaRoot: cfg.MediaRoot, Blob: store}
 	// 车联网上报走进程内有界队列 + 后台批处理，替代 Redis 队列 + Celery
 	ingestor := telematics.NewIngestor(pool)
 	ingestor.Start(context.Background())
@@ -450,18 +462,48 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 	})
 
 	// 媒体文件（头像/回单/证件/打卡照/合同）：Django 退役后由网关自服务。
+	//
+	// 从 blob.Store 读，而不是 http.FileServer(http.Dir(...))：
+	// 接了对象存储之后文件不在本地盘上。读也走网关（不 302 到预签名 URL），
+	// 因为媒体里有身份证、行驶证、签收回单——让它们只经过一个出口，
+	// 将来要加鉴权、加水印、加访问审计都只有一个地方要改。
+	//
+	// 换掉 FileServer 就意味着**它顺手提供的两样保护也没了**，得自己补：
+	//   · 路径穿越——现在由 blob.Local.abs 拒绝带 ".." 的 key（有用例钉着）
+	//   · 目录列表——Store 对目录 key 返回 ErrNotFound
+	// 这类"本来由框架白送"的保障，是换实现时最容易悄悄丢掉的东西。
+	//
 	// nosniff 是必须的——这些是用户上传物，绝不能让浏览器按内容猜出可执行类型。
-	media := http.StripPrefix("/media/", http.FileServer(http.Dir(cfg.MediaRoot)))
 	r.Handle("/media/*", http.HandlerFunc(
 		func(w http.ResponseWriter, rq *http.Request) {
-			// 不开目录列表。判定必须在 StripPrefix 之前做：`/media/` 自身被削完就是
-			// 空串，尾斜杠判断落空，FileServer 会把整个上传目录列出来。
-			if strings.HasSuffix(rq.URL.Path, "/") {
+			key := strings.TrimPrefix(rq.URL.Path, "/media/")
+			if key == "" || strings.HasSuffix(key, "/") {
 				httpx.Err(w, http.StatusNotFound, "not_found", "未找到。")
 				return
 			}
+			rc, info, err := store.Get(rq.Context(), key)
+			if err != nil {
+				if !errors.Is(err, blob.ErrNotFound) {
+					// 底层错误只进日志。它可能带 bucket 名、内网地址，
+					// 不能原样回给请求方。
+					slog.Error("媒体读取失败", "key", key, "err", err)
+				}
+				httpx.Err(w, http.StatusNotFound, "not_found", "未找到。")
+				return
+			}
+			defer rc.Close()
 			w.Header().Set("X-Content-Type-Options", "nosniff")
-			media.ServeHTTP(w, rq)
+			w.Header().Set("Content-Type", info.ContentType)
+			if info.Size >= 0 {
+				w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
+			}
+			if info.ETag != "" {
+				w.Header().Set("ETag", `"`+info.ETag+`"`)
+			}
+			if _, err := io.Copy(w, rc); err != nil {
+				// 响应头已经发出去了，这里只能记一笔——客户端会看到截断的响应
+				slog.Warn("媒体传输中断", "key", key, "err", err)
+			}
 		}))
 
 	// 未知路由：DRF 同款 404 信封

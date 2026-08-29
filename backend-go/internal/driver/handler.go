@@ -7,6 +7,7 @@ package driver
 // 而司机端能看到运单、能打卡推进状态、能传回单，顶号代价很高。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -25,12 +26,16 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 )
 
 type Handler struct {
 	DB        *pgxpool.Pool
 	Secret    string // 与 Django SECRET_KEY 同源，保证 token 跨栈互认
 	MediaRoot string
+	// Blob 媒体存放。为 nil 时退回 MediaRoot 直接落盘。
+	Blob blob.Store
 }
 
 // loginThrottle 对齐 DriverLoginRateThrottle（scope=driver_login，默认 10/min）：
@@ -431,12 +436,20 @@ func (h *Handler) applyCredentialOCR(ctx context.Context, id, source, credType s
 	return "manual"
 }
 
+// saveMedia 存一份司机端上传的证件/打卡照。
+// 走 blob.Store 而不是直接落盘：多副本部署时本地盘上的文件，
+// 换个副本就读不到了。
 func (h *Handler) saveMedia(rel string, data []byte) error {
-	abs := filepath.Join(h.MediaRoot, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return err
+	return h.store().Put(context.Background(), rel, bytes.NewReader(data),
+		int64(len(data)), http.DetectContentType(data))
+}
+
+// store 取媒体存放实现。Blob 为 nil 时退回本地盘（老的构造方式）。
+func (h *Handler) store() blob.Store {
+	if h.Blob != nil {
+		return h.Blob
 	}
-	return os.WriteFile(abs, data, 0o644)
+	return blob.NewLocal(h.MediaRoot)
 }
 
 func nullIfEmpty(s string) any {

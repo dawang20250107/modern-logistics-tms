@@ -8,6 +8,7 @@ package auth
 // 由管理员在组织中台分配，杜绝"自助注册即提权"。
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -19,7 +20,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +28,8 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 )
 
 var (
@@ -516,7 +518,7 @@ func (h *Handlers) Avatar(w http.ResponseWriter, r *http.Request) {
 		var cur string
 		_ = h.Svc.DB.QueryRow(ctx, "SELECT COALESCE(avatar,'') FROM accounts_user WHERE id=$1::uuid", uid).Scan(&cur)
 		if cur != "" {
-			_ = os.Remove(filepath.Join(h.MediaRoot, filepath.FromSlash(cur)))
+			_ = h.store().Delete(ctx, cur)
 			_, _ = h.Svc.DB.Exec(ctx, "UPDATE accounts_user SET avatar=NULL WHERE id=$1::uuid", uid)
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -545,23 +547,21 @@ func (h *Handlers) Avatar(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"detail": "仅支持 JPG / PNG / WEBP / GIF"})
 		return
 	}
-	// 落盘路径对齐 Django 的 upload_to（avatars/<uuid><ext>），使 /media/ 直出一致
+	// 存放路径对齐 Django 的 upload_to（avatars/<uuid><ext>），使 /media/ 直出一致
 	rel := "avatars/" + uuid.NewString() + ext
-	abs := filepath.Join(h.MediaRoot, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "存储目录不可写")
-		return
-	}
-	dst, err := os.Create(abs)
-	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败")
-		return
-	}
-	written, cerr := io.Copy(dst, io.LimitReader(file, avatarMaxBytes+1))
-	_ = dst.Close()
-	if cerr != nil || written > avatarMaxBytes {
-		_ = os.Remove(abs)
+	// 先读进内存再交给 Store：大小上限本来就要在写之前卡住（2MB），
+	// 而且对象存储那条实现无论如何都要先知道 payload 才能签名。
+	// 多读 1 字节用来判"是不是超了"——只读到上限的话，正好等于上限
+	// 和超出上限这两种情况分不开。
+	buf, rerr := io.ReadAll(io.LimitReader(file, avatarMaxBytes+1))
+	if rerr != nil || int64(len(buf)) > avatarMaxBytes {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"detail": "图片过大，请控制在 2MB 内"})
+		return
+	}
+	if err := h.store().Put(ctx, rel, bytes.NewReader(buf), int64(len(buf)),
+		hdr.Header.Get("Content-Type")); err != nil {
+		slog.Error("头像写入失败", "err", err)
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败")
 		return
 	}
 	if _, err := h.Svc.DB.Exec(ctx, "UPDATE accounts_user SET avatar=$2 WHERE id=$1::uuid", uid, rel); err != nil {
@@ -658,4 +658,13 @@ func (h *Handlers) TokenVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{})
+}
+
+// store 取媒体存放实现。Blob 为 nil 时退回本地盘（老的构造方式），
+// 这样迁移期间没改到的调用方仍然能跑。
+func (h *Handlers) store() blob.Store {
+	if h.Blob != nil {
+		return h.Blob
+	}
+	return blob.NewLocal(h.MediaRoot)
 }

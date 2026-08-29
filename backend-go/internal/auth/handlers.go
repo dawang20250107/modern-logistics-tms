@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 )
 
 type ctxKey int
@@ -27,8 +29,11 @@ type Handlers struct {
 	Issuer *TokenIssuer
 	// MediaBase 头像等媒体文件的绝对地址前缀（并跑期由 Django 提供 /media/）
 	MediaBase string
-	// MediaRoot 媒体文件落盘根目录（对齐 Django 的 MEDIA_ROOT）
+	// MediaRoot 媒体文件落盘根目录（对齐 Django 的 MEDIA_ROOT）。
+	// Blob 非空时以 Blob 为准，这里只留给尚未迁移的调用方。
 	MediaRoot string
+	// Blob 媒体存放。为 nil 时退回 MediaRoot 直接落盘（仅测试构造会出现）。
+	Blob blob.Store
 	// Debug 对齐 settings.DEBUG：仅调试期在找回密码响应里附 dev_code
 	Debug bool
 	// AllowSelfRegistration 见 config.Config 同名字段：默认关闭

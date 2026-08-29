@@ -297,6 +297,21 @@ func (h *Handler) ReimbursementCreate(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, it)
 }
 
+// reimbStatusLabel 报销状态的中文，用于把"为什么不能审批"说清楚。
+func reimbStatusLabel(s string) string {
+	switch s {
+	case "submitted":
+		return "已提交"
+	case "approved":
+		return "已审批"
+	case "rejected":
+		return "已驳回"
+	case "paid":
+		return "已付款"
+	}
+	return s
+}
+
 // ReimbursementApprove 审批通过：生成应付费用（计入毛利）+ 下游付款申请
 func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -304,29 +319,40 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		return
 	}
-	var status, reimbNo, category, amount, reason, orderNo string
-	var waybillID *string
-	if err := h.DB.QueryRow(ctx, `
-		SELECT status, reimb_no, category, amount::text, COALESCE(reason,''), COALESCE(order_no,''), waybill_id::text
-		FROM fin_reimbursement WHERE id=$1::uuid`, id).
-		Scan(&status, &reimbNo, &category, &amount, &reason, &orderNo, &waybillID); err != nil {
-		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
-		return
-	}
-	if status != "submitted" {
-		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED", "仅已提交的报销可审批。")
-		return
-	}
-	label := reimbCategoryLabel[category]
-	if label == "" {
-		label = category
-	}
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// 状态检查必须在事务里、并且锁住这一行。
+	//
+	// 原先这一段读在事务**外面**：两个人同时点审批，两边都读到 submitted、
+	// 都通过检查、都往下走。审批会生成一条应付、开一张付款申请——同一笔报销
+	// 计两次账、付两遍钱。
+	// 实测 6 个并发的返回码是 [409 409 500 409 500 200]：钱确实没付两遍，
+	// 但拦住它的是 fin_payment_request.request_no 上的唯一索引**碰巧**撞了车，
+	// 而不是这段逻辑。代价是两个人收到 500「生成付款申请失败」——
+	// 那看起来像系统故障，实际是"别人先批了"。
+	// 加上 FOR UPDATE 之后，后来的请求会等锁、重读到 approved，拿到干净的 409。
+	var status, reimbNo, category, amount, reason, orderNo string
+	var waybillID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT status, reimb_no, category, amount::text, COALESCE(reason,''), COALESCE(order_no,''), waybill_id::text
+		FROM fin_reimbursement WHERE id=$1::uuid FOR UPDATE`, id).
+		Scan(&status, &reimbNo, &category, &amount, &reason, &orderNo, &waybillID); err != nil {
+		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
+		return
+	}
+	if status != "submitted" {
+		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED", "仅已提交的报销可审批（该报销当前为「"+reimbStatusLabel(status)+"」）。")
+		return
+	}
+	label := reimbCategoryLabel[category]
+	if label == "" {
+		label = category
+	}
 
 	if waybillID != nil {
 		eid, _ := uuid.NewV7()
@@ -409,27 +435,45 @@ func (h *Handler) ReimbursementPay(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		return
 	}
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// 同审批那条：状态检查要在事务里、并锁住行。
+	// 另外这两条 UPDATE（报销置已付款、付款申请置已付款）必须同生共死——
+	// 原先后一条的错误被 `_, _ =` 丢掉，失败时报销显示"已付款"、
+	// 付款申请还挂在"未付"上，两张表各说各话。
 	var status string
 	var prID *string
-	if err := h.DB.QueryRow(ctx,
-		"SELECT status, payment_request_id::text FROM fin_reimbursement WHERE id=$1::uuid", id).
+	if err := tx.QueryRow(ctx,
+		"SELECT status, payment_request_id::text FROM fin_reimbursement WHERE id=$1::uuid FOR UPDATE", id).
 		Scan(&status, &prID); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
 		return
 	}
 	if status != "approved" {
-		httpx.Err(w, http.StatusConflict, "REIMB_NOT_APPROVED", "仅已审批的报销可付款。")
+		httpx.Err(w, http.StatusConflict, "REIMB_NOT_APPROVED",
+			"仅已审批的报销可付款（该报销当前为「"+reimbStatusLabel(status)+"」）。")
 		return
 	}
-	if _, err := h.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE fin_reimbursement SET status='paid', paid_at=now(), updated_at=now() WHERE id=$1::uuid`,
 		id); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 		return
 	}
 	if prID != nil {
-		_, _ = h.DB.Exec(ctx,
-			"UPDATE fin_payment_request SET status='paid', updated_at=now() WHERE id=$1::uuid", *prID)
+		if _, err := tx.Exec(ctx,
+			"UPDATE fin_payment_request SET status='paid', updated_at=now() WHERE id=$1::uuid", *prID); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新付款申请失败："+err.Error())
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交事务失败")
+		return
 	}
 	h.echo(w, r, ReimbursementsCfg, "rb.id = $1::uuid", id)
 }

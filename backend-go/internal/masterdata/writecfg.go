@@ -3,7 +3,10 @@ package masterdata
 // 各主数据资源的写侧配置 + 新增资源（routes / carrier-lane-prices / driver-credentials）
 // 的读侧配置。所有标准 CRUD 由 crud.go 的通用引擎驱动，此处只声明字段契约。
 
-import "github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
+import (
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
+)
 
 var CustomerWrite = WriteCfg{
 	Table: "md_customer", Model: "Customer", Verbose: "客户", Alias: "c", SoftDelete: true,
@@ -288,12 +291,15 @@ SELECT json_build_object(
      GROUP BY w.origin, w.destination ORDER BY deals DESC, w.origin, w.destination LIMIT 5) f), '[]'::json))
 FROM (SELECT
     count(*) AS total,
-    count(*) FILTER (WHERE w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL) AS timed_total,
-    count(*) FILTER (WHERE w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL
+    -- 准班率只从真的送达过的单里取样（见 wbstatus 包的说明）
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `
+                       AND w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL) AS timed_total,
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `
+                       AND w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL
                        AND w.arrived_at <= w.planned_arrival) AS on_time_hits,
     count(*) FILTER (WHERE EXISTS (SELECT 1 FROM ops_exception x WHERE x.waybill_id=w.id)) AS exc_total,
-    count(*) FILTER (WHERE w.status IN ('arrived','signed','delivered','settled')) AS done_total,
-    count(*) FILTER (WHERE w.status IN ('arrived','signed','delivered','settled')
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `) AS done_total,
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `
                        AND w.receipt_status IN ('returned','audited')) AS receipt_hits
   FROM ops_waybill w
   WHERE w.carrier_id = ca.id AND w.created_at >= now() - interval '90 days' AND w.status <> 'voided') s`

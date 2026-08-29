@@ -12,6 +12,8 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type Handler struct {
@@ -145,7 +147,7 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	_ = h.DB.QueryRow(ctx, `SELECT
 			count(*) FILTER (WHERE arrived_at <= planned_arrival), count(*)
 		FROM ops_waybill
-		WHERE status IN ('arrived','signed','delivered','settled')
+		WHERE status IN `+wbstatus.DeliveredSQL+`
 		  AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
 		  AND (created_at `+cstDate+`)::date BETWEEN $1::date AND $2::date`, s, e).Scan(&otNum, &otDen)
 	metrics = append(metrics, card("ops.on_time_rate", "准班率", "%", "ops", rate(otNum, otDen),

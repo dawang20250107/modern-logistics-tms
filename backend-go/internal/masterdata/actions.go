@@ -21,6 +21,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // pyRound 复刻 Python round(float, n)：十进制半偶入（Go 的 FormatFloat 同口径）
@@ -256,12 +258,16 @@ func (h *Handler) CarrierPerformance(w http.ResponseWriter, r *http.Request) {
 		)
 		SELECT
 		  (SELECT count(*) FROM w),
-		  (SELECT count(*) FROM w WHERE planned_arrival IS NOT NULL AND arrived_at IS NOT NULL),
-		  (SELECT count(*) FROM w WHERE planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
+		  -- 同 suggestion.go：准班率只从真的送达过的单里取样，
+		  -- 否则「发车后取消」那条路径留下的假 arrived_at 会算成准点交付。
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
+		     AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL),
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
+		     AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
 		     AND arrived_at <= planned_arrival),
 		  (SELECT count(*) FROM w WHERE EXISTS (SELECT 1 FROM ops_exception x WHERE x.waybill_id = w.id)),
-		  (SELECT count(*) FROM w WHERE status IN ('arrived','signed','delivered','settled')),
-		  (SELECT count(*) FROM w WHERE status IN ('arrived','signed','delivered','settled')
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`),
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
 		     AND receipt_status IN ('returned','audited')),
 		  (SELECT count(*) FROM route),
 		  -- 本线路应付均价：先按运单汇总再取均值（对齐 annotate(Sum) + aggregate(Avg)），

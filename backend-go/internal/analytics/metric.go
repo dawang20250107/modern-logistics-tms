@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type metricSpec struct {
@@ -37,7 +39,7 @@ var metricSpecs = map[string]metricSpec{
 	"ops.on_time_rate": {Name: "准班率", Unit: "%", Domain: "ops", Ratio: true,
 		Description: "实际到达不晚于计划到达的运单占比（真实时间戳对比）",
 		SQL: `SELECT count(*) FILTER (WHERE arrived_at <= planned_arrival)::float8, count(*)::float8
-		      FROM ops_waybill WHERE status IN ('arrived','signed','delivered','settled')
+		      FROM ops_waybill WHERE status IN ` + wbstatus.DeliveredSQL + `
 		        AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
 		        AND (created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date`},
 	"ops.risk_rate": {Name: "风险运单占比", Unit: "%", Domain: "ops", Ratio: true, Snapshot: true,

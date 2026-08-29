@@ -23,6 +23,8 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/finance"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // scoreWeights 评分权重（合计 100），对应产品需求里的推荐评分维度表
@@ -67,12 +69,17 @@ func (h *Handler) carrierPerformance(ctx context.Context, carrierID, origin, des
 		  SELECT * FROM w WHERE $2 <> '' AND $3 <> '' AND origin = $2 AND destination = $3
 		)
 		SELECT (SELECT count(*) FROM w),
-		  (SELECT count(*) FROM w WHERE planned_arrival IS NOT NULL AND arrived_at IS NOT NULL),
-		  (SELECT count(*) FROM w WHERE planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
+		  -- 准班率只从**真的送达过**的单里取样。原先只排除了 voided：
+		  -- 一张被取消的运单若带着 arrived_at（车发出后要取消，系统逼你先记一次
+		  -- 假到达），会既进分母又进分子，把没送到的货算成准点交付。
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
+		     AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL),
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
+		     AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
 		     AND arrived_at <= planned_arrival),
 		  (SELECT count(*) FROM w WHERE EXISTS (SELECT 1 FROM ops_exception x WHERE x.waybill_id = w.id)),
-		  (SELECT count(*) FROM w WHERE status IN ('arrived','signed','delivered','settled')),
-		  (SELECT count(*) FROM w WHERE status IN ('arrived','signed','delivered','settled')
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`),
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
 		     AND receipt_status IN ('returned','audited')),
 		  (SELECT count(*) FROM route),
 		  (SELECT avg(pay)::float8 FROM (

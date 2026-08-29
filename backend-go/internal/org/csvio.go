@@ -7,15 +7,19 @@ package org
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // writeCSV 统一的 CSV 响应：一个 UTF-8 BOM + 表头 + 数据行。
@@ -107,7 +111,7 @@ func (h *Handler) ImportEmployees(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	cr := csv.NewReader(bomReader(file))
+	cr := csv.NewReader(decodeCSV(file))
 	cr.FieldsPerRecord = -1
 	orgByCode := map[string]string{}
 	if rows, err := h.DB.Query(ctx, `SELECT code, id::text FROM iam_organization`); err == nil {
@@ -194,6 +198,37 @@ func bomReader(r io.Reader) io.Reader {
 		_, _ = br.Discard(3)
 	}
 	return br
+}
+
+// decodeCSV 剥 BOM，并在内容不是合法 UTF-8 时按 GBK 解。
+//
+// 为什么需要这一步：这个接口吃的是**别人用 Excel 导出来的文件**，
+// 而中文 Windows 上 Excel 默认导出的就是 GBK——「CSV UTF-8」是另一个
+// 需要用户主动去选的菜单项，没人会注意到这个区别。
+//
+// 不转码的后果不是报错，是**静默导进一批乱码**：csv.Reader 把 GBK 字节
+// 当 UTF-8 读，姓名、部门、职位全变成问号，导入照样返回"成功 N 条"。
+// 等有人翻员工名录才发现，那时候已经导进去几百条了。
+//
+// 判别方式是「先按 UTF-8 验，不合法才当 GBK」而不是反过来：
+// GBK 的双字节几乎都不是合法 UTF-8 序列，所以这个方向误判率极低；
+// 反过来则不行——绝大多数 UTF-8 中文字节串按 GBK 也能"解出"东西来，
+// 只是解出来是乱码。ASCII 两边一致，怎么走都不会被改坏。
+func decodeCSV(r io.Reader) io.Reader {
+	raw, err := io.ReadAll(bomReader(r))
+	if err != nil {
+		return bytes.NewReader(nil)
+	}
+	if utf8.Valid(raw) {
+		return bytes.NewReader(raw)
+	}
+	dec, err := simplifiedchinese.GBK.NewDecoder().Bytes(raw)
+	if err != nil {
+		// GBK 也解不出来：原样交给 csv.Reader，让它按能读多少读多少，
+		// 好过整个导入直接失败——至少 ASCII 列（工号、手机号）还是对的。
+		return bytes.NewReader(raw)
+	}
+	return bytes.NewReader(dec)
 }
 
 func anyNonBlank(row []string) bool {

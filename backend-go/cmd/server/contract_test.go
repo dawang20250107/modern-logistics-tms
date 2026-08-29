@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mkWaybillWithDriver 造一张有司机、无合同的运单，返回运单号。
@@ -129,5 +130,77 @@ func TestGenerateContractWontOverwriteConfirmed(t *testing.T) {
 		WHERE waybill_id IN (SELECT id FROM ops_waybill WHERE waybill_no=$1)`, no).Scan(&n)
 	if n != 1 {
 		t.Errorf("合同条数变成了 %d，应保持 1", n)
+	}
+}
+
+// TestContractConfirmCannotBeFlippedAfterConfirmed 已确认的合同不能被改判成拒签。
+//
+// 确认这一步没有任何状态守卫：谁在什么时候点「司机拒签」，
+// 都会把一份**司机已经确认过**的合同改写成"已拒签"，并顺手重写 confirmed_at。
+// 承运合同是出事时双方唯一的书面依据，"他签过"这件事不该被后来的一次点击抹掉。
+func TestContractConfirmCannotBeFlippedAfterConfirmed(t *testing.T) {
+	e := newTestEnv(t)
+	token := e.mkUser(true)
+	no := e.mkWaybillWithDriver()
+
+	if rec := e.call(token, "POST", "/api/v1/waybills/"+no+"/contract", `{}`); rec.Code != http.StatusCreated {
+		t.Fatalf("生成合同失败 %d", rec.Code)
+	}
+	if rec := e.call(token, "POST", "/api/v1/waybills/"+no+"/contract/send", `{}`); rec.Code != http.StatusOK {
+		t.Fatalf("发送失败 %d", rec.Code)
+	}
+	if rec := e.call(token, "POST", "/api/v1/waybills/"+no+"/contract/confirm",
+		`{"accepted":true,"reply":"同意承运"}`); rec.Code != http.StatusOK {
+		t.Fatalf("确认失败 %d", rec.Code)
+	}
+
+	rec := e.call(token, "POST", "/api/v1/waybills/"+no+"/contract/confirm",
+		`{"accepted":false,"reply":"改主意了"}`)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("把已确认的合同改判成拒签，返回 %d（应 409）—— "+
+			"「司机签过」这件事被一次点击抹掉了", rec.Code)
+	}
+	c, _ := e.contractOf(token, no)
+	if s, _ := c["confirm_status"].(string); s != "confirmed" {
+		t.Errorf("合同状态被改成了 %q", s)
+	}
+}
+
+// TestContractConfirmIsIdempotent 重复确认不改动已经记下的时间。
+func TestContractConfirmIsIdempotent(t *testing.T) {
+	e := newTestEnv(t)
+	token := e.mkUser(true)
+	no := e.mkWaybillWithDriver()
+	_ = e.call(token, "POST", "/api/v1/waybills/"+no+"/contract", `{}`)
+	_ = e.call(token, "POST", "/api/v1/waybills/"+no+"/contract/send", `{}`)
+	_ = e.call(token, "POST", "/api/v1/waybills/"+no+"/contract/confirm", `{"accepted":false,"reply":"车坏了"}`)
+
+	var first time.Time
+	if err := e.pool.QueryRow(context.Background(), `
+		SELECT confirmed_at FROM ops_contract
+		WHERE waybill_id IN (SELECT id FROM ops_waybill WHERE waybill_no=$1)
+		ORDER BY created_at DESC LIMIT 1`, no).Scan(&first); err != nil {
+		t.Fatalf("查确认时间失败：%v", err)
+	}
+	if _, err := e.pool.Exec(context.Background(), `
+		UPDATE ops_contract SET confirmed_at = confirmed_at - interval '1 hour'
+		WHERE waybill_id IN (SELECT id FROM ops_waybill WHERE waybill_no=$1)`, no); err != nil {
+		t.Fatalf("调整时间失败：%v", err)
+	}
+	var before time.Time
+	_ = e.pool.QueryRow(context.Background(), `
+		SELECT confirmed_at FROM ops_contract
+		WHERE waybill_id IN (SELECT id FROM ops_waybill WHERE waybill_no=$1)
+		ORDER BY created_at DESC LIMIT 1`, no).Scan(&before)
+
+	// 再拒签一次：结果一样，就不该改动已经记下的时间
+	_ = e.call(token, "POST", "/api/v1/waybills/"+no+"/contract/confirm", `{"accepted":false,"reply":"车坏了"}`)
+	var after time.Time
+	_ = e.pool.QueryRow(context.Background(), `
+		SELECT confirmed_at FROM ops_contract
+		WHERE waybill_id IN (SELECT id FROM ops_waybill WHERE waybill_no=$1)
+		ORDER BY created_at DESC LIMIT 1`, no).Scan(&after)
+	if !after.Equal(before) {
+		t.Errorf("重复拒签把时间从 %v 改成了 %v", before, after)
 	}
 }

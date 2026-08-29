@@ -526,7 +526,7 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 	if body.Accepted != nil {
 		accepted = *body.Accepted
 	}
-	cid, _, driverID, found := h.latestContract(ctx, id)
+	cid, cur, driverID, found := h.latestContract(ctx, id)
 	if !found {
 		httpx.Err(w, http.StatusNotFound, "NO_CONTRACT", "无可确认的合同。")
 		return
@@ -534,6 +534,23 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 	newStatus, eventType := "confirmed", "contract_confirmed"
 	if !accepted {
 		newStatus, eventType = "rejected", "contract_rejected"
+	}
+	// 已确认的合同不能被改判。
+	//
+	// 这里原先没有任何状态守卫：谁在什么时候点一下「司机拒签」，都会把一份
+	// **司机已经确认过**的合同改写成"已拒签"，并顺手重写 confirmed_at。
+	// 承运合同是出事时双方唯一的书面依据，"他签过"这件事不该被后来的一次
+	// 点击抹掉。要变更就走重新生成那条路（那条也拒绝覆盖已确认的合同）。
+	if cur == "confirmed" && newStatus != "confirmed" {
+		httpx.Err(w, http.StatusConflict, "CONTRACT_CONFIRMED",
+			"该合同司机已确认，不能改判。如需变更请重新生成合同并重新发送。")
+		return
+	}
+	// 结果一样就什么都不做：重复提交多半是网络重试或手滑，
+	// 不该把已经记下的确认时间往后挪。
+	if cur == newStatus {
+		h.respondContract(w, r, cid)
+		return
 	}
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_contract SET confirm_status=$2, confirmed_at=now(), driver_reply=$3, updated_at=now()

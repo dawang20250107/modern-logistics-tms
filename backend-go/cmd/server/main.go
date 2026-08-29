@@ -151,6 +151,11 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 	r := chi.NewRouter()
 	r.Use(httpx.Recover, httpx.AccessLog, httpx.CORS(cfg.CORSOrigins))
 
+	// 指标曝光。默认关闭（METRICS_TOKEN 未设置即 404）——/metrics 会泄露
+	// 路由表、流量规模与错误率，不该像 /healthz 那样人人可读。
+	httpx.BindMetricsPool(pool)
+	r.Get("/metrics", httpx.MetricsHandler(os.Getenv("METRICS_TOKEN")))
+
 	// 存活探针：进程还在、HTTP 还能响应。**刻意不查库**——
 	// 库抖一下就重启应用进程是错的处置，那只会让恢复更慢。
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {

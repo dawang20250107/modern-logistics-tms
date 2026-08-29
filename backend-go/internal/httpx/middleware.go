@@ -60,9 +60,24 @@ func AccessLog(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(sw, r)
-		slog.Info("req",
-			"method", r.Method, "path", r.URL.Path,
-			"status", sw.status, "duration_ms", float64(time.Since(start).Microseconds())/1000,
+		elapsed := time.Since(start)
+		// 指标要在 next 之后取：chi 是在路由匹配时才把模式写进 RouteContext 的
+		observe(r.Method, routePattern(r), sw.status, elapsed.Seconds())
+
+		// 5xx 与慢请求提到 Warn/Error：上线后翻日志时，
+		// 「哪里出错了、哪里慢」不该淹在每秒几十条的 INFO 里。
+		lvl := slog.LevelInfo
+		switch {
+		case sw.status >= 500:
+			lvl = slog.LevelError
+		case sw.status >= 400 || elapsed > 2*time.Second:
+			lvl = slog.LevelWarn
+		}
+		slog.Log(r.Context(), lvl, "req",
+			"method", r.Method, "path", r.URL.Path, "route", routePattern(r),
+			"status", sw.status, "duration_ms", float64(elapsed.Microseconds())/1000,
+			// nginx 会带 X-Request-ID 进来；一条请求在网关与前置日志里能对上号
+			"request_id", r.Header.Get("X-Request-ID"),
 		)
 	})
 }

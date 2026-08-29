@@ -63,6 +63,17 @@ if [ -d frontend/node_modules ]; then
   if curl -sf -o /dev/null http://127.0.0.1:5173/ 2>/dev/null; then
     node scripts/dev/ui-audit.mjs >/tmp/rc-ui.log 2>&1 \
       && ok "UI 走查（配色/间距预算）" || bad "UI 走查超预算（见 /tmp/rc-ui.log）"
+    node scripts/dev/smoke-ui.mjs >/tmp/rc-smoke.log 2>&1 \
+      && ok "浏览器冒烟（各页无非 2xx、无未捕获异常）" \
+      || { bad "浏览器冒烟有发现："; tail -6 /tmp/rc-smoke.log | sed 's/^/      /'; }
+    # 端到端业务链要连网关，前面已确认它在
+    if curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null; then
+      node scripts/dev/e2e-flow.mjs >/tmp/rc-e2e.log 2>&1 \
+        && ok "端到端业务链（建单→检索→详情→计数一致→翻页）" \
+        || { bad "端到端业务链失败："; tail -10 /tmp/rc-e2e.log | sed 's/^/      /'; }
+    else
+      skip "端到端业务链：网关没起"
+    fi
   else
     skip "UI 走查：前端开发服务器没起（cd frontend && npm run dev）"
   fi

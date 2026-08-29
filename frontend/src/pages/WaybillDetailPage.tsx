@@ -547,6 +547,66 @@ export function WaybillDetailPage() {
             )}
           </div>
 
+          {/* 司机报销。
+              和承运合同同一个毛病：submitReimb / reimbAction 两个 mutation
+              连同表单状态（bxCat / bxAmount / bxReason）都写好了，
+              但没有任何地方把它们渲染出来——后端的提交/审批/驳回/付款四条
+              路由一直是全的，只是界面上够不着。
+              过路费、油费这些是司机先垫的钱，没有入口就意味着他垫的钱
+              进不了系统，只能线下要——而工作流面板上还有一格「报销」在等它。 */}
+          <div className="panel">
+            <div className="panel-head">司机报销</div>
+            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <select className="search" style={{ minWidth: 110 }} value={bxCat} onChange={(e) => setBxCat(e.target.value)}>
+                  {Object.entries(REIMB_CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+                <input className="search" style={{ width: 110 }} inputMode="decimal" placeholder="金额" value={bxAmount} onChange={(e) => setBxAmount(e.target.value)} />
+                <input className="search" style={{ flex: 1, minWidth: 160 }} placeholder="事由（选填）" value={bxReason} onChange={(e) => setBxReason(e.target.value)} />
+                <button
+                  className="btn-primary small"
+                  disabled={submitReimb.isPending || !(Number(bxAmount) > 0)}
+                  onClick={() => submitReimb.mutate()}
+                >
+                  {submitReimb.isPending ? "提交中…" : "提交报销"}
+                </button>
+              </div>
+              {(reimbursements.data?.items ?? []).length === 0 ? (
+                <StateView kind="empty" title="暂无报销单" hint="过路费、油费等司机垫付的费用在此提交与审批。" compact />
+              ) : (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead><tr><th>单号</th><th>类别</th><th>金额</th><th>事由</th><th>提交人</th><th>状态</th><th>操作</th></tr></thead>
+                    <tbody>
+                      {(reimbursements.data?.items ?? []).map((b) => (
+                        <tr key={b.id}>
+                          <td className="small">{b.reimb_no}</td>
+                          <td>{REIMB_CATEGORY_LABEL[b.category] ?? b.category_label ?? b.category}</td>
+                          <td>{fmtMoney(b.amount)}</td>
+                          <td className="small">{b.reason || EMPTY}</td>
+                          <td className="small">{b.submitted_by_name || EMPTY}</td>
+                          <td><span className={`tag tag-${b.status === "paid" ? "low" : b.status === "rejected" ? "high" : "medium"}`}>{b.status_label || b.status}</span></td>
+                          <td style={{ display: "flex", gap: 6 }}>
+                            {b.status === "submitted" && (
+                              <>
+                                <button className="btn-ghost small" disabled={reimbAction.isPending} onClick={() => reimbAction.mutate({ id: b.id, action: "approve" })}>审批</button>
+                                <button className="btn-ghost small" disabled={reimbAction.isPending} onClick={() => reimbAction.mutate({ id: b.id, action: "reject" })}>驳回</button>
+                              </>
+                            )}
+                            {b.status === "approved" && (
+                              <button className="btn-ghost small" disabled={reimbAction.isPending} onClick={() => reimbAction.mutate({ id: b.id, action: "pay" })}>标记已付</button>
+                            )}
+                            {!["submitted", "approved"].includes(b.status) && <span className="small muted">{EMPTY}</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* 承运合同。
               这三个 mutation（genContract / sendContract / confirmContract）
               早就写在这个文件里，但一直没有任何地方把它们渲染出来——

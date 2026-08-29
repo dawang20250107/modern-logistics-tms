@@ -100,8 +100,14 @@ func TestDriverCredentialUploadStoresFile(t *testing.T) {
 	}
 	content := []byte("CRED-BYTES-OK 驾驶证正面")
 
+	// 字段照抄 FleetPage 真正发的那一组——包括 self_uploaded。
+	// multipart 里所有值都是字符串，没有类型；只传一部分字段的话，
+	// 布尔字段那条路根本走不到，用例绿了而页面上照样 400。
 	rec := e.postMultipart(token, "/api/v1/driver-credentials",
-		map[string]string{"driver": drvID, "cred_type": "driving_license", "side": "main"},
+		map[string]string{
+			"driver": drvID, "cred_type": "driving_license", "side": "main",
+			"self_uploaded": "false",
+		},
 		"driving.jpg", content)
 	e.assertStoredAndFetchable(rec, content)
 }

@@ -176,7 +176,7 @@ func (h *Handler) decodeWriteBody(w http.ResponseWriter, r *http.Request, wc Wri
 	body := map[string]any{}
 	for k, v := range r.MultipartForm.Value {
 		if len(v) > 0 {
-			body[k] = v[0]
+			body[k] = coerceFormValue(wc.Fields[k].Kind, v[0])
 		}
 	}
 	// 存放键由服务端生成，客户端传什么都不算数——否则表单里塞一个
@@ -210,6 +210,36 @@ func (h *Handler) decodeWriteBody(w http.ResponseWriter, r *http.Request, wc Wri
 	}
 	body[wc.Upload.Field] = rel
 	return body, true
+}
+
+// coerceFormValue 把表单里的字符串按字段声明还原成对应类型。
+//
+// multipart 没有类型，什么都是字符串——前端一个 fd.append("self_uploaded", "false")，
+// 到这边就是字符串 "false"，而布尔校验只认真正的 bool，于是回 400
+// 「该字段必须是布尔值」。用户看到的是"上传失败"，没人猜得到是这个原因。
+// 数字和日期那几类校验本来就接受字符串，不用动；只有 bool 和 JSON 需要还原。
+//
+// 这条是补第一版的漏：那一版只把表单字段原样铺进 body，用后端用例
+// （只传了必填的几个字段）验过就以为成了，而页面上真正发的那一组里
+// 带着 self_uploaded——照抄前端的字段清单去测，才碰得到这条路。
+func coerceFormValue(kind FieldKind, s string) any {
+	switch kind {
+	case FBool:
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1", "on", "yes":
+			return true
+		case "false", "0", "off", "no", "":
+			return false
+		}
+		return s // 不认识的值交给校验去报错，别在这里猜
+	case FJSON:
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err == nil {
+			return v
+		}
+		return s
+	}
+	return s
 }
 
 // safeExt 从用户给的文件名里取一个能安全拼进存放键的扩展名。

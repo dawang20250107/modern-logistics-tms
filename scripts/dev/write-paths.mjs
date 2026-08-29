@@ -68,7 +68,9 @@ async function token() {
 
 // upload 在某一页上传一个文件，并断言列出来的链接真能打开
 async function upload(label, url, linkSel) {
-  await page.goto(url, { waitUntil: "networkidle" });
+  if (url && url !== page.url()) {
+    await page.goto(url, { waitUntil: "networkidle" });
+  }
   await page.waitForTimeout(600);
   const input = page.locator('input[type="file"]').first();
   if ((await input.count()) === 0) {
@@ -116,6 +118,40 @@ if (waybill) {
   await upload("电子回单", `${BASE}/waybills/${waybill.waybill_no}`, '.panel:has-text("电子回单") a[href]');
 } else {
   fail.push("电子回单：库里没有运单可用");
+}
+
+// 司机证件：第三条上传路径，走的是资源库那一页。
+// 它要先"带出档案"才能传，所以先造一个自己的司机——不依赖演示数据里
+// 恰好有一个带身份证号的司机（实测演示库里一个都没有）。
+{
+  const tail = String(Date.now()).slice(-6);
+  const idNo = "310101199001" + tail;
+  const name = "走查司机" + tail;
+  const mk = await page.request.post(`${API}/api/v1/drivers`, {
+    headers: { Authorization: "Bearer " + (await token()) },
+    data: { name, phone: "137" + tail.padStart(8, "0"), id_no: idNo, employment_type: "fulltime" },
+  });
+  if (!mk.ok()) {
+    fail.push(`司机证件：造不出司机（${mk.status()}），这一段没验到`);
+  } else {
+    const drvID = (await mk.json()).data.id;
+    await page.goto(`${BASE}/fleet`, { waitUntil: "networkidle" });
+    await page.locator('button:has-text("证件合规")').first().click();
+    await page.waitForTimeout(800);
+    const nameBox = page.locator('input[placeholder="司机姓名"]');
+    if ((await nameBox.count()) === 0) {
+      fail.push("司机证件：资源库页面上找不到「司机姓名」查询框");
+    } else {
+      await nameBox.fill(name);
+      await page.locator('input[placeholder="身份证后6位"]').fill(tail);
+      await page.locator('button:has-text("带出档案")').click();
+      await page.waitForTimeout(1200);
+      await upload("司机证件", page.url(), 'table a[href]');
+    }
+    await page.request.delete(`${API}/api/v1/drivers/${drvID}`, {
+      headers: { Authorization: "Bearer " + (await token()) },
+    });
+  }
 }
 
 // 运单状态流转：调度员每天点最多的按钮

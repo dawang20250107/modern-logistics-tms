@@ -941,6 +941,45 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 		if len(body.Splits) < 2 {
 			return httpErr{http.StatusBadRequest, "INVALID_SPLIT", "拆单至少需要 2 个子单。"}
 		}
+		// 子单的货量之和必须等于父单。
+		//
+		// 这里的件数/吨/方是**调用方给的**，而父单随即作废：
+		// 少给等于货凭空消失，多给等于凭空多出——而吨数直接进承运商运费，
+		// 把 10 吨拆成两个 10 吨，就是凭空多付一倍的钱。
+		// 实测两个方向都放行，接口都回 201。
+		var sumQ, sumW, sumV decimal.Decimal
+		for _, part := range body.Splits {
+			q, _ := toDecimal(part["cargo_quantity"])
+			wt, _ := toDecimal(part["cargo_weight_ton"])
+			v, _ := toDecimal(part["cargo_volume_cbm"])
+			sumQ, sumW, sumV = sumQ.Add(q), sumW.Add(wt), sumV.Add(v)
+		}
+		var pq, pw, pv decimal.Decimal
+		var pqi int
+		var pws, pvs string
+		if err := tx.QueryRow(ctx, `
+			SELECT cargo_quantity, cargo_weight_ton::text, cargo_volume_cbm::text
+			FROM ops_waybill WHERE id=$1::uuid`, wb.ID).Scan(&pqi, &pws, &pvs); err != nil {
+			return err
+		}
+		pq = decimal.NewFromInt(int64(pqi))
+		pw, _ = decimal.NewFromString(pws)
+		pv, _ = decimal.NewFromString(pvs)
+		var bad []string
+		if !sumQ.Equal(pq) {
+			bad = append(bad, fmt.Sprintf("件数 %s ≠ %s", sumQ.String(), pq.String()))
+		}
+		if !sumW.Equal(pw) {
+			bad = append(bad, fmt.Sprintf("吨数 %s ≠ %s", sumW.String(), pw.String()))
+		}
+		if !sumV.Equal(pv) {
+			bad = append(bad, fmt.Sprintf("方数 %s ≠ %s", sumV.String(), pv.String()))
+		}
+		if len(bad) > 0 {
+			return httpErr{http.StatusBadRequest, "SPLIT_CARGO_MISMATCH",
+				"子单货量之和与原运单对不上（" + strings.Join(bad, "；") +
+					"）。拆完原单即作废，对不上就意味着货凭空多了或少了。"}
+		}
 		for idx, part := range body.Splits {
 			q, _ := toDecimal(part["cargo_quantity"])
 			wt, _ := toDecimal(part["cargo_weight_ton"])

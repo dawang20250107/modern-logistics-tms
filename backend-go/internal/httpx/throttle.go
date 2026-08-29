@@ -164,6 +164,23 @@ func (t *Throttle) Guard(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// GuardKey 按调用方给的键限流，而不是按来源 IP。
+//
+// 用在「被猜的那个东西」上，而不是「猜的人」上。按 IP 限流挡不住换 IP，
+// 而暴破一个具体资源时，被反复试的**是那个资源**——把闸挂在它身上，
+// 攻击者换多少 IP 都绕不开。登录锁定按用户名而不是按 IP，是同一个道理。
+//
+// 两道闸通常要一起用：按键的挡定向暴破，按 IP 的挡广撒网式扫描。
+func (t *Throttle) GuardKey(w http.ResponseWriter, key string) bool {
+	ok, wait := t.Allow(key)
+	if !ok {
+		Err(w, http.StatusTooManyRequests, "throttled",
+			"请求已被限流。 预计 "+strconv.Itoa(wait)+" 秒后可用。")
+		return false
+	}
+	return true
+}
+
 // ClientIP 对齐 Django 的 X-Forwarded-For 取首段、否则 REMOTE_ADDR
 func ClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {

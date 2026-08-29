@@ -72,6 +72,11 @@ services:
       TMS_SMTP_USER: ${TMS_SMTP_USER:-}
       TMS_SMTP_PASS: ${TMS_SMTP_PASS:-}
       TMS_SMTP_FROM: ${TMS_SMTP_FROM:-}
+      # 对公开放端点的限流。/track 的"密码"只是手机号后 4 位、订单号顺序可猜，
+      # 没有闸时穷举四位组合只要 60 秒。详见 docs/deployment.md「对公开放的面」。
+      THROTTLE_TRACK_ORDER: ${THROTTLE_TRACK_ORDER:-10/min}
+      THROTTLE_TRACK_FAIL_IP: ${THROTTLE_TRACK_FAIL_IP:-20/min}
+      THROTTLE_PUBLIC_INTAKE: ${THROTTLE_PUBLIC_INTAKE:-5/min}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}

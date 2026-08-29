@@ -72,7 +72,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	r := buildRouter(ctx, pool, cfg)
+	// 常驻任务活到进程结束
+	r := buildRouter(ctx, context.Background(), pool, cfg)
 
 	slog.Info("gateway up", "addr", cfg.ListenAddr)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
@@ -113,7 +114,21 @@ func newPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 	return pgxpool.NewWithConfig(ctx, pc)
 }
 
-func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) http.Handler {
+// buildRouter 组装路由，并拉起后台常驻任务。
+//
+// 两个 ctx 是有意分开的，它们管的不是同一件事：
+//
+//	· startCtx —— 启动期那些一次性动作（建 schema、灌权限目录、拉 MCP 工具），
+//	  应该有超时，卡住了就该让启动失败而不是干等。
+//	· workerCtx —— 常驻任务（削峰、掉线扫描、指标物化、各种清理器）的生命周期，
+//	  生产上就是进程的一生。
+//
+// 原先常驻任务一律写死 context.Background()，因为 startCtx 带 10 秒超时，
+// 用它会让所有后台任务十秒后集体停摆。那在生产上没问题，但测试里
+// buildRouter 被调用几十次，每次都漏 6 个永不退出的 goroutine 继续打库——
+// 于是用例之间会互相干扰，池关掉之后还会刷一屏 "closed pool"。
+// 分成两个参数，调用方就能明确表达"这批后台任务活多久"。
+func buildRouter(startCtx, workerCtx context.Context, pool *pgxpool.Pool, cfg config.Config) http.Handler {
 	// 媒体存放。配错（比如 MEDIA_BACKEND=s3 但少了 S3_BUCKET）就直接退出，
 	// 不静默退回本地盘——退回去会让多副本部署"看起来正常"地间歇丢文件。
 	store, err := blob.FromEnv()
@@ -141,36 +156,36 @@ func buildRouter(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) htt
 	drvH := &driver.Handler{DB: pool, Secret: cfg.SecretKey, MediaRoot: cfg.MediaRoot, Blob: store}
 	// 车联网上报走进程内有界队列 + 后台批处理，替代 Redis 队列 + Celery
 	ingestor := telematics.NewIngestor(pool)
-	ingestor.Start(context.Background())
-	ingestor.StartOfflineScanner(context.Background(), 1*time.Minute)
+	ingestor.Start(workerCtx)
+	ingestor.StartOfflineScanner(workerCtx, 1*time.Minute)
 	// MQTT 终端接入（替代 mqtt_gateway 管理命令）；未配 MQTT_HOST 则不启用
-	ingestor.StartMQTTGateway(context.Background(), telematics.MQTTOptions{
+	ingestor.StartMQTTGateway(workerCtx, telematics.MQTTOptions{
 		Host: cfg.MQTTHost, Port: cfg.MQTTPort, Topic: cfg.MQTTTopic,
 		Username: cfg.MQTTUsername, Password: cfg.MQTTPassword,
 	})
 	telH := &telematics.Handler{DB: pool, Svc: authSvc, In: ingestor}
 	// 指标按日物化，替代 Django 的 materialize_metrics 命令（趋势图的数据来源）
-	analytics.StartMaterializer(context.Background(), pool, 1*time.Hour, 30)
+	analytics.StartMaterializer(workerCtx, pool, 1*time.Hour, 30)
 	// 权限点规范目录落库：库里原先只有 3 行（Django 演示数据残留），而代码校验 12 个，
 	// 差额那些在权限矩阵界面上没有行、没法勾选，等于永久 403。见 auth/permcatalog.go。
-	if err := auth.EnsurePermissions(ctx, pool); err != nil {
+	if err := auth.EnsurePermissions(startCtx, pool); err != nil {
 		slog.Warn("permission catalog", "err", err)
 	}
 	// 令牌黑名单只需覆盖「券还没自然过期」那段窗口，过期条目留着只会让表无限长
-	auth.StartDenylistPurger(context.Background(), pool, 1*time.Hour)
+	auth.StartDenylistPurger(workerCtx, pool, 1*time.Hour)
 	// 登录锁定 / 限流 / 找回密码验证码从进程内 map 改为共享存储。
 	// 不注入的话它们仍走进程内 map —— 那在单副本下没问题，多副本下
 	// 前两者是安全闸被稀释、后者是功能直接断（见 007 迁移的说明）。
 	auth.UseSharedStore(pool)
 	httpx.UseSharedStore(pool)
-	auth.StartRuntimeStatePurger(context.Background(), pool, 30*time.Minute)
+	auth.StartRuntimeStatePurger(workerCtx, pool, 30*time.Minute)
 	agentH := &agent.Handler{DB: pool, Svc: authSvc, MD: mdH}
-	if err := agent.EnsureSchema(ctx, pool); err != nil {
+	if err := agent.EnsureSchema(startCtx, pool); err != nil {
 		slog.Warn("agent schema", "err", err)
 	}
 	// 外部 MCP server 的工具与内置工具同表注册。必须在开始监听之前跑完：
 	// 注册表是启动期一次性构建的，之后只读，这样才不用为它上锁。
-	agent.LoadMCPTools(ctx, os.Getenv("AGENT_MCP_SERVERS"))
+	agent.LoadMCPTools(startCtx, os.Getenv("AGENT_MCP_SERVERS"))
 
 	// detailOnly 包一层：路径参数不是 UUID 时说明命中的其实是同层的集合级动作，
 	// 而那些动作都已单独注册——走到这里就是真的没有这个资源。

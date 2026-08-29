@@ -19,7 +19,25 @@ import (
 )
 
 // PublicIntake POST /api/v1/public/orders —— 客户自助下单（免登录）
+// 对公开放端点的限流。速率可用环境变量覆盖（部署侧要按真实流量调）。
+var (
+	// 按订单号：同一个单号被反复试就是暴破信号。10/min 意味着穷举
+	// 10000 种四位后缀要 1000 分钟以上，而且全程会在 /metrics 上留下
+	// 大量 404 与 429，能被告警发现。
+	trackByOrderThrottle = httpx.NewThrottle("THROTTLE_TRACK_ORDER", "10/min")
+	// 按来源 IP，但**只在查不到时**计数。正常客户一次就查到，不占配额；
+	// 横向扫描的人几乎全是查不到。20 次失败/分钟对手滑输错的人足够宽松。
+	trackFailByIPThrottle = httpx.NewThrottle("THROTTLE_TRACK_FAIL_IP", "20/min")
+	// 公开建单：真实客户一次提交一单，5/min 足够宽松。
+	intakeThrottle = httpx.NewThrottle("THROTTLE_PUBLIC_INTAKE", "5/min")
+)
+
 func (h *Handler) PublicIntake(w http.ResponseWriter, r *http.Request) {
+	// 免登录建单：不挡的话，任何人都能把客服工作台灌满垃圾单，
+	// 而客服无法区分哪些是真客户提交的。
+	if !intakeThrottle.Guard(w, r) {
+		return
+	}
 	ctx := r.Context()
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
@@ -96,6 +114,20 @@ func (h *Handler) PublicTrack(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "TRACK_PARAMS", "order_no 与 phone 必填。")
 		return
 	}
+	// 两道闸，缺一不可。
+	//
+	// 这个端点免登录、对整个互联网开放，而它的"密码"只是手机号后 4 位
+	// （下面那条 SQL 允许 >=4 位的后缀匹配，这是有意的可用性取舍——
+	// 客户常常只记得后四位）。订单号又是顺序可猜的。
+	// 实测过：没有闸的时候，穷举 10000 种四位组合只要 **60 秒**，
+	// 也就是任何人都能把全系统的发货信息（起止地、状态、时间线）爬走。
+	// 对一家物流公司来说，那是把客户的发货规律直接送给同行。
+	//
+	// 按订单号的闸挡定向暴破：被反复试的是那个单号，攻击者换多少 IP 都绕不开。
+	// 按 IP 的闸挡横向扫描（拿一批单号各试几次），但**只对失败计数**——见下。
+	if !trackByOrderThrottle.GuardKey(w, "no:"+orderNo) {
+		return
+	}
 	// 手机号校验：全等或「输入至少 4 位且为登记号码的后缀」，三个联系号任一命中即可
 	var orderID, status, businessType, ordOrigin, ordDest string
 	var createdAt time.Time
@@ -111,6 +143,21 @@ func (h *Handler) PublicTrack(w http.ResponseWriter, r *http.Request) {
 		LIMIT 1`, orderNo, phone).
 		Scan(&orderID, &status, &businessType, &ordOrigin, &ordDest, &createdAt)
 	if err != nil {
+		// 只有**查不到**才消耗这个 IP 的配额。
+		//
+		// 第一版是在查询之前按 IP 无差别限流的，结果被自己的用例抓了出来：
+		// 打满一个单号之后，另一个客户的正常查询也被连带挡住。
+		// 现实里这一条更要命——国内大量用户共用出口 IP（企业 NAT、运营商 CGNAT），
+		// 30/min 摊到成百上千人身上立刻就满，正常客户查不了自己的单。
+		// 安全修复就这么变成了拒绝服务。
+		//
+		// 只对失败计数就没有这个问题：客户知道自己的手机号，一次就查到，
+		// 永远不消耗配额；而横向扫描的人几乎全是查不到，很快就被切断。
+		// 代价是每次失败仍会走一次库查询——那是一条走索引的单行查询，
+		// 而同一单号的重复尝试已经被上面那道闸挡住了。
+		if !trackFailByIPThrottle.Guard(w, r) {
+			return
+		}
 		httpx.Err(w, http.StatusNotFound, "TRACK_NOT_FOUND", "未找到匹配的订单，请核对订单号与手机号。")
 		return
 	}

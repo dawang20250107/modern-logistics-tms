@@ -74,7 +74,15 @@ func newTestEnv(t *testing.T) *testEnv {
 	//
 	// 注册在这里（最早）意味着它最后执行：t.Cleanup 是后进先出，
 	// 后面 mkUser 注册的删数据要先跑完，再关池。反过来的话删不掉。
-	t.Cleanup(pool.Close)
+	// 后台常驻任务跟着用例一起收。不收的话，buildRouter 每被调用一次
+	// 就漏 6 个永不退出的 goroutine 继续打库，用例之间会互相干扰，
+	// 池关掉之后还会刷一屏 "closed pool"。
+	// 顺序要紧：先停任务，再关池——反过来任务会拿着已关闭的池报错。
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		stopWorkers()
+		pool.Close()
+	})
 
 	cfg := config.Load()
 	if err := auth.EnsurePermissions(ctx, pool); err != nil {
@@ -82,7 +90,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	return &testEnv{
 		t: t, pool: pool,
-		router: buildRouter(ctx, pool, cfg),
+		router: buildRouter(ctx, workerCtx, pool, cfg),
 		issuer: auth.NewIssuer(cfg.SecretKey, cfg.AccessMinutes, cfg.RefreshDays),
 	}
 }

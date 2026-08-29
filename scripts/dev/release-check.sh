@@ -161,6 +161,19 @@ PLACE=$(grep -nE '^\s+(DJANGO_SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL):.*:-' \
 [ -z "$PLACE" ] && ok "生产编排里密钥/口令都是必填（:?），没有可用的默认值" \
                 || { bad "生产编排给了默认口令，按文档部署的实例会共用同一把钥匙："; echo "$PLACE" | sed 's/^/      /'; }
 
+sect "对公开放端点的限流"
+# 免登录端点没有闸 = 互联网可以直接刷。/track 尤其要紧：
+# 它的"密码"只有手机号后 4 位，没有闸时 60 秒能穷举完。
+for kv in "PublicTrack:trackByOrderThrottle" "PublicTrack:trackFailByIPThrottle" \
+          "PublicIntake:intakeThrottle"; do
+  fn="${kv%%:*}"; th="${kv##*:}"
+  if grep -q "$th" backend-go/internal/orders/public.go; then
+    ok "$fn 已挂 $th"
+  else
+    bad "$fn 缺少 $th —— 免登录端点没有限流"
+  fi
+done
+
 sect "HTTPS"
 grep -q 'listen 443 ssl' deploy/nginx.conf && ok "nginx 配了 443 + TLS" || bad "nginx 没有 443"
 grep -q 'Strict-Transport-Security' deploy/nginx.conf && ok "配了 HSTS" || bad "缺 HSTS"

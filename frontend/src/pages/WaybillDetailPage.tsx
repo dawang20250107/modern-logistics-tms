@@ -5,7 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { apiGet, apiPost, apiUpload } from "../api/client";
 import { fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
-import { COD_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
+import { COD_STATUS_LABEL, OCR_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { CopyCode } from "../components/CopyCode";
 import { StateView } from "../components/StateView";
@@ -567,7 +567,18 @@ export function WaybillDetailPage() {
                       <div className="stack" style={{ gap: 4 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontWeight: "bold", fontSize: 13 }}>回单</span>
-                          <span className={`tag tag-${r.ocr_status === "done" ? "low" : "medium"}`} style={{ fontSize: 10 }}>OCR {r.ocr_status === "done" ? "识别完成" : "提取中"}</span>
+                          {/* 别把「不是 done」一律说成「提取中」。
+                              未配 OCR 引擎时后端落的是 manual（待人工），
+                              这个徽标会一直显示"提取中"——一件永远不会完成的事，
+                              等于告诉用户"再等等"，而其实该他自己去录。
+                              failed 同理，卡在"提取中"就没人会去重传。 */}
+                          <span
+                            className={`tag tag-${r.ocr_status === "done" ? "low" : r.ocr_status === "failed" ? "high" : "medium"}`}
+                            style={{ fontSize: 10 }}
+                            title={r.ocr_status === "manual" ? "本部署未接入 OCR 引擎，签收信息需人工录入" : undefined}
+                          >
+                            OCR {OCR_STATUS_LABEL[r.ocr_status] ?? r.ocr_status}
+                          </span>
                         </div>
                         {r.signatory && (
                           <div style={{ fontSize: 12, color: "var(--brand)" }}>

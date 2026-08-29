@@ -235,7 +235,14 @@ function CredentialLibrary() {
       fd.append("file", file);
       return apiUpload<DriverCredential>("/driver-credentials", fd);
     },
-    onSuccess: () => { toast.success("证件已上传，识别中"); lookup.mutate(); },
+    // 后端未配 OCR 引擎时回的是 ocr_status=manual，不会有任何识别发生。
+    // 原先无条件说"识别中"，等于让人去等一件不会发生的事。
+    onSuccess: (c) => {
+      toast.success(c?.ocr_status === "manual" || !c?.ocr_status
+        ? "证件已上传，需人工录入证件信息（本部署未接入 OCR）"
+        : "证件已上传，识别中");
+      lookup.mutate();
+    },
   });
 
   return (

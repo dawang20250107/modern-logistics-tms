@@ -281,7 +281,8 @@ function CredentialUpload({ token }: { token: string }) {
       const fd = new FormData();
       fd.append("cred_type", credType); fd.append("side", side); fd.append("file", file);
       await dFetch("/driver/credentials", token, { method: "POST", body: fd });
-      toast.success("证件已上传，识别建档中");
+      // 未接 OCR 引擎时不会有任何"识别"发生，别让司机以为传完就没事了
+      toast.success("证件已上传，待人工核验建档");
     } catch (e) { toast.error(e instanceof Error ? e.message : "上传失败"); }
     finally { setBusy(false); }
   }

@@ -13,7 +13,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -205,5 +207,82 @@ func TestDriverEndpointsRequireDriverToken(t *testing.T) {
 				t.Errorf("带伪造令牌 → %d，期望 401", got)
 			}
 		})
+	}
+}
+
+// ── 司机登录：第 8 个免登录端点 ──────────────────────────────
+//
+// 上面那份清单里写着 /driver/login 之外的司机端点"实测全部 401，把关是好的"，
+// 但 login 本身是公开的，而且它是**凭据校验**端点——校验的是身份证后 6 位。
+// 下面两条钉的是它的闸挂在哪儿。
+
+// mkDriver 造一个能登录的司机，返回手机号与身份证后 6 位。
+func (e *testEnv) mkDriver() (phone, idTail string) {
+	e.t.Helper()
+	phone = "139" + fmt.Sprintf("%08d", uuid.New().ID()%100000000)
+	idNo := "310101199001" + fmt.Sprintf("%06d", uuid.New().ID()%1000000)
+	idTail = idNo[len(idNo)-6:]
+	id := uuid.NewString()
+	if _, err := e.pool.Exec(context.Background(), `
+		INSERT INTO md_driver (id, created_at, updated_at, is_deleted, name, phone, id_no,
+		  license_no, is_active, license_type, qualification_cert_no, employment_type,
+		  app_registered, cumulative_freight, cumulative_waybills, wechat)
+		VALUES ($1::uuid, now(), now(), false, '测试司机', $2, $3,
+		  '', true, '', '', 'fulltime', false, 0, 0, '')`, id, phone, idNo); err != nil {
+		e.t.Fatalf("造司机失败：%v", err)
+	}
+	e.t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.Background(), `DELETE FROM md_driver WHERE id=$1::uuid`, id)
+	})
+	return phone, idTail
+}
+
+// driverLogin 从指定来源 IP 发起一次司机登录。
+// ClientIP 取 X-Forwarded-For 首段，所以换这个头等于换来源 IP——
+// 攻击者手上有代理池时就是这么绕按 IP 的闸的。
+func (e *testEnv) driverLogin(ip, phone, idTail string) int {
+	e.t.Helper()
+	req := httptest.NewRequest("POST", "/api/v1/driver/login",
+		strings.NewReader(fmt.Sprintf(`{"phone":%q,"id_tail":%q}`, phone, idTail)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", ip)
+	rec := httptest.NewRecorder()
+	e.router.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+// TestDriverLoginThrottleSurvivesIPRotation 换 IP 不能重置爆破额度。
+//
+// 闸只按来源 IP 的话，它拦的是"猜的人"，而猜的人可以换。真正被反复试的
+// 是**那个手机号对应的身份证后 6 位**，闸得挂在它身上——和公开查单同一个道理。
+func TestDriverLoginThrottleSurvivesIPRotation(t *testing.T) {
+	e := newTestEnv(t)
+	phone, _ := e.mkDriver()
+	throttledAt := -1
+	for i := 0; i < 40; i++ {
+		// 每次都换一个来源 IP，模拟代理池
+		if e.driverLogin(fmt.Sprintf("203.0.113.%d", i%250), phone, fmt.Sprintf("%06d", i)) == http.StatusTooManyRequests {
+			throttledAt = i
+			break
+		}
+	}
+	if throttledAt < 0 {
+		t.Error("同一个手机号连试 40 次都没被限流（每次换来源 IP）—— " +
+			"身份证后 6 位可以被慢慢穷举，闸挂在了 IP 上而不是被猜的那个号上")
+	}
+}
+
+// TestDriverLoginSuccessDoesNotConsumeIPBudget 共用出口的司机不能互相挤掉。
+//
+// 司机端是手机 App，跑在运营商网络上——一个基站后面的车队共用一个出口 IP
+// 是常态。按 IP 无差别计数的话，一支 20 人的车队早上集中上线就会互相挤掉。
+func TestDriverLoginSuccessDoesNotConsumeIPBudget(t *testing.T) {
+	e := newTestEnv(t)
+	for i := 0; i < 25; i++ {
+		phone, tail := e.mkDriver()
+		if got := e.driverLogin("198.51.100.7", phone, tail); got != http.StatusOK {
+			t.Fatalf("第 %d 个司机从同一出口 IP 登录变成了 %d —— "+
+				"登录成功也在消耗 IP 配额，同一车队的人会互相挤掉", i+1, got)
+		}
 	}
 }

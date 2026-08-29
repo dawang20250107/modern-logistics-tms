@@ -8,7 +8,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -54,9 +53,7 @@ func (h *Handler) require(w http.ResponseWriter, r *http.Request) (*auth.UserRow
 		return nil, false
 	}
 	// LLM 成本闸：与 Django scope="ai" 同档（默认 30/min，按用户计）
-	if ok, wait := aiThrottle.Allow(me.ID); !ok {
-		httpx.Err(w, http.StatusTooManyRequests, "throttled",
-			fmt.Sprintf("请求已被限流。 预计 %d 秒后可用。", wait))
+	if !aiThrottle.GuardKey(w, me.ID) {
 		return nil, false
 	}
 	return me, true

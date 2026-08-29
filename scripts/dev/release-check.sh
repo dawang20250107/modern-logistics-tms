@@ -175,10 +175,16 @@ done
 sect "对公开放端点的限流"
 # 免登录端点没有闸 = 互联网可以直接刷。/track 尤其要紧：
 # 它的"密码"只有手机号后 4 位，没有闸时 60 秒能穷举完。
-for kv in "PublicTrack:trackByOrderThrottle" "PublicTrack:trackFailByIPThrottle" \
-          "PublicIntake:intakeThrottle"; do
-  fn="${kv%%:*}"; th="${kv##*:}"
-  if grep -q "$th" backend-go/internal/orders/public.go; then
+# 每个免登录的凭据校验端点都要有两道闸：按被猜的那个东西（单号/手机号）
+# 挡定向爆破，按 IP 只对失败计数挡广撒网——只有前者会被换 IP 绕开，
+# 只有后者会误伤共用出口（CGNAT、车队、企业 NAT）的正常用户。
+for kv in "PublicTrack:trackByOrderThrottle:backend-go/internal/orders/public.go" \
+          "PublicTrack:trackFailByIPThrottle:backend-go/internal/orders/public.go" \
+          "PublicIntake:intakeThrottle:backend-go/internal/orders/public.go" \
+          "DriverLogin:loginByPhoneThrottle:backend-go/internal/driver/handler.go" \
+          "DriverLogin:loginFailByIPThrottle:backend-go/internal/driver/handler.go"; do
+  fn="${kv%%:*}"; rest="${kv#*:}"; th="${rest%%:*}"; src="${rest##*:}"
+  if grep -q "$th" "$src"; then
     ok "$fn 已挂 $th"
   else
     bad "$fn 缺少 $th —— 免登录端点没有限流"

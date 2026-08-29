@@ -156,9 +156,7 @@ func (t *Throttle) Allow(key string) (bool, int) {
 func (t *Throttle) Guard(w http.ResponseWriter, r *http.Request) bool {
 	ok, wait := t.Allow(ClientIP(r))
 	if !ok {
-		// 文案逐字对齐 DRF zh-hans 翻译（两句之间有一个空格，别手滑省掉）
-		Err(w, http.StatusTooManyRequests, "throttled",
-			"请求已被限流。 预计 "+strconv.Itoa(wait)+" 秒后可用。")
+		errThrottled(w, wait)
 		return false
 	}
 	return true
@@ -174,11 +172,23 @@ func (t *Throttle) Guard(w http.ResponseWriter, r *http.Request) bool {
 func (t *Throttle) GuardKey(w http.ResponseWriter, key string) bool {
 	ok, wait := t.Allow(key)
 	if !ok {
-		Err(w, http.StatusTooManyRequests, "throttled",
-			"请求已被限流。 预计 "+strconv.Itoa(wait)+" 秒后可用。")
+		errThrottled(w, wait)
 		return false
 	}
 	return true
+}
+
+// errThrottled 429 的唯一出口。
+//
+// 这句话原先在三处各写了一份（这里、司机登录、AI 闸），措辞逐字对齐
+// DRF 的 zh-hans 翻译——包括"限流。 预计"中间那个空格，那是翻译文件里的
+// 手滑，不是中文标点。当时抄它是为了让前端不用区分新旧后端。
+//
+// 现在这句话会直接显示在客户自助查单页上（免登录的 /track 加了防穷举限流），
+// 不再只是给接口调用方看的。所以按中文来排：句号后面不留空格。
+func errThrottled(w http.ResponseWriter, wait int) {
+	Err(w, http.StatusTooManyRequests, "throttled",
+		"请求已被限流，预计 "+strconv.Itoa(wait)+" 秒后可用。")
 }
 
 // ClientIP 对齐 Django 的 X-Forwarded-For 取首段、否则 REMOTE_ADDR

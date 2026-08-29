@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -40,9 +39,23 @@ type Handler struct {
 	Blob blob.Store
 }
 
-// loginThrottle 对齐 DriverLoginRateThrottle（scope=driver_login，默认 10/min）：
-// 司机端登录是「手机号 + 6 位数字」，不限速等于把身份证尾号交给爆破。
-var loginThrottle = httpx.NewThrottle("THROTTLE_DRIVER_LOGIN", "10/min")
+// 司机端登录是「手机号 + 身份证后 6 位」，两道闸各挡一种打法。
+//
+// 原先只有一道按来源 IP 的闸（对齐 DriverLoginRateThrottle，10/min），实测两头都不对：
+//
+//	· 挡不住爆破——换 IP 就重置。同一个手机号连试 40 次、每次换来源 IP，
+//	  一次都没被限住；有代理池就能把 6 位数字慢慢试完。
+//	· 又会误伤——司机端是跑在运营商网络上的手机 App，一支车队共用一个出口 IP
+//	  是常态。实测同一出口的第 11 个司机**登录成功**也被 429 挡下，
+//	  早上集中上线时整队人互相挤掉。
+//
+// 所以：按手机号的闸挡定向爆破（被反复试的是那个号，换 IP 绕不开），
+// 按 IP 的闸只对**失败**计数、挡广撒网式扫描——正常司机登录成功不消耗它，
+// 共用出口就不会被连带挡住。/track 是同一套结构，见 orders/public.go。
+var (
+	loginByPhoneThrottle  = httpx.NewThrottle("THROTTLE_DRIVER_LOGIN", "10/min")
+	loginFailByIPThrottle = httpx.NewThrottle("THROTTLE_DRIVER_LOGIN_FAIL_IP", "20/min")
+)
 
 // 在途运单状态集（司机端只看这些）
 var activeWaybillStatuses = []string{
@@ -120,11 +133,6 @@ func (h *Handler) authDriver(w http.ResponseWriter, r *http.Request, bodyToken s
 
 // Login POST /api/v1/driver/login —— 手机号 + 身份证后 6 位
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := loginThrottle.Allow(httpx.ClientIP(r)); !ok {
-		httpx.Err(w, http.StatusTooManyRequests, "throttled",
-			fmt.Sprintf("请求已被限流。 预计 %d 秒后可用。", wait))
-		return
-	}
 	var body struct {
 		Phone  string `json:"phone"`
 		IDTail string `json:"id_tail"`
@@ -140,6 +148,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "DRIVER_LOGIN_REQUIRED", "身份证后 6 位格式不正确。")
 		return
 	}
+	// 闸挂在被猜的那个号上，且要在查库**之前**——放到后面的话，
+	// 爆破照样能让数据库替它把每个候选值都查一遍。
+	if !loginByPhoneThrottle.GuardKey(w, phone) {
+		return
+	}
 	d := &driverRow{}
 	var idNo string
 	// 始终校验身份证后 6 位；档案缺身份证号则无法验证身份，拒绝登录
@@ -149,6 +162,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		ORDER BY created_at, id LIMIT 1`, phone).
 		Scan(&d.ID, &d.Name, &d.Phone, &d.AppRegistered, &idNo)
 	if err != nil || idNo == "" || !strings.HasSuffix(idNo, idTail) {
+		// 只有这里计 IP 配额：失败才算，成功不算。
+		if !loginFailByIPThrottle.Guard(w, r) {
+			return
+		}
 		httpx.Err(w, http.StatusUnauthorized, "DRIVER_LOGIN_FAILED", "手机号或身份证后 6 位不匹配。")
 		return
 	}

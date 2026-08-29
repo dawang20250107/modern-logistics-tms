@@ -106,7 +106,7 @@ function compareValues(a: string | number, b: string | number): number {
 export function DataTable<T>({
   columns, rows, rowKey, viewKey, selectable, selected, onToggle, onToggleAll,
   onRowContextMenu, onRowDoubleClick, onRowClick, rowClassName, stickyFirst, toolbarLeft, toolbarRight, batchBar, exportName,
-  expandedKey, renderExpanded, rowMenu, hideExport, emptyState, server, fill,
+  expandedKey, renderExpanded, rowMenu, hideExport, exportAll, emptyState, server, fill,
 }: {
   columns: DataColumn<T>[];
   rows: T[];
@@ -129,6 +129,9 @@ export function DataTable<T>({
   exportName?: string;
   rowMenu?: (row: T) => RowMenuItem[];
   hideExport?: boolean;
+  // exportAll 服务端分页时用来取「全部行」。不给的话导出只能覆盖当前这一页，
+  // 按钮文案会相应改成「本页」——绝不让一个叫「导出」的按钮悄悄只导 50 行。
+  exportAll?: () => Promise<T[]>;
   emptyState?: React.ReactNode;
   server?: ServerPage;
   fill?: boolean;
@@ -424,16 +427,32 @@ export function DataTable<T>({
   const isPinnedR = (key: string) => pinRight.has(key);
 
 
-  const exportRows = () => displayRows.map((r) => visibleCols.map((c) => cellValue(c, r)));
+  // 服务端分页时 displayRows 只是**当前这一页**。导出如果就照它来，
+  // 5 万单的台账点一下「导出」会得到 50 行——表头齐、格式对、文件打得开，
+  // 只是少了 99.9%。这套系统在调度台上栽过同一条（把 8336 说成 20）。
+  // 所以：能取全量就取全量（exportAll），取不到就在按钮上写明是「本页」。
+  const pagedOnly = Boolean(server) && !exportAll && (server?.total ?? 0) > rows.length;
+  const [exporting, setExporting] = useState(false);
+  const gatherRows = async (): Promise<T[]> => {
+    if (!exportAll) return displayRows;
+    setExporting(true);
+    try {
+      return await exportAll();
+    } finally {
+      setExporting(false);
+    }
+  };
+  const toCells = (rs: T[]) => rs.map((r) => visibleCols.map((c) => cellValue(c, r)));
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
+    const rs = await gatherRows();
     const esc = (v: string | number) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const head = visibleCols.map((c) => esc(c.header)).join(",");
-    const body = exportRows().map((cells) => cells.map(esc).join(","));
+    const body = toCells(rs).map((cells) => cells.map(esc).join(","));
     download("﻿" + [head, ...body].join("\r\n"), `${exportName ?? viewKey}.csv`, "text/csv;charset=utf-8");
   };
   // Excel 导出：SpreadsheetML（数字列落 Number 类型，Excel 打开即可求和）
-  const exportXls = () => {
+  const exportXls = async () => {
     const xmlEsc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const cell = (v: string | number) => {
       const n = parseNum(v);
@@ -442,7 +461,7 @@ export function DataTable<T>({
         : `<Cell><Data ss:Type="String">${xmlEsc(String(v ?? ""))}</Data></Cell>`;
     };
     const head = `<Row>${visibleCols.map((c) => `<Cell><Data ss:Type="String">${xmlEsc(c.header)}</Data></Cell>`).join("")}</Row>`;
-    const body = exportRows().map((cells) => `<Row>${cells.map(cell).join("")}</Row>`).join("");
+    const body = toCells(await gatherRows()).map((cells) => `<Row>${cells.map(cell).join("")}</Row>`).join("");
     const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
 <Worksheet ss:Name="${xmlEsc(exportName ?? viewKey)}"><Table>${head}${body}</Table></Worksheet></Workbook>`;
@@ -707,8 +726,30 @@ export function DataTable<T>({
           {activeFilterCount > 0 && (
             <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setFilters({}); }} title="清除所有列筛选">清筛 {activeFilterCount}</button>
           )}
-          {!hideExport && <button className="btn-ghost" onClick={exportCsv} title="导出 CSV（当前可见列）">CSV</button>}
-          <button className="btn-ghost" onClick={exportXls} title="导出 Excel（数字列可直接求和）">Excel</button>
+          {/* hideExport 原先只挡住了 CSV 那一颗，Excel 那颗照旧露着。
+              于是订单台账（明确设了 hideExport，意思是"用服务端导出，别用前端的"）
+              上仍有一颗 Excel 按钮，点下去导出的是当前这一页的 50 行。
+              两颗一起挡。 */}
+          {!hideExport && (
+            <>
+              <button
+                className="btn-ghost"
+                onClick={exportCsv}
+                disabled={exporting}
+                title={pagedOnly ? "导出当前这一页（可见列）" : "导出 CSV（当前可见列）"}
+              >
+                {exporting ? "导出中…" : pagedOnly ? "CSV(本页)" : "CSV"}
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={exportXls}
+                disabled={exporting}
+                title={pagedOnly ? "导出当前这一页（数字列可直接求和）" : "导出 Excel（数字列可直接求和）"}
+              >
+                {exporting ? "导出中…" : pagedOnly ? "Excel(本页)" : "Excel"}
+              </button>
+            </>
+          )}
           <button className="btn-ghost" onClick={() => setDensity(DENSITY_NEXT[density])} title={`行密度：${DENSITY_LABEL[density]}（点击切换）`}>密度</button>
           <button className="btn-ghost" onClick={() => setFullscreen((v) => !v)} title={fullscreen ? "退出全屏 (Esc)" : "全屏表格"}>{fullscreen ? "退出全屏" : "全屏"}</button>
           <button className="btn-ghost" onClick={(e) => { e.stopPropagation(); setColMenu((v) => !v); }}>列 / 视图</button>

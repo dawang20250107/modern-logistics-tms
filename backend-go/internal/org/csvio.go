@@ -9,9 +9,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/csv"
-	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -27,12 +27,10 @@ import (
 // Django 侧把 charset 设成 utf-8-sig 又手写了一次 BOM，于是 HttpResponse 每次
 // write 都再补一个——表头前 3 个、每条数据行前 1 个。那是 Excel 里每行首格都带
 // 一个不可见字符的缺陷，不是契约，这里只发一个。
-func writeCSV(w http.ResponseWriter, filename string, header []string, rows pgx.Rows, cols int) {
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8-sig")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
-	cw := csv.NewWriter(w)
-	_ = cw.Write(header)
+// total 是符合条件的总行数（<0 表示未知），只用来判断要不要在文件末尾
+// 写「导出已截断」。见 httpx.NewExport。
+func writeCSV(w http.ResponseWriter, filename string, header []string, rows pgx.Rows, cols, total int) {
+	ex := httpx.NewExport(w, filename, header, total)
 	defer rows.Close()
 	for rows.Next() {
 		rec := make([]string, cols)
@@ -43,9 +41,18 @@ func writeCSV(w http.ResponseWriter, filename string, header []string, rows pgx.
 		if rows.Scan(ptrs...) != nil {
 			break
 		}
-		_ = cw.Write(rec)
+		if !ex.Row(rec) {
+			break
+		}
 	}
-	cw.Flush()
+	ex.Done()
+}
+
+// countRows 数一遍，供 writeCSV 判断截断用。数不出来就当未知，不影响导出。
+func (h *Handler) countRows(r *http.Request, sql string) int {
+	n := -1
+	_ = h.DB.QueryRow(r.Context(), sql).Scan(&n)
+	return n
 }
 
 // ExportOrganizations GET /api/v1/org/organizations/export
@@ -63,14 +70,14 @@ func (h *Handler) ExportOrganizations(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(p.code,''), o.manager_name, o.manager_phone, o.city,
 		       (CASE WHEN o.is_active THEN '是' ELSE '否' END)
 		FROM iam_organization o LEFT JOIN iam_organization p ON p.id = o.parent_id
-		ORDER BY o.sort_order, o.code LIMIT 5000`)
+		ORDER BY o.sort_order, o.code LIMIT `+strconv.Itoa(httpx.ExportMaxRows))
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
 	}
 	writeCSV(w, "organizations.csv",
 		[]string{"编码", "名称", "简称", "类型", "经营属性", "上级编码", "负责人", "负责人电话", "城市", "启用"},
-		rows, 10)
+		rows, 10, h.countRows(r, "SELECT count(*) FROM iam_organization"))
 }
 
 // ExportEmployees GET /api/v1/org/employees/export
@@ -86,13 +93,14 @@ func (h *Handler) ExportEmployees(w http.ResponseWriter, r *http.Request) {
 		FROM iam_employee e
 		LEFT JOIN iam_organization o ON o.id = e.organization_id
 		LEFT JOIN iam_employee s ON s.id = e.supervisor_id
-		ORDER BY e.employee_no LIMIT 5000`)
+		ORDER BY e.employee_no LIMIT `+strconv.Itoa(httpx.ExportMaxRows))
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
 	}
 	writeCSV(w, "employees.csv",
-		[]string{"工号", "姓名", "手机", "组织编码", "职位", "直接上级工号", "状态"}, rows, 7)
+		[]string{"工号", "姓名", "手机", "组织编码", "职位", "直接上级工号", "状态"}, rows, 7,
+		h.countRows(r, "SELECT count(*) FROM iam_employee"))
 }
 
 // ImportEmployees POST /api/v1/org/employees/import（multipart，字段名 file）

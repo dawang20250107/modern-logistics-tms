@@ -11,10 +11,10 @@ package orders
 // customer_addresses / export。数据范围一律沿用列表口径（建单人组织子树）。
 
 import (
-	"encoding/csv"
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
@@ -289,6 +289,12 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	if frag := filters.Apply(q.Get("filter"), filterFields, args); frag != "" {
 		where = append(where, frag)
 	}
+	whereSQL := strings.Join(where, " AND ")
+	// 先数一次：截断与否必须在写第一个字节之前知道，否则响应头已经发出去了。
+	// 这一次 count 走的是和取数完全相同的 WHERE，不会出现「说有 N 行、导出 M 行」。
+	total := -1
+	_ = h.DB.QueryRow(ctx, "SELECT count(*)"+fromClause+" WHERE "+whereSQL,
+		args.Values...).Scan(&total)
 	rows, err := h.DB.Query(ctx, `
 		SELECT o.order_no, COALESCE(c.name,''),
 		       (CASE o.channel WHEN 'cs' THEN '客服代下' WHEN 'self' THEN '客户自助'
@@ -301,18 +307,17 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		       o.origin, o.destination, o.cargo_weight_ton::text, o.cargo_quantity::text,
 		       o.quoted_amount::text,
 		       to_char(o.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI')
-		`+fromClause+" WHERE "+strings.Join(where, " AND ")+" ORDER BY o.created_at DESC LIMIT 5000", args.Values...)
+		`+fromClause+" WHERE "+whereSQL+" ORDER BY o.created_at DESC LIMIT "+
+		strconv.Itoa(httpx.ExportMaxRows), args.Values...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
 		return
 	}
 	defer rows.Close()
 
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8-sig")
-	w.Header().Set("Content-Disposition", `attachment; filename="orders.csv"`)
-	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF}) // UTF-8 BOM
-	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"订单号", "客户", "渠道", "状态", "始发", "目的", "货量(吨)", "件数", "报价", "创建时间"})
+	ex := httpx.NewExport(w, "orders.csv",
+		[]string{"订单号", "客户", "渠道", "状态", "始发", "目的", "货量(吨)", "件数", "报价", "创建时间"},
+		total)
 	for rows.Next() {
 		rec := make([]string, 10)
 		ptrs := make([]any, 10)
@@ -322,9 +327,11 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		if rows.Scan(ptrs...) != nil {
 			break
 		}
-		_ = cw.Write(rec)
+		if !ex.Row(rec) {
+			break
+		}
 	}
-	cw.Flush()
+	ex.Done()
 }
 
 // PoolCounts GET /api/v1/orders/pool-counts

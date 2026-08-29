@@ -538,6 +538,7 @@ export function ReconciliationPage() {
                 rowKey={(s) => s.id}
                 viewKey="statements"
                 exportName="对账单"
+                exportAll={st.fetchAll}
                 server={st.server}
                 fill
                 onRowClick={(s) => setExpanded(expanded === s.id ? "" : s.id)}

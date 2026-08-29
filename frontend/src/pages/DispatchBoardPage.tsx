@@ -625,7 +625,7 @@ export function DispatchBoardPage() {
           <StateView kind="error" hint="当前订单池暂时无法同步，请重试。" onRetry={retryPool} compact />
         ) : (
           <DataTable<Order>
-            columns={poolColumns} rows={rows} rowKey={(o) => o.id} viewKey={`dispatch-pool-${poolTab}`} exportName={`调度池-${poolTab}`}
+            columns={poolColumns} rows={rows} rowKey={(o) => o.id} viewKey={`dispatch-pool-${poolTab}`} exportName={`调度池-${poolTab}`} exportAll={st.fetchAll}
             selectable={poolTab !== "dispatched"} selected={picked} onToggle={togglePick}
             onToggleAll={() => setPicked((s) => s.size >= rows.length && rows.length > 0 ? new Set() : new Set(rows.map((o) => o.id)))}
             stickyFirst rowMenu={poolRowMenu}

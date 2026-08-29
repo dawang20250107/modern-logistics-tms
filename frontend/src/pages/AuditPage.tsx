@@ -50,6 +50,7 @@ export function AuditPage() {
             rowKey={(l) => l.id}
             server={t.server}
             exportName="审计日志"
+            exportAll={t.fetchAll}
             fill
             toolbarLeft={
               <>

@@ -314,7 +314,18 @@ function OrdersTab() {
             <>
               {anyFilter && <button className="linkish small" onClick={resetFilters}>重置</button>}
               <button className="btn-ghost" disabled={!anyFilter} onClick={savePreset}>保存视图</button>
-              <button className="btn-ghost" onClick={() => apiDownload("/orders/export?page_size=5000", "orders.csv")}>导出全部</button>
+              {/* 导出必须跟着当前的搜索与筛选走。
+                  原先这里写死 "/orders/export?page_size=5000"，一个筛选条件都不带
+                  （page_size 服务端还根本不看）——用户筛出 12 单、点导出，
+                  拿到的是另外几万条毫不相干的数据。按钮就在搜索框和筛选器旁边，
+                  没人会以为它导的是别的东西。
+                  文案也跟着变：没筛选时才叫「导出全部」。 */}
+              <button
+                className="btn-ghost"
+                onClick={() => apiDownload(`/orders/export${st.filterQuery() ? "?" + st.filterQuery() : ""}`, "orders.csv")}
+              >
+                {anyFilter ? `导出筛选结果（${total}）` : "导出全部"}
+              </button>
             </>
           }
         />

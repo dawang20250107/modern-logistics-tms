@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -83,12 +84,19 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := decodeBody(r)
-	status := curStatus
+	status := wbstatus.PODConfirmed
 	if v, ok := str(body, "status"); ok {
 		status = v
-	} else {
-		status = "confirmed"
 	}
+	// 取值必须在词表里。原先是照单全收：传什么写什么，
+	// 于是可以往库里写一个 'banana'，界面上就露出这个英文串
+	// （渲染处一律是 LABEL[x] ?? x），而且再也没有任何流程认得它。
+	if !wbstatus.ValidPOD(status) {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_RECEIPT_STATUS",
+			"回单状态取值非法："+status)
+		return
+	}
+	_ = curStatus
 	signatory := curSignatory
 	if v, ok := str(body, "signatory"); ok {
 		signatory = v
@@ -99,10 +107,31 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 		return
 	}
-	// 回写运单回单状态
-	if waybillID != nil && status == "confirmed" {
-		_, _ = h.DB.Exec(ctx, `
-			UPDATE ops_waybill SET receipt_status='`+wbstatus.ReceiptAudited+`', updated_at=now() WHERE id=$1::uuid`, *waybillID)
+	// 回写运单的回单状态——**两个方向都要写**。
+	//
+	// 原先只有"核验通过 → 运单标已核销"这一个方向。把一张已核验的回单改判为
+	// 不通过时，运单上那个"已核销"留在原地不动：回单已经被否了，
+	// 而运单看起来仍然凭证齐全——回单付的单子就凭这个放行结算。
+	// 按"这张运单还有没有通过核验的回单"重算，而不是按刚改的这一张。
+	if waybillID != nil {
+		// 占位符要显式 ::text：CASE 各分支全是参数时 Postgres 推不出类型。
+		// 而这个错误原先被 `_, _ =` 丢掉了，表现是"接口 200、状态没变"——
+		// 查起来毫无线索。回写失败必须留下痕迹，不能装作成功。
+		if _, err := h.DB.Exec(ctx, `
+			UPDATE ops_waybill w SET receipt_status = CASE
+			    WHEN EXISTS (SELECT 1 FROM ops_receipt rc
+			                 WHERE rc.waybill_id = w.id AND rc.status = $2::text)
+			      THEN $3::text
+			    WHEN w.receipt_status = $3::text THEN $4::text
+			    ELSE w.receipt_status
+			  END, updated_at=now()
+			WHERE w.id = $1::uuid`,
+			*waybillID, wbstatus.PODConfirmed, wbstatus.ReceiptAudited,
+			wbstatus.ReceiptReturned); err != nil {
+			slog.Error("回写运单回单状态失败", "waybill", *waybillID, "err", err)
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回写运单回单状态失败")
+			return
+		}
 	}
 	h.echo(w, r, ReceiptsCfg, "rc.id = $1::uuid", id)
 }

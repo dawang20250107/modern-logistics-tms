@@ -178,3 +178,19 @@ const (
 	ReminderPending      = "pending"      // 已发出、等司机确认（司机端按这个拉强制弹窗）
 	ReminderAcknowledged = "acknowledged" // 司机已确认
 )
+
+// ── 单张回单的状态 ────────────────────────────────────────
+//
+// 注意和上面的 Receipt* 不是一回事：那一组是**运单**上的"回单回收到哪一步"，
+// 这一组是**单张回单单据**自己的状态。两者名字像，含义不同，
+// 写代码时最容易张冠李戴，所以分开命名并各自留注释。
+const (
+	PODUploaded  = "uploaded"  // 传上来了，还没核验
+	PODConfirmed = "confirmed" // 核验通过（签收凭证成立）
+	PODRejected  = "rejected"  // 核验不通过 / 拒收回单
+)
+
+// ValidPOD 单张回单的状态是否合法。
+func ValidPOD(s string) bool {
+	return s == PODUploaded || s == PODConfirmed || s == PODRejected
+}

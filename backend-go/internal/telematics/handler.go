@@ -213,6 +213,23 @@ func (h *Handler) CommandCenterSummary(w http.ResponseWriter, r *http.Request) {
 
 // Ingest POST /telematics/ingest —— 设备上报批量入口（202 + 异步落库）
 func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
+	// 上报位置要 telematics.manage。
+	//
+	// 这两条（车辆遥测、运单轨迹点）**本来是给车载终端和网关用的**，
+	// 前端一次都不调。可它们挂在「登录后」这一组上，而函数体里
+	// 一句权限校验都没有——实测**零权限的登录账号**照样能给任意车牌、
+	// 任意运单灌位置点，两次都返回 202 并真的入库。
+	//
+	// 后果不是"多了几条脏数据"：轨迹是超速告警、围栏告警、ETA 的输入，
+	// 也是**异常定责时的证据**。谁都能往里写，那几样就都不作数了。
+	//
+	// 该有的机制是设备凭据：库里 iam_api_key 那张表（key_id/secret/scopes）
+	// 就是为它准备的，但**代码里一处都没用上**。发布前没有已知的终端对接方，
+	// 所以先按权限点挡住——真接终端时再实现 API Key，
+	// 这一条已写进交付说明的"仍然待办"。
+	if !h.requirePerm(w, r, "telematics.manage") {
+		return
+	}
 	var body struct {
 		Reports json.RawMessage `json:"reports"`
 	}
@@ -238,6 +255,10 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 
 // TrackingIngest POST /tracking/points —— 轨迹批量上报（202 + 异步落库）
 func (h *Handler) TrackingIngest(w http.ResponseWriter, r *http.Request) {
+	// 同 Ingest：位置数据不能由任意登录用户写入
+	if !h.requirePerm(w, r, "telematics.manage") {
+		return
+	}
 	const maxPoints = 1000
 	var body struct {
 		Points json.RawMessage `json:"points"`

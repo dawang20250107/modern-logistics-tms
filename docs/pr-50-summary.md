@@ -409,6 +409,9 @@ HTTP 500  建单失败：ERROR: value too long for type character varying(32) (S
 - **S3 签名没对着真实端点验过**：没有凭据也没有 MinIO。
   首次接入请先在预发用测试桶验一遍。
 - **三处 OCR 仍是空壳**，`docs/delivery-notes.md` 已写清交付时必须与客户确认。
+- **车载终端上报走的是权限点，不是设备凭据**。`iam_api_key` 表已经在库里
+  （key_id/secret/scopes），但代码没用上；发布前没有已知的终端对接方，
+  接入时先用一个只有 `telematics.manage` 的服务账号过渡。
 - **外部 OA 回写付款结果的端点不校验 status 取值**，与已修的回单那处同类。
   但那是对外集成契约、没有已知对接方、也没有规格——猜一套词表去卡可能把真实
   对接卡死，所以只记录，未改。

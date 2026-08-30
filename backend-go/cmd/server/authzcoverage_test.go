@@ -48,9 +48,6 @@ var authzExempt = map[string]string{
 	"Checkin":          "司机打卡，authDriver + 本人运单校验",
 	"UploadCredential": "司机自助传证件，同上",
 	"AckReminder":      "司机确认提醒，同上",
-	// 设备侧：走设备/网关凭据，不走用户权限
-	"Ingest":         "车载终端上报",
-	"TrackingIngest": "轨迹点上报",
 }
 
 func TestEveryMutatingHandlerHasAPermissionCheck(t *testing.T) {

@@ -61,7 +61,33 @@ export function getAccess(): string {
   return accessToken;
 }
 
-async function tryRefresh(): Promise<boolean> {
+/**
+ * 同一时刻只允许有一次刷新在飞。
+ *
+ * 刷新是**轮换**的：后端签发新券的同时把旧券作废（那是防重放的关键，
+ * 见 auth/handlers.go 里"先校验再签发"那段）。而前端原先是谁 401 谁去刷，
+ * 没有任何协调——驾驶舱一进来就并发发 5 个请求（运单统计、订单漏斗、
+ * 工作台、财务敞口、证件预警），令牌到期时它们**同时** 401，
+ * 于是 5 个刷新拿着同一张 refresh 打出去。
+ *
+ * 实测拿同一张券并发换 5 次：**3 个 200、2 个 401**。
+ * 而拿到 401 的那两个会 clearTokens() —— 刷新其实成功了，人却被踢下线。
+ * 用户看到的是"这系统隔一阵就把我踢出去"，而且只在页面开着好几个查询、
+ * 恰好赶上令牌到期时才出现，复现不了。
+ *
+ * 修法是把并发本身消掉：第一个发起刷新，其余等同一个 promise。
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = doRefresh().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function doRefresh(): Promise<boolean> {
   if (!refreshToken) return false;
   const resp = await fetch(`${API_BASE}/auth/token/refresh`, {
     method: "POST",

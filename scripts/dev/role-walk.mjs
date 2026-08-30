@@ -184,6 +184,40 @@ for (const prof of PROFILES) {
   await login(page, BASE, { user: prof.user, pass: PASS, api: API });
   await page.waitForTimeout(1200); // 让首屏（驾驶舱）的请求都发完
 
+  // ── 令牌到期时不能把人踢下线 ──
+  //
+  // 刷新是轮换的：后端签发新券的同时作废旧券。而驾驶舱一进来就并发发
+  // 五个请求，令牌到期时它们**同时** 401 —— 五个刷新拿着同一张 refresh
+  // 打出去，实测 3 个 200、2 个 401，而拿到 401 的会清空令牌把人踢走。
+  // 刷新其实成功了，人却掉线；只在"页面开着好几个查询 + 恰好赶上到期"
+  // 时出现，用户报上来也复现不了。
+  //
+  // 只在第一个档案上跑一次：这条验的是客户端的刷新逻辑，和角色无关。
+  if (prof === PROFILES[0]) {
+    current = "令牌到期";
+    let refreshes = 0;
+    const countRefresh = (r) => { if (r.url().includes("/auth/token/refresh")) refreshes++; };
+    page.on("request", countRefresh);
+    // 把 access 换成一张过期的，refresh 留着
+    await page.evaluate(() => localStorage.setItem("access",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
+      "eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwidXNlcl9pZCI6IjAwMDAwMDAwLTAwMDAtMDAwMC0wMDAwLTAwMDAwMDAwMDAwMCIsImV4cCI6MTAwMDAwMDAwMH0.bad"));
+    refreshes = 0;
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(2000);
+    page.off("request", countRefresh);
+    console.log("\u2500\u2500 令牌到期 \u2500\u2500");
+    if (page.url().includes("/login")) {
+      bad(`令牌到期后被踢回登录页（发了 ${refreshes} 次刷新）—— ` +
+        `刷新是轮换的，并发刷新会有几个拿到 401，而拿到 401 就清空令牌`);
+    } else if (refreshes > 1) {
+      bad(`令牌到期时发了 ${refreshes} 次刷新 —— 旧券只能用一次，` +
+        `多出来的那几次会拿到 401，迟早把人踢下线（这次侥幸没踢）`);
+    } else {
+      ok(`令牌到期后自动续上（刷新 ${refreshes} 次），人留在页面上`);
+    }
+  }
+
   // ── 侧栏 ──
   const nav = await page.$$eval(".side a", (as) => as.map((a) => a.textContent.trim()).filter(Boolean));
   console.log("\u2500\u2500 侧栏 \u2500\u2500");

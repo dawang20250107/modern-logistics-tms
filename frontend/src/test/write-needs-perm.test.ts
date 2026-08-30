@@ -84,4 +84,19 @@ describe("会写数据的界面要先判权限", () => {
         .toMatch(/mutationFn:[^\n]*\b(apiPost|apiPatch|apiDelete|apiUpload|apiPut)\b/);
     }
   });
+
+  // 还差一半：**这条豁免还需不需要**。文件后来自己判了权限时，
+  // 名单里那句"为什么不用判"就成了假话。门是有的，名单却说这里不设门——
+  // 不造成漏洞，但读名单的人会以为这一屏是有意不判的，
+  // 于是下次真漏判时也没人多看一眼。名单一旦有一条不可信，整份就都不可信。
+  it("名单里的每个文件都还确实不需要判权限", () => {
+    const stale = Object.keys(EXEMPT).filter((rel) => {
+      try {
+        return /\bhasPerm\b/.test(readFileSync(join(SRC, rel), "utf8"));
+      } catch {
+        return false;
+      }
+    });
+    expect(stale, "这些文件已经自己判权限了，名单里那条理由是假话，删掉").toEqual([]);
+  });
 });

@@ -62,6 +62,23 @@ describe("登录之后的页面都有权限门", () => {
     expect(intake).toMatch(/waybill\.manage/);
   });
 
+  // 另一半：**这条豁免还需不需要**。上面那条只查"路由还在"，
+  // 而一条路由后来挂上了 RequirePerm 时，名单里那句"为什么不用挂"
+  // 就变成了假话——门是有的，名单却说这里不设门。
+  // 假话本身不造成漏洞（门确实在），但它会让读名单的人以为这一页
+  // 是有意敞开的，于是下次真敞开时也没人多看一眼。
+  it("名单里的每一条都还确实不需要权限门", () => {
+    const start = APP.indexOf("<ProtectedRoute />}>");
+    const guarded = APP.slice(start, APP.indexOf("</Routes>", start));
+    const stale: string[] = [];
+    for (const m of guarded.matchAll(/<Route\s+(?:path="([^"]*)"|index)([\s\S]*?)\/>/g)) {
+      const path = m[1] ?? "/";
+      if (path in OPEN && /RequirePerm/.test(m[2] ?? "")) stale.push(path);
+    }
+    expect(stale, `这些路由已经挂上 RequirePerm 了，名单里那条"为什么不用挂"是假话，删掉`)
+      .toEqual([]);
+  });
+
   it("名单里的每一条都还是真实存在的路由", () => {
     for (const path of Object.keys(OPEN)) {
       if (path === "/") {

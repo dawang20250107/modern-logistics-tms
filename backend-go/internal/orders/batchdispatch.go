@@ -378,9 +378,13 @@ func dispatchOneInBatch(ctx context.Context, tx pgx.Tx, o dispatchableOrder, bod
 		  order_id, customer_id, carrier_id, batch_id, route_name, ai_conversation_id, origin, destination,
 		  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
 		  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
-		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
+		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id,
+		  -- 同 dispatch.go：归属取建单人的组织，漏了这一列运单就没人看得见
+		  organization_id)
 		VALUES ($1, now(), now(), $2, $3, $4, '', $5::uuid, $6::uuid, $7::uuid, $8::uuid, $9, $10, $11, $12,
-		  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid)`,
+		  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid,
+		  (SELECT u.organization_id FROM ops_order oo
+		     LEFT JOIN accounts_user u ON u.id = oo.created_by_id WHERE oo.id = $5::uuid))`,
 		wid.String(), wbNo, body.DispatchType, body.PlatformName,
 		o.ID, o.CustomerID, carrierIDArg, batchID,
 		o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,

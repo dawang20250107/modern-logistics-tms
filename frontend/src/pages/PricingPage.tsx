@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { confirmAction } from "../api/confirm";
 import { EMPTY as DASH, fmtMoney, fmtNum } from "../api/format";
 import { toast } from "../api/toast";
@@ -125,6 +126,13 @@ export function PricingPage() {
   })();
 
   const reset = () => { setEditing(null); setForm(EMPTY); setFormOpen(false); };
+  // 计价规则读要 finance.view、写要 finance.manage（PricingRuleWrite）。
+  // 「财务（只读）」这个演示角色只有 view，却看得到「+ 新增规则」「编辑」「删除」
+  // 和那个启用/停用开关——和对账中心是同一个洞：看得见按不动。
+  // 尤其「删除」：只读的人点下去、弹一句无权限，他不会知道规则有没有被删掉。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "finance.manage");
+
   const save = useMutation({
     mutationFn: () => editing ? apiPatch(`/finance/pricing-rules/${editing}`, payload()) : apiPost("/finance/pricing-rules", payload()),
     onSuccess: () => { toast.success(editing ? "已更新合同价" : "已新增合同价"); reset(); invalidate(); },
@@ -321,11 +329,12 @@ export function PricingPage() {
               <button key={k} className={typeFilter === k ? "active" : ""} onClick={() => setTypeFilter(k)}>{label}</button>
             ))}
           </div>
-          {!formOpen && (
+          {!formOpen && canManage && (
             <div className="panel-actions">
               <button className="btn-ghost small" onClick={() => setFormOpen(true)}>+ 新增规则</button>
             </div>
           )}
+          {!canManage && <span className="muted small" title="需要 finance.manage 权限点">只读账号：可查看规则，不能新增或修改</span>}
         </div>
         {rules.isLoading ? (
           <StateView kind="loading" compact />
@@ -357,16 +366,18 @@ export function PricingPage() {
                   <td className="num">{r.volumetric_factor}</td>
                   <td className="num">{Number(r.fuel_surcharge_pct) > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>+{fmtNum(Number(r.fuel_surcharge_pct) * 100, 1)}%</span> : DASH}</td>
                   <td>
-                    <label className="switch-mini" title={r.is_active ? "已启用，点击停用" : "已停用，点击启用"}>
-                      <input type="checkbox" checked={r.is_active} onChange={() => patch.mutate({ id: r.id, is_active: !r.is_active })} />
+                    <label className="switch-mini" title={!canManage ? "需要 finance.manage 权限点" : r.is_active ? "已启用，点击停用" : "已停用，点击启用"}>
+                      <input type="checkbox" checked={r.is_active} disabled={!canManage} onChange={() => patch.mutate({ id: r.id, is_active: !r.is_active })} />
                       <span className={r.is_active ? undefined : "muted"}>{r.is_active ? "启用" : "停用"}</span>
                     </label>
                   </td>
                   <td className="row-actions">
-                    <button className="btn-ghost" onClick={() => startEdit(r)}>编辑</button>
-                    <button className="btn-ghost" disabled={remove.isPending} onClick={async () => {
-                      if (await confirmAction({ message: `删除规则「${r.name}」？`, tone: "danger", confirmText: "删除" })) remove.mutate(r.id);
-                    }}>删除</button>
+                    {canManage ? <>
+                      <button className="btn-ghost" onClick={() => startEdit(r)}>编辑</button>
+                      <button className="btn-ghost" disabled={remove.isPending} onClick={async () => {
+                        if (await confirmAction({ message: `删除规则「${r.name}」？`, tone: "danger", confirmText: "删除" })) remove.mutate(r.id);
+                      }}>删除</button>
+                    </> : <span className="muted small">只读</span>}
                   </td>
                 </tr>
               ))}

@@ -7,7 +7,7 @@ import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { useModalA11y } from "../api/useModalA11y";
 import { useServerTable } from "../api/useServerTable";
-import { useAuth } from "../auth/auth";
+import { hasPerm, useAuth } from "../auth/auth";
 import { BatchDispatchModal } from "../components/BatchDispatchModal";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
@@ -190,6 +190,13 @@ export function DispatchBoardPage() {
   // 抽屉无障碍：焦点陷阱 / Esc 关闭 / 关闭后焦点归还（右键菜单由 DataTable 内置管理）
   const wbRef = useRef<HTMLElement>(null);
   useModalA11y(Boolean(active), wbRef, closeWb);
+
+  // 调度台上的写动作（锁定、释放、派单、分单、批量派、智能排线）都要
+  // waybill.manage。而「客服」这个演示角色只有 waybill.view + waybill.create，
+  // 它进得来（侧栏上这一页声明的就是 waybill.view，看板本身对客服有意义），
+  // 但那些按钮对它只会弹一句"缺少所需权限"。
+  // 「登记异常」不在此列：上报异常刻意只要 waybill.view（发现问题的常是客服）。
+  const canManage = hasPerm(user, "waybill.manage");
 
   const claim = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/claim`, {}),
@@ -404,12 +411,17 @@ export function DispatchBoardPage() {
 
   // 抽屉开合
   function openWb(o: Order, initialTab: DrawerTab = "dispatch") {
+    // 没有 waybill.manage 就不落到派单页签上。
+    // 这个弹窗有四个入口（派单按钮、精准派单、查看轨迹、以及列表上的
+    // 双击与回车），前两个已经按权限藏了，后两个藏不掉——
+    // 在这里统一兜住，比逐个入口加判断可靠。
+    const t = canManage ? initialTab : "track";
     setActive(o);
-    setTab(initialTab);
+    setTab(t);
     setSuggestion(null);
     setVehicleId(""); setCarrierId(""); setDriverId(""); setTrailerId(""); setCoDriverIds([]);
     setPlatformName(""); setPlatformOrderNo(""); setAgreedPayable("");
-    if (initialTab === "dispatch") suggest.mutate(o.id);
+    if (t === "dispatch") suggest.mutate(o.id);
   }
   function closeWb() {
     setActive(null);
@@ -518,13 +530,13 @@ export function DispatchBoardPage() {
       return (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           {poolTab === "unassigned" && (<>
-            <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
+            {canManage && <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>}
             <button onClick={() => setExcOrder(o)}>登记异常</button>
           </>)}
           {poolTab === "dispatchable" && (<>
-            {o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
+            {canManage && o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
             <button onClick={() => setExcOrder(o)}>登记异常</button>
-            <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
+            {canManage && <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>}
           </>)}
           {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0 && (
             <Link className="link small" to={`/waybills/${o.waybill_nos[0]}`}>查看运单</Link>
@@ -535,10 +547,10 @@ export function DispatchBoardPage() {
   ];
 
   const poolRowMenu = (o: Order) => [
-    { label: "精准派单", onClick: () => openWb(o, "dispatch") },
-    o.status !== "dispatching"
+    ...(canManage ? [{ label: "精准派单", onClick: () => openWb(o, "dispatch") }] : []),
+    ...(canManage ? [o.status !== "dispatching"
       ? { label: "认领订单", onClick: () => claim.mutate(o.id) }
-      : { label: "退回订单池", onClick: () => release.mutate(o.id) },
+      : { label: "退回订单池", onClick: () => release.mutate(o.id) }] : []),
     { label: "查看轨迹", onClick: () => openWb(o, "track") },
     { label: "登记异常", onClick: () => setExcOrder(o) },
   ];
@@ -600,7 +612,8 @@ export function DispatchBoardPage() {
           </div>
         )}
 
-        {picked.size > 0 && poolTab !== "dispatched" && (
+        {/* 批量条上除「清除」外全是写动作，没有 waybill.manage 就整条不出现 */}
+        {canManage && picked.size > 0 && poolTab !== "dispatched" && (
           <div className="batch-bar">
             <span>已选 <b style={{ color: "var(--accent)" }}>{picked.size}</b> 单</span>
             <div style={{ flex: 1 }} />
@@ -830,7 +843,8 @@ export function DispatchBoardPage() {
             </div>
 
             <div className="wb-tabs">
-              <button className={tab === "dispatch" ? "active" : ""} onClick={() => { setTab("dispatch"); if (!suggestion && !suggest.isPending) suggest.mutate(active.id); }}>派单</button>
+              {/* 「查看轨迹」也会打开这个弹窗——没有 waybill.manage 就不该露出派单页签 */}
+              {canManage && <button className={tab === "dispatch" ? "active" : ""} onClick={() => { setTab("dispatch"); if (!suggestion && !suggest.isPending) suggest.mutate(active.id); }}>派单</button>}
               <button className={tab === "track" ? "active" : ""} onClick={() => setTab("track")}>轨迹</button>
             </div>
 

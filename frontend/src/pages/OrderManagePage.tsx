@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { apiDownload, apiGet, apiPost } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { confirmAction } from "../api/confirm";
 import { fmtDateShort, fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
@@ -105,6 +106,14 @@ function OrdersTab() {
   };
 
   const BATCH_LABEL: Record<string, string> = { confirm: "确认", pool: "进池", cancel: "取消", delete: "删除" };
+  // 订单上的写动作（确认、进池、取消、删除、合单、改优先级/结算、分单）
+  // 都要 waybill.manage。而「客服」这个演示角色只有 waybill.view + waybill.create——
+  // 它看得到这些按钮，点下去只会弹一句"缺少所需权限"。
+  // 生成对账单那颗另算：它要 finance.manage。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "waybill.manage");
+  const canFinance = hasPerm(user, "finance.manage");
+
   const batch = useMutation({
     mutationFn: (v: { action: string; ids: string[] }) =>
       apiPost<{ ok_count: number; failed: Array<{ order_no: string; error: string }> }>("/orders/batch", v),
@@ -203,8 +212,8 @@ function OrdersTab() {
       key: "actions", header: "操作", width: 130, alwaysVisible: true, sticky: "right",
       render: (o) => (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-          {(o.status === "draft" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "confirm", ids: [o.id] })}>确认</button>}
-          {(o.status === "confirmed" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "pool", ids: [o.id] })}>进池</button>}
+          {canManage && (o.status === "draft" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "confirm", ids: [o.id] })}>确认</button>}
+          {canManage && (o.status === "confirmed" || o.status === "pending_confirm") && <button disabled={batch.isPending} onClick={() => batch.mutate({ action: "pool", ids: [o.id] })}>进池</button>}
           {o.status === "pooled" && <Link className="link small" to="/dispatch-board">去派单</Link>}
           <Link className="link small" to={`/orders/${o.id}`}>详情</Link>
         </div>
@@ -215,14 +224,15 @@ function OrdersTab() {
   // 行右键菜单：批量/单条常用动作直达
   const rowMenu = (o: Order): { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] => [
     { label: "查看详情", onClick: () => setDrawer(o) },
-    ...((o.status === "draft" || o.status === "pending_confirm") ? [{ label: "确认订单", onClick: () => batch.mutate({ action: "confirm", ids: [o.id] }) }] : []),
-    ...((o.status === "confirmed" || o.status === "pending_confirm") ? [{ label: "进池", onClick: () => batch.mutate({ action: "pool", ids: [o.id] }) }] : []),
+    ...(canManage && (o.status === "draft" || o.status === "pending_confirm") ? [{ label: "确认订单", onClick: () => batch.mutate({ action: "confirm", ids: [o.id] }) }] : []),
+    ...(canManage && (o.status === "confirmed" || o.status === "pending_confirm") ? [{ label: "进池", onClick: () => batch.mutate({ action: "pool", ids: [o.id] }) }] : []),
     { label: "登记异常", onClick: () => setExcOrder(o) },
     { label: "完整详情页", onClick: () => { window.location.href = `/orders/${o.id}`; } },
-    { label: "取消订单", danger: true, disabled: o.status === "cancelled" || o.status === "converted", onClick: async () => { if (await confirmAction({ message: `取消订单 ${o.order_no}？`, tone: "danger", confirmText: "取消订单" })) batch.mutate({ action: "cancel", ids: [o.id] }); } },
+    ...(!canManage ? [] : [{ label: "取消订单", danger: true, disabled: o.status === "cancelled" || o.status === "converted", onClick: async () => { if (await confirmAction({ message: `取消订单 ${o.order_no}？`, tone: "danger", confirmText: "取消订单" })) batch.mutate({ action: "cancel", ids: [o.id] }); } }]),
   ];
 
-  const batchBar = selected.size > 0 ? (
+  // 批量条上全是写动作，没有 waybill.manage 就整条不出现
+  const batchBar = canManage && selected.size > 0 ? (
     <div className="batch-bar">
       <span>已选 <b style={{ color: "var(--accent)" }}>{selected.size}</b> 单</span>
       <div style={{ flex: 1 }} />
@@ -397,8 +407,8 @@ function OrdersTab() {
             </div>
           </div>
           <div className="wb-actions" style={{ borderTop: "1px solid var(--line)" }}>
-            {(drawer.status === "draft" || drawer.status === "pending_confirm") && <button className="btn-ghost" onClick={() => { batch.mutate({ action: "confirm", ids: [drawer.id] }); setDrawer(null); }}>确认</button>}
-            {(drawer.status === "confirmed" || drawer.status === "pending_confirm") && <button className="btn-ghost" onClick={() => { batch.mutate({ action: "pool", ids: [drawer.id] }); setDrawer(null); }}>进池</button>}
+            {canManage && (drawer.status === "draft" || drawer.status === "pending_confirm") && <button className="btn-ghost" onClick={() => { batch.mutate({ action: "confirm", ids: [drawer.id] }); setDrawer(null); }}>确认</button>}
+            {canManage && (drawer.status === "confirmed" || drawer.status === "pending_confirm") && <button className="btn-ghost" onClick={() => { batch.mutate({ action: "pool", ids: [drawer.id] }); setDrawer(null); }}>进池</button>}
             {drawer.status === "pooled" && <Link className="btn-primary" to="/dispatch-board" style={{ textDecoration: "none" }}>去派单</Link>}
             <Link className="btn-ghost" to={`/orders/${drawer.id}`} style={{ textDecoration: "none" }}>完整详情页</Link>
           </div>
@@ -421,6 +431,10 @@ const BATCH_FILTER_FIELDS: FilterFieldDef[] = [
 
 // ── 批次视图（派车批次台账：多单一次委托同一承运商）──────────────
 function BatchesTab() {
+  // 「生成承运商对账单」要 finance.manage —— 调度员看得到这个批次面板，
+  // 但它没有财务权限，按下去只会被拒。
+  const { user } = useAuth();
+  const canFinance = hasPerm(user, "finance.manage");
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("");
   const [drawer, setDrawer] = useState<string | null>(null);
@@ -575,11 +589,13 @@ function BatchesTab() {
                   <>
                     <span className="muted small">批次内 {detail.data.order_count} 单应付归集为一张对账单</span>
                     <div style={{ flex: 1 }} />
-                    <input className="search" style={{ width: 150, padding: "6px 10px" }} value={externalTotal}
-                      onChange={(e) => setExternalTotal(e.target.value)} placeholder="承运商回单金额（选填）" title="填写承运商侧金额，生成对账单时自动做差异稽核" />
-                    <button className="btn-primary" disabled={genStatement.isPending} onClick={() => genStatement.mutate(detail.data!.id)}>
-                      {genStatement.isPending ? "生成中…" : "生成承运商对账单"}
-                    </button>
+                    {canFinance ? <>
+                      <input className="search" style={{ width: 150, padding: "6px 10px" }} value={externalTotal}
+                        onChange={(e) => setExternalTotal(e.target.value)} placeholder="承运商回单金额（选填）" title="填写承运商侧金额，生成对账单时自动做差异稽核" />
+                      <button className="btn-primary" disabled={genStatement.isPending} onClick={() => genStatement.mutate(detail.data!.id)}>
+                        {genStatement.isPending ? "生成中…" : "生成承运商对账单"}
+                      </button>
+                    </> : <span className="muted small" title="需要 finance.manage 权限点">生成对账单需要财务权限</span>}
                   </>
                 )}
               </div>

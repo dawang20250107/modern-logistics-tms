@@ -70,12 +70,17 @@ func (h *Handler) BatchStatement(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO fin_statement (id, created_at, updated_at, statement_no, direction,
 			  counterparty_type, counterparty_id, counterparty_name,
 			  period_start, period_end, total_amount, item_count, external_total,
-			  settled_amount, status, scope_type, scope_id, scope_name)
+			  settled_amount, status, scope_type, scope_id, scope_name,
+			  -- 归属跟着批次走。漏了这一列，对账单落成 NULL，
+			  -- 而 NULL 只有「全部」档看得见——生成它的人自己在对账中心里
+			  -- 都找不到它。主生成路径（GenerateStatement）是按明细所属运单
+			  -- 的组织算的，这条批次路径一直没跟上。
+			  organization_id)
 			SELECT $1::uuid, now(), now(), $2, 'payable', 'carrier', $3, $4,
 			  COALESCE(agg.min_day, (b.created_at AT TIME ZONE 'Asia/Shanghai')::date),
 			  COALESCE(agg.max_day, (b.created_at AT TIME ZONE 'Asia/Shanghai')::date),
 			  COALESCE(agg.total, 0), COALESCE(agg.n, 0), $5::numeric,
-			  0, 'draft', 'batch', NULL, b.batch_no
+			  0, 'draft', 'batch', NULL, b.batch_no, b.organization_id
 			FROM ops_dispatch_batch b
 			LEFT JOIN LATERAL (
 			  SELECT min((e.occurred_at AT TIME ZONE 'Asia/Shanghai')::date) AS min_day,

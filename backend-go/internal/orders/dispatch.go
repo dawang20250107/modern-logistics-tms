@@ -339,9 +339,20 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		  order_id, customer_id, carrier_id, vehicle_id, driver_id, trailer_id, route_name, ai_conversation_id, origin, destination,
 		  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
 		  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
-		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
+		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id,
+		  -- 运单的组织归属 = **建单人的组织**。
+		  -- 漏了这一列的后果不是少个字段：ops_waybill.organization_id 决定
+		  -- 运单的数据范围，NULL 只有「全部」档看得见。也就是说，单子是哪个
+		  -- 网点接的，那个网点在派单的那一刻就失去了它的可见性——
+		  -- 订单列表里还看得见，点开运单是「运单不存在、无权访问」。
+		  -- 取建单人而不是派单人：中心调度替各网点派单是常态，
+		  -- 按派单人算会把网点自己的单子划走。转承运那条路径（quotes.go）
+		  -- 一直就是这么写的，三条路径统一到它。
+		  organization_id)
 		VALUES ($1, now(), now(), $2, $3, $4, $5, $6::uuid, $7::uuid, $8::uuid, $9::uuid, $10::uuid, $11::uuid,
-		  $12, $13, $14, $15, 'pending_dispatch', $16, 'none', 'not_due', 0, $17, $18, $19, $20, $21, $22, $23, $24, $25::uuid)`,
+		  $12, $13, $14, $15, 'pending_dispatch', $16, 'none', 'not_due', 0, $17, $18, $19, $20, $21, $22, $23, $24, $25::uuid,
+		  (SELECT u.organization_id FROM ops_order oo
+		     LEFT JOIN accounts_user u ON u.id = oo.created_by_id WHERE oo.id = $6::uuid))`,
 		wid.String(), wbNo, body.DispatchType, body.PlatformName, body.PlatformOrderNo,
 		o.ID, o.CustomerID, carrierID, vehArg, drvArg, trailerArg,
 		o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,

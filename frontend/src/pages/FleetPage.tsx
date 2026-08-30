@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet, apiUpload } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { CarrierCenter } from "../components/CarrierCenter";
@@ -225,6 +226,12 @@ function CredentialLibrary() {
     mutationFn: () => apiGet<DriverLookup>(`/drivers/lookup?name=${encodeURIComponent(name)}&id_tail=${encodeURIComponent(idTail)}`),
     onSuccess: (d) => { setResult(d); if (!d.matched) toast.info("未匹配到司机，请核对姓名与身份证后6位"); },
   });
+  // 上传证件要 masterdata.manage（DriverCredWrite）。而客服和调度员
+  // 都只有 masterdata.view —— 文件框对它们照样显示，选完文件才 403，
+  // 而那时人已经把证件照片挑出来了。
+  const { user } = useAuth();
+  const canManageMd = hasPerm(user, "masterdata.manage");
+
   const upload = useMutation({
     mutationFn: (file: File) => {
       const fd = new FormData();
@@ -284,10 +291,12 @@ function CredentialLibrary() {
             <select value={side} onChange={(e) => setSide(e.target.value)}>
               <option value="main">主页/正面</option><option value="back">副页/反面</option>
             </select>
-            <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
-              {upload.isPending ? "上传中…" : "上传证件"}
-              <input className="file-input-accessible" type="file" accept="image/*,application/pdf" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
-            </label>
+            {canManageMd ? (
+              <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
+                {upload.isPending ? "上传中…" : "上传证件"}
+                <input className="file-input-accessible" type="file" accept="image/*,application/pdf" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
+              </label>
+            ) : <span className="muted small" title="需要 masterdata.manage 权限点">只读账号：可查询证件，不能上传</span>}
           </div>
         </div>
       )}

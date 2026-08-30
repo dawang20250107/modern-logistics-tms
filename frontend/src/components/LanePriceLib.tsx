@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import { useServerTable } from "../api/useServerTable";
@@ -41,6 +42,10 @@ export function LanePriceLib() {
     queryKey: ["lane-prices"], path: "/carrier-lane-prices", pageSize: 50,
     defaultSort: { field: "origin_city", dir: "asc" }, model, search,
   });
+
+  // 线路价库读要 carrier.view、写要 carrier.manage（LanePriceWrite）。
+  const { user } = useAuth();
+  const canManageCarrier = hasPerm(user, "carrier.manage");
 
   const create = useMutation({
     mutationFn: () => apiPost<CarrierLanePrice>("/carrier-lane-prices", {
@@ -153,7 +158,7 @@ export function LanePriceLib() {
           toolbarRight={
             <>
               {anyFilter && <button className="linkish small" onClick={() => { setSearch(""); setModel(EMPTY_MODEL); }}>重置</button>}
-              <button className="btn-primary" onClick={() => setAdding((v) => !v)}>{adding ? "收起" : "+ 新增价库"}</button>
+              {canManageCarrier && <button className="btn-primary" onClick={() => setAdding((v) => !v)}>{adding ? "收起" : "+ 新增价库"}</button>}
             </>
           }
         />

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ApiError, apiGet, apiPost } from "../api/client";
+import { ApiError, apiGet, apiPost, isPermissionDenied } from "../api/client";
 import { toast } from "../api/toast";
 import { useModalA11y } from "../api/useModalA11y";
 import type { LookupResponse, LookupResult, ReplyCardData } from "../api/types";
@@ -100,7 +100,16 @@ export function SpotlightCommandBar() {
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
-  const aiReady = aiStatus.data?.configured !== false;
+  // 这里原先写的是 `aiStatus.data?.configured !== false`：
+  // 请求**失败**时 data 是 undefined，`undefined !== false` 为真，
+  // 于是判成"AI 可用"。没有 ai.use 权限点的账号（探测接口回 403）
+  // 就落进这一档——界面照样亮着 Enter ↵，按下去才拿到 403。
+  // 而上面那段注释说的正是相反的事：要在用户按下去之前就告诉他。
+  // 现在把两种"用不了"分开说：没接入 vs 没权限。
+  const aiDenied = isPermissionDenied(aiStatus.error);
+  const aiReady = !aiStatus.isError && aiStatus.data?.configured !== false;
+  const aiWhyNot = aiDenied ? "你的角色没有「使用 AI 助手」权限点" : "未配置 DEEPSEEK_API_KEY";
+  const aiWhyNotShort = aiDenied ? "无权限" : "未接入";
 
   const lookupQ = useQuery({
     queryKey: ["cmdk-lookup", lookup],
@@ -331,7 +340,7 @@ export function SpotlightCommandBar() {
                         <span>用 AI 分析：“{query.trim()}”</span>
                         {aiReady
                           ? <span className="cmdk-kbd">Enter ↵</span>
-                          : <span className="cmdk-kbd" title="未配置 DEEPSEEK_API_KEY">未接入</span>}
+                          : <span className="cmdk-kbd" title={aiWhyNot}>{aiWhyNotShort}</span>}
                       </div>
                     </div>
                   );

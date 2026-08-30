@@ -219,6 +219,11 @@ jobs:
       # 跨段的接缝只有这条链能覆盖——"费用不会在派单时自动生成"就是它发现的。
       - name: 验收链（建单→派单→签收→回单→生成费用→对账→核销→查单）
         run: node scripts/dev/acceptance-walk.mjs
+
+      - name: 受限角色（客服）走查：该用的用得了、该挡的说清了
+        env:
+          DATABASE_URL: postgres://tms:tms@127.0.0.1:5432/tms
+        run: node scripts/dev/role-walk.mjs http://127.0.0.1:5173
       # ui-audit 不进 CI：它量的是首屏容量、配色、对比度，
       # 跟字体渲染强相关，换一台机器读数就不一样。
       # 一条会因为环境不同而红的检查，最后只会被加上 continue-on-error。

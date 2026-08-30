@@ -132,6 +132,12 @@ if [ -d frontend/node_modules ]; then
     # 第五步拿到一张 ¥0 的对账单。
     browse_step "验收链（建单→派单→签收→回单→生成费用→对账→核销→查单）" /tmp/rc-acc.log \
       env DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" node scripts/dev/acceptance-walk.mjs
+    # 上面五条全用超管跑，而超管带 `*` 权限，**永远看不到 403 长什么样**。
+    # 这一条用演示客服（waybill.view + waybill.create + masterdata.view、
+    # 数据范围只有本网点）真的登进去点一遍：该用的用得了、该挡的说人话、
+    # 能进的页面上没有没被说明的 403。
+    browse_step "受限角色（客服该用的用得了、该挡的说清了）" /tmp/rc-role.log \
+      env DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" node scripts/dev/role-walk.mjs
   fi
 else
   skip "前端：未装依赖（frontend/node_modules 不存在），先 npm ci"

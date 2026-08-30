@@ -22,7 +22,14 @@ interface WaybillBrief {
   pickup_address: string; delivery_address: string; pickup_contact_phone: string; delivery_contact_phone: string;
   cod_amount: number;
 }
-interface Tasks { driver: { name: string; phone: string }; waybills: WaybillBrief[]; pending_reminders: Reminder[] }
+interface Tasks {
+  driver: { name: string; phone: string };
+  waybills: WaybillBrief[];
+  /** 在途总数。列表被服务端截断过，所以这个数才是真的——
+   *  拿 waybills.length 当总数就是"把一页当全量"，这套系统已经犯过四次。 */
+  waybill_total?: number;
+  pending_reminders: Reminder[];
+}
 
 const CRED_TYPES: [string, string][] = [
   ["vehicle_license", "车头行驶证"], ["trailer_license", "车挂行驶证"], ["driving_license", "驾驶证"],
@@ -123,8 +130,19 @@ export function DriverPortalPage() {
         <div className="drv-body">
           <div className="drv-body-head">
             <h3>在途运输任务</h3>
-            <span className="tag tag-info">{tasks?.waybills.length ?? 0} 单进行中</span>
+            {/* 数字取服务端的 waybill_total，不是取回来这一批的条数。
+                列表最多返回 50 条（手机上一次拉 3000 条实测 1.19MB、
+                页面高一百多万像素），截断了就在下面明说。 */}
+            <span className="tag tag-info">{tasks?.waybill_total ?? tasks?.waybills.length ?? 0} 单进行中</span>
           </div>
+          {(tasks?.waybill_total ?? 0) > (tasks?.waybills.length ?? 0) && (
+            <div className="muted small" style={{ padding: "0 16px 8px" }}>
+              共 {tasks?.waybill_total} 单，先显示最近 {tasks?.waybills.length} 单。
+              {/* 这里原先写的是"用上方的搜索"——而司机端没有搜索框。
+                  指向一个不存在的东西，比不说更耽误人。 */}
+              更早的单请联系调度。
+            </div>
+          )}
 
           {(tasks?.waybills.length ?? 0) === 0 ? (
             <div style={{ background: "var(--panel)", borderRadius: 12, border: "1px dashed var(--line-2)" }}>

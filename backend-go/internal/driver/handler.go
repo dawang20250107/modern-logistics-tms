@@ -187,11 +187,34 @@ func allDigits(s string) bool {
 	return true
 }
 
+// driverTaskLimit 司机端一次最多返回多少张在途运单。
+//
+// 原先不限。演示库里一个司机有 3032 张在途单，实测一次 /driver/tasks：
+//
+//	**1.19 MB JSON**，前端把 3032 张卡片全渲染出来，
+//	页面高 1,140,794 px —— 视口 844 px，也就是 1351 屏。
+//
+// 这是**手机上**的页面：那 1.19 MB 要走司机的流量，而他要找的是下一单在哪。
+//
+// 50 是按"司机手上同时有多少活"定的：干散货/整车的一天几单，
+// 零担配送的一趟几十单，50 足够覆盖一天并留出余量；
+// 超出的部分由界面明说，而不是悄悄截断。
+const driverTaskLimit = 50
+
 // Tasks GET /api/v1/driver/tasks —— 在途运单 + 待确认提醒（强制弹窗）
 func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	d := h.authDriver(w, r, "")
 	if d == nil {
+		return
+	}
+	// 总数单独数一次：截断了就要在界面上说出来。
+	// "把一部分说成全部"这一轮已经踩过四次（导出、调度池、登录审计、待核销队列），
+	// 司机端这条是第五处——而且是最没被看见的一处：它在手机上。
+	var total int
+	if err := h.DB.QueryRow(ctx, `SELECT count(*) FROM ops_waybill
+		WHERE driver_id=$1::uuid AND status = ANY($2)`, d.ID, activeWaybillStatuses).Scan(&total); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
 	}
 	rows, err := h.DB.Query(ctx, `
@@ -201,7 +224,8 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(wb.cod_amount,0)::float8
 		FROM ops_waybill wb LEFT JOIN ops_order o ON o.id = wb.order_id
 		WHERE wb.driver_id=$1::uuid AND wb.status = ANY($2)
-		ORDER BY wb.created_at DESC, wb.id`, d.ID, activeWaybillStatuses)
+		ORDER BY wb.created_at DESC, wb.id
+		LIMIT $3`, d.ID, activeWaybillStatuses, driverTaskLimit)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
@@ -256,6 +280,7 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"driver":            map[string]any{"name": d.Name, "phone": d.Phone},
 		"waybills":          wbs,
+		"waybill_total":     total,
 		"pending_reminders": rems,
 	})
 }

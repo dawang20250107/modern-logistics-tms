@@ -22,6 +22,7 @@ package driver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -215,5 +216,79 @@ func TestCheckinPhotoIsNotOverwrittenByRetry(t *testing.T) {
 	}
 	if bytes.Equal(got[0], got[1]) {
 		t.Error("两个文件路径不同但内容一样——覆盖发生在别的地方")
+	}
+}
+
+// 司机端任务列表必须封顶，而且要把真实总数带出来。
+//
+// 原先不限条数。演示库里一个司机有 3032 张在途单，实测一次 /driver/tasks：
+//
+//	1.19 MB JSON，前端把 3032 张卡片全渲染出来，页面高 1,140,794 px
+//	（视口 844 px，也就是 1351 屏），登录到出卡片 6.2 秒。
+//
+// 这是**手机上**的页面：那 1.19 MB 走的是司机的流量，而他要找的是下一单在哪。
+//
+// 封顶之后必须同时给出总数，否则界面上会写「50 单进行中」——
+// 那就是"把一页当全量"，这套系统已经在导出、调度池、登录审计、
+// 待核销队列上犯过四次。
+func TestDriverTaskListIsCappedAndReportsTrueTotal(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("未设置 DATABASE_URL，跳过司机任务列表测试")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("连库失败：%v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("库 ping 不通：%v", err)
+	}
+	if err := migrate.Run(ctx, pool); err != nil {
+		t.Fatalf("迁移失败：%v", err)
+	}
+
+	// 找一个在途单数量超过上限的司机；没有就说清楚跳过的理由，
+	// 而不是让这条用例在一个 3 单的司机身上"通过"。
+	var drvID string
+	var total int
+	err = pool.QueryRow(ctx, `SELECT driver_id::text, count(*) FROM ops_waybill
+		WHERE driver_id IS NOT NULL AND status IN ('dispatched','loaded','departed','in_transit','arrived')
+		GROUP BY driver_id HAVING count(*) > $1 ORDER BY count(*) DESC LIMIT 1`, driverTaskLimit).
+		Scan(&drvID, &total)
+	if err != nil {
+		t.Skipf("库里没有在途单超过 %d 的司机，这条用例这次没验到截断（跑过 seed 的库通常有）", driverTaskLimit)
+	}
+
+	const secret = "test-insecure-secret-min-32-bytes-long!!"
+	h := &Handler{DB: pool, Secret: secret, MediaRoot: t.TempDir()}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/driver/tasks", nil)
+	req.Header.Set("X-Driver-Token", SignToken(secret, drvID))
+	rec := httptest.NewRecorder()
+	h.Tasks(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("取任务返回 %d：%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Data struct {
+			Waybills     []map[string]any `json:"waybills"`
+			WaybillTotal int              `json:"waybill_total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("响应解不开：%v", err)
+	}
+	if n := len(out.Data.Waybills); n > driverTaskLimit {
+		t.Errorf("返回了 %d 张运单，上限是 %d——手机上会拉一个几百 KB 到几 MB 的包", n, driverTaskLimit)
+	}
+	if out.Data.WaybillTotal != total {
+		t.Errorf("waybill_total=%d，库里实际 %d：界面要靠这个数说「共 N 单，先显示 M 单」，"+
+			"给错了就等于把一页说成了全量", out.Data.WaybillTotal, total)
+	}
+	if out.Data.WaybillTotal <= len(out.Data.Waybills) {
+		t.Errorf("这个司机有 %d 张在途单却没被截断（返回 %d）——上限没生效",
+			total, len(out.Data.Waybills))
 	}
 }

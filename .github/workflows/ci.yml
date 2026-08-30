@@ -118,6 +118,10 @@ jobs:
         working-directory: .
         run: python3 scripts/dev/txn-guard.py
 
+      - name: 上传物必须经网关发出走查
+        working-directory: .
+        run: python3 scripts/dev/media-route.py
+
   # 浏览器走查：真起一套（库 + 网关 + 前端），用真浏览器把关键链路按一遍。
   #
   # 这个 job 是补上 CI 最大的一个洞。这一轮发布前查出来的严重问题——

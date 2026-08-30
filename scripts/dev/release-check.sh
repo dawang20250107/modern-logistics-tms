@@ -271,6 +271,11 @@ static_step /tmp/rc-reach.log "有后端动作在界面上够不着：" \
 static_step /tmp/rc-txn.log "有状态守卫读在事务外（并发下等于没有守卫）：" \
   python3 scripts/dev/txn-guard.py
 
+# 上传物必须经网关发出：网关那侧按类型决定能不能内联，
+# 绕过去就等于把上传的 HTML 原样当网页发（司机自助上传就能种）。
+static_step /tmp/rc-media.log "上传物没有经过网关发出：" \
+  python3 scripts/dev/media-route.py
+
 sect "请求体字段对齐"
 # route-match 只比路径和方法，比不到 body 里面。而发布前最要命的那个 bug
 # 恰恰在 body 里：对账中心发 period_start，后端只认 start——用户明明选了账期，

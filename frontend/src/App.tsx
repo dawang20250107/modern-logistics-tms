@@ -1,6 +1,7 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GlobalProgress } from "./components/GlobalProgress";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { RequirePerm } from "./components/RequirePerm";
@@ -28,6 +29,9 @@ import { WaybillDetailPage } from "./pages/WaybillDetailPage";
 export function App() {
   return (
     <AuthProvider>
+      {/* 应用级兜底：路由级那层包的是内容区，布局本身或路由本身崩了它接不住。
+          这一层保证任何情况下都还有一句话，而不是一张白页。 */}
+      <ErrorBoundary>
       <BrowserRouter>
         <GlobalProgress />
         <Routes>
@@ -58,6 +62,7 @@ export function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </ErrorBoundary>
     </AuthProvider>
   );
 }

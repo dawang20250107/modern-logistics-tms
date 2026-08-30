@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { ErrorBoundary } from "./ErrorBoundary";
+
 import { hasPerm, useAuth } from "../auth/auth";
 import { getTheme, toggleTheme, type Theme } from "../api/theme";
 import { useModalA11y } from "../api/useModalA11y";
@@ -255,7 +257,13 @@ export function AppLayout() {
           </div>
         </header>
         <section className="content" ref={contentRef} tabIndex={-1}>
-          <Outlet />
+          {/* 页面级兜底：没有它，一个渲染期异常会把**整棵树**卸掉——
+              实测是一片 0 个字符的白页，侧栏顶栏全没，用户不知道还能换一页。
+              包在这里，出错的只是内容区，导航还在，人点得走。
+              key 用路径：换一页时重建，免得上一页的错卡在这里不散。 */}
+          <ErrorBoundary key={pathname} where={pageTitle}>
+            <Outlet />
+          </ErrorBoundary>
         </section>
       </main>
       <SpotlightCommandBar />

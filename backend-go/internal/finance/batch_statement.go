@@ -119,7 +119,7 @@ func (h *Handler) BatchStatement(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成对账单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "生成对账单失败", err)
 		return
 	}
 	h.respondBatchStatement(w, r, stmtID, stmtNo, false)

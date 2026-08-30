@@ -134,7 +134,7 @@ func (h *Handler) MetricQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		m, err := h.computeAt(r, code, s, e, body.Dimension)
 		if err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "指标计算失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "指标计算失败", err)
 			return
 		}
 		results = append(results, m)

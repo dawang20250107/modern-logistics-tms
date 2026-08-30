@@ -129,7 +129,7 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 
 	rule, err := finance.MatchRule(ctx, h.DB, "", "income", customer, "", route, "", cstDay())
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "匹配计价规则失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "匹配计价规则失败", err)
 		return
 	}
 	if rule == nil {

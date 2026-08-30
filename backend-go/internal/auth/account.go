@@ -120,7 +120,7 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1::uuid, $2, NULL, false, $3, '', '', '', false, true, now(), $4, $5, NULL, NULL, '{}'::jsonb)`,
 		id.String(), MakeDjangoPassword(body.Password), username,
 		strings.TrimSpace(body.Phone), strings.TrimSpace(body.Nickname)); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "注册失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "注册失败", err)
 		return
 	}
 	RecordAttempt(ctx, h.Svc.DB, r, username, id.String(), ResultSuccess, true)

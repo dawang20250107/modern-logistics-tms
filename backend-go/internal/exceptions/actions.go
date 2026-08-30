@@ -160,7 +160,7 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_exception SET assignee_id=$2::uuid, status='handling', updated_at=now()
 		WHERE id=$1::uuid`, id, assignee); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	note := "取消指派"
@@ -204,7 +204,7 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_exception SET status='pending_audit', resolution=$2, updated_at=now()
 		WHERE id=$1::uuid`, id, newRes); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	note, _ := body["resolution"].(string) // 事件 note 取的是本次入参而非合并后的值
@@ -281,7 +281,7 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 		UPDATE ops_exception SET status='closed', responsibility_party=$2,
 		  amount=$3::numeric, resolution=$4, updated_at=now() WHERE id=$1::uuid`,
 		id, party, amount, resolution); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	// 责任金额 > 0 且挂了运单 → 落一条应付费用，把异常成本带进对账
@@ -302,7 +302,7 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 				  'normal', 'exception', $4, 'CNY', '', '', '', '', '', '', '', '', '',
 				  '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)`,
 				eid.String(), *waybillID, amount, id); err != nil {
-				httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "异常费用落库失败："+err.Error())
+				httpx.Fail(w, r, "INTERNAL", "异常费用落库失败", err)
 				return
 			}
 		}

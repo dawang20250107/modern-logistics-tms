@@ -168,7 +168,7 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		  AND NOT EXISTS (SELECT 1 FROM fin_statement_line l WHERE l.expense_record_id = e.id)
 		ORDER BY e.occurred_at, e.id`, args...)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "归集失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "归集失败", err)
 		return
 	}
 	type lineRow struct {
@@ -238,7 +238,7 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 
 	stmtNo, err := nextStatementNo(ctx, tx)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "取号失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "取号失败", err)
 		return
 	}
 	sid, _ := uuid.NewV7()
@@ -252,7 +252,7 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		sid.String(), stmtNo, req.Direction, req.CounterpartyType, req.CounterpartyID, cpName,
 		periodStart, periodEnd, nullIfEmpty(req.DueDate), total.String(), len(lines),
 		orZeroStr(req.ExternalTotal.String()), req.ScopeType, scopeIDArg(req), scopeName, stmtOrg); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "建单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "建单失败", err)
 		return
 	}
 	for _, l := range lines {
@@ -373,7 +373,7 @@ func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
 		) s ON true
 		WHERE l.statement_id = $1::uuid`, id, direction)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "审计失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "审计失败", err)
 		return
 	}
 	type auditRow struct {
@@ -522,7 +522,7 @@ func (h *Handler) SettleStatement(w http.ResponseWriter, r *http.Request) {
 		  paid_at, reference_no, remark, created_by_id)
 		VALUES ($1, now(), now(), $2::uuid, $3::numeric, $4, $5::date, $6, $7, $8::uuid)`,
 		pid.String(), id, amt.String(), method, paidAt, req.ReferenceNo, req.Remark, actor); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "登记失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "登记失败", err)
 		return
 	}
 	newSettled := settled.Add(amt)

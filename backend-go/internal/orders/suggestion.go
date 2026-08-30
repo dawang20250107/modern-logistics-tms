@@ -396,7 +396,7 @@ func (h *Handler) DispatchSuggestion(w http.ResponseWriter, r *http.Request) {
 	wDec := decimal.NewFromFloat(weight)
 	carrierRows, err := h.scoreCarriers(ctx, origin, dest, wDec, 6)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "承运商评分失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "承运商评分失败", err)
 		return
 	}
 	wh := &waybills.Handler{DB: h.DB, Svc: h.Svc}

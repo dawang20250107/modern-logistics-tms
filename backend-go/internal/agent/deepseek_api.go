@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -48,7 +49,10 @@ func (h *Handler) DeepSeekChat(w http.ResponseWriter, r *http.Request) {
 				"未配置 DEEPSEEK_API_KEY，AI 能力不可用。")
 			return
 		}
-		httpx.Err(w, http.StatusBadGateway, "DEEPSEEK_ERROR", err.Error())
+		// 上游的原始错误可能带着请求 URL 和内部细节，进日志不进响应。
+		slog.Error("上游 AI 服务报错", "code", "DEEPSEEK_ERROR", "err", err,
+			"method", r.Method, "path", r.URL.Path)
+		httpx.Err(w, http.StatusBadGateway, "DEEPSEEK_ERROR", "AI 服务调用失败，请稍后再试。")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
@@ -105,7 +109,7 @@ func (h *Handler) QueryWaybill(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := waybills.SerializeWhere(ctx, h.DB, strings.Join(where, " AND "), 10, args...)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	risk := 0

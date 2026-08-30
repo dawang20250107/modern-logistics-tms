@@ -87,7 +87,7 @@ func (h *Handler) approvalGate(w http.ResponseWriter, r *http.Request, approved 
 		args = append(args, me.ID)
 	}
 	if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	h.orderEvent(ctx, id, eventType, "", "", me.ID, "approval", map[string]any{"remark": body.Remark})
@@ -350,7 +350,7 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"children": childNos})
 	})
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "拆单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "拆单失败", err)
 		return
 	}
 	h.respondMany(w, r, childIDs, me, http.StatusCreated)
@@ -468,7 +468,7 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"merged_from": nos})
 	})
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "合单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "合单失败", err)
 		return
 	}
 	h.respondOneStatus(w, r, mergedID, me, http.StatusCreated)
@@ -838,7 +838,7 @@ func (h *Handler) Attachments(w http.ResponseWriter, r *http.Request) {
 		  file, file_url, uploaded_by_id)
 		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, $6, $7::uuid)`,
 		aid.String(), id, kind, name, fileRel, fileURL, nilIfBlank(me.ID)); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	list, _ := h.childRows(ctx, attachmentSelect+" WHERE a.id=$1::uuid", aid.String())

@@ -384,7 +384,7 @@ func (h *Handler) DispatchPlan(w http.ResponseWriter, r *http.Request) {
 			WHERE w.status = 'pending_dispatch' ORDER BY w.created_at DESC, w.id LIMIT 200`)
 	}
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取运单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取运单失败", err)
 		return
 	}
 	type item struct {

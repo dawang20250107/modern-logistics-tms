@@ -140,7 +140,7 @@ func (h *Handler) CustomerContext(w http.ResponseWriter, r *http.Request) {
 	if err := h.DB.QueryRow(ctx, customerContextSQL, id).Scan(
 		&total, &openCnt, &outstanding, &excCnt, &receiptPending,
 		&routes, &pickups, &deliveries, &recent, &openList); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取客户上下文失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取客户上下文失败", err)
 		return
 	}
 	credit := map[string]any{
@@ -210,7 +210,7 @@ func (h *Handler) CustomerLaneSuggest(w http.ResponseWriter, r *http.Request) {
 		     FROM o WHERE delivery_address <> '' GROUP BY 1 ORDER BY n DESC, last_at DESC LIMIT 5) t), '[]'::json)
 		`, id, origin, dest).Scan(&cargo, &quoteMin, &quoteMax, &deliveries)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取线路建议失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取线路建议失败", err)
 		return
 	}
 
@@ -293,7 +293,7 @@ func (h *Handler) CarrierPerformance(w http.ResponseWriter, r *http.Request) {
 		`, id, origin, dest).Scan(&total, &timedTotal, &onTimeHits, &excTotal, &doneTotal, &receiptHits,
 		&routeHits, &lanePayable)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取承运商表现失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取承运商表现失败", err)
 		return
 	}
 
@@ -372,7 +372,7 @@ func (h *Handler) CarrierBlacklist(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(r.Context(), `
 		UPDATE md_carrier SET blacklisted=$2, blacklist_reason=$3, updated_at=now()
 		WHERE id=$1::uuid`, id, blacklisted, reason); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	it, err := h.OneDetail(r.Context(), CarriersCfg, "ca.id = $1::uuid", id)
@@ -416,7 +416,7 @@ func (h *Handler) DriverRefreshStats(w http.ResponseWriter, r *http.Request) {
 		     WHERE w.driver_id = d.id AND e.direction = 'payable'),
 		  updated_at = now()
 		WHERE d.id = $1::uuid`, id); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "刷新失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "刷新失败", err)
 		return
 	}
 	it, err := h.OneDetail(r.Context(), DriversCfg, "d.id = $1::uuid", id)

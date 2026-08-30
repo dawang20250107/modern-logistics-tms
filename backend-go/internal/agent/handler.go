@@ -171,7 +171,10 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.Err(w, http.StatusBadGateway, "AGENT_FAILED", err.Error())
+		// 上游的原始错误可能带着请求 URL 和内部细节，进日志不进响应。
+		slog.Error("上游 AI 服务报错", "code", "AGENT_FAILED", "err", err,
+			"method", r.Method, "path", r.URL.Path)
+		httpx.Err(w, http.StatusBadGateway, "AGENT_FAILED", "AI 助手调用失败，请稍后再试。")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)

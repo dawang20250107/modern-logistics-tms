@@ -293,7 +293,7 @@ func (h *Handler) GenerateCosts(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusNotFound, "WAYBILL_NOT_FOUND", "运单不存在。")
 		return
 	case err != nil:
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "生成失败", err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"waybill_no": no, "generated": res})

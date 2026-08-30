@@ -84,14 +84,14 @@ func (h *Handler) poolPage(w http.ResponseWriter, r *http.Request, extraWhere fu
 
 	var total int
 	if err := h.DB.QueryRow(ctx, "SELECT count(*) "+fromClause+" "+whereSQL, args.Values...).Scan(&total); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	limitPh := args.Add(pageSize)
 	offsetPh := args.Add((page - 1) * pageSize)
 	rows, err := h.DB.Query(ctx, pagedOrderSQL(whereSQL, orderSQL, limitPh, offsetPh), args.Values...)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	defer rows.Close()
@@ -354,7 +354,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		`+fromClause+" WHERE "+whereSQL+" ORDER BY o.created_at DESC LIMIT "+
 		strconv.Itoa(httpx.ExportMaxRows), args.Values...)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	defer rows.Close()

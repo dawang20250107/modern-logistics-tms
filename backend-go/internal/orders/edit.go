@@ -132,7 +132,7 @@ func (h *Handler) Edit(w http.ResponseWriter, r *http.Request) {
 	if len(sets) > 0 {
 		if _, err := tx.Exec(ctx,
 			"UPDATE ops_order SET "+strings.Join(sets, ", ")+", updated_at=now() WHERE id=$1::uuid", args...); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "更新失败", err)
 			return
 		}
 	}

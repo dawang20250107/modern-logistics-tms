@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"io"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -360,10 +362,20 @@ func normalize(key string, f Field, raw any) (any, string) {
 		case float64:
 			return fmt.Sprintf("%v", v), ""
 		case string:
-			if strings.TrimSpace(v) == "" {
+			s := strings.TrimSpace(v)
+			if s == "" {
 				return nil, ""
 			}
-			return strings.TrimSpace(v), ""
+			// 校验一遍再落库。这里原先原样透传：值作为 $N::numeric 交给 Postgres，
+			// 参数化挡住了注入，但挡不住"这不是个数"——
+			// 客户授信额度填「一万」、车辆核载填「十吨」，
+			// 请求变成 500，而且**把 Postgres 的原话抛回给了前端**：
+			//   更新失败：ERROR: invalid input syntax for type numeric: "一万" (SQLSTATE 22P02)
+			// 整数字段一直是好好的 400「请输入合法整数。」，小数这一档漏了。
+			if _, err := decimal.NewFromString(s); err != nil {
+				return nil, "请输入合法数字。"
+			}
+			return s, ""
 		}
 		return nil, "请输入合法数字。"
 	case FBool:
@@ -377,7 +389,17 @@ func normalize(key string, f Field, raw any) (any, string) {
 		if !ok || strings.TrimSpace(s) == "" {
 			return nil, ""
 		}
-		return strings.TrimSpace(s), ""
+		s = strings.TrimSpace(s)
+		// 同 FDecimal：不验就丢给 ::date / ::timestamptz，
+		// 「今天」和 2026-13-45 都会变成 500。日期框里打两个字、
+		// 或者把日期打错一位，是每天都会发生的事。
+		if !parsesAsTime(s, f.Kind == FDateTime) {
+			if f.Kind == FDate {
+				return nil, "请输入合法日期（如 2026-01-31）。"
+			}
+			return nil, "请输入合法日期时间。"
+		}
+		return s, ""
 	case FURL:
 		s, ok := raw.(string)
 		if !ok {
@@ -418,6 +440,25 @@ func (f Field) column(key string) string {
 }
 
 // castFor 给占位符补类型转换（pgx 对 text→uuid/date 等需要显式 cast）
+// parsesAsTime 判断这个字符串 Postgres 认不认。
+//
+// 覆盖前端会发的写法和人手填的常见写法，而不是只认一种——
+// 收得太紧会把本来能用的输入判成错的，那和 500 一样是产品问题。
+func parsesAsTime(s string, withTime bool) bool {
+	layouts := []string{"2006-01-02", "2006/01/02", "2006-1-2", "2006/1/2"}
+	if withTime {
+		layouts = append(layouts,
+			time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05",
+			"2006-01-02T15:04", "2006-01-02 15:04")
+	}
+	for _, l := range layouts {
+		if _, err := time.Parse(l, s); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func castFor(f Field) string {
 	switch f.Kind {
 	case FUUID:
@@ -575,7 +616,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	}
 	sql := "INSERT INTO " + wc.Table + " (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(phs, ",") + ")"
 	if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	if wc.AfterWrite != nil {
@@ -618,7 +659,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		}
 		sql := "UPDATE " + wc.Table + " SET " + strings.Join(sets, ", ") + ", updated_at=now() WHERE " + wc.pk() + "=$1::uuid"
 		if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "更新失败", err)
 			return
 		}
 	}
@@ -648,19 +689,19 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	id := chi.URLParam(r, "id")
 	if wc.BeforeDelete != nil {
 		if err := wc.BeforeDelete(ctx, h, id); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "级联删除失败", err)
 			return
 		}
 	}
 	for tbl, col := range wc.NullifyTables {
 		if _, err := h.DB.Exec(ctx, "UPDATE "+tbl+" SET "+col+"=NULL WHERE "+col+"=$1::uuid", id); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "级联删除失败", err)
 			return
 		}
 	}
 	for tbl, col := range wc.CascadeTables {
 		if _, err := h.DB.Exec(ctx, "DELETE FROM "+tbl+" WHERE "+col+"=$1::uuid", id); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "级联删除失败", err)
 			return
 		}
 	}
@@ -674,7 +715,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	if err != nil {
 		// 删失败（多半是没收干净的外键引用）不能伪装成 404——那会让调用方以为
 		// "本来就不存在"，而真相是"存在但删不掉"，两者要采取的动作完全不同。
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "删除失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "删除失败", err)
 		return
 	}
 	if ct.RowsAffected() == 0 {

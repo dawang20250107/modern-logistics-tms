@@ -166,12 +166,12 @@ func (h *Handler) ToggleEmployee(active bool) http.HandlerFunc {
 		defer func() { _ = tx.Rollback(ctx) }()
 		if userID != nil {
 			if _, err := tx.Exec(ctx, `UPDATE accounts_user SET is_active=$2 WHERE id=$1::uuid`, *userID, active); err != nil {
-				httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新账号状态失败："+err.Error())
+				httpx.Fail(w, r, "INTERNAL", "更新账号状态失败", err)
 				return
 			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE iam_employee SET status=$2, updated_at=now() WHERE id=$1::uuid`, empID, status); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新员工状态失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "更新员工状态失败", err)
 			return
 		}
 		if err := tx.Commit(ctx); err != nil {

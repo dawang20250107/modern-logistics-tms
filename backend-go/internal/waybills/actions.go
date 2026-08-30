@@ -91,7 +91,7 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondWaybill(w, r, no)
@@ -119,7 +119,7 @@ func (h *Handler) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 }
 
 // wrote 统一把事务错误翻成响应；返回 true 表示没出错、可以继续写成功响应
-func (h *Handler) wrote(w http.ResponseWriter, err error) bool {
+func (h *Handler) wrote(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return true
 	}
@@ -127,7 +127,7 @@ func (h *Handler) wrote(w http.ResponseWriter, err error) bool {
 		httpx.Err(w, he.Status, he.Code, he.Message)
 		return false
 	}
-	httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "处理失败："+err.Error())
+	httpx.Fail(w, r, "INTERNAL", "处理失败", err)
 	return false
 }
 
@@ -193,7 +193,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		  source, resource, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, COALESCE($4::timestamptz, now()), $5, $6, $7)`,
 		eid.String(), id, body.EventType, nilIfBadTime(body.EventTime), source, resource, pj); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	rows, err := h.DB.Query(ctx, eventSelect+" WHERE e.id=$1::uuid", eid.String())
@@ -287,7 +287,7 @@ func (h *Handler) AddExpense(w http.ResponseWriter, r *http.Request) {
 		  $6, $7, $8, '', '', '', '', '', '', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)`,
 		eid.String(), id, body.Direction, body.ExpenseItemCode, amt.String(),
 		body.PayeeType, body.PayeeRef, body.Remark); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, map[string]any{"ok": true})
@@ -363,7 +363,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx,
 		`UPDATE ops_waybill SET receipt_status=$2, updated_at=now() WHERE id=$1::uuid`,
 		id, rs); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
@@ -417,7 +417,7 @@ func (h *Handler) ContractGenerate(w http.ResponseWriter, r *http.Request) {
 		Scan(&in.WaybillID, &in.WaybillNo, &driverID, &driverName, &plate,
 			&trailer, &in.Route, &in.CargoDesc, &weight, &quantity, &agreed)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取运单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取运单失败", err)
 		return
 	}
 	in.DriverID = deref(driverID)
@@ -444,7 +444,7 @@ func (h *Handler) ContractGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := contracts.Generate(ctx, tx, in); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "合同生成失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "合同生成失败", err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -513,7 +513,7 @@ func (h *Handler) ContractSend(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_contract SET sent_at=now(), confirm_status='sent', updated_at=now()
 		WHERE id=$1::uuid`, cid); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	h.contractRecord(ctx, id, "contract_sent", cid, "")
@@ -565,7 +565,7 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_contract SET confirm_status=$2, confirmed_at=now(), driver_reply=$3, updated_at=now()
 		WHERE id=$1::uuid`, cid, newStatus, body.Reply); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	h.contractRecord(ctx, id, eventType, cid, body.Reply)
@@ -722,7 +722,7 @@ func (h *Handler) PartialSign(w http.ResponseWriter, r *http.Request) {
 			pyNum(total), pyNum(signed), pyNum(damaged), pyNum(shortage), body.Note))
 		return openDeliveryException(ctx, tx, wb.ID, "cargo_damage", level, desc, me.ID)
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondSignOutcome(w, r, no, finalStatus, receiptID)
@@ -793,7 +793,7 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 		}
 		return openDeliveryException(ctx, tx, wb.ID, "customer_complaint", "high", "整车拒收："+body.Reason, me.ID)
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondSignOutcome(w, r, no, finalStatus, receiptID)
@@ -919,7 +919,7 @@ func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) 
 			map[string]any{"amount": amount, "__source": "settlement"})
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.Detail(w, r) // 两个动作都回 WaybillDetailSerializer
@@ -1036,7 +1036,7 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 		wbEvent(ctx, tx, wb.ID, "split", wb.No, map[string]any{"children": children, "__source": "split"})
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondWaybillList(w, r, children, http.StatusCreated, map[string]any{"parent": no})
@@ -1124,7 +1124,7 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"sources": nos, "__source": "merge"})
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	it, err := SerializeByNo(ctx, h.DB, mergedNo)

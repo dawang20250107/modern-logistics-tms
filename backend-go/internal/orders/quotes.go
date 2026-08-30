@@ -175,7 +175,7 @@ func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"waybill_no": no})
 	})
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "转运单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "转运单失败", err)
 		return
 	}
 	it, err := waybills.SerializeByNo(ctx, h.DB, waybillNo)

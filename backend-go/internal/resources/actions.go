@@ -331,7 +331,7 @@ func (h *Handler) ReimbursementCreate(w http.ResponseWriter, r *http.Request) {
 		  category, amount, reason, status, submitted_by_id, remark)
 		VALUES ($1, now(), now(), $2, $3::uuid, $4, $5, $6::numeric, $7, 'submitted', $8::uuid, '')`,
 		id.String(), genReimbNo(), waybillID, orderNo, category, amount.String(), reason, submitter); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	it, err := h.MD.OneDetail(ctx, ReimbursementsCfg, "rb.id = $1::uuid", id.String())
@@ -417,7 +417,7 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 			VALUES ($1, now(), now(), $2::uuid, 'payable', $3, $4::numeric, 'CNY', 'normal',
 			  'reimbursement', $5, 'driver', '', $6, '', '', '', '', '', '', '{}', '{}', '{}')`,
 			eid.String(), *waybillID, item, amount, reimbNo, "报销 "+label); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成应付失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "生成应付失败", err)
 			return
 		}
 	}
@@ -429,7 +429,7 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 		  counterparty_type, counterparty_ref, amount, reason, status, external_approval_no)
 		VALUES ($1, now(), now(), $2, $3::uuid, 'reimbursement', $4, $5::numeric, $6, 'created', '')`,
 		prID.String(), "PR-"+reimbNo, waybillID, orderNo, amount, prReason); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成付款申请失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "生成付款申请失败", err)
 		return
 	}
 	var approver any
@@ -541,7 +541,7 @@ func (h *Handler) ReimbursementPay(w http.ResponseWriter, r *http.Request) {
 	if prID != nil {
 		if _, err := tx.Exec(ctx,
 			"UPDATE fin_payment_request SET status='paid', updated_at=now() WHERE id=$1::uuid", *prID); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新付款申请失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "更新付款申请失败", err)
 			return
 		}
 	}

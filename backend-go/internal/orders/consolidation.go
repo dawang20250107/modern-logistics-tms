@@ -252,7 +252,7 @@ func (h *Handler) DispatchPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, err := ConsolidateByIDs(ctx, h.DB, body.IDs)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "排线失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "排线失败", err)
 		return
 	}
 	// 每条合并线路配上承运商推荐：拼出整车之后要解决的是「谁来拉」，不是「用哪台自有车」

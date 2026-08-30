@@ -70,7 +70,7 @@ func (h *Handler) SuggestProjects(w http.ResponseWriter, r *http.Request) {
 		ORDER BY score DESC, c.start_date DESC NULLS LAST, c.project_no
 		LIMIT 8`, customer, origin, dest, keyword)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	defer rows.Close()

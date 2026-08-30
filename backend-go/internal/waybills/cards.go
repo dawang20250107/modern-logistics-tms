@@ -554,7 +554,7 @@ func (h *Handler) SendReminder(w http.ResponseWriter, r *http.Request) {
 		  template_id, title, content, ack_required, status, level, sent_at)
 		VALUES ($1, now(), now(), $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, '`+wbstatus.ReminderPending+`', 'important', now())`,
 		rid.String(), id, *driverID, tplID, title, content, ack); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, map[string]any{

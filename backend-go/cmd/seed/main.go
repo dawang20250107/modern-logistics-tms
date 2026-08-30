@@ -465,14 +465,53 @@ func (s *seeder) ordersAndWaybills() {
 			        $9::uuid, $10::uuid, $11::uuid, $12::uuid, $13::uuid, $14::uuid)
 			ON CONFLICT (waybill_no) DO UPDATE SET status=EXCLUDED.status, updated_at=now()`,
 			id("waybill/"+no), fmt.Sprint(i+2), no, route[0]+"→"+route[1], route[0], route[1], st,
-			map[bool]string{true: "returned", false: "pending"}[st == "signed"],
+			// 签收了不等于回单已经回来。
+			//
+			// 原先这里把 signed 的运单一律写成 receipt_status='returned'
+			// （界面上显示「回单已核验」），而播种**根本没有建任何回单记录**——
+			// 点开是空的。这跟这套系统自己立的规矩相反：没有 OCR 引擎时
+			// 刻意不伪造签收人和签收时间，因为回单是法律凭证。
+			// 那么也不该凭空宣布"回单已核验"。
+			//
+			// 「已签收 + 回单待返回」本来就是真实状态（货送到了、回单还在司机手上），
+			// 而且它正好把验收链第 4 步要做的事留在那里：传一张回单，点开看看。
+			"pending",
 			id("cust/"+custs[orderIdx%len(custs)]),
 			id("carrier/SEED_R"+fmt.Sprint(i%4+1)),
 			id(orgs[orderIdx%len(orgs)]),
 			id(fmt.Sprintf("order/SEEDDD%06d", orderIdx+1)),
 			id(fmt.Sprintf("vehicle/%d", i%6+1)),
 			id(fmt.Sprintf("driver/%d", i%5+1)))
+
+		// 事件时间线：状态是直接写进去的，事件得跟着补，否则运单详情页那条
+		// 时间线是空的——而验收时点开的正是这一页。
+		// 实测播种后：3 张在途运单**一条事件都没有**。
+		for j, ev := range eventChainFor(st) {
+			s.exec("waybill event "+no+ev, `
+				INSERT INTO ops_waybill_event (id, created_at, updated_at, event_type, event_time,
+				  resource, source, payload, waybill_id)
+				VALUES ($1::uuid, now(), now(), $2, now() - (($3)::int || ' hours')::interval,
+				        'waybill', 'seed', '{}'::jsonb, $4::uuid)
+				ON CONFLICT (id) DO NOTHING`,
+				id("wbevent/"+no+"/"+ev), ev, fmt.Sprint((len(eventChainFor(st))-j)*6),
+				id("waybill/"+no))
+		}
 	}
+}
+
+// eventChainFor 一张运单走到某个状态时，路上应该留下哪些事件。
+// 顺序与 wbstatus 的状态机一致；播种只写"已经发生过的"那几条。
+func eventChainFor(status string) []string {
+	chain := []string{"created", "dispatched", "loaded", "departed", "in_transit", "arrived", "signed"}
+	at := map[string]int{
+		"dispatched": 2, "loaded": 3, "departed": 4,
+		"in_transit": 5, "arrived": 6, "signed": 7,
+	}
+	n, ok := at[status]
+	if !ok {
+		return chain[:1]
+	}
+	return chain[:n]
 }
 
 // expensesAndStatements 每张运单一笔应收 + 一笔应付，前 4 张进一张对账单。

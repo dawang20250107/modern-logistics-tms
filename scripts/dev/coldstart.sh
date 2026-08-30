@@ -83,6 +83,31 @@ n=$(curl -s "$API/org/employees" -H "Authorization: Bearer $TOK" \
 [ "$n" -ge 4 ] && ok "员工名录 $n 人" || bad "员工名录只有 $n 人（演示账号没有员工档案？）"
 
 # 权限点目录：少了的话权限矩阵上没有勾选框，功能对非超管永久 403
+# 演示数据自身要自洽。
+#
+# 验收时客户点开的就是这几张演示单，而它们此前有两处对不上：
+#   · 3 张在途运单**一条事件都没有** —— 详情页那条时间线是空的
+#   · 2 张已签收运单标着 receipt_status='returned'（界面显示「回单已核验」），
+#     而库里根本没有回单记录 —— 点开是空的
+# 后一条尤其不该有：这套系统自己立的规矩是没有 OCR 引擎时刻意不伪造签收人
+# 和签收时间，因为回单是法律凭证。那就更不该凭空宣布"回单已核验"。
+#
+# 状态是直接写进去的，配套的事件与凭证要跟着写；写不了就别声称它存在。
+echo "── 演示数据自洽性 ──"
+noev=$(psql -d "$DB" -tAc "SELECT count(*) FROM ops_waybill w
+  WHERE w.status IN ('departed','in_transit','arrived','signed')
+    AND NOT EXISTS (SELECT 1 FROM ops_waybill_event e WHERE e.waybill_id=w.id)")
+[ "$noev" = "0" ] && ok "在途/已签收运单都有事件时间线" \
+  || bad "$noev 张在途或已签收的运单一条事件都没有（详情页时间线是空的）"
+ghost=$(psql -d "$DB" -tAc "SELECT count(*) FROM ops_waybill w
+  WHERE w.receipt_status='returned'
+    AND NOT EXISTS (SELECT 1 FROM ops_receipt r WHERE r.waybill_id=w.id)")
+[ "$ghost" = "0" ] && ok "没有「声称回单已核验但查无回单」的运单" \
+  || bad "$ghost 张运单标着回单已核验，库里却没有回单——凭证不能凭空宣布存在"
+nodrv=$(psql -d "$DB" -tAc "SELECT count(*) FROM ops_waybill
+  WHERE status IN ('departed','in_transit','arrived') AND driver_id IS NULL")
+[ "$nodrv" = "0" ] && ok "在途运单都有司机" || bad "$nodrv 张在途运单没有司机"
+
 perms=$(psql -d "$DB" -tAc 'SELECT count(*) FROM iam_permission')
 [ "$perms" -ge 15 ] && ok "权限点 $perms 个" || bad "权限点只有 $perms 个"
 

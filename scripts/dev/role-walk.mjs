@@ -63,6 +63,13 @@ const PROFILES = [
     // 该能用的：订单管理要有数据、客服工作台要打得开
     listPage: ["订单管理", "/waybills"],
     openPage: ["客服工作台", "/intake"],
+    // 真填表单、真点提交、再回库核对。
+    //
+    // waybill.create 那个权限点是为这一步加的（第七节验收链第一步就是
+    // 「客服工作台建一单」，而客服原先被 403 挡住）。但那次只用 Go 用例
+    // 验过——发的是 JSON。真实表单是另一条路：它自己拼 payload、
+    // 自己做必填校验，权限对了而字段拼错一样建不出单。
+    submitOrder: { name: "客服工作台建单", path: "/intake" },
   },
   {
     user: "seed_dispatcher",
@@ -241,6 +248,65 @@ for (const prof of PROFILES) {
         `（都要 ${w.need}，点下去只会弹一句"无权限"）`);
     } else {
       ok(`「${w.name}」没有对只读角色显示写按钮`);
+    }
+  }
+
+  // ── 真下一单 ──
+  if (prof.submitOrder) {
+    const so = prof.submitOrder;
+    current = so.name;
+    console.log("\u2500\u2500 真下一单 \u2500\u2500");
+    const tag = "走查" + Date.now().toString(36).slice(-6);
+    // 按**货品明细**上的标记找这一单，不是订单表头。
+    // 第一版查的是 ops_order.cargo_desc，而表单把货品名放进 cargo_items——
+    // 于是它报「客服点了提交，库里没有多出这一单」，而实测那次提交
+    // 返回的是 201、页面上也弹了「建单成功」。**假红**。
+    const found = () => `SELECT count(*) FROM ops_order_cargo_item WHERE name LIKE '${tag}%'`;
+    const before = Number(q(found()) ?? -1);
+    await page.goto(`${BASE}${so.path}`, { waitUntil: "networkidle" });
+    await assertAppPage(page, so.path, API);
+    await page.waitForTimeout(1000);
+    const fill = async (ph, val) => {
+      const el = page.locator(`input[placeholder="${ph}"]`).first();
+      if (!(await el.count())) { bad(`建单表单上找不到「${ph}」输入框`); return false; }
+      await el.fill(val);
+      return true;
+    };
+    // 必填三项：始发、目的、货品名称（trySubmit 里逐条校验的就是这三个）
+    // 注意占位符：写着「如 上海」的那个是**目的地**，「如 无锡」的是始发地。
+    const okFill = (await fill("输入或选择，如 无锡", "上海"))
+      && (await fill("输入或选择，如 上海", "杭州"))
+      && (await fill("货品名称 *", tag + " 日用品"));
+    if (okFill) {
+      await page.locator('button:has-text("确认提交")').first().click();
+      await page.waitForTimeout(2500);
+      const after = Number(q(found()) ?? -1);
+      const toast = (await page.textContent("body")) ?? "";
+      if (after > before) {
+        // 建单人必须是这个账号本人，而不是别人——否则数据范围会算错
+        const who = q(`SELECT COALESCE(u.username,'(空)') FROM ops_order o
+          JOIN ops_order_cargo_item ci ON ci.order_id = o.id
+          LEFT JOIN accounts_user u ON u.id = o.created_by_id
+          WHERE ci.name LIKE '${tag}%' ORDER BY o.created_at DESC LIMIT 1`);
+        if (who !== prof.user) {
+          bad(`单建出来了，但建单人记成了「${who}」而不是 ${prof.user} —— 数据范围按这一列算`);
+        } else {
+          ok(`${prof.label}在真实表单上建出了一单（建单人 ${who}）`);
+        }
+        // 清理：这是演示库，别留垃圾
+        const mine = `SELECT order_id FROM ops_order_cargo_item WHERE name LIKE '${tag}%'`;
+        q(`CREATE TEMP TABLE _walk_o AS ${mine};
+           DELETE FROM ops_order_event WHERE order_id IN (SELECT order_id FROM _walk_o);
+           DELETE FROM ops_order_cargo_item WHERE order_id IN (SELECT order_id FROM _walk_o);
+           DELETE FROM ops_order_stop WHERE order_id IN (SELECT order_id FROM _walk_o);
+           DELETE FROM ops_order WHERE id IN (SELECT order_id FROM _walk_o);`);
+      } else if (before < 0) {
+        ok("提交了，但没有 DATABASE_URL，无法回库核对");
+      } else {
+        const why = /缺少所需权限|权限|失败|错误/.exec(toast);
+        bad(`${prof.label}点了「确认提交」，库里没有多出这一单` +
+          (why ? `（页面上出现了「${why[0]}」）` : "（页面上也没有任何提示）"));
+      }
     }
   }
 

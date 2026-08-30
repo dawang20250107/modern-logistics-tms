@@ -23,16 +23,20 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/", label: "运输驾驶舱", icon: <IconTower size={18} />, end: true },
       { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} /> },
-      { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} /> },
-      { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} /> },
+      { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} />, perm: "waybill.view" },
+      { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} />, perm: "waybill.view" },
     ],
   },
   {
+    // 这三项挂上权限点。NavItem 上本来就有 perm 这个字段、canSee 里也一直在判，
+    // 但**没有一个条目声明过它**——于是财务点进「资源库」、客服点进「对账中心」，
+    // 得到的是一页空白：接口 403 被前端吞掉，页面既没有数据也没有说明。
+    // 权限点补齐之后 403 变多了，这个问题跟着变明显，一起收掉。
     title: "资源与结算",
     items: [
-      { to: "/fleet", label: "资源库", icon: <IconTruck size={18} /> },
-      { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} /> },
-      { to: "/reconciliation", label: "对账中心", icon: <IconReceipt size={18} /> },
+      { to: "/fleet", label: "资源库", icon: <IconTruck size={18} />, perm: "masterdata.view" },
+      { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} />, perm: "finance.view" },
+      { to: "/reconciliation", label: "对账中心", icon: <IconReceipt size={18} />, perm: "finance.view" },
     ],
   },
   {

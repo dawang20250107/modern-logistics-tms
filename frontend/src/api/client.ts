@@ -19,6 +19,18 @@ export class ApiError extends Error {
   }
 }
 
+/** 这个错是"没权限"而不是"出错了"。
+ *
+ * 后端两处闸的 code 拼写不一样（通用 CRUD 引擎回 permission_denied，
+ * 各 handler 里回 PERMISSION_DENIED），所以这里不区分大小写。
+ * 分辨这两者有实际意义：页面上写「数据获取出错，请重试」会让用户一直点重试，
+ * 而真相是他的角色就是看不了这一块——重试一万次也一样。 */
+export function isPermissionDenied(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  const c = err.code.toLowerCase();
+  return c === "permission_denied" || c === "403";
+}
+
 let accessToken = localStorage.getItem("access") ?? "";
 let refreshToken = localStorage.getItem("refresh") ?? "";
 

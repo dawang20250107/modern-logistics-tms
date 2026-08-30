@@ -133,7 +133,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
           {detail.isLoading ? (
             <StateView kind="loading" compact />
           ) : detail.isError ? (
-            <StateView kind="error" onRetry={() => detail.refetch()} />
+            <StateView kind="error" error={detail.error} onRetry={() => detail.refetch()} />
           ) : c ? (
             <div className="stack" style={{ gap: 16 }}>
               {c.dispatch_blocked && (
@@ -208,7 +208,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                 {lanes.isLoading ? (
                   <StateView kind="loading" compact />
                 ) : lanes.isError ? (
-                  <StateView kind="error" onRetry={() => lanes.refetch()} compact />
+                  <StateView kind="error" error={lanes.error} onRetry={() => lanes.refetch()} compact />
                 ) : (lanes.data?.items ?? []).length === 0 ? (
                   <StateView kind="empty" title="尚未维护线路价" hint="补充常跑线路价格后，调度推荐会优先引用价库。" compact />
                 ) : (
@@ -274,7 +274,7 @@ export function CarrierCenter() {
         </div>
       )}
       {st.isError ? (
-        <StateView kind="error" onRetry={() => st.refetch()} />
+        <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
       ) : (
         <DataTable<Carrier>
           columns={carrierColumns} rows={st.rows} rowKey={(c) => c.id} viewKey="carriers" exportName="承运商"

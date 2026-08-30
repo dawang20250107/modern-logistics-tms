@@ -87,7 +87,7 @@ export function OrderDetailPage() {
   const events = timeline.data ?? [];
 
   if (order.isLoading) return <StateView kind="loading" />;
-  if (order.isError || !o) return <StateView kind="error" title="订单无法打开" hint="订单不存在、无权访问或数据暂时不可用。" onRetry={() => order.refetch()} />;
+  if (order.isError || !o) return <StateView kind="error" title="订单无法打开" hint="订单不存在、无权访问或数据暂时不可用。" error={order.error} onRetry={() => order.refetch()} />;
 
   const startEdit = () => {
     setEdit({

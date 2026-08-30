@@ -363,7 +363,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
         </div>
 
         {st.isError ? (
-          <StateView kind="error" hint="运单台账暂时无法加载。" onRetry={() => st.refetch()} />
+          <StateView kind="error" hint="运单台账暂时无法加载。" error={st.error} onRetry={() => st.refetch()} />
         ) : (
           <DataTable<Waybill>
             columns={columns}

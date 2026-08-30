@@ -278,7 +278,7 @@ function OrdersTab() {
       )}
 
       {st.isError ? (
-        <StateView kind="error" onRetry={() => st.refetch()} />
+        <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
       ) : (
         <DataTable<Order>
           columns={columns} rows={rows} rowKey={(o) => o.id} viewKey="order-manage-v2" exportName="订单台账"
@@ -490,7 +490,7 @@ function BatchesTab() {
         {Object.entries(BATCH_STATUS_LABEL).map(([k, v]) => <button key={k} className={`chip${status === k ? " chip-on" : ""}`} onClick={() => setStatus(status === k ? "" : k)}>{v}</button>)}
       </div>
       {st.isError ? (
-        <StateView kind="error" onRetry={() => st.refetch()} />
+        <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
       ) : (
         <DataTable<DispatchBatch>
           columns={columns} rows={st.rows} rowKey={(b) => b.id} viewKey="dispatch-batches" exportName="派车批次"

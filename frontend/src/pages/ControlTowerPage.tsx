@@ -224,7 +224,7 @@ export function ControlTowerPage() {
             </div>
             <div className="ct-side-body">
               {fin.isLoading ? <StateView kind="loading" compact /> : fin.isError ? (
-                <StateView kind="error" hint="财务敞口暂时无法同步。" compact onRetry={() => fin.refetch()} />
+                <StateView kind="error" hint="财务敞口暂时无法同步。" compact error={fin.error} onRetry={() => fin.refetch()} />
               ) : <><div className="ct-expo">
                 <div><span>应收未结</span><b className="num-grad">{fmtWan(ov?.receivable.outstanding ?? 0)}</b></div>
                 <div><span>应付未结</span><b>{fmtWan(ov?.payable.outstanding ?? 0)}</b></div>
@@ -250,7 +250,7 @@ export function ControlTowerPage() {
             </div>
             <div className="ct-side-body">
               {compliance.isLoading ? <StateView kind="loading" compact /> : compliance.isError ? (
-                <StateView kind="error" hint="证件状态暂时无法同步。" compact onRetry={() => compliance.refetch()} />
+                <StateView kind="error" hint="证件状态暂时无法同步。" compact error={compliance.error} onRetry={() => compliance.refetch()} />
               ) : credRows.length === 0 ? (
                 <div className="muted small" style={{ padding: "6px 2px" }}>30 天内无临期/过期证件。</div>
               ) : (

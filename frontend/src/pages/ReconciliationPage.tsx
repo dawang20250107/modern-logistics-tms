@@ -110,7 +110,7 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
 function OverviewTab() {
   const ov = useQuery({ queryKey: ["stmt-overview"], queryFn: () => apiGet<StatementOverview>("/finance/statement-overview") });
   if (ov.isLoading) return <StateView kind="loading" compact />;
-  if (ov.isError || !ov.data) return <StateView kind="error" onRetry={() => ov.refetch()} />;
+  if (ov.isError || !ov.data) return <StateView kind="error" error={ov.error} onRetry={() => ov.refetch()} />;
   const d = ov.data;
   const collectRate = d.receivable.total > 0 ? d.receivable.settled / d.receivable.total : 0;
   const payRate = d.payable.total > 0 ? d.payable.settled / d.payable.total : 0;
@@ -261,7 +261,7 @@ function AgingTab() {
         {aging.isLoading ? (
           <StateView kind="loading" compact />
         ) : aging.isError ? (
-          <StateView kind="error" onRetry={() => aging.refetch()} />
+          <StateView kind="error" error={aging.error} onRetry={() => aging.refetch()} />
         ) : rows.length === 0 ? (
           <StateView kind="empty" title="暂无账龄数据" hint="生成费用与对账单后，此处按对手方汇总账龄敞口。" />
         ) : (
@@ -530,7 +530,7 @@ export function ReconciliationPage() {
               </div>
             )}
             {st.isError ? (
-              <StateView kind="error" onRetry={() => st.refetch()} />
+              <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
             ) : (
               <DataTable<Statement>
                 columns={stmtColumns}
@@ -567,7 +567,7 @@ export function ReconciliationPage() {
           {settleQ.isLoading ? (
             <StateView kind="loading" compact />
           ) : settleQ.isError ? (
-            <StateView kind="error" hint="待核销单据暂时无法加载。" onRetry={() => settleQ.refetch()} compact />
+            <StateView kind="error" hint="待核销单据暂时无法加载。" error={settleQ.error} onRetry={() => settleQ.refetch()} compact />
           ) : settleQueue.length === 0 ? (
             <StateView kind="empty" title="暂无待核销单据" hint="确认对账单后，会进入此队列等待收付款核销。" />
           ) : (

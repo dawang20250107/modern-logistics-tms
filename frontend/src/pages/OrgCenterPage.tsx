@@ -191,7 +191,7 @@ function OrgTab() {
       {q.isLoading ? (
         <StateView kind="loading" compact />
       ) : q.isError ? (
-        <StateView kind="error" hint="组织架构暂时无法加载。" onRetry={() => q.refetch()} compact />
+        <StateView kind="error" hint="组织架构暂时无法加载。" error={q.error} onRetry={() => q.refetch()} compact />
       ) : (q.data?.tree.length ?? 0) === 0 ? (
         <StateView kind="empty" title="暂无组织" />
       ) : (
@@ -627,7 +627,7 @@ function RbacTab() {
   });
 
   if (q.isLoading) return <StateView kind="loading" />;
-  if (q.isError || !matrix) return <StateView kind="error" hint="权限矩阵暂时无法加载。" onRetry={() => q.refetch()} />;
+  if (q.isError || !matrix) return <StateView kind="error" hint="权限矩阵暂时无法加载。" error={q.error} onRetry={() => q.refetch()} />;
   if (matrix.roles.length === 0)
     return <StateView kind="empty" title="暂无角色" />;
 
@@ -751,7 +751,7 @@ function LoginAuditTab() {
       {q.isLoading ? (
         <StateView kind="loading" compact />
       ) : q.isError ? (
-        <StateView kind="error" hint="登录记录暂时无法加载。" onRetry={() => q.refetch()} compact />
+        <StateView kind="error" hint="登录记录暂时无法加载。" error={q.error} onRetry={() => q.refetch()} compact />
       ) : rows.length === 0 ? (
         <StateView kind="empty" title="暂无登录记录" />
       ) : (

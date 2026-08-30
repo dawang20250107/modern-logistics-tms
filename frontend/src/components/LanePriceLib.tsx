@@ -127,7 +127,7 @@ export function LanePriceLib() {
       )}
 
       {st.isError ? (
-        <StateView kind="error" onRetry={() => st.refetch()} />
+        <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
       ) : (
         <DataTable<CarrierLanePrice>
           columns={laneColumns} rows={st.rows} rowKey={(l) => l.id} viewKey="lane-prices" exportName="线路价库"

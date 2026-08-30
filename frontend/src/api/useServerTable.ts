@@ -99,6 +99,9 @@ export function useServerTable<T>(opts: ServerTableOptions) {
     pages: q.data?.pages ?? 1,
     isLoading: q.isLoading,
     isError: q.isError,
+    // 把错误对象也带出去：页面要靠它分辨「没权限」和「出错了」——
+    // 403 时显示"加载失败，请重试"会让人一直点重试，而那点不出结果。
+    error: q.error,
     refetch: q.refetch,
     page,
     setPage,

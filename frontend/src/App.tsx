@@ -3,6 +3,7 @@ import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { GlobalProgress } from "./components/GlobalProgress";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { RequirePerm } from "./components/RequirePerm";
 import { StateView } from "./components/StateView";
 import { AuthProvider } from "./auth/auth";
 import { AuditPage } from "./pages/AuditPage";
@@ -41,15 +42,15 @@ export function App() {
               <Route index element={<ControlTowerPage />} />
               <Route path="intake" element={<OrderIntakePage />} />
               <Route path="orders/:id" element={<OrderDetailPage />} />
-              <Route path="dispatch-board" element={<DispatchBoardPage />} />
-              <Route path="waybills" element={<OrderManagePage />} />
+              <Route path="dispatch-board" element={<RequirePerm perm="waybill.view" label="调度工作台"><DispatchBoardPage /></RequirePerm>} />
+              <Route path="waybills" element={<RequirePerm perm="waybill.view" label="订单管理"><OrderManagePage /></RequirePerm>} />
               <Route path="waybills/:no" element={<WaybillDetailPage />} />
-              <Route path="fleet" element={<FleetPage />} />
-              <Route path="reconciliation" element={<ReconciliationPage />} />
-              <Route path="pricing" element={<PricingPage />} />
+              <Route path="fleet" element={<RequirePerm perm="masterdata.view" label="资源库"><FleetPage /></RequirePerm>} />
+              <Route path="reconciliation" element={<RequirePerm perm="finance.view" label="对账中心"><ReconciliationPage /></RequirePerm>} />
+              <Route path="pricing" element={<RequirePerm perm="finance.view" label="计价规则"><PricingPage /></RequirePerm>} />
               {/* 「管理后台」中转页已删除（侧栏直接列出组织与权限 / 审计日志）；老书签重定向 */}
               <Route path="admin" element={<Navigate to="/org" replace />} />
-              <Route path="org" element={<OrgCenterPage />} />
+              <Route path="org" element={<RequirePerm perm="org.rbac" label="组织与权限"><OrgCenterPage /></RequirePerm>} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="*" element={<StateView kind="empty" title="页面不存在" hint="该地址已失效或从未创建。" action={<Link className="btn-primary" to="/" style={{ textDecoration: "none" }}>返回驾驶舱</Link>} />} />

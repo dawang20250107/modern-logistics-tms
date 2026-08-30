@@ -63,7 +63,7 @@ function ResourceTable<T>({
         </div>
       )}
       {st.isError ? (
-        <StateView kind="error" onRetry={() => st.refetch()} />
+        <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
       ) : (
         <DataTable<T>
           columns={columns} rows={st.rows} rowKey={rowKey} viewKey={viewKey} exportName={exportName}
@@ -331,7 +331,7 @@ function ComplianceTab() {
       {q.isLoading ? (
         <StateView kind="loading" compact />
       ) : q.isError ? (
-        <StateView kind="error" hint="证件合规数据暂时无法加载。" onRetry={() => q.refetch()} compact />
+        <StateView kind="error" hint="证件合规数据暂时无法加载。" error={q.error} onRetry={() => q.refetch()} compact />
       ) : (
         <div className="ct-grid">
           <CredTable title="车辆证件" rows={q.data?.vehicles ?? []} subjectLabel="车牌" />

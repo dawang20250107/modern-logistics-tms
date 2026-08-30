@@ -218,7 +218,7 @@ export function WaybillDetailPage() {
   });
 
   if (detail.isLoading) return <StateView kind="loading" />;
-  if (detail.isError || !detail.data) return <StateView kind="error" title="运单无法打开" hint="运单不存在、无权访问或数据暂时不可用。" onRetry={() => detail.refetch()} />;
+  if (detail.isError || !detail.data) return <StateView kind="error" title="运单无法打开" hint="运单不存在、无权访问或数据暂时不可用。" error={detail.error} onRetry={() => detail.refetch()} />;
   
   const w = detail.data;
   const c = contract.data ?? null;

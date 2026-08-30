@@ -23,7 +23,7 @@ export function CustomerContextPanel({ customerId }: { customerId: string }) {
     );
   }
   if (q.isLoading) return <div className="panel"><StateView kind="loading" compact /></div>;
-  if (q.isError) return <div className="panel"><StateView kind="error" hint="客户上下文暂时无法加载。" onRetry={() => q.refetch()} compact /></div>;
+  if (q.isError) return <div className="panel"><StateView kind="error" hint="客户上下文暂时无法加载。" error={q.error} onRetry={() => q.refetch()} compact /></div>;
   const c = q.data;
   if (!c) return <div className="panel"><StateView kind="empty" title="未取到客户上下文" compact /></div>;
 

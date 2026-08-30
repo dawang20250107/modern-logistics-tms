@@ -100,7 +100,7 @@ function CsOrderPool() {
         </div>
       )}
       {st.isError ? (
-        <StateView kind="error" onRetry={() => st.refetch()} />
+        <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
       ) : (
         <DataTable<Order>
           columns={columns} rows={st.rows} rowKey={(o) => o.id} viewKey="cs-order-pool" exportName="客服订单池"

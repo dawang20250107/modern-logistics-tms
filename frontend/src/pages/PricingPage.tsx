@@ -330,7 +330,7 @@ export function PricingPage() {
         {rules.isLoading ? (
           <StateView kind="loading" compact />
         ) : rules.isError ? (
-          <StateView kind="error" hint="合同价目录暂时无法加载。" onRetry={() => rules.refetch()} />
+          <StateView kind="error" hint="合同价目录暂时无法加载。" error={rules.error} onRetry={() => rules.refetch()} />
         ) : items.length === 0 ? (
           <StateView kind="empty" title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
         ) : (

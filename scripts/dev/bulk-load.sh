@@ -40,7 +40,8 @@ INSERT INTO ops_order (
   pickup_contact_phone, priority, quoted_amount, settlement_type, source_type,
   temperature_range, sla_status, approval_remark, approval_status,
   ai_conversation_id, cod_amount, cod_status, freight_payer, freight_term,
-  customer_id, created_by_id, expected_pickup_at, expected_delivery_at
+  customer_id, created_by_id, expected_pickup_at, expected_delivery_at,
+  claimed_by_id, claimed_at
 )
 SELECT
   gen_random_uuid(),
@@ -48,6 +49,12 @@ SELECT
   now() - (g % 540) * interval '1 day',
   'LT-' || lpad(g::text, 9, '0'),
   'cs',
+  -- 状态。注意下面还要给 dispatching 配上锁定人：
+  -- 「调度中」意味着有人锁了这一单，产品里 claim/release 永远成对写这两列。
+  -- 造数时只写状态不写锁定人，会造出一个产品自己产生不出来的状态——
+  -- 而这种单在调度台的「待分配」里看得见、点「锁定」却恒定 409
+  -- 「订单已被锁定或不在池中」（而其实没人锁）。
+  -- 用 bulk-load 评估产品的人会以为一半的池子是坏的。
   (ARRAY['completed','completed','completed','completed','completed','completed',
          'confirmed','converted','dispatching','pooled','draft','pending_confirm'])[1 + g % 12],
   '', '普货 ' || (ARRAY['家电','汽配','化工原料','建材','纺织品','食品'])[1 + g % 6],
@@ -70,7 +77,16 @@ SELECT
   (SELECT id FROM md_customer OFFSET (g % GREATEST((SELECT count(*) FROM md_customer),1)) LIMIT 1),
   (SELECT id FROM accounts_user OFFSET (g % GREATEST((SELECT count(*) FROM accounts_user),1)) LIMIT 1),
   now() - (g % 540) * interval '1 day' + interval '6 hours',
-  now() - (g % 540) * interval '1 day' + interval '2 days'
+  now() - (g % 540) * interval '1 day' + interval '2 days',
+  -- dispatching = 有人锁了这一单，两列必须成对。其余状态一律为空。
+  CASE WHEN (ARRAY['completed','completed','completed','completed','completed','completed',
+                   'confirmed','converted','dispatching','pooled','draft','pending_confirm'])[1 + g % 12] = 'dispatching'
+       THEN (SELECT id FROM accounts_user OFFSET (g % GREATEST((SELECT count(*) FROM accounts_user),1)) LIMIT 1)
+       ELSE NULL END,
+  CASE WHEN (ARRAY['completed','completed','completed','completed','completed','completed',
+                   'confirmed','converted','dispatching','pooled','draft','pending_confirm'])[1 + g % 12] = 'dispatching'
+       THEN now() - (g % 540) * interval '1 day' + interval '7 hours'
+       ELSE NULL END
 FROM generate_series(1, $N) g
 ON CONFLICT (order_no) DO NOTHING
 " >/dev/null

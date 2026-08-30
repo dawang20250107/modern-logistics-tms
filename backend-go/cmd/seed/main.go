@@ -392,6 +392,24 @@ func (s *seeder) ordersAndWaybills() {
 		}
 		return nil
 	}
+	// dispatching = 有人锁了这一单。产品里 claim/release 永远成对写
+	// status 与 claimed_by_id，造数时只写状态就造出了一个产品自己
+	// 产生不出来的状态——那种单在调度台的「待分配」里看得见
+	// （谓词是 status IN ('pooled','dispatching') AND claimed_by_id IS NULL），
+	// 点「锁定」却恒定 409「订单已被锁定或不在池中」，而其实没人锁。
+	// 演示时点开调度台第一件想做的事就是锁一单，正好撞上。
+	claimedBy := func(status string) any {
+		if status == "dispatching" {
+			return id("user/seed_dispatcher")
+		}
+		return nil
+	}
+	claimedAt := func(status string) any {
+		if status == "dispatching" {
+			return time.Now()
+		}
+		return nil
+	}
 
 	for i, st := range statuses {
 		no := fmt.Sprintf("SEEDDD%06d", i+1)
@@ -405,14 +423,15 @@ func (s *seeder) ordersAndWaybills() {
 			  pickup_contact_phone, priority, quoted_amount, settlement_type, source_type,
 			  temperature_range, sla_status, approval_remark, approval_status, ai_conversation_id,
 			  cod_amount, cod_status, freight_payer, freight_term,
-			  customer_id, created_by_id, pooled_at)
+			  customer_id, created_by_id, pooled_at, claimed_by_id, claimed_at)
 			VALUES ($1::uuid, now() - ($2 || ' days')::interval, now(), $3, 'cs', $4, '',
 			        '演示货物', $5, $6::numeric, $7::numeric, 'cs', '联系人', '13800000000',
 			        $8, $9, '{}'::jsonb, '', 'ftl', 0, '', '', '', false, false, $14,
 			        '', '', '', 'normal', $10::numeric, 'monthly', $15, '', 'pending',
 			        '', 'none', '', 0, 'none', 'consignor', 'prepaid',
-			        $11::uuid, $12::uuid, $13::timestamptz)
-			ON CONFLICT (order_no) DO UPDATE SET status=EXCLUDED.status, updated_at=now()`,
+			        $11::uuid, $12::uuid, $13::timestamptz, $16::uuid, $17::timestamptz)
+			ON CONFLICT (order_no) DO UPDATE SET status=EXCLUDED.status,
+			  claimed_by_id=EXCLUDED.claimed_by_id, claimed_at=EXCLUDED.claimed_at, updated_at=now()`,
 			id("order/"+no), fmt.Sprint(i%14), no, st,
 			10+i*3, 2.5+float64(i), 8.0+float64(i), route[1], route[0],
 			12000+i*1500,
@@ -424,7 +443,8 @@ func (s *seeder) ordersAndWaybills() {
 			// 那看着像是界面漏了枚举翻译，其实是**播种数据用错了词汇表**。
 			// 演示数据必须长得像真数据，否则拿它走查界面会走出一堆假 bug。
 			[]string{"托盘", "木箱", "裸装", "纸箱"}[i%4],
-			[]string{"enterprise", "individual"}[i%2])
+			[]string{"enterprise", "individual"}[i%2],
+			claimedBy(st), claimedAt(st))
 	}
 
 	// 后 8 张转运单，状态铺满在途 → 已签收

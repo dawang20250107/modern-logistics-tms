@@ -44,8 +44,32 @@ type statementReq struct {
 	ScopeRef         string `json:"scope_ref"`  // 项目 id 或线路名
 	Start            string `json:"start"`
 	End              string `json:"end"`
-	DueDate          string `json:"due_date"`
-	ExternalTotal    string `json:"external_total"`
+	// PeriodStart / PeriodEnd 是界面上用的名字（账期），与 Start/End 同义。
+	//
+	// 两边原先对不上：前端发 period_start / period_end，这里只认 start / end，
+	// 于是对账中心那颗「生成」按钮点下去恒定报「start 与 end 必填」——
+	// 而用户明明选了账期。两个名字都收下，比逼一边改更稳。
+	PeriodStart string `json:"period_start"`
+	PeriodEnd   string `json:"period_end"`
+	DueDate     string `json:"due_date"`
+	// ExternalTotal 金额，数字和字符串两种写法都收。
+	//
+	// JSON 里金额写成数字是最自然的，而这里原先是 string——前端在用户没填时
+	// 发的是数字 0，一个数字就让**整个请求体**解不开，报错还是
+	// 「请求体不是合法 JSON」，排查方向完全被带偏。
+	ExternalTotal json.Number `json:"external_total"`
+}
+
+// period 取账期：优先 period_start/period_end（界面用的名字），回落到 start/end。
+func (q statementReq) period() (string, string) {
+	s, e := q.PeriodStart, q.PeriodEnd
+	if s == "" {
+		s = q.Start
+	}
+	if e == "" {
+		e = q.End
+	}
+	return s, e
 }
 
 // GenerateStatement POST /finance/statements/generate
@@ -72,8 +96,10 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "INVALID_COUNTERPARTY", "counterparty_id 必须是合法 UUID。")
 		return
 	}
-	if req.Start == "" || req.End == "" {
-		httpx.Err(w, http.StatusBadRequest, "PERIOD_REQUIRED", "start 与 end 必填（对账必须带账期）。")
+	periodStart, periodEnd := req.period()
+	if periodStart == "" || periodEnd == "" {
+		httpx.Err(w, http.StatusBadRequest, "PERIOD_REQUIRED",
+			"账期必填（period_start 与 period_end，旧字段名 start/end 亦可）。")
 		return
 	}
 	if req.ScopeType == "" {
@@ -87,7 +113,7 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scopeCond, scopeName := "true", ""
-	args := []any{req.Direction, req.Start, req.End, req.CounterpartyID}
+	args := []any{req.Direction, periodStart, periodEnd, req.CounterpartyID}
 	switch req.ScopeType {
 	case "project":
 		if _, err := uuid.Parse(req.ScopeRef); err != nil {
@@ -208,8 +234,8 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1, now(), now(), $2, $3, $4, $5, $6, $7::date, $8::date, $9::date,
 		        $10::numeric, $11, $12::numeric, 0, 'draft', $13, $14::uuid, $15, $16::uuid)`,
 		sid.String(), stmtNo, req.Direction, req.CounterpartyType, req.CounterpartyID, cpName,
-		req.Start, req.End, nullIfEmpty(req.DueDate), total.String(), len(lines),
-		orZeroStr(req.ExternalTotal), req.ScopeType, scopeIDArg(req), scopeName, stmtOrg); err != nil {
+		periodStart, periodEnd, nullIfEmpty(req.DueDate), total.String(), len(lines),
+		orZeroStr(req.ExternalTotal.String()), req.ScopeType, scopeIDArg(req), scopeName, stmtOrg); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "建单失败："+err.Error())
 		return
 	}

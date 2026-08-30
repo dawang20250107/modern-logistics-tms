@@ -88,17 +88,44 @@ function tryRefresh(): Promise<boolean> {
 }
 
 async function doRefresh(): Promise<boolean> {
-  if (!refreshToken) return false;
+  // 以 localStorage 为准，而不是模块变量。
+  //
+  // 模块变量是**每个标签页各存一份**、页面加载时读一次的。而刷新是轮换的：
+  // 同一个人开两个标签页，A 标签刷新之后旧券就作废了，
+  // B 标签内存里那张还是旧的——它下次刷新必然 401，然后清空令牌把人踢走。
+  // 实测：A 用 R0 换到 R1，B 稍后再用 R0 → 401「该凭证已失效，请重新登录」。
+  // localStorage 是两个标签页共享的，A 换完就写在那儿，B 读它就能续上。
+  const sent = localStorage.getItem("refresh") ?? refreshToken;
+  if (!sent) return false;
+  refreshToken = sent;
   const resp = await fetch(`${API_BASE}/auth/token/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh: refreshToken }),
+    body: JSON.stringify({ refresh: sent }),
   });
   if (!resp.ok) {
+    // 还有一种情形：我们在飞的这几百毫秒里，另一个标签页正好把券轮换了。
+    // 那时候手上这张是刚作废的，而 localStorage 里已经是新的——重试一次。
+    // 只重试一次：真的失效时不该在这儿打转。
+    const now = localStorage.getItem("refresh") ?? "";
+    if (now && now !== sent) {
+      refreshToken = now;
+      const again = await fetch(`${API_BASE}/auth/token/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh: now }),
+      });
+      if (again.ok) return applyRefreshed(await again.json());
+    }
     clearTokens();
     return false;
   }
-  const env = (await resp.json()) as Envelope<{ access: string; refresh?: string }>;
+  return applyRefreshed(await resp.json());
+}
+
+/** 把刷新回来的新券存下；成功返回 true，否则清空令牌。 */
+function applyRefreshed(raw: unknown): boolean {
+  const env = raw as Envelope<{ access: string; refresh?: string }>;
   if (env.success && env.data?.access) {
     accessToken = env.data.access;
     localStorage.setItem("access", accessToken);

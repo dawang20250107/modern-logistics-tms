@@ -90,4 +90,46 @@ describe("令牌刷新只能有一次在飞", () => {
     await expect(apiGet("/waybills/stats")).rejects.toThrow();
     expect(store.get("access"), "刷新失败后必须清掉令牌").toBeUndefined();
   });
+
+  it("另一个标签页刚轮换过券，这个标签页不能因此掉线", async () => {
+    // 同一个人开两个标签页。A 标签先刷新，把 R0 换成了 R1（R0 随即作废）。
+    // B 标签内存里那张还是 R0——它下次刷新如果照旧用 R0，必然 401 然后掉线。
+    // 实测过后端行为：A 用 R0 换到 R1 后，B 再用 R0 就是
+    // 401「该凭证已失效，请重新登录」。
+    // localStorage 是两个标签页共享的，A 换完就写在那儿。
+    let usedTokens: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/auth/token/refresh")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { refresh?: string };
+        usedTokens.push(body.refresh ?? "");
+        if (body.refresh !== "rotated-by-tab-a") {
+          return new Response(JSON.stringify({ success: false, error: { code: "TOKEN_REVOKED", message: "该凭证已失效" } }),
+            { status: 401, headers: { "Content-Type": "application/json" } });
+        }
+        return new Response(JSON.stringify({ success: true, data: { access: "fresh-access", refresh: "fresh-refresh" } }),
+          { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      const auth = new Headers(init?.headers).get("Authorization");
+      if (auth === "Bearer fresh-access") {
+        return new Response(JSON.stringify({ success: true, data: { ok: true } }),
+          { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ success: false, error: { code: "TOKEN_INVALID", message: "过期" } }),
+        { status: 401, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // 顺序要紧：**先加载模块**，让它把当时的旧券记进模块变量
+    // （这就是 B 标签页打开时的状态），**之后**另一个标签页才轮换。
+    // 反过来写的话模块变量一开始就是新券，这条用例什么都测不到——
+    // 第一版就是这么写的，把串行化改回读模块变量它照样绿。
+    const { apiGet } = await import("../api/client");
+    store.set("refresh", "rotated-by-tab-a"); // A 标签轮换后写进共享的 localStorage
+    await expect(apiGet("/waybills/stats")).resolves.toBeTruthy();
+    expect(usedTokens[0],
+      "刷新时用的是模块变量里那张旧券 —— 另一个标签页轮换过之后它已经作废了，" +
+      "这个标签页会被踢下线。localStorage 是共享的，该以它为准。")
+      .toBe("rotated-by-tab-a");
+  });
 });

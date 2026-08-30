@@ -71,6 +71,7 @@ export function WaybillDetailPage() {
       }),
     onSuccess: invalidate,
   });
+  const hasCosts = ((costs.data?.payables?.length ?? 0) + (costs.data?.receivables?.length ?? 0)) > 0;
   const genCosts = useMutation({
     mutationFn: () => apiPost(`/waybills/${no}/generate-costs`, {}),
     onSuccess: invalidate,
@@ -484,7 +485,17 @@ export function WaybillDetailPage() {
           {/* 费用台账 */}
           <div className="panel">
             <div className="panel-head">
-              费用台账              <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }} disabled={genCosts.isPending} onClick={() => genCosts.mutate()}>重新生成</button>
+              费用台账
+              {/* 一张新运单的费用台账是空的，要按这颗按钮才按合同价生成。
+                  按钮原先一律写「重新生成」——第一次生成时那三个字是错的，
+                  而正在找"费用怎么出来"的人也不会认得它。
+                  实测走完整条验收链：建单→派单→签收之后费用记录 0 条，
+                  对账单归集出来是 ¥0，看起来像对账坏了。 */}
+              <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }}
+                      disabled={genCosts.isPending} onClick={() => genCosts.mutate()}
+                      title={hasCosts ? "按当前合同价重算这张运单的应收应付" : "按合同价生成这张运单的应收应付"}>
+                {genCosts.isPending ? "生成中…" : hasCosts ? "重新生成" : "生成费用"}
+              </button>
             </div>
             {costs.data ? (
               <>

@@ -126,6 +126,12 @@ if [ -d frontend/node_modules ]; then
     # 管理端 /login 进去，一个都没打开过它。第一次真按下去就查出两处：
     # 预检没放行 X-Driver-Token（登录后一片空白）、未授权定位时打卡按钮永久卡住。
     browse_step "司机端（登录→本人运单→拍照打卡→证件自助上传→回库核对）" /tmp/rc-driver.log node scripts/dev/driver-walk.mjs
+    # 验收链：把交付说明第七节那几步**按同一张单**从头走到尾。
+    # 前面几条各覆盖一段，没有一条跨过段与段的接缝——
+    # "费用不会在派单时自动生成"就是在这条链上才发现的：前四步都对，
+    # 第五步拿到一张 ¥0 的对账单。
+    browse_step "验收链（建单→派单→签收→回单→生成费用→对账→核销→查单）" /tmp/rc-acc.log \
+      env DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" node scripts/dev/acceptance-walk.mjs
   fi
 else
   skip "前端：未装依赖（frontend/node_modules 不存在），先 npm ci"

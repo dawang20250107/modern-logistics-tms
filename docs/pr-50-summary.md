@@ -349,7 +349,7 @@ HTTP 500  建单失败：ERROR: value too long for type character varying(32) (S
 | 检查 | 判据 | 抓到过 |
 |---|---|---|
 | `readsurface_test.go`（4 条） | 每条集合/详情 GET 要么 403，要么在名单里说明为什么这个账号该看得到 | 订单域 9 条 + 异常列表 + 订单子资源 6 条 + 承运商绩效 |
-| `txn-guard.py` | 状态守卫和它守着的写要在同一个事务里 | 异常关闭、报销驳回 |
+| `txn-guard.py` | 状态守卫和它守着的写要在同一个事务里 | 异常关闭、报销驳回、回单核验 |
 | `orgcolumn_test.go` | 带 `organization_id` 的表 INSERT 时不能漏这一列 | 主派单、批量派承运商、批次对账单 |
 | `write-needs-perm.test.ts` | 有写请求的界面必须出现 `hasPerm` | 运单详情（12 处）等 9 个文件 |
 | `readonly-buttons.test.ts` | 对账中心每个写动作按钮三行内要有 `canManage` | 对账中心全套 |
@@ -422,6 +422,12 @@ HTTP 500  建单失败：ERROR: value too long for type character varying(32) (S
 渐变 11 条死 6 条（`^textarea` 连一个选择器都匹配不上）；
 写死 hex 10 条死 9 条，其中 `hero` 最典型——`.auth-hero` 早就被
 `isFieldUse` 的公开页规则盖住了，这条豁免从来没生效过。
+
+另外两份（`route-guard` 与 `write-needs-perm`）本来就有"条目还在不在"
+的自检，但都缺另一半：**这条豁免还需不需要**。一条路由后来挂上了
+`RequirePerm`、一个文件后来自己判了权限之后，名单里那句"为什么不用挂"
+就成了假话。这不造成漏洞——门确实在；危险在读的人身上：他会以为这一页
+是有意敞开的，于是下次真敞开时也没人多看一眼。两个方向现在都齐了。
 
 ### 补完界面之后，那条豁免的理由被证明是错的
 
@@ -497,6 +503,12 @@ HTTP 500  建单失败：ERROR: value too long for type character varying(32) (S
   变量（`` `/orders/${id}/${action}` ``），规整完是 `/orders/{}/{}`，
   段数对得上就配上了 `/orders` 下的每一条三段路由。改成那个词必须在同一个
   文件里以字符串出现过才算数——即确实有调用点把它传进去
+- 回单核验那条并发用例的第一版**期望写错了**：写的是"没有通过的回单就该是
+  returned"，跑八遍红两遍——全被驳回时运单停在 `pending`。去看重算 SQL：
+  它只在运单当前就是 `audited` 时才退回 `returned`，否则原样不动，这是对的
+  （一张从没核销过的运单，驳回它的回单不该凭空多出一个"已回收"）。
+  **红的是我写的期望，不是被测的代码**；照着改代码就会为了让用例变绿
+  而写进一个假状态
 
 ## 量过之后决定不改的地方
 

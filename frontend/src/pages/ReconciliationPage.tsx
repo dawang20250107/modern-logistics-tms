@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { useModalA11y } from "../api/useModalA11y";
 import { fmtDateTime, fmtMoney, fmtNum0 } from "../api/format";
 import { toast } from "../api/toast";
@@ -296,10 +297,22 @@ export function ReconciliationPage() {
   const [showGen, setShowGen] = useState(false);
   const [settleTarget, setSettleTarget] = useState<Statement | null>(null);
 
+  // 财务（只读）这个角色真实存在（演示库里就有一个），它有 finance.view
+  // 没有 finance.manage。原先这一页的写按钮对它照常显示：台账上五个「确认」、
+  // 两个「核销」、「批量审计」「+ 生成对账单」全都亮着，点下去弹一句
+  // 「无财务操作权限」。看得见按不动的按钮比没有按钮更糟——
+  // 只读的人会以为是自己操作错了，反复点、然后来问。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "finance.manage");
+
   const cpType = direction === "receivable" ? "customer" : "carrier";
   const counterparties = useQuery({
     queryKey: ["cp", cpType],
     queryFn: () => apiGet<Paginated<Customer | Carrier>>(`/${cpType === "customer" ? "customers" : "carriers"}?page_size=200`),
+    // 只有展开「生成对账单」时才需要它。原先无条件预取 200 条对手方：
+    // 一是白拉一次，二是财务角色没有 masterdata.view，一进页面就吃一个
+    // 403（页面上什么都不说，只是那个下拉永远是空的）。
+    enabled: showGen && canManage,
   });
   // 对账单台账：服务端筛选 + 分页 + 排序（对全量生效）
   const st = useServerTable<Statement>({
@@ -390,7 +403,8 @@ export function ReconciliationPage() {
     { key: "status", header: "状态", width: 100, filterable: true, filterValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, sortField: "status", sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => statusTag(s) },
     { key: "act", header: "财务操作", width: 110, alwaysVisible: true, sticky: "right", render: (s) => (
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-        {s.status === "draft" ? <button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button>
+        {!canManage ? <span className="muted small" title="需要 finance.manage 权限点">只读</span>
+          : s.status === "draft" ? <button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button>
           : (s.status === "confirmed" || s.status === "partial") ? <button className="btn-primary" onClick={() => setSettleTarget(s)}>核销</button>
           : <span className="muted small">—</span>}
       </div>
@@ -406,12 +420,12 @@ export function ReconciliationPage() {
             {detail.data?.audited_at ? `已审计 · ${fmtDateTime(detail.data.audited_at)}` : "尚未审计"}
             {" · "}共 {detail.data?.lines?.length || 0} 笔明细
           </span>
-          {detail.data && (detail.data.status === "confirmed" || detail.data.status === "partial") && (
+          {canManage && detail.data && (detail.data.status === "confirmed" || detail.data.status === "partial") && (
             <button className="btn-primary" style={{ padding: "3px 12px", fontSize: 11 }} onClick={(e) => { e.stopPropagation(); setSettleTarget(detail.data!); }}>登记核销</button>
           )}
-          <button className="btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }} disabled={auditOne.isPending} onClick={(e) => { e.stopPropagation(); if (expanded) auditOne.mutate(expanded); }}>
+          {canManage && <button className="btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }} disabled={auditOne.isPending} onClick={(e) => { e.stopPropagation(); if (expanded) auditOne.mutate(expanded); }}>
             {auditOne.isPending ? "审计中…" : "审计本单"}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -490,8 +504,10 @@ export function ReconciliationPage() {
               </button>
               {showStmtFilter && <FilterBuilder fields={STMT_FILTER_FIELDS} model={stmtModel} onChange={setStmtModel} onClose={() => setShowStmtFilter(false)} />}
             </div>
-            <button className="btn-ghost" disabled={auditAll.isPending || items.length === 0} onClick={() => auditAll.mutate()}>{auditAll.isPending ? "审计中…" : `批量审计（${items.length}）`}</button>
-            <button className={`btn-primary${showGen ? " is-on" : ""}`} onClick={() => setShowGen((v) => !v)}>{showGen ? "收起" : "+ 生成对账单"}</button>
+            {canManage && <button className="btn-ghost" disabled={auditAll.isPending || items.length === 0} onClick={() => auditAll.mutate()}>{auditAll.isPending ? "审计中…" : `批量审计（${items.length}）`}</button>}
+            {canManage
+              ? <button className={`btn-primary${showGen ? " is-on" : ""}`} onClick={() => setShowGen((v) => !v)}>{showGen ? "收起" : "+ 生成对账单"}</button>
+              : <span className="muted small" title="需要 finance.manage 权限点">只读账号：可查看与导出，不能生成或核销</span>}
           </div>
 
           {showGen && (
@@ -595,7 +611,9 @@ export function ReconciliationPage() {
                       <div><span className="muted small">已核销</span><b style={{ color: "var(--green)" }}>{fmtMoney(s.settled_amount)}</b></div>
                       <div><span className="muted small">未结</span><b style={{ color: "var(--accent)" }}>{fmtMoney(s.outstanding)}</b></div>
                     </div>
-                    <button className="btn-primary" onClick={() => setSettleTarget(s)}>登记{s.direction === "receivable" ? "收款" : "付款"}</button>
+                    {canManage
+                      ? <button className="btn-primary" onClick={() => setSettleTarget(s)}>登记{s.direction === "receivable" ? "收款" : "付款"}</button>
+                      : <span className="muted small" title="需要 finance.manage 权限点">只读</span>}
                   </div>
                 );
               })}

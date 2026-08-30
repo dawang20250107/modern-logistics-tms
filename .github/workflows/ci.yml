@@ -94,6 +94,11 @@ jobs:
       - name: 部署配置与代码对齐走查
         working-directory: .
         run: python3 scripts/dev/env-match.py
+      # 比 body 里的字段名。route-match 只比路径和方法，看不见这一类——
+      # 对账中心发 period_start 而后端只认 start，路径方法全对，功能是死的。
+      - name: 请求体字段对齐走查
+        working-directory: .
+        run: python3 scripts/dev/payload-match.py
       - name: 前后端接口对齐走查
         # working-directory 必须写：这个 job 默认 cd 到 frontend/，
         # 不写的话脚本路径找不到，步骤会在 0 秒内失败——

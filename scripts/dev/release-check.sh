@@ -207,6 +207,16 @@ else
   bad "有前端调用对不上后端路由："; sed 's/^/      /' /tmp/rc-route.log
 fi
 
+sect "请求体字段对齐"
+# route-match 只比路径和方法，比不到 body 里面。而发布前最要命的那个 bug
+# 恰恰在 body 里：对账中心发 period_start，后端只认 start——用户明明选了账期，
+# 后端却报"start 与 end 必填"，对账中心第一步就走不通。
+if python3 scripts/dev/payload-match.py >/tmp/rc-payload.log 2>&1; then
+  ok "$(tail -1 /tmp/rc-payload.log)"
+else
+  bad "有前端字段后端从没提过："; grep -E "✗|      " /tmp/rc-payload.log | sed 's/^/      /'
+fi
+
 sect "凭证上传"
 # 回单、附件、司机证件是对账吵起来时唯一拿得出的东西。
 # 这三条路径都曾经"看起来成功、其实没存"或"存了但打不开"。

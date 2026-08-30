@@ -349,6 +349,9 @@ func cstMidnight() time.Time {
 // 贪心：货量从大到小，每张单挑最紧凑且未占用的车。先排大件是因为大件的
 // 可行车少，先满足它才不会被小件把大车占掉。
 func (h *Handler) DispatchPlan(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -381,7 +384,7 @@ func (h *Handler) DispatchPlan(w http.ResponseWriter, r *http.Request) {
 			WHERE w.status = 'pending_dispatch' ORDER BY w.created_at DESC, w.id LIMIT 200`)
 	}
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取运单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取运单失败", err)
 		return
 	}
 	type item struct {

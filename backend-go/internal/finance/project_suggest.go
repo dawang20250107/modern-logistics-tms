@@ -27,6 +27,9 @@ import (
 
 // SuggestProjects GET /finance/projects/suggest?customer=&origin=&destination=&q=
 func (h *Handler) SuggestProjects(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermView, denyView) == nil {
+		return
+	}
 	q := r.URL.Query()
 	customer := strings.TrimSpace(q.Get("customer"))
 	origin := strings.TrimSpace(q.Get("origin"))
@@ -67,7 +70,7 @@ func (h *Handler) SuggestProjects(w http.ResponseWriter, r *http.Request) {
 		ORDER BY score DESC, c.start_date DESC NULLS LAST, c.project_no
 		LIMIT 8`, customer, origin, dest, keyword)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	defer rows.Close()

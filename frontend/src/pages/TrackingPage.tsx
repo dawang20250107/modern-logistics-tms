@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { apiGet } from "../api/client";
+import { ApiError, apiGet } from "../api/client";
 import { fmtDateTime } from "../api/format";
 import { BUSINESS_TYPE_LABEL, ORDER_STATUS_LABEL, STATUS_LABEL } from "../api/types";
 
@@ -31,6 +31,10 @@ export function TrackingPage() {
   const [phone, setPhone] = useState("");
 
   const track = useMutation({
+    // 本页自己在表单下面渲染错误文案，不需要全局浮层再弹一次。
+    // 项目里为这种情况留了 meta.silent（见 main.tsx 的 MutationCache.onError），
+    // 不声明的话同一句话会同时出现在表单下和右下角。
+    meta: { silent: true },
     mutationFn: () => apiGet<TrackResult>(`/track?order_no=${encodeURIComponent(orderNo)}&phone=${encodeURIComponent(phone)}`),
   });
 
@@ -52,7 +56,19 @@ export function TrackingPage() {
             {track.isPending ? "查询中…" : "查询"}
           </button>
         </form>
-        {track.isError && <div className="login-error">未找到匹配订单，请核对订单号与手机号。</div>}
+        {/* 错误提示要说**这次**为什么失败，不能一律说"没找到"。
+            这个端点现在会返回 429（限流，防四位后缀被穷举）。
+            如果照旧只显示"未找到匹配订单，请核对订单号与手机号"，
+            客户会以为是自己输错了，于是反复重输——而每次重试都会把
+            限流窗口顶得更长，他永远等不到能查的时候。
+            服务端的报错文案本来就写清楚了（含"预计 N 秒后可用"），照实说即可。 */}
+        {track.isError && (
+          <div className="login-error">
+            {track.error instanceof ApiError && track.error.code === "throttled"
+              ? track.error.message
+              : "未找到匹配订单，请核对订单号与手机号。"}
+          </div>
+        )}
 
         {r && (
           <div className="stack" style={{ marginTop: 8 }}>

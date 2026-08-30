@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -56,6 +57,16 @@ LEFT JOIN accounts_user u ON u.id = x.assignee_id`,
 
 // List GET /api/v1/exceptions（数据范围按运单组织归属）
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	// 这条路由**覆盖掉了**通用 CRUD 挂好的那条（main.go 里
+	// mdH.CRUD(...) 之后又写了 rt.Get("/", excH.List)），
+	// 于是 CRUD 上 ReadPerm: "waybill.view" 那道闸一起被盖掉了。
+	// 自实现的这份只做了数据范围——而范围管的是"看得见谁的单"，
+	// 不是"该不该看异常这一面"。实测一个只有 masterdata.view、
+	// 数据范围给"全部"的账号，打这里拿得到异常记录（含责任方、
+	// 赔付金额、处理结论）。
+	if !h.MD.Allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -93,15 +104,23 @@ func nilIfEmpty(s string) any {
 func (h *Handler) excEvent(ctx context.Context, excID, eventType, toStatus, actorID, note, source string) {
 	eid, _ := uuid.NewV7()
 	pj, _ := json.Marshal(map[string]any{"source": source})
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_exception_event (id, created_at, updated_at, exception_id, event_type,
 		  from_status, to_status, actor_id, note, payload, event_time)
 		VALUES ($1, now(), now(), $2::uuid, $3, '', $4, $5::uuid, $6, $7, clock_timestamp())`,
-		eid.String(), excID, eventType, toStatus, actorID, note, pj)
+		eid.String(), excID, eventType, toStatus, actorID, note, pj); err != nil {
+		slog.Warn("异常事件写库失败", "err", err)
+	}
 }
 
 // Create POST /api/v1/exceptions —— 挂运单登记（运单详情页上报）
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	// 上报异常按 waybill.view 放行而不是 waybill.manage：发现问题的常常是客服，
+	// 而他们只有查看权。**登记问题的门要低，定责赔钱的门要高**——
+	// 后面 Assign/Handle/Close 三个动作要的是 waybill.manage。
+	if !h.MD.Allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -164,6 +183,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // ReportForOrder POST /api/v1/orders/{id}/report-exception —— 订单池登记 + 订单事件
 func (h *Handler) ReportForOrder(w http.ResponseWriter, r *http.Request) {
+	// 与 Create 同一道门：发现问题的常常是只有查看权的客服
+	if !h.MD.Allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -213,11 +236,13 @@ func (h *Handler) ReportForOrder(w http.ResponseWriter, r *http.Request) {
 	// 订单事件（record_order_event: exception_reported + note）
 	oe, _ := uuid.NewV7()
 	pj, _ := json.Marshal(map[string]any{"note": "登记异常：" + exceptionTypeLabel[excType]})
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type,
 		  from_status, to_status, actor_id, source, payload)
 		VALUES ($1, now(), now(), clock_timestamp(), $2::uuid, 'exception_reported', '', '', $3::uuid, 'exception', $4)`,
-		oe.String(), orderID, me.ID, pj)
+		oe.String(), orderID, me.ID, pj); err != nil {
+		slog.Warn("异常事件写库失败", "err", err)
+	}
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"id": id.String(), "order_no": orderNo, "exception_type": excType, "level": level,
 	})

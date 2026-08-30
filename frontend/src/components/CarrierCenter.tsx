@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
-import { apiGet } from "../api/client";
+import { apiGet, apiPost } from "../api/client";
+import { confirmAction } from "../api/confirm";
 import { fmtMoney } from "../api/format";
+import { toast } from "../api/toast";
 import { useModalA11y } from "../api/useModalA11y";
 import { useServerTable } from "../api/useServerTable";
 import type { Carrier, CarrierLanePrice, Paginated } from "../api/types";
@@ -32,6 +34,73 @@ function riskTag(c: Carrier) {
   if (c.grade === "A") return <span className="tag tag-low">优质 A</span>;
   if (c.grade === "D") return <span className="tag tag-high">高风险 D</span>;
   return <span className="tag tag-low">正常</span>;
+}
+
+// 拉黑 / 恢复合作。
+//
+// 后端 POST /carriers/{id}/blacklist 一直是全的，**界面上一个入口都没有**——
+// 表格里有「黑名单」标签、筛选器里有「停派/黑名单」这一档，详情里也显示
+// 「黑名单：是（原因）」，唯独没有地方能把它设上或者撤掉。
+// 只读得出、写不进去，是这一轮反复出现的那一种缺口。
+//
+// 拉黑必须填原因（后端会 400 拦住空原因）：停掉一家承运商后面跟着的是
+// 在途单怎么办、押金怎么退、谁批的，没有原因事后没法还原。
+function BlacklistAction({ carrier, onDone }: { carrier: Carrier; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const act = useMutation({
+    mutationFn: (v: { blacklisted: boolean; reason: string }) =>
+      apiPost(`/carriers/${carrier.id}/blacklist`, v),
+    onSuccess: (_d, v) => {
+      toast.success(v.blacklisted ? "已拉黑，该承运商不再参与派单" : "已恢复合作");
+      setOpen(false);
+      setReason("");
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message || "操作失败"),
+  });
+
+  if (carrier.blacklisted) {
+    return (
+      <div style={{ marginTop: 8 }}>
+        <button className="btn-ghost small" disabled={act.isPending}
+                onClick={async () => {
+                  const ok = await confirmAction({
+                    title: "恢复与该承运商的合作？",
+                    message: `${carrier.name} 将重新参与派单与比价。`,
+                    confirmText: "恢复合作",
+                  });
+                  if (ok) act.mutate({ blacklisted: false, reason: "" });
+                }}>恢复合作</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      {!open ? (
+        <button className="btn-ghost small" onClick={() => setOpen(true)}>拉黑该承运商</button>
+      ) : (
+        <div className="stack-sm">
+          <input className="search" style={{ width: "100%" }} value={reason}
+                 onChange={(e) => setReason(e.target.value)}
+                 placeholder="拉黑原因（必填，如：货损后拒赔 / 资质造假）" />
+          <div className="form-row" style={{ gap: 8, padding: 0 }}>
+            <button className="btn-danger small" disabled={!reason.trim() || act.isPending}
+                    onClick={async () => {
+                      const ok = await confirmAction({
+                        title: "确认拉黑该承运商？",
+                        message: `${carrier.name} 将不再出现在派单与比价里。原因：${reason.trim()}`,
+                        confirmText: "确认拉黑",
+                        tone: "danger",
+                      });
+                      if (ok) act.mutate({ blacklisted: true, reason: reason.trim() });
+                    }}>确认拉黑</button>
+            <button className="btn-ghost small" onClick={() => { setOpen(false); setReason(""); }}>取消</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // 承运商详情抽屉：档案 + 风控合规 + 经营表现 + 线路价库
@@ -64,7 +133,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
           {detail.isLoading ? (
             <StateView kind="loading" compact />
           ) : detail.isError ? (
-            <StateView kind="error" onRetry={() => detail.refetch()} />
+            <StateView kind="error" error={detail.error} onRetry={() => detail.refetch()} />
           ) : c ? (
             <div className="stack" style={{ gap: 16 }}>
               {c.dispatch_blocked && (
@@ -95,6 +164,10 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                   <div><span>合同有效期</span><b>{c.contract_expiry || "—"}</b></div>
                   <div><span>责任险到期</span><b>{c.insurance_expiry || "—"}</b></div>
                 </div>
+                {/* 拉黑/恢复。这一块原先只**显示**黑名单状态：表格里有「黑名单」标签、
+                    筛选器里有「停派/黑名单」这一档，而没有任何地方能把它设上或撤掉。
+                    货损、跑路、资质造假之后要立刻停掉一家承运商，是调度当天就要做的事。 */}
+                <BlacklistAction carrier={c} onDone={() => detail.refetch()} />
                 {c.expiry_alerts && c.expiry_alerts.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                     {c.expiry_alerts.map((a, i) => (
@@ -135,7 +208,7 @@ function CarrierDrawer({ carrierId, onClose }: { carrierId: string; onClose: () 
                 {lanes.isLoading ? (
                   <StateView kind="loading" compact />
                 ) : lanes.isError ? (
-                  <StateView kind="error" onRetry={() => lanes.refetch()} compact />
+                  <StateView kind="error" error={lanes.error} onRetry={() => lanes.refetch()} compact />
                 ) : (lanes.data?.items ?? []).length === 0 ? (
                   <StateView kind="empty" title="尚未维护线路价" hint="补充常跑线路价格后，调度推荐会优先引用价库。" compact />
                 ) : (
@@ -201,7 +274,7 @@ export function CarrierCenter() {
         </div>
       )}
       {st.isError ? (
-        <StateView kind="error" onRetry={() => st.refetch()} />
+        <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
       ) : (
         <DataTable<Carrier>
           columns={carrierColumns} rows={st.rows} rowKey={(c) => c.id} viewKey="carriers" exportName="承运商"

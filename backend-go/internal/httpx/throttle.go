@@ -8,6 +8,8 @@ package httpx
 // AI 闸防 LLM token 成本 DoS —— 原生化时必须一并带过来。
 
 import (
+	"context"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,9 +17,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Throttle struct {
+	scope  string // 库模式下的闸名（取自环境变量名，如 THROTTLE_REGISTER）
 	mu     sync.Mutex
 	hits   map[string][]time.Time
 	limit  int
@@ -50,11 +55,80 @@ func NewThrottle(envKey, fallback string) *Throttle {
 			window = 24 * time.Hour
 		}
 	}
-	return &Throttle{hits: map[string][]time.Time{}, limit: limit, window: window}
+	return &Throttle{scope: envKey, hits: map[string][]time.Time{}, limit: limit, window: window}
+}
+
+// sharedDB 由 UseSharedStore 在启动期注入。为空时限流退回进程内 map。
+//
+// 为什么要能共享：限流是**安全闸**（注册 10/min 防批量刷号、找回密码 8/min
+// 防验证码爆破、AI 30/min 防 token 成本 DoS）。计数在进程内的话，
+// 副本数一乘闸就形同虚设——两个副本等于把每个闸的额度直接翻倍。
+// "要不要多副本"不该由这个实现细节决定。
+var sharedDB *pgxpool.Pool
+
+// UseSharedStore 让所有限流器改用库做计数（多副本部署必须调用）。
+func UseSharedStore(db *pgxpool.Pool) { sharedDB = db }
+
+// allowShared 用库做滑动窗口：先删过期命中，再数窗口内的行数，未超则插一行。
+// 单条 SQL 里完成，避免"读-判-写"之间的竞态。
+func (t *Throttle) allowShared(key string) (bool, int, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	scope := t.scope
+	if scope == "" {
+		scope = "default"
+	}
+	var allowed bool
+	var oldest *time.Time
+	err := sharedDB.QueryRow(ctx, `
+		WITH purged AS (
+		  DELETE FROM iam_rate_hit
+		   WHERE scope = $1 AND key = $2 AND hit_at < now() - $3::interval
+		), cur AS (
+		  SELECT count(*) AS n, min(hit_at) AS oldest
+		    FROM iam_rate_hit WHERE scope = $1 AND key = $2 AND hit_at >= now() - $3::interval
+		), ins AS (
+		  INSERT INTO iam_rate_hit (scope, key)
+		  SELECT $1, $2 FROM cur WHERE cur.n < $4
+		  RETURNING 1
+		)
+		SELECT (SELECT count(*) FROM ins) > 0, (SELECT oldest FROM cur)`,
+		scope, key, t.window.String(), t.limit).Scan(&allowed, &oldest)
+	if err != nil {
+		// 库出问题时**放行**而不是拒绝。限流不是鉴权：把所有人挡在门外
+		// 换来的不是安全，是自己制造的全站不可用。降级的方向要选对。
+		slog.Warn("限流查询失败，本次放行", "scope", scope, "err", err)
+		return true, 0, true
+	}
+	if allowed {
+		return true, 0, true
+	}
+	wait := 1
+	if oldest != nil {
+		if w := int(time.Until(oldest.Add(t.window)).Seconds()) + 1; w > wait {
+			wait = w
+		}
+	}
+	return false, wait, true
+}
+
+// PurgeExpiredRateHits 清理过期命中行。allowShared 里那条 DELETE 只清
+// 「本 key 本 scope」的，从没被访问过的旧 key 需要这个兜底。
+func PurgeExpiredRateHits(ctx context.Context, db *pgxpool.Pool, keep time.Duration) (int64, error) {
+	tag, err := db.Exec(ctx, `DELETE FROM iam_rate_hit WHERE hit_at < now() - $1::interval`, keep.String())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 // Allow 返回是否放行；被限时给出建议重试秒数（向上取整，对齐 DRF）
 func (t *Throttle) Allow(key string) (bool, int) {
+	if sharedDB != nil {
+		if ok, wait, handled := t.allowShared(key); handled {
+			return ok, wait
+		}
+	}
 	now := time.Now()
 	cutoff := now.Add(-t.window)
 
@@ -82,12 +156,39 @@ func (t *Throttle) Allow(key string) (bool, int) {
 func (t *Throttle) Guard(w http.ResponseWriter, r *http.Request) bool {
 	ok, wait := t.Allow(ClientIP(r))
 	if !ok {
-		// 文案逐字对齐 DRF zh-hans 翻译（两句之间有一个空格，别手滑省掉）
-		Err(w, http.StatusTooManyRequests, "throttled",
-			"请求已被限流。 预计 "+strconv.Itoa(wait)+" 秒后可用。")
+		errThrottled(w, wait)
 		return false
 	}
 	return true
+}
+
+// GuardKey 按调用方给的键限流，而不是按来源 IP。
+//
+// 用在「被猜的那个东西」上，而不是「猜的人」上。按 IP 限流挡不住换 IP，
+// 而暴破一个具体资源时，被反复试的**是那个资源**——把闸挂在它身上，
+// 攻击者换多少 IP 都绕不开。登录锁定按用户名而不是按 IP，是同一个道理。
+//
+// 两道闸通常要一起用：按键的挡定向暴破，按 IP 的挡广撒网式扫描。
+func (t *Throttle) GuardKey(w http.ResponseWriter, key string) bool {
+	ok, wait := t.Allow(key)
+	if !ok {
+		errThrottled(w, wait)
+		return false
+	}
+	return true
+}
+
+// errThrottled 429 的唯一出口。
+//
+// 这句话原先在三处各写了一份（这里、司机登录、AI 闸），措辞逐字对齐
+// DRF 的 zh-hans 翻译——包括"限流。 预计"中间那个空格，那是翻译文件里的
+// 手滑，不是中文标点。当时抄它是为了让前端不用区分新旧后端。
+//
+// 现在这句话会直接显示在客户自助查单页上（免登录的 /track 加了防穷举限流），
+// 不再只是给接口调用方看的。所以按中文来排：句号后面不留空格。
+func errThrottled(w http.ResponseWriter, wait int) {
+	Err(w, http.StatusTooManyRequests, "throttled",
+		"请求已被限流，预计 "+strconv.Itoa(wait)+" 秒后可用。")
 }
 
 // ClientIP 对齐 Django 的 X-Forwarded-For 取首段、否则 REMOTE_ADDR

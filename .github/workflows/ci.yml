@@ -33,16 +33,31 @@ jobs:
           cache-dependency-path: backend-go/go.sum
       # runner 上没有中文字体，而水印测试守的正是「本机确实能渲染中文」。
       # 不装字体就只能把那条断言删掉，等于把生产上"静默不水印"的风险放行。
+      # apt 源偶发抖动（实测挂过一次：装字体这一步 5 秒就失败，
+      # 后面 Vet/Build/Test 全部 skipped，CI 一片红而代码毫无问题）。
+      # 和代码无关的红会让人开始无视 CI，所以退避重试三次再放弃。
       - name: 安装 CJK 字体（水印测试需要）
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont && exit 0
+            echo "第 $i 次失败，等 $((i * 5)) 秒重试"
+            sleep $((i * 5))
+          done
+          echo "装字体连试三次都失败——这一步失败会让水印测试无法验证中文渲染" >&2
+          exit 1
       - name: Vet
         run: go vet ./...
       - name: Build
         run: go build ./...
-      - name: Test
-        run: go test ./...
       - name: Migrate（空库跑基线 + 增量，确保「从零建库」这条路没断）
         run: go run ./cmd/migrate
+      # 播种必须在测试之前：数据范围那组用例要判断「收窄生效」还是「本来就没数据」，
+      # 空库上它们只能 skip —— 而那恰恰是最值得测的一组。
+      # 顺带也验了 seed 本身在空库上跑得通（它有 8 个域的外键顺序要对）。
+      - name: Seed（演示数据，让数据范围用例有东西可测）
+        run: go run ./cmd/seed
+      - name: Test
+        run: go test ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -69,6 +84,158 @@ jobs:
         run: npx vitest run
       - name: Build
         run: npx vite build
+      # 纯静态扫描，不需要起服务。钉的是"把当前页条数当总数"这一类——
+      # 调度工作台、登录审计、待核销队列都犯过，而且都是"单页看着正常、
+      # 数字在说谎"，逐页冒烟一个都抓不到。
+      # 纯静态、无依赖，适合进 CI（浏览器类检查进不来）。
+      # 抓的是"前端调的接口后端没有"——恒定 405/404，而失败常被 catch 吞掉。
+      # 同上，纯静态。抓的是"部署模板里设了个变量，代码根本不读"——
+      # 配置看起来是齐的，功能就是不工作，而且没有任何一处会报错。
+      - name: 部署配置与代码对齐走查
+        working-directory: .
+        run: python3 scripts/dev/env-match.py
+      # 比 body 里的字段名。route-match 只比路径和方法，看不见这一类——
+      # 对账中心发 period_start 而后端只认 start，路径方法全对，功能是死的。
+      - name: 请求体字段对齐走查
+        working-directory: .
+        run: python3 scripts/dev/payload-match.py
+      - name: 前后端接口对齐走查
+        # working-directory 必须写：这个 job 默认 cd 到 frontend/，
+        # 不写的话脚本路径找不到，步骤会在 0 秒内失败——
+        # 看起来像"检查抓到问题了"，其实是检查自己没跑起来。
+        # 隔壁「分页口径走查」早就写了这一行，我照抄的时候漏了。
+        working-directory: .
+        run: python3 scripts/dev/route-match.py
+      - name: 分页口径走查
+        working-directory: .
+        run: node scripts/dev/paging-audit.mjs
+      # 反方向：后端有动作、界面上够不着。纯静态，不需要起服务。
+      - name: 后端动作可达性走查
+        working-directory: .
+        run: python3 scripts/dev/reachable-actions.py
+
+      - name: 状态守卫与写在同一事务里走查
+        working-directory: .
+        run: python3 scripts/dev/txn-guard.py
+
+      - name: 上传物必须经网关发出走查
+        working-directory: .
+        run: python3 scripts/dev/media-route.py
+
+  # 浏览器走查：真起一套（库 + 网关 + 前端），用真浏览器把关键链路按一遍。
+  #
+  # 这个 job 是补上 CI 最大的一个洞。这一轮发布前查出来的严重问题——
+  # 司机端跨域整个不能用（预检没放行 X-Driver-Token，登录后一片空白而
+  # 服务端日志一行没有）、打卡按钮在未授权定位时永久卡死、订单附件传了
+  # 丢字节、对账中心生成恒定 400——**没有一个是 tsc / vitest / go test /
+  # 静态走查能发现的，全部靠真按按钮**。而这批检查此前只在
+  # release-check.sh 里，也就是只有人想起来跑的时候才跑。
+  #
+  # 前端用 vite preview 起构建产物、网关单独一个进程，两者不同源——
+  # 这正是生产上前端单独部署的形态，也正是 CORS 那个洞唯一会现形的形态。
+  # 用 dev server 的话反而验不出来。
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: tms
+          POSTGRES_USER: tms
+          POSTGRES_PASSWORD: tms
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tms"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://tms:tms@localhost:5432/tms
+      DJANGO_SECRET_KEY: ci-insecure-secret-min-32-bytes-long
+      DJANGO_CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+      API_BASE: http://127.0.0.1:8000
+      # 让走查脚本用 npm 装的 playwright 与它自带的浏览器，
+      # 而不是开发机上那两条写死的路径（见 scripts/dev/lib/browser.mjs）
+      # 绝对路径：走查脚本从仓库根跑，而 playwright 装在 frontend/node_modules，
+      # ESM 的解析是相对导入它的那个模块的，NODE_PATH 对 ESM 不起作用。
+      PLAYWRIGHT_PKG: ${{ github.workspace }}/frontend/node_modules/playwright/index.js
+      # 演示超管，口令见 cmd/seed 的输出。脚本默认的 admin/Admin12345! 是
+      # 开发机上用 adminctl 开的那个，CI 的空库里没有。
+      TMS_USER: seed_admin
+      TMS_PASS: Demo12345!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend-go/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # 打卡照片要焊中文水印。没字体的话 Watermark 会**静默原样返回**，
+      # 而司机端走查正好会去比对"取回来的和原图是不是一模一样"。
+      # 字体：打卡照片要焊中文水印，没字体 Watermark 会静默原样返回。
+      # psql：司机端走查要回库核对打卡记录与照片路径。
+      - name: 安装 CJK 字体与 psql
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont postgresql-client && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
+      - name: 装前端依赖并构建
+        working-directory: frontend
+        run: |
+          npm ci
+          npx vite build
+      - name: 装 playwright 与 chromium
+        working-directory: frontend
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: 建库 + 播种
+        working-directory: backend-go
+        run: |
+          go run ./cmd/migrate
+          go run ./cmd/seed
+      - name: 起网关与前端
+        run: |
+          (cd backend-go && go build -o /tmp/tms-gateway ./cmd/server)
+          MEDIA_ROOT="$PWD/media" /tmp/tms-gateway > /tmp/gw.log 2>&1 &
+          (cd frontend && npx vite preview --port 5173 --host 127.0.0.1 > /tmp/fe.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:8000/readyz && break; sleep 1; done
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:5173/ && break; sleep 1; done
+          # 两个都必须真的起来。起不来就在这里红，别让后面四步各自报一个
+          # 看起来像业务问题的错——"失败原因说的不是真的"这一晚上踩了三次。
+          curl -sf -o /dev/null http://127.0.0.1:8000/readyz || { echo "网关没起："; cat /tmp/gw.log; exit 1; }
+          curl -sf -o /dev/null http://127.0.0.1:5173/ || { echo "前端没起："; cat /tmp/fe.log; exit 1; }
+      # 四条走查的退出码约定：0 过 / 1 有发现 / 2 没跑起来（都算失败，
+      # 但脚本会自己说清是哪一种，见 scripts/dev/lib/browser-login.mjs）。
+      - name: 浏览器冒烟（各页无非 2xx、无未捕获异常）
+        run: node scripts/dev/smoke-ui.mjs
+      - name: 端到端业务链（建单→检索→详情→计数一致→翻页）
+        run: node scripts/dev/e2e-flow.mjs
+      - name: 各页写操作（上传的凭证能取回原件）
+        run: node scripts/dev/write-paths.mjs
+      - name: 司机端（登录→本人运单→拍照打卡→证件自助上传→回库核对）
+        run: node scripts/dev/driver-walk.mjs
+      # 验收链：交付说明第七节那几步，按同一张单从头走到尾。
+      # 跨段的接缝只有这条链能覆盖——"费用不会在派单时自动生成"就是它发现的。
+      - name: 验收链（建单→派单→签收→回单→生成费用→对账→核销→查单）
+        run: node scripts/dev/acceptance-walk.mjs
+
+      - name: 受限角色（客服）走查：该用的用得了、该挡的说清了
+        env:
+          DATABASE_URL: postgres://tms:tms@127.0.0.1:5432/tms
+        run: node scripts/dev/role-walk.mjs http://127.0.0.1:5173
+      # ui-audit 不进 CI：它量的是首屏容量、配色、对比度，
+      # 跟字体渲染强相关，换一台机器读数就不一样。
+      # 一条会因为环境不同而红的检查，最后只会被加上 continue-on-error。
+      - name: 失败时把日志带出来
+        if: failure()
+        run: |
+          echo "── 网关 ──"; tail -50 /tmp/gw.log || true
+          echo "── 前端 ──"; tail -20 /tmp/fe.log || true
 
   docker-build:
     runs-on: ubuntu-latest

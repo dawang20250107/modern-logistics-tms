@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { ErrorBoundary } from "./ErrorBoundary";
+
 import { hasPerm, useAuth } from "../auth/auth";
 import { getTheme, toggleTheme, type Theme } from "../api/theme";
 import { useModalA11y } from "../api/useModalA11y";
@@ -11,7 +13,7 @@ import {
   IconReceipt, IconCreditCard, IconShield, IconFileText, IconBox,
 } from "./Icons";
 
-type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string };
+type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string | string[] };
 type NavGroup = { title: string; items: NavItem[] };
 const MOBILE_NAV_MEDIA = "(max-width: 900px)";
 
@@ -22,17 +24,24 @@ const NAV_GROUPS: NavGroup[] = [
     title: "工作台",
     items: [
       { to: "/", label: "运输驾驶舱", icon: <IconTower size={18} />, end: true },
-      { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} /> },
-      { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} /> },
-      { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} /> },
+      // 客服工作台的核心动作是建单，要 waybill.create（manage 也涵盖它）。
+      // 原先这一条没声明权限：财务只读点进去，表单能填满，
+      // 最后在提交那一下才告诉你"缺少所需权限"。
+      { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} />, perm: ["waybill.create", "waybill.manage"] },
+      { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} />, perm: "waybill.view" },
+      { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} />, perm: "waybill.view" },
     ],
   },
   {
+    // 这三项挂上权限点。NavItem 上本来就有 perm 这个字段、canSee 里也一直在判，
+    // 但**没有一个条目声明过它**——于是财务点进「资源库」、客服点进「对账中心」，
+    // 得到的是一页空白：接口 403 被前端吞掉，页面既没有数据也没有说明。
+    // 权限点补齐之后 403 变多了，这个问题跟着变明显，一起收掉。
     title: "资源与结算",
     items: [
-      { to: "/fleet", label: "资源库", icon: <IconTruck size={18} /> },
-      { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} /> },
-      { to: "/reconciliation", label: "对账中心", icon: <IconReceipt size={18} /> },
+      { to: "/fleet", label: "资源库", icon: <IconTruck size={18} />, perm: "masterdata.view" },
+      { to: "/pricing", label: "计价规则", icon: <IconCreditCard size={18} />, perm: "finance.view" },
+      { to: "/reconciliation", label: "对账中心", icon: <IconReceipt size={18} />, perm: "finance.view" },
     ],
   },
   {
@@ -251,7 +260,13 @@ export function AppLayout() {
           </div>
         </header>
         <section className="content" ref={contentRef} tabIndex={-1}>
-          <Outlet />
+          {/* 页面级兜底：没有它，一个渲染期异常会把**整棵树**卸掉——
+              实测是一片 0 个字符的白页，侧栏顶栏全没，用户不知道还能换一页。
+              包在这里，出错的只是内容区，导航还在，人点得走。
+              key 用路径：换一页时重建，免得上一页的错卡在这里不散。 */}
+          <ErrorBoundary key={pathname} where={pageTitle}>
+            <Outlet />
+          </ErrorBoundary>
         </section>
       </main>
       <SpotlightCommandBar />

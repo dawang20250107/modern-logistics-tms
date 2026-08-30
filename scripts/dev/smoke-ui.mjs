@@ -7,11 +7,13 @@
 // 用法（需先起好 :8000 网关与 :5173 前端）：
 //   node scripts/dev/smoke-ui.mjs [baseUrl]
 // 退出码非 0 表示发现问题，可直接接进 CI。
-const { chromium } = await import(
-  process.env.PLAYWRIGHT_PKG ?? "/opt/node22/lib/node_modules/playwright/index.js"
-).then((m) => m.default ?? m);
+import { launchBrowser } from "./lib/browser.mjs";
+import { login, assertAppPage } from "./lib/browser-login.mjs";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
+const API = process.env.API_BASE ?? "http://127.0.0.1:8000";
+const USER = process.env.TMS_USER ?? "admin";
+const PASS = process.env.TMS_PASS ?? "Admin12345!";
 const PAGES = [
   ["驾驶舱", "/"], ["订单管理", "/waybills"], ["调度工作台", "/dispatch-board"],
   ["对账中心", "/reconciliation"], ["资源库", "/fleet"], ["计价规则", "/pricing"],
@@ -23,7 +25,7 @@ const PAGES = [
 // 已知会 4xx 且属预期的（例如未配置 AI 时的 503）写在这里，避免噪声掩盖真问题
 const EXPECTED = [/\/ai\/deepseek\/status/];
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+const browser = await launchBrowser();
 const page = await (await browser.newContext({ viewport: { width: 1680, height: 1000 } })).newPage();
 
 const netErrors = new Map();
@@ -41,17 +43,19 @@ page.on("pageerror", (e) => {
   if (!consoleErrors.has(key)) consoleErrors.set(key, current);
 });
 
-await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-await page.locator("input").nth(0).fill("admin");
-await page.locator("input").nth(1).fill("Admin12345!");
-await page.keyboard.press("Enter");
-await page.waitForTimeout(3000);
+// 登录不确认成功的话，这个脚本会以最坏的方式坏掉：网关不通时请求在网络层
+// 就断了，连响应都没有，page.on("response") 不触发，于是它报"6 个页面全绿"——
+// 而这 6 个页面它一个都没打开过。假绿比假红更难发现。
+await login(page, BASE, { user: USER, pass: PASS, api: API });
 
 for (const [name, path] of PAGES) {
   current = name;
   await page.goto(BASE + path, { waitUntil: "networkidle" }).catch(() => {});
   // 多等一会：SSE / 轮询这类副作用不在首屏 networkidle 里
   await page.waitForTimeout(2000);
+  // /admin 是重定向到组织与权限的中转页，落点不是登录页即可；
+  // 其余页面都要确认真的进去了。
+  await assertAppPage(page, name, API);
 }
 await browser.close();
 

@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 )
 
 type ctxKey int
@@ -26,10 +29,18 @@ type Handlers struct {
 	Issuer *TokenIssuer
 	// MediaBase 头像等媒体文件的绝对地址前缀（并跑期由 Django 提供 /media/）
 	MediaBase string
-	// MediaRoot 媒体文件落盘根目录（对齐 Django 的 MEDIA_ROOT）
+	// MediaRoot 媒体文件落盘根目录（对齐 Django 的 MEDIA_ROOT）。
+	// Blob 非空时以 Blob 为准，这里只留给尚未迁移的调用方。
 	MediaRoot string
+	// Blob 媒体存放。为 nil 时退回 MediaRoot 直接落盘（仅测试构造会出现）。
+	Blob blob.Store
 	// Debug 对齐 settings.DEBUG：仅调试期在找回密码响应里附 dev_code
 	Debug bool
+	// AllowSelfRegistration 见 config.Config 同名字段：默认关闭
+	AllowSelfRegistration bool
+	// ResetSender 密码找回验证码的下发通道。nil = 未开通自助找回。
+	// 刻意不给默认实现：原先"默认写日志"等于验证码人人可读（见 notify.go）。
+	ResetSender Sender
 }
 
 // RequireAuth Bearer 校验中间件：任何原生路由的鉴权入口。
@@ -43,6 +54,13 @@ func (h *Handlers) RequireAuth(next http.Handler) http.Handler {
 		claims, err := h.Issuer.Parse(raw, "access")
 		if err != nil {
 			httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "凭证无效或已过期")
+			return
+		}
+		// 账号级水位线：改密 / 停用 / 管理员重置之后，签发早于水位线的 access
+		// 必须立刻失效。只作废 refresh 是不够的——access 还能再活满一个 TTL。
+		if claims.IssuedAt != nil &&
+			IssuedBeforeCutoff(r.Context(), h.Svc.DB, claims.UserID, claims.IssuedAt.Time) {
+			httpx.Err(w, http.StatusUnauthorized, "TOKEN_REVOKED", "凭证已失效，请重新登录")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey, claims.UserID)))
@@ -129,9 +147,31 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "refresh token 无效或已过期")
 		return
 	}
+	ctx := r.Context()
+	// 校验必须在签发之前：先签发再检查旧券，等于拿一张已作废的券照样能换新券，
+	// 黑名单就只是记了个账。
+	if IsRevoked(ctx, h.Svc.DB, claims.JTI) {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_REVOKED", "该凭证已失效，请重新登录")
+		return
+	}
+	if claims.IssuedAt != nil &&
+		IssuedBeforeCutoff(ctx, h.Svc.DB, claims.UserID, claims.IssuedAt.Time) {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_REVOKED", "凭证已失效，请重新登录")
+		return
+	}
 	access, refresh, err := h.Issuer.IssuePair(claims.UserID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "签发凭证失败")
+		return
+	}
+	// 旧券入列：轮换的意义就在这一步。少了它，一张泄漏的 refresh 在自然过期前
+	// 可以无限次换出新的 access + refresh，等于永久有效。
+	exp := time.Now().Add(24 * time.Hour)
+	if claims.ExpiresAt != nil {
+		exp = claims.ExpiresAt.Time
+	}
+	if err := Revoke(ctx, h.Svc.DB, claims.JTI, claims.UserID, "refresh", ReasonRotated, exp); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "作废旧凭证失败")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"access": access, "refresh": refresh})
@@ -161,4 +201,36 @@ func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
 		"date_joined": u.DateJoined, "last_login": u.LastLogin,
 		"roles": roles, "role_names": roleNames, "permissions": perms,
 	})
+}
+
+// Logout POST /api/v1/auth/logout —— 把提交的 refresh 券作废。
+//
+// 原先服务端没有这个动作，"退出登录"只是前端把本地存的 token 删掉；
+// 券本身照样有效到自然过期，在共用电脑或凭证已泄漏的场景下等于没退出。
+//
+// 幂等：券已失效 / 解析不出来都回 200 —— 退出登录不该因为"你本来就没登录"而报错。
+func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Refresh string `json:"refresh"`
+		All     bool   `json:"all"` // true = 踢掉该账号全部会话
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	ctx := r.Context()
+	if body.All {
+		if uid := UserID(r); uid != "" {
+			_ = RevokeAllForUser(ctx, h.Svc.DB, uid)
+		}
+		httpx.JSON(w, http.StatusOK, map[string]string{"detail": "已退出全部会话"})
+		return
+	}
+	if body.Refresh != "" {
+		if claims, err := h.Issuer.Parse(body.Refresh, "refresh"); err == nil {
+			exp := time.Now().Add(24 * time.Hour)
+			if claims.ExpiresAt != nil {
+				exp = claims.ExpiresAt.Time
+			}
+			_ = Revoke(ctx, h.Svc.DB, claims.JTI, claims.UserID, "refresh", ReasonLogout, exp)
+		}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"detail": "已退出登录"})
 }

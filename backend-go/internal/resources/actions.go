@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -20,12 +21,44 @@ import (
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type Handler struct {
 	DB  *pgxpool.Pool
 	Svc *auth.Service
 	MD  *masterdata.Handler
+}
+
+// allow 权限闸：这个动作要不要这个权限点。
+//
+// 由来是发布前的一次系统性排查：拿一个只有 masterdata.view + waybill.view 的
+// 客服账号，把 100 条动作路由挨个打了一遍，**53 条没有被 403 挡住**。
+// 挡住其中一部分的只是数据范围——而数据范围管的是"看得见谁的单"，
+// 不是"能不能做这件事"：同一个网点的客服照样能派单、能签收、能核销。
+//
+// 这个包里本来就有带权限的入口（resolve(w, r, "waybill.manage")），
+// 只是那些自己取参数、不走 resolve 的 handler 全都漏了。
+// 现在缺的那些补上，并逐条登记进 cmd/server/authz_test.go 的清单。
+func (h *Handler) allow(w http.ResponseWriter, r *http.Request, want string) bool {
+	ctx := r.Context()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return false
+	}
+	_, _, perms, err := h.Svc.RolesAndPerms(ctx, me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取权限失败")
+		return false
+	}
+	for _, p := range perms {
+		if p == "*" || p == want {
+			return true
+		}
+	}
+	httpx.Err(w, http.StatusForbidden, "PERMISSION_DENIED", "缺少所需权限。")
+	return false
 }
 
 func ocrProvider() string { return os.Getenv("OCR_PROVIDER") }
@@ -68,6 +101,9 @@ func (h *Handler) echo(w http.ResponseWriter, r *http.Request, cfg masterdata.Re
 // ── 回单确认 POST /receipts/{id}/confirm ──
 
 func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Receipt")
 	if id == "" {
@@ -82,26 +118,91 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := decodeBody(r)
-	status := curStatus
+	status := wbstatus.PODConfirmed
 	if v, ok := str(body, "status"); ok {
 		status = v
-	} else {
-		status = "confirmed"
 	}
+	// 取值必须在词表里。原先是照单全收：传什么写什么，
+	// 于是可以往库里写一个 'banana'，界面上就露出这个英文串
+	// （渲染处一律是 LABEL[x] ?? x），而且再也没有任何流程认得它。
+	if !wbstatus.ValidPOD(status) {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_RECEIPT_STATUS",
+			"回单状态取值非法："+status)
+		return
+	}
+	_ = curStatus
 	signatory := curSignatory
 	if v, ok := str(body, "signatory"); ok {
 		signatory = v
 	}
-	if _, err := h.DB.Exec(ctx, `
-		UPDATE ops_receipt SET status=$2, signatory=$3, updated_at=now() WHERE id=$1::uuid`,
-		id, status, signatory); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
+	// 改回单 + 回写运单，必须在**同一个事务**里，并且先把运单行锁住。
+	//
+	// 这里原先是两条各自独立的语句，txn-guard.py 上还登记着一条豁免，
+	// 理由写的是"回写是按『这张运单还有没有通过核验的回单』在同一条 SQL 里
+	// 重算的，不依赖前面那次读到的旧值，所以并发下不会错"。
+	//
+	// **那条理由是错的。** 重算确实写在一条 SQL 里，但那个 EXISTS 子查询是在
+	// 语句开始时按当时的快照求值的；READ COMMITTED 下这条 UPDATE 要是卡在
+	// 运单行的锁上，等锁放开后它会拿着**已经过期的那个判断结果**写下去。
+	// 于是最后落库的可能是一个早就不成立的结论。
+	//
+	// 实测（12 并发 × 20 轮跑 25 次）：出现「回单是 confirmed，
+	// 而运单写着 returned」。这一次是往保守的方向偏，但机制是对称的——
+	// 反过来就是「一张通过核验的回单都没有，运单却写着已核销」：
+	// 凭证不成立而钱照付。
+	//
+	// 界面补上「核验通过 / 驳回」两颗按钮之后，"两个人同时点同一张回单"
+	// 从假想变成了日常，这条不能再留着。锁运单行让同一张运单上的核验串行。
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Fail(w, r, "INTERNAL", "更新失败", err)
 		return
 	}
-	// 回写运单回单状态
-	if waybillID != nil && status == "confirmed" {
-		_, _ = h.DB.Exec(ctx, `
-			UPDATE ops_waybill SET receipt_status='confirmed', updated_at=now() WHERE id=$1::uuid`, *waybillID)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if waybillID != nil {
+		if _, err := tx.Exec(ctx,
+			`SELECT 1 FROM ops_waybill WHERE id=$1::uuid FOR UPDATE`, *waybillID); err != nil {
+			httpx.Fail(w, r, "INTERNAL", "更新失败", err)
+			return
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE ops_receipt SET status=$2, signatory=$3, updated_at=now() WHERE id=$1::uuid`,
+		id, status, signatory); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "更新失败", err)
+		return
+	}
+
+	// 回写运单的回单状态——**两个方向都要写**。
+	//
+	// 原先只有"核验通过 → 运单标已核销"这一个方向。把一张已核验的回单改判为
+	// 不通过时，运单上那个"已核销"留在原地不动：回单已经被否了，
+	// 而运单看起来仍然凭证齐全——回单付的单子就凭这个放行结算。
+	// 按"这张运单还有没有通过核验的回单"重算，而不是按刚改的这一张。
+	if waybillID != nil {
+		// 占位符要显式 ::text：CASE 各分支全是参数时 Postgres 推不出类型。
+		// 而这个错误原先被 `_, _ =` 丢掉了，表现是"接口 200、状态没变"——
+		// 查起来毫无线索。回写失败必须留下痕迹，不能装作成功。
+		if _, err := tx.Exec(ctx, `
+			UPDATE ops_waybill w SET receipt_status = CASE
+			    WHEN EXISTS (SELECT 1 FROM ops_receipt rc
+			                 WHERE rc.waybill_id = w.id AND rc.status = $2::text)
+			      THEN $3::text
+			    WHEN w.receipt_status = $3::text THEN $4::text
+			    ELSE w.receipt_status
+			  END, updated_at=now()
+			WHERE w.id = $1::uuid`,
+			*waybillID, wbstatus.PODConfirmed, wbstatus.ReceiptAudited,
+			wbstatus.ReceiptReturned); err != nil {
+			httpx.Fail(w, r, "INTERNAL", "回写运单回单状态失败", err)
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "更新失败", err)
+		return
 	}
 	h.echo(w, r, ReceiptsCfg, "rc.id = $1::uuid", id)
 }
@@ -109,6 +210,9 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 // ── 司机确认提醒 POST /reminders/{id}/acknowledge ──
 
 func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "DriverReminder")
 	if id == "" {
@@ -125,7 +229,7 @@ func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != "acknowledged" { // 幂等：已确认则原样返回
 		if _, err := h.DB.Exec(ctx, `
-			UPDATE ops_driver_reminder SET status='acknowledged', acknowledged_at=now(), updated_at=now()
+			UPDATE ops_driver_reminder SET status='`+wbstatus.ReminderAcknowledged+`', acknowledged_at=now(), updated_at=now()
 			WHERE id=$1::uuid`, id); err != nil {
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 			return
@@ -137,11 +241,13 @@ func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
 			if waybillNo != nil {
 				res = *waybillNo
 			}
-			_, _ = h.DB.Exec(ctx, `
+			if _, err := h.DB.Exec(ctx, `
 				INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type,
 				  event_time, source, resource, payload)
 				VALUES ($1, now(), now(), $2::uuid, 'reminder_acknowledged', clock_timestamp(), 'driver', $3, $4)`,
-				eid.String(), *waybillID, res, pj)
+				eid.String(), *waybillID, res, pj); err != nil {
+				slog.Warn("资源动作写库失败", "err", err)
+			}
 		}
 	}
 	h.echo(w, r, DriverRemindersCfg, "dr.id = $1::uuid", id)
@@ -152,6 +258,9 @@ func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
 // AlertTransition 对齐 AlertViewSet._transition（status + handled_by + handled_at）
 func (h *Handler) AlertTransition(target string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !h.allow(w, r, "telematics.manage") {
+			return
+		}
 		ctx := r.Context()
 		id := pathUUID(w, r, "Alert")
 		if id == "" {
@@ -198,6 +307,9 @@ func genReimbNo() string {
 
 // ReimbursementCreate POST /reimbursements —— ViewSet.create 完全重写，走 submit_reimbursement
 func (h *Handler) ReimbursementCreate(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	body := decodeBody(r)
 
@@ -256,7 +368,7 @@ func (h *Handler) ReimbursementCreate(w http.ResponseWriter, r *http.Request) {
 		  category, amount, reason, status, submitted_by_id, remark)
 		VALUES ($1, now(), now(), $2, $3::uuid, $4, $5, $6::numeric, $7, 'submitted', $8::uuid, '')`,
 		id.String(), genReimbNo(), waybillID, orderNo, category, amount.String(), reason, submitter); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	it, err := h.MD.OneDetail(ctx, ReimbursementsCfg, "rb.id = $1::uuid", id.String())
@@ -267,29 +379,30 @@ func (h *Handler) ReimbursementCreate(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, it)
 }
 
+// reimbStatusLabel 报销状态的中文，用于把"为什么不能审批"说清楚。
+func reimbStatusLabel(s string) string {
+	switch s {
+	case "submitted":
+		return "已提交"
+	case "approved":
+		return "已审批"
+	case "rejected":
+		return "已驳回"
+	case "paid":
+		return "已付款"
+	}
+	return s
+}
+
 // ReimbursementApprove 审批通过：生成应付费用（计入毛利）+ 下游付款申请
 func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Reimbursement")
 	if id == "" {
 		return
-	}
-	var status, reimbNo, category, amount, reason, orderNo string
-	var waybillID *string
-	if err := h.DB.QueryRow(ctx, `
-		SELECT status, reimb_no, category, amount::text, COALESCE(reason,''), COALESCE(order_no,''), waybill_id::text
-		FROM fin_reimbursement WHERE id=$1::uuid`, id).
-		Scan(&status, &reimbNo, &category, &amount, &reason, &orderNo, &waybillID); err != nil {
-		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
-		return
-	}
-	if status != "submitted" {
-		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED", "仅已提交的报销可审批。")
-		return
-	}
-	label := reimbCategoryLabel[category]
-	if label == "" {
-		label = category
 	}
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
@@ -297,6 +410,34 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// 状态检查必须在事务里、并且锁住这一行。
+	//
+	// 原先这一段读在事务**外面**：两个人同时点审批，两边都读到 submitted、
+	// 都通过检查、都往下走。审批会生成一条应付、开一张付款申请——同一笔报销
+	// 计两次账、付两遍钱。
+	// 实测 6 个并发的返回码是 [409 409 500 409 500 200]：钱确实没付两遍，
+	// 但拦住它的是 fin_payment_request.request_no 上的唯一索引**碰巧**撞了车，
+	// 而不是这段逻辑。代价是两个人收到 500「生成付款申请失败」——
+	// 那看起来像系统故障，实际是"别人先批了"。
+	// 加上 FOR UPDATE 之后，后来的请求会等锁、重读到 approved，拿到干净的 409。
+	var status, reimbNo, category, amount, reason, orderNo string
+	var waybillID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT status, reimb_no, category, amount::text, COALESCE(reason,''), COALESCE(order_no,''), waybill_id::text
+		FROM fin_reimbursement WHERE id=$1::uuid FOR UPDATE`, id).
+		Scan(&status, &reimbNo, &category, &amount, &reason, &orderNo, &waybillID); err != nil {
+		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
+		return
+	}
+	if status != "submitted" {
+		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED", "仅已提交的报销可审批（该报销当前为「"+reimbStatusLabel(status)+"」）。")
+		return
+	}
+	label := reimbCategoryLabel[category]
+	if label == "" {
+		label = category
+	}
 
 	if waybillID != nil {
 		eid, _ := uuid.NewV7()
@@ -313,7 +454,7 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 			VALUES ($1, now(), now(), $2::uuid, 'payable', $3, $4::numeric, 'CNY', 'normal',
 			  'reimbursement', $5, 'driver', '', $6, '', '', '', '', '', '', '{}', '{}', '{}')`,
 			eid.String(), *waybillID, item, amount, reimbNo, "报销 "+label); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成应付失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "生成应付失败", err)
 			return
 		}
 	}
@@ -325,7 +466,7 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 		  counterparty_type, counterparty_ref, amount, reason, status, external_approval_no)
 		VALUES ($1, now(), now(), $2, $3::uuid, 'reimbursement', $4, $5::numeric, $6, 'created', '')`,
 		prID.String(), "PR-"+reimbNo, waybillID, orderNo, amount, prReason); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成付款申请失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "生成付款申请失败", err)
 		return
 	}
 	var approver any
@@ -348,25 +489,48 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 
 // ReimbursementReject 驳回：仅已提交可驳回，理由写入 remark
 func (h *Handler) ReimbursementReject(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Reimbursement")
 	if id == "" {
 		return
 	}
+	// 同审批那条：状态检查要在事务里、并锁住行。
+	//
+	// 财务两个人同时处理同一笔报销，一个批一个驳，这在真实班次里不稀罕。
+	// 审批那一步不可逆——应付和付款申请都已经落库了——所以谁先落地谁算数。
+	// 原先这段读在事务外、UPDATE 又不带状态条件：驳回抢输了照样把状态
+	// 覆盖成"已驳回"并返回 200。实测就是这样：审批先提交，随后到的驳回
+	// 把它改成了 rejected。账上于是挂着一笔"已驳回"却仍要付的钱，
+	// 对账时两边谁也说不清。
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var status string
-	if err := h.DB.QueryRow(ctx, "SELECT status FROM fin_reimbursement WHERE id=$1::uuid", id).Scan(&status); err != nil {
+	if err := tx.QueryRow(ctx,
+		"SELECT status FROM fin_reimbursement WHERE id=$1::uuid FOR UPDATE", id).Scan(&status); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
 		return
 	}
 	if status != "submitted" {
-		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED", "仅已提交的报销可驳回。")
+		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED",
+			"仅已提交的报销可驳回（该报销当前为「"+reimbStatusLabel(status)+"」）。")
 		return
 	}
 	reason, _ := str(decodeBody(r), "reason")
-	if _, err := h.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE fin_reimbursement SET status='rejected', remark=$2, updated_at=now() WHERE id=$1::uuid`,
 		id, reason); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交事务失败")
 		return
 	}
 	h.echo(w, r, ReimbursementsCfg, "rb.id = $1::uuid", id)
@@ -374,38 +538,62 @@ func (h *Handler) ReimbursementReject(w http.ResponseWriter, r *http.Request) {
 
 // ReimbursementPay 付款：同步把下游付款申请置为 paid
 func (h *Handler) ReimbursementPay(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Reimbursement")
 	if id == "" {
 		return
 	}
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// 同审批那条：状态检查要在事务里、并锁住行。
+	// 另外这两条 UPDATE（报销置已付款、付款申请置已付款）必须同生共死——
+	// 原先后一条的错误被 `_, _ =` 丢掉，失败时报销显示"已付款"、
+	// 付款申请还挂在"未付"上，两张表各说各话。
 	var status string
 	var prID *string
-	if err := h.DB.QueryRow(ctx,
-		"SELECT status, payment_request_id::text FROM fin_reimbursement WHERE id=$1::uuid", id).
+	if err := tx.QueryRow(ctx,
+		"SELECT status, payment_request_id::text FROM fin_reimbursement WHERE id=$1::uuid FOR UPDATE", id).
 		Scan(&status, &prID); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
 		return
 	}
 	if status != "approved" {
-		httpx.Err(w, http.StatusConflict, "REIMB_NOT_APPROVED", "仅已审批的报销可付款。")
+		httpx.Err(w, http.StatusConflict, "REIMB_NOT_APPROVED",
+			"仅已审批的报销可付款（该报销当前为「"+reimbStatusLabel(status)+"」）。")
 		return
 	}
-	if _, err := h.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE fin_reimbursement SET status='paid', paid_at=now(), updated_at=now() WHERE id=$1::uuid`,
 		id); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 		return
 	}
 	if prID != nil {
-		_, _ = h.DB.Exec(ctx,
-			"UPDATE fin_payment_request SET status='paid', updated_at=now() WHERE id=$1::uuid", *prID)
+		if _, err := tx.Exec(ctx,
+			"UPDATE fin_payment_request SET status='paid', updated_at=now() WHERE id=$1::uuid", *prID); err != nil {
+			httpx.Fail(w, r, "INTERNAL", "更新付款申请失败", err)
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交事务失败")
+		return
 	}
 	h.echo(w, r, ReimbursementsCfg, "rb.id = $1::uuid", id)
 }
 
 // PaymentResult POST /finance/payment-results —— 外部 OA/ERP 回写付款结果
 func (h *Handler) PaymentResult(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	body := decodeBody(r)
 	updated := false

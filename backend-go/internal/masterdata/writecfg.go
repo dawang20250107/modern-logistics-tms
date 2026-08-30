@@ -3,7 +3,10 @@ package masterdata
 // 各主数据资源的写侧配置 + 新增资源（routes / carrier-lane-prices / driver-credentials）
 // 的读侧配置。所有标准 CRUD 由 crud.go 的通用引擎驱动，此处只声明字段契约。
 
-import "github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
+import (
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
+)
 
 var CustomerWrite = WriteCfg{
 	Table: "md_customer", Model: "Customer", Verbose: "客户", Alias: "c", SoftDelete: true,
@@ -59,10 +62,23 @@ var DriverWrite = WriteCfg{
 		"license_expiry":        {Kind: FDate},
 		"qualification_cert_no": {Kind: FText},
 		"qualification_expiry":  {Kind: FDate},
-		"employment_type":       {Kind: FText, Default: "employee"},
-		"carrier":               {Kind: FUUID, Ref: "md_carrier"},
-		"app_registered":        {Kind: FBool, Default: false},
-		"is_active":             {Kind: FBool, Default: true},
+		// 用工性质是**枚举**，不是自由文本。词表在 waybills/handler.go 的
+		// employmentLabel、列表 SQL 的 CASE、以及前端 DRIVER_EMP_LABEL 里
+		// 三处一致：employee / outsourced / carrier_driver / temp。
+		//
+		// 原先声明成 FText，写什么进什么。结果是我自己的走查脚本用了
+		// `fulltime` 这个哪儿都不存在的值造司机，一路安静地写进去——
+		// 演示库里 763 个在用司机有 758 个是它。表现不是报错，是
+		// **「用工」这一列空着**（列表 SQL 对未知值回空串），
+		// 而且按用工筛选永远筛不到它们：按「自有员工」筛只出 5 个。
+		//
+		// 声明成枚举之后，第一次写 `fulltime` 就会被 400 挡住并说
+		// "不是合法选项"——那才是它该有的样子。
+		"employment_type": {Kind: FEnum, Default: "employee",
+			Choices: []string{"employee", "outsourced", "carrier_driver", "temp"}},
+		"carrier":        {Kind: FUUID, Ref: "md_carrier"},
+		"app_registered": {Kind: FBool, Default: false},
+		"is_active":      {Kind: FBool, Default: true},
 	},
 }
 
@@ -198,7 +214,9 @@ SELECT dc.id::text AS id, dc.driver_id::text AS driver, COALESCE(d.name,'') AS d
                           WHEN 'id_card' THEN '身份证' ELSE dc.cred_type END) AS cred_type_label,
        dc.side,
        (CASE dc.side WHEN 'main' THEN '主页/正面' WHEN 'back' THEN '副页/反面' ELSE dc.side END) AS side_label,
-       NULLIF(dc.file,'') AS file, COALESCE(NULLIF(dc.file,''), dc.file_url) AS file_display, dc.file_url,
+       NULLIF(dc.file,'') AS file,
+       -- 同 ReceiptsCfg：落盘的文件要带 /media/ 前缀才是能打开的地址
+       (CASE WHEN dc.file <> '' THEN '/media/' || dc.file ELSE dc.file_url END) AS file_display, dc.file_url,
        dc.ocr_status, dc.ocr_result, dc.holder_name, dc.cert_no,
        dc.expiry_date::text AS expiry_date, dc.self_uploaded, dc.created_at`,
 	FromClause:   "FROM md_driver_credential dc LEFT JOIN md_driver d ON d.id = dc.driver_id",
@@ -229,6 +247,8 @@ var DriverCredWrite = WriteCfg{
 		"file":          {Kind: FText, Default: ""},
 	},
 	AfterWrite: CredentialAfterWrite, // 上传即触发 OCR 建档
+	// 资源库里传证件走的是 multipart（FleetPage），必须声明才收得下文件。
+	Upload: &UploadCfg{Field: "file", Prefix: "credentials/"},
 }
 
 // 导出既有列表配置供路由绑定；详情态补上 DRF 里「仅 retrieve 计算」的重聚合字段
@@ -288,12 +308,15 @@ SELECT json_build_object(
      GROUP BY w.origin, w.destination ORDER BY deals DESC, w.origin, w.destination LIMIT 5) f), '[]'::json))
 FROM (SELECT
     count(*) AS total,
-    count(*) FILTER (WHERE w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL) AS timed_total,
-    count(*) FILTER (WHERE w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL
+    -- 准班率只从真的送达过的单里取样（见 wbstatus 包的说明）
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `
+                       AND w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL) AS timed_total,
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `
+                       AND w.planned_arrival IS NOT NULL AND w.arrived_at IS NOT NULL
                        AND w.arrived_at <= w.planned_arrival) AS on_time_hits,
     count(*) FILTER (WHERE EXISTS (SELECT 1 FROM ops_exception x WHERE x.waybill_id=w.id)) AS exc_total,
-    count(*) FILTER (WHERE w.status IN ('arrived','signed','delivered','settled')) AS done_total,
-    count(*) FILTER (WHERE w.status IN ('arrived','signed','delivered','settled')
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `) AS done_total,
+    count(*) FILTER (WHERE w.status IN ` + wbstatus.DeliveredSQL + `
                        AND w.receipt_status IN ('returned','audited')) AS receipt_hits
   FROM ops_waybill w
   WHERE w.carrier_id = ca.id AND w.created_at >= now() - interval '90 days' AND w.status <> 'voided') s`

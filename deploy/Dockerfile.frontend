@@ -5,6 +5,13 @@ WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ ./
+# 高德地图 Key 是**构建期**变量：Vite 在 npm run build 时把 import.meta.env
+# 的值编进产物，容器运行时再设已经来不及。
+# 原先这个镜像一个 ARG 都没有，而 compose 把 AMAP_KEY 设在了**网关**容器上——
+# 名字不对、位置也不对，于是运维无论怎么配，地图都停在
+# "未配置高德地图 Key（VITE_AMAP_KEY），已降级为列表视图"。
+ARG VITE_AMAP_KEY=""
+ENV VITE_AMAP_KEY=$VITE_AMAP_KEY
 RUN npm run build
 
 FROM nginx:1.27-alpine

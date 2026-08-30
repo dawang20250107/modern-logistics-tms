@@ -6,11 +6,12 @@ import { apiGet, apiPost } from "../api/client";
 import { fmtDateTime, fmtMoney, fmtRelative } from "../api/format";
 import { toast } from "../api/toast";
 import { useModalA11y } from "../api/useModalA11y";
-import { useAuth } from "../auth/auth";
+import { useServerTable } from "../api/useServerTable";
+import { hasPerm, useAuth } from "../auth/auth";
 import { BatchDispatchModal } from "../components/BatchDispatchModal";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { ExceptionRegisterModal } from "../components/ExceptionRegisterModal";
-import { FilterBuilder, applyFilterModel, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
+import { FilterBuilder, activeConditionCount, describeCondition, EMPTY_MODEL, type FilterFieldDef, type FilterModel } from "../components/FilterBuilder";
 import { StateView } from "../components/StateView";
 import { IconSparkles, IconTruck, IconZap, IconAlert, IconSearch, IconWarning, IconMoney, IconDragHandle, IconCheckCircle, IconMapPin, IconGitBranch, IconX } from "../components/Icons";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
@@ -146,30 +147,42 @@ export function DispatchBoardPage() {
   const [viewAll, setViewAll] = useState(true);
   const mineScope = canViewAll && viewAll ? "all" : "mine";
 
-  // 待分配池：未锁定/未分派（所有调度可见，供分派/锁定）
-  const poolFree = useQuery({
-    queryKey: ["pool", "free"],
-    queryFn: () => apiGet<Paginated<Order>>("/orders/pool?scope=free"),
-    refetchInterval: 15000,
+  // 只取**当前这一池、当前这一页**。
+  //
+  // 原先是三个池各拉一次、每次只拉第一页（默认 20 条），然后所有计数、
+  // 搜索、"仅看紧急" 全在前端对着这 20 条做。演示库十几单时一页装得下全部，
+  // 一切看起来都对；真实数据量下订单池有八千多条，于是
+  // "待分配 20" 其实是 8336、搜第 500 条上的单号永远搜不到、
+  // "仅看紧急" 只从这 20 条里挑。界面不会报错，只会安静地把全量说成一页——
+  // 而调度员正是照着这些数决定今天先派哪一批。
+  //
+  // 现在：翻页/检索/筛选/仅看紧急全部下推到服务端，计数走 /orders/pool-counts。
+  const poolPath = poolTab === "dispatched" ? "/orders/dispatched" : "/orders/pool";
+  const poolScope = poolTab === "unassigned" ? "free" : mineScope;
+  const st = useServerTable<Order>({
+    queryKey: ["pool", poolTab, poolScope],
+    path: poolPath,
+    pageSize: 20,
+    model,
+    search: poolSearch,
+    extraParams: { scope: poolScope, urgent: urgentOnly ? "1" : undefined },
   });
-  // 可调派池：普通调度仅本人锁定/被分派；超管可看全量（scope=all）
-  const poolMine = useQuery({
-    queryKey: ["pool", "mine", mineScope],
-    queryFn: () => apiGet<Paginated<Order>>(`/orders/pool?scope=${mineScope}`),
+  // 计数：服务端全量算，与列表 total 同源同谓词（后端 pool-counts 复用
+  // 列表那份 where 构造器，避免"计数说 8336、点进去只有 20 条"）
+  const poolCountsQ = useQuery({
+    queryKey: ["pool-counts", mineScope],
+    queryFn: () => apiGet<{
+      unassigned: number; dispatchable: number; dispatched: number;
+      pending: number; urgent: number; at_risk: number;
+    }>(`/orders/pool-counts?scope=${mineScope}`),
     refetchInterval: 15000,
-  });
-  // 已调派池：本人已转运单（超管可看全量）
-  const dispatchedQ = useQuery({
-    queryKey: ["dispatched-orders", mineScope],
-    queryFn: () => apiGet<Paginated<Order>>(`/orders/dispatched?scope=${mineScope}&page_size=80`),
-    refetchInterval: 30000,
   });
   const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=200") });
   const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: () => apiGet<Paginated<Vehicle>>("/vehicles?page_size=200") });
   const drivers = useQuery({ queryKey: ["drivers"], queryFn: () => apiGet<Paginated<Driver>>("/drivers?page_size=200") });
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["pool"] });
-    queryClient.invalidateQueries({ queryKey: ["dispatched-orders"] });
+    queryClient.invalidateQueries({ queryKey: ["pool-counts"] });
     queryClient.invalidateQueries({ queryKey: ["orders-manage"] });
   };
 
@@ -177,6 +190,13 @@ export function DispatchBoardPage() {
   // 抽屉无障碍：焦点陷阱 / Esc 关闭 / 关闭后焦点归还（右键菜单由 DataTable 内置管理）
   const wbRef = useRef<HTMLElement>(null);
   useModalA11y(Boolean(active), wbRef, closeWb);
+
+  // 调度台上的写动作（锁定、释放、派单、分单、批量派、智能排线）都要
+  // waybill.manage。而「客服」这个演示角色只有 waybill.view + waybill.create，
+  // 它进得来（侧栏上这一页声明的就是 waybill.view，看板本身对客服有意义），
+  // 但那些按钮对它只会弹一句"缺少所需权限"。
+  // 「登记异常」不在此列：上报异常刻意只要 waybill.view（发现问题的常是客服）。
+  const canManage = hasPerm(user, "waybill.manage");
 
   const claim = useMutation({
     mutationFn: (id: string) => apiPost(`/orders/${id}/claim`, {}),
@@ -246,7 +266,7 @@ export function DispatchBoardPage() {
     const isUnassigned = plan.unassigned.some(u => u.order_id === orderId);
     if (!isUnassigned) return;
 
-    const o = orders.find(x => x.id === orderId);
+    const o = rows.find(x => x.id === orderId);
     if (!o) return;
 
     const trip = plan.consolidated_trips[tripIdx];
@@ -391,64 +411,67 @@ export function DispatchBoardPage() {
 
   // 抽屉开合
   function openWb(o: Order, initialTab: DrawerTab = "dispatch") {
+    // 没有 waybill.manage 就不落到派单页签上。
+    // 这个弹窗有四个入口（派单按钮、精准派单、查看轨迹、以及列表上的
+    // 双击与回车），前两个已经按权限藏了，后两个藏不掉——
+    // 在这里统一兜住，比逐个入口加判断可靠。
+    const t = canManage ? initialTab : "track";
     setActive(o);
-    setTab(initialTab);
+    setTab(t);
     setSuggestion(null);
     setVehicleId(""); setCarrierId(""); setDriverId(""); setTrailerId(""); setCoDriverIds([]);
     setPlatformName(""); setPlatformOrderNo(""); setAgreedPayable("");
-    if (initialTab === "dispatch") suggest.mutate(o.id);
+    if (t === "dispatch") suggest.mutate(o.id);
   }
   function closeWb() {
     setActive(null);
     setSuggestion(null);
   }
 
-  const freeOrders = poolFree.data?.items ?? [];
-  const mineOrders = poolMine.data?.items ?? [];
-  const dispatchedOrders = dispatchedQ.data?.items ?? [];
-  const orders = [...freeOrders, ...mineOrders]; // 供拖拽/并发校验查找
-  const isUrgent = (o: Order) => o.sla_status === "breached" || o.sla_status === "at_risk" || o.priority === "vip";
-  const sortUrgent = (list: Order[]) => [...list]
-    .filter((o) => !urgentOnly || isUrgent(o))
-    .sort((a, b) => Number(isUrgent(b)) - Number(isUrgent(a)));
-
-  // 三池切分：待分配（scope=free）· 可调派（scope=mine）· 已调派（本人 converted）
-  const unassignedRows = sortUrgent(freeOrders);
-  const dispatchableRows = sortUrgent(mineOrders);
-  const dispatchedRows = sortUrgent(dispatchedOrders);
+  const rows = st.rows;
+  // 这里有意保留两个口径，因为它们回答的是两个不同的问题。
+  //
+  // isUrgent —— 「紧急」的**计数与筛选**口径，必须和后端 urgentSQL 同义。
+  // 顶部那个「紧急 2778」和「仅看紧急」都用它；两边不同义就会出现
+  // 「计数说 7 条，筛出来 3 条」。
+  //
+  // needsAttention —— 行首红条的口径，只标 SLA 临期/超时与 VIP。
+  // 不能直接用 isUrgent：列表默认按 priority DESC 排，加急单本来就全排在前面，
+  // 用 isUrgent 标的话第一页 20 行全是红的——红色标满一屏就等于没标。
+  // 行内高亮的意义是「在这一页里，这几行比邻居更该先看」，
+  // 而在一个已经按优先级排好序的列表里，能区分出邻居的是 SLA 状态。
+  const isUrgent = (o: Order) => o.sla_status === "breached" || o.sla_status === "at_risk"
+    || o.priority === "vip" || o.priority === "urgent";
+  const needsAttention = (o: Order) => o.sla_status === "breached" || o.sla_status === "at_risk"
+    || o.priority === "vip";
+  const counts = poolCountsQ.data;
   const poolCounts = {
-    unassigned: freeOrders.length,
-    dispatchable: mineOrders.length,
-    dispatched: dispatchedOrders.length,
+    unassigned: counts?.unassigned ?? 0,
+    dispatchable: counts?.dispatchable ?? 0,
+    dispatched: counts?.dispatched ?? 0,
   };
-  const rowsBase = poolTab === "unassigned" ? unassignedRows : poolTab === "dispatchable" ? dispatchableRows : dispatchedRows;
   const filterActive = activeConditionCount(model, DISPATCH_FILTER_FIELDS);
-  const searchLc = poolSearch.trim().toLowerCase();
-  const rows = applyFilterModel(
-    searchLc ? rowsBase.filter((o) => `${o.order_no} ${o.customer_name ?? ""} ${o.origin ?? ""} ${o.destination ?? ""}`.toLowerCase().includes(searchLc)) : rowsBase,
-    model, DISPATCH_FILTER_FIELDS,
-  );
   // 光标下标每次从 rows 里推：rows 一重排，下标跟着走，指向的还是同一张单。
   // 焦点单不在当前列表里（被别人派掉 / 被筛选条件排除）→ -1，Enter 不动手。
   const focusIdx = focusId ? rows.findIndex((o) => o.id === focusId) : -1;
   const focusOrder = focusIdx >= 0 ? rows[focusIdx] : null;
-  const anyPoolFilter = Boolean(searchLc) || urgentOnly || filterActive > 0;
-  const poolLoading = poolTab === "unassigned" ? poolFree.isLoading : poolTab === "dispatchable" ? poolMine.isLoading : dispatchedQ.isLoading;
-  const poolError = poolTab === "unassigned" ? poolFree.isError : poolTab === "dispatchable" ? poolMine.isError : dispatchedQ.isError;
-  const retryPool = () => {
-    if (poolTab === "unassigned") poolFree.refetch();
-    else if (poolTab === "dispatchable") poolMine.refetch();
-    else dispatchedQ.refetch();
-  };
-  // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派
-  const activeGone = Boolean(active) && !poolMine.isLoading && !orders.some((o) => o.id === active?.id);
+  const anyPoolFilter = Boolean(poolSearch.trim()) || urgentOnly || filterActive > 0;
+  const poolLoading = st.isLoading;
+  const poolError = st.isError;
+  const retryPool = () => { st.refetch(); poolCountsQ.refetch(); };
+  // 并发：正在处理的订单若已被他人认领/派出而离开订单池，提示并避免误派。
+  //
+  // 只在**当前页**里找。分页之后这个判断本身就只能是页内的——
+  // 但派单抽屉必然是从当前页点开的，所以要判的那张单一定在这一页里；
+  // 它一旦被别人抢走，下一次 15 秒轮询就会把它从这一页刷掉，判断照样成立。
+  const activeGone = Boolean(active) && !st.isLoading && !rows.some((o) => o.id === active?.id);
   const trackNo = active?.waybill_nos?.[0];
 
   // 调度工作流概览：一眼看清 待派 / 紧急 / 临期超时 / 已选
   const wf = {
-    pending: freeOrders.length + mineOrders.length,
-    urgent: orders.filter((o) => o.priority === "urgent" || o.priority === "vip").length,
-    atRisk: orders.filter((o) => o.sla_status === "at_risk" || o.sla_status === "breached").length,
+    pending: counts?.pending ?? 0,
+    urgent: counts?.urgent ?? 0,
+    atRisk: counts?.at_risk ?? 0,
     picked: picked.size,
   };
 
@@ -507,13 +530,13 @@ export function DispatchBoardPage() {
       return (
         <div className="row-actions" onClick={(e) => e.stopPropagation()}>
           {poolTab === "unassigned" && (<>
-            <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>
+            {canManage && <button disabled={claim.isPending} onClick={() => claim.mutate(o.id)}>锁定</button>}
             <button onClick={() => setExcOrder(o)}>登记异常</button>
           </>)}
           {poolTab === "dispatchable" && (<>
-            {o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
+            {canManage && o.lock_state === "mine" && <button disabled={release.isPending} onClick={() => release.mutate(o.id)}>释放</button>}
             <button onClick={() => setExcOrder(o)}>登记异常</button>
-            <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>
+            {canManage && <button className="btn-primary" disabled={!canDispatch} title={canDispatch ? "" : "未分派/锁定给你，请由总调度分单或先锁定"} onClick={() => openWb(o)}>派单</button>}
           </>)}
           {poolTab === "dispatched" && (o.waybill_nos ?? []).length > 0 && (
             <Link className="link small" to={`/waybills/${o.waybill_nos[0]}`}>查看运单</Link>
@@ -524,10 +547,10 @@ export function DispatchBoardPage() {
   ];
 
   const poolRowMenu = (o: Order) => [
-    { label: "精准派单", onClick: () => openWb(o, "dispatch") },
-    o.status !== "dispatching"
+    ...(canManage ? [{ label: "精准派单", onClick: () => openWb(o, "dispatch") }] : []),
+    ...(canManage ? [o.status !== "dispatching"
       ? { label: "认领订单", onClick: () => claim.mutate(o.id) }
-      : { label: "退回订单池", onClick: () => release.mutate(o.id) },
+      : { label: "退回订单池", onClick: () => release.mutate(o.id) }] : []),
     { label: "查看轨迹", onClick: () => openWb(o, "track") },
     { label: "登记异常", onClick: () => setExcOrder(o) },
   ];
@@ -589,7 +612,8 @@ export function DispatchBoardPage() {
           </div>
         )}
 
-        {picked.size > 0 && poolTab !== "dispatched" && (
+        {/* 批量条上除「清除」外全是写动作，没有 waybill.manage 就整条不出现 */}
+        {canManage && picked.size > 0 && poolTab !== "dispatched" && (
           <div className="batch-bar">
             <span>已选 <b style={{ color: "var(--accent)" }}>{picked.size}</b> 单</span>
             <div style={{ flex: 1 }} />
@@ -614,12 +638,17 @@ export function DispatchBoardPage() {
           <StateView kind="error" hint="当前订单池暂时无法同步，请重试。" onRetry={retryPool} compact />
         ) : (
           <DataTable<Order>
-            columns={poolColumns} rows={rows} rowKey={(o) => o.id} viewKey={`dispatch-pool-${poolTab}`} exportName={`调度池-${poolTab}`}
+            columns={poolColumns} rows={rows} rowKey={(o) => o.id} viewKey={`dispatch-pool-${poolTab}`} exportName={`调度池-${poolTab}`} exportAll={st.fetchAll}
             selectable={poolTab !== "dispatched"} selected={picked} onToggle={togglePick}
             onToggleAll={() => setPicked((s) => s.size >= rows.length && rows.length > 0 ? new Set() : new Set(rows.map((o) => o.id)))}
             stickyFirst rowMenu={poolRowMenu}
+            // 翻页即清空勾选：分页之后勾选会跨页累积，而排线/批量派承运商
+            // 这些动作只拿得到当前页的行对象——用户在第 1 页选 5 单、翻到
+            // 第 2 页再选 3 单，打开批量派单却只看到 3 单，这种不一致
+            // 比"翻页要重新勾"讨厌得多。
+            server={{ ...st.server, onPageChange: (p: number) => { setPicked(new Set()); st.server.onPageChange(p); } }}
             onRowDoubleClick={(o) => { if (poolTab === "dispatchable" && o.dispatchable !== false) openWb(o); else if (poolTab === "unassigned") setExcOrder(o); }}
-            rowClassName={(o) => `pool-row${active?.id === o.id ? " row-active" : ""}${focusId === o.id ? " row-focus" : ""}${isUrgent(o) ? " row-urgent" : ""}`}
+            rowClassName={(o) => `pool-row${active?.id === o.id ? " row-active" : ""}${focusId === o.id ? " row-focus" : ""}${needsAttention(o) ? " row-urgent" : ""}`}
             emptyState={
               <StateView
                 kind="empty"
@@ -631,7 +660,7 @@ export function DispatchBoardPage() {
             }
             toolbarLeft={
               <>
-                <span className="muted small">共 {rows.length} 单{picked.size ? ` · 已选 ${picked.size}` : ""}</span>
+                {picked.size > 0 && <span className="muted small">已选 {picked.size}</span>}
                 <input className="search" style={{ minWidth: 170, flex: 1, maxWidth: 280 }} placeholder="搜索 订单号 / 客户 / 线路" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} />
                 <div style={{ position: "relative" }}>
                   <button className={`btn-ghost${filterActive > 0 || showBuilder ? " on-accent" : ""}`} onClick={() => setShowBuilder((v) => !v)}>
@@ -814,7 +843,8 @@ export function DispatchBoardPage() {
             </div>
 
             <div className="wb-tabs">
-              <button className={tab === "dispatch" ? "active" : ""} onClick={() => { setTab("dispatch"); if (!suggestion && !suggest.isPending) suggest.mutate(active.id); }}>派单</button>
+              {/* 「查看轨迹」也会打开这个弹窗——没有 waybill.manage 就不该露出派单页签 */}
+              {canManage && <button className={tab === "dispatch" ? "active" : ""} onClick={() => { setTab("dispatch"); if (!suggestion && !suggest.isPending) suggest.mutate(active.id); }}>派单</button>}
               <button className={tab === "track" ? "active" : ""} onClick={() => setTab("track")}>轨迹</button>
             </div>
 
@@ -1068,7 +1098,7 @@ export function DispatchBoardPage() {
       {/* 批量派承运商：多单一次委托同一承运商，生成派车批次 */}
       {batchDispatch && (
         <BatchDispatchModal
-          orders={orders.filter((o) => picked.has(o.id))}
+          orders={rows.filter((o) => picked.has(o.id))}
           carriers={carriers.data?.items ?? []}
           onClose={() => setBatchDispatch(false)}
           onDone={() => { setBatchDispatch(false); setPicked(new Set()); invalidate(); }}

@@ -7,7 +7,7 @@ import { confirmAction } from "../api/confirm";
 import { EMPTY, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
 import type { Contract, Paginated, Waybill } from "../api/types";
-import { STATUS_LABEL, CHANNEL_TAG } from "../api/types";
+import { STATUS_LABEL, CHANNEL_TAG, RECEIPT_LABEL } from "../api/types";
 import { useModalA11y } from "../api/useModalA11y";
 import { useServerTable } from "../api/useServerTable";
 import { DataTable, type DataColumn, type RowMenuItem } from "../components/DataTable";
@@ -52,7 +52,6 @@ function loadFilters(): PersistedFilters {
   return { filter: "", statusFilter: "" };
 }
 
-const RECEIPT_LABEL: Record<string, string> = { returned: "已回收", audited: "已核销", pending: "待追回" };
 
 export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const navigate = useNavigate();
@@ -227,16 +226,27 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
     }
     setBatchBusy(true);
     let ok = 0;
+    let lastErr = "";
     for (const w of targets) {
       try {
         await apiPatch(`/waybills/${w.waybill_no}`, { receipt_status: "returned" });
         ok += 1;
-      } catch {
-        /* 单条失败不阻断整批 */
+      } catch (e) {
+        // 单条失败不阻断整批，但**必须记下来**——原先这里是空的 catch，
+        // 而后端那条 PATCH 路由压根不存在（405），于是每一条都失败，
+        // 最后照样弹「已标记 0/5 条…」的成功提示：绿色对勾、语气笃定，
+        // 什么都没发生。全失败还报成功，比直接报错坏得多。
+        lastErr = e instanceof Error ? e.message : String(e);
       }
     }
     setBatchBusy(false);
-    toast.success(`已标记 ${ok}/${targets.length} 条运单回单为「已回收」`);
+    if (ok === 0) {
+      toast.error(`一条都没标记成功（共 ${targets.length} 条）${lastErr ? "：" + lastErr : ""}`);
+    } else if (ok < targets.length) {
+      toast.error(`只标记成功 ${ok}/${targets.length} 条${lastErr ? "，最后一条失败原因：" + lastErr : ""}`);
+    } else {
+      toast.success(`已标记 ${ok} 条运单回单为「已回收」`);
+    }
     clearSelection();
     invalidateWaybills();
   };
@@ -353,7 +363,7 @@ export function WaybillsPage({ embedded = false }: { embedded?: boolean } = {}) 
         </div>
 
         {st.isError ? (
-          <StateView kind="error" hint="运单台账暂时无法加载。" onRetry={() => st.refetch()} />
+          <StateView kind="error" hint="运单台账暂时无法加载。" error={st.error} onRetry={() => st.refetch()} />
         ) : (
           <DataTable<Waybill>
             columns={columns}

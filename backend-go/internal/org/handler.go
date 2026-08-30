@@ -651,5 +651,6 @@ var HandoverWrite = masterdata.WriteCfg{
 	ReadPerm: "org.view",
 }
 var LoginAuditWrite = masterdata.WriteCfg{
-	Table: "iam_login_attempt", Model: "LoginAttempt", Alias: "l", ReadOnly: true,
+	ReadPerm: "org.rbac",
+	Table:    "iam_login_attempt", Model: "LoginAttempt", Alias: "l", ReadOnly: true,
 }

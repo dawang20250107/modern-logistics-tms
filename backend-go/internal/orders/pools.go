@@ -11,10 +11,10 @@ package orders
 // customer_addresses / export。数据范围一律沿用列表口径（建单人组织子树）。
 
 import (
-	"encoding/csv"
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
@@ -67,19 +67,31 @@ func (h *Handler) poolPage(w http.ResponseWriter, r *http.Request, extraWhere fu
 		where = append(where, sw)
 	}
 	where = append(where, extraWhere(args, me, canViewAll)...)
+	// 检索/筛选/仅看紧急交给库去做。以前这些全在前端对着取回来的那一页做，
+	// 一页装不下就等于只在 20 条里搜——数据一多就悄悄变成了抽样。
+	where = append(where, searchAndFilterWhere(q, args)...)
+	// 已知字段上的非法值（比如日期框里打了「今天」）要当场说清是哪个字段，
+	// 而不是让 Postgres 报错变成 500，也不是默默把这个条件丢掉。
+	frag, ferr := filters.Apply(q.Get("filter"), filterFields, args)
+	if ferr != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_FILTER", ferr.Error())
+		return
+	}
+	if frag != "" {
+		where = append(where, frag)
+	}
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
 
 	var total int
 	if err := h.DB.QueryRow(ctx, "SELECT count(*) "+fromClause+" "+whereSQL, args.Values...).Scan(&total); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	limitPh := args.Add(pageSize)
 	offsetPh := args.Add((page - 1) * pageSize)
-	rows, err := h.DB.Query(ctx, selectOrderSQL+fromClause+" "+whereSQL+" "+orderSQL+
-		fmt.Sprintf(" LIMIT %s OFFSET %s", limitPh, offsetPh), args.Values...)
+	rows, err := h.DB.Query(ctx, pagedOrderSQL(whereSQL, orderSQL, limitPh, offsetPh), args.Values...)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	defer rows.Close()
@@ -116,11 +128,11 @@ func mineFilter(args *filters.Args, me *auth.UserRow) string {
 	return fmt.Sprintf("(o.claimed_by_id::text = %s OR o.assigned_to_id::text = %s)", ph, ph)
 }
 
-// PoolList GET /api/v1/orders/pool
-func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	scope, mine := q.Get("scope"), q.Get("mine")
-	h.poolPage(w, r, func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
+// poolWhere 待分配/可调派池的谓词。计数端点与列表端点共用同一份，
+// 免得哪天改了一处忘了另一处——那种不一致的表现是「计数说 8336、
+// 点进去只有 20 条」，而且很难第一时间怀疑到是两份谓词不同步。
+func poolWhere(scope, mine string) func(*filters.Args, *auth.UserRow, bool) []string {
+	return func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
 		where := []string{"o.status IN ('pooled','dispatching')"}
 		switch {
 		case scope == "free":
@@ -131,14 +143,12 @@ func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
 			where = append(where, mineFilter(args, me))
 		}
 		return where
-	}, "ORDER BY o.priority DESC, o.pooled_at, o.id")
+	}
 }
 
-// Dispatched GET /api/v1/orders/dispatched
-func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	scope, mine := q.Get("scope"), q.Get("mine")
-	h.poolPage(w, r, func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
+// dispatchedWhere 已调派池的谓词
+func dispatchedWhere(scope, mine string) func(*filters.Args, *auth.UserRow, bool) []string {
+	return func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
 		where := []string{"o.status = 'converted'"}
 		switch {
 		case scope == "all" && canAll:
@@ -146,11 +156,49 @@ func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
 			where = append(where, mineFilter(args, me))
 		}
 		return where
-	}, "ORDER BY o.created_at DESC, o.id")
+	}
+}
+
+// PoolList GET /api/v1/orders/pool
+func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
+	// 订单这一面的读，权限点是 waybill.view —— 前端导航上早就是这么声明的
+	// （AppLayout 里「订单管理」「调度工作台」都写着 perm: "waybill.view"），
+	// 后端这 9 条读路由却一条都没执行。
+	//
+	// 实测一个只有 masterdata.view（"主数据查看"，听起来只是看客户和司机档案）
+	// 且数据范围给了"全部"的角色：
+	//   GET /api/v1/orders          → 200，全库订单
+	//   GET /api/v1/orders/export   → 200，5.26 MB、50002 行 CSV，
+	//                                  客户名、始发目的、报价一次拉走
+	//   GET /api/v1/orders/funnel   → 全库漏斗：cs 50839 单、self 1 单、各状态分布
+	// 同一个账号打 /waybills、/statements、/reimbursements 都规规矩矩 403 ——
+	// 订单是唯一漏的那一面，而它恰恰是数据量最大、最敏感的那一面。
+	//
+	// 数据范围挡不住这件事：范围管的是"看得见谁的单"，
+	// 给了"全部"就等于全库。三个内置角色都带 waybill.view，补上不影响它们。
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
+	q := r.URL.Query()
+	h.poolPage(w, r, poolWhere(q.Get("scope"), q.Get("mine")),
+		"ORDER BY o.priority DESC, o.pooled_at, o.id")
+}
+
+// Dispatched GET /api/v1/orders/dispatched
+func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
+	q := r.URL.Query()
+	h.poolPage(w, r, dispatchedWhere(q.Get("scope"), q.Get("mine")),
+		"ORDER BY o.created_at DESC, o.id")
 }
 
 // Dispatchers GET /api/v1/orders/dispatchers
 func (h *Handler) Dispatchers(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -190,6 +238,9 @@ func (h *Handler) Dispatchers(w http.ResponseWriter, r *http.Request) {
 // 取该客户最近 200 个历史站点，按 (类型, 城市, 地址) 去重后各留 10 条。
 // 缺 customer 参数时回空，不报错——录单页在选客户前就会先打这个接口。
 func (h *Handler) CustomerAddresses(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	cid := r.URL.Query().Get("customer")
 	empty := map[string]any{"pickup": []any{}, "delivery": []any{}}
 	if cid == "" {
@@ -239,6 +290,9 @@ func headN(xs []map[string]any, n int) []map[string]any {
 
 // Export GET /api/v1/orders/export —— 当前筛选结果导出 CSV（带 BOM 供 Excel 识别中文）
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -269,9 +323,22 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 			where = append(where, fmt.Sprintf("o.%s = %s", f, args.Add(v)))
 		}
 	}
-	if frag := filters.Apply(q.Get("filter"), filterFields, args); frag != "" {
+	// 已知字段上的非法值（比如日期框里打了「今天」）要当场说清是哪个字段，
+	// 而不是让 Postgres 报错变成 500，也不是默默把这个条件丢掉。
+	frag, ferr := filters.Apply(q.Get("filter"), filterFields, args)
+	if ferr != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_FILTER", ferr.Error())
+		return
+	}
+	if frag != "" {
 		where = append(where, frag)
 	}
+	whereSQL := strings.Join(where, " AND ")
+	// 先数一次：截断与否必须在写第一个字节之前知道，否则响应头已经发出去了。
+	// 这一次 count 走的是和取数完全相同的 WHERE，不会出现「说有 N 行、导出 M 行」。
+	total := -1
+	_ = h.DB.QueryRow(ctx, "SELECT count(*)"+fromClause+" WHERE "+whereSQL,
+		args.Values...).Scan(&total)
 	rows, err := h.DB.Query(ctx, `
 		SELECT o.order_no, COALESCE(c.name,''),
 		       (CASE o.channel WHEN 'cs' THEN '客服代下' WHEN 'self' THEN '客户自助'
@@ -284,18 +351,17 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		       o.origin, o.destination, o.cargo_weight_ton::text, o.cargo_quantity::text,
 		       o.quoted_amount::text,
 		       to_char(o.created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI')
-		`+fromClause+" WHERE "+strings.Join(where, " AND ")+" ORDER BY o.created_at DESC LIMIT 5000", args.Values...)
+		`+fromClause+" WHERE "+whereSQL+" ORDER BY o.created_at DESC LIMIT "+
+		strconv.Itoa(httpx.ExportMaxRows), args.Values...)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "查询失败", err)
 		return
 	}
 	defer rows.Close()
 
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8-sig")
-	w.Header().Set("Content-Disposition", `attachment; filename="orders.csv"`)
-	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF}) // UTF-8 BOM
-	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"订单号", "客户", "渠道", "状态", "始发", "目的", "货量(吨)", "件数", "报价", "创建时间"})
+	ex := httpx.NewExport(w, "orders.csv",
+		[]string{"订单号", "客户", "渠道", "状态", "始发", "目的", "货量(吨)", "件数", "报价", "创建时间"},
+		total)
 	for rows.Next() {
 		rec := make([]string, 10)
 		ptrs := make([]any, 10)
@@ -305,7 +371,117 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		if rows.Scan(ptrs...) != nil {
 			break
 		}
-		_ = cw.Write(rec)
+		if !ex.Row(rec) {
+			break
+		}
 	}
-	cw.Flush()
+	ex.Done()
+}
+
+// PoolCounts GET /api/v1/orders/pool-counts
+//
+// 调度工作台顶部那排计数（待派 / 紧急 / 临期超时）和三个池的角标。
+//
+// 为什么要单独一个端点：这些数以前是前端拿 items.length 数出来的。
+// 演示库十几单时一页装得下全部，数出来正好是对的；真实数据量下
+// 一页只有 20 条，于是「待分配 20」其实是 8336、「紧急 40」其实是两千多。
+// 这类错误不会报错、不会变形，只是安静地把全量说成了一页——
+// 而调度员正是照着这几个数决定今天先派哪一批。
+//
+// 计数走的谓词与列表端点是同一份（poolWhere / dispatchedWhere / urgentSQL），
+// 所以「计数说有多少」和「点进去能翻到多少」不会各说各话。
+func (h *Handler) PoolCounts(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
+	ctx := r.Context()
+	q := r.URL.Query()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return
+	}
+	canAll, err := h.canViewAll(r, me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取数据范围失败")
+		return
+	}
+	scope, mine := q.Get("scope"), q.Get("mine")
+
+	// count 用主表 + 建单人关联即可：数据范围看 cb.organization_id，
+	// 其余关联对计数没有影响，不必拖进来。
+	count := func(build func(*filters.Args, *auth.UserRow, bool) []string, extra string) (int, error) {
+		args := &filters.Args{}
+		where := []string{"NOT o.is_deleted"}
+		sw, err := h.scopeWhere(r, me, args)
+		if err != nil {
+			return 0, err
+		}
+		if sw != "" {
+			where = append(where, sw)
+		}
+		where = append(where, build(args, me, canAll)...)
+		if extra != "" {
+			where = append(where, extra)
+		}
+		var n int
+		err = h.DB.QueryRow(ctx, `SELECT count(*) FROM ops_order o
+			LEFT JOIN accounts_user cb ON cb.id = o.created_by_id
+			WHERE `+strings.Join(where, " AND "), args.Values...).Scan(&n)
+		return n, err
+	}
+
+	free := poolWhere("free", "")
+	minePool := poolWhere(scope, mine)
+	disp := dispatchedWhere(scope, mine)
+
+	// 待派/紧急/临期这三个数**不能**用「待分配 + 可调派」相加。
+	//
+	// 两池对普通调度是不相交的（未认领 vs 本人已认领），加起来没问题；
+	// 但超管选「全部」时可调派池就是整个订单池，把待分配池整个包含在内，
+	// 相加等于每张单数两遍——8336 + 8336 = 16672，而池里一共只有 8336 张。
+	// 前端原来的 freeOrders.length + mineOrders.length 就是这么写的，
+	// 演示库里 12 + 12 = 24 也一样是错的，只是没人会去核对那个数。
+	//
+	// 所以这里按「我能看见的整个待派池」一次数完，谓词取两池的并集。
+	visible := func(args *filters.Args, me *auth.UserRow, canAll bool) []string {
+		where := []string{"o.status IN ('pooled','dispatching')"}
+		if scope == "all" && canAll {
+			return where // 全量可见：并集就是整池
+		}
+		// 未认领未分派（人人可见） OR 本人认领/被分派
+		where = append(where, "((o.claimed_by_id IS NULL AND o.assigned_to_id IS NULL) OR "+
+			mineFilter(args, me)+")")
+		return where
+	}
+
+	type job struct {
+		key   string
+		build func(*filters.Args, *auth.UserRow, bool) []string
+		extra string
+	}
+	out := map[string]int{}
+	for _, j := range []job{
+		{"unassigned", free, ""},
+		{"dispatchable", minePool, ""},
+		{"dispatched", disp, ""},
+		{"pending", visible, ""},
+		{"urgent", visible, urgentSQL},
+		{"at_risk", visible, "o.sla_status IN ('at_risk','breached')"},
+	} {
+		n, err := count(j.build, j.extra)
+		if err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "统计失败")
+			return
+		}
+		out[j.key] = n
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"unassigned":   out["unassigned"],
+		"dispatchable": out["dispatchable"],
+		"dispatched":   out["dispatched"],
+		"pending":      out["pending"],
+		"urgent":       out["urgent"],
+		"at_risk":      out["at_risk"],
+	})
 }

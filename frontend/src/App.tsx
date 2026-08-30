@@ -1,8 +1,10 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GlobalProgress } from "./components/GlobalProgress";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { RequirePerm } from "./components/RequirePerm";
 import { StateView } from "./components/StateView";
 import { AuthProvider } from "./auth/auth";
 import { AuditPage } from "./pages/AuditPage";
@@ -27,6 +29,9 @@ import { WaybillDetailPage } from "./pages/WaybillDetailPage";
 export function App() {
   return (
     <AuthProvider>
+      {/* 应用级兜底：路由级那层包的是内容区，布局本身或路由本身崩了它接不住。
+          这一层保证任何情况下都还有一句话，而不是一张白页。 */}
+      <ErrorBoundary>
       <BrowserRouter>
         <GlobalProgress />
         <Routes>
@@ -39,17 +44,17 @@ export function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />
-              <Route path="intake" element={<OrderIntakePage />} />
-              <Route path="orders/:id" element={<OrderDetailPage />} />
-              <Route path="dispatch-board" element={<DispatchBoardPage />} />
-              <Route path="waybills" element={<OrderManagePage />} />
-              <Route path="waybills/:no" element={<WaybillDetailPage />} />
-              <Route path="fleet" element={<FleetPage />} />
-              <Route path="reconciliation" element={<ReconciliationPage />} />
-              <Route path="pricing" element={<PricingPage />} />
+              <Route path="intake" element={<RequirePerm perm={["waybill.create", "waybill.manage"]} label="客服工作台"><OrderIntakePage /></RequirePerm>} />
+              <Route path="orders/:id" element={<RequirePerm perm="waybill.view" label="订单详情"><OrderDetailPage /></RequirePerm>} />
+              <Route path="dispatch-board" element={<RequirePerm perm="waybill.view" label="调度工作台"><DispatchBoardPage /></RequirePerm>} />
+              <Route path="waybills" element={<RequirePerm perm="waybill.view" label="订单管理"><OrderManagePage /></RequirePerm>} />
+              <Route path="waybills/:no" element={<RequirePerm perm="waybill.view" label="运单详情"><WaybillDetailPage /></RequirePerm>} />
+              <Route path="fleet" element={<RequirePerm perm="masterdata.view" label="资源库"><FleetPage /></RequirePerm>} />
+              <Route path="reconciliation" element={<RequirePerm perm="finance.view" label="对账中心"><ReconciliationPage /></RequirePerm>} />
+              <Route path="pricing" element={<RequirePerm perm="finance.view" label="计价规则"><PricingPage /></RequirePerm>} />
               {/* 「管理后台」中转页已删除（侧栏直接列出组织与权限 / 审计日志）；老书签重定向 */}
               <Route path="admin" element={<Navigate to="/org" replace />} />
-              <Route path="org" element={<OrgCenterPage />} />
+              <Route path="org" element={<RequirePerm perm="org.rbac" label="组织与权限"><OrgCenterPage /></RequirePerm>} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="*" element={<StateView kind="empty" title="页面不存在" hint="该地址已失效或从未创建。" action={<Link className="btn-primary" to="/" style={{ textDecoration: "none" }}>返回驾驶舱</Link>} />} />
@@ -57,6 +62,7 @@ export function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </ErrorBoundary>
     </AuthProvider>
   );
 }

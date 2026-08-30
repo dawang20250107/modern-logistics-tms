@@ -114,6 +114,9 @@ func (h *Handler) mutate(w http.ResponseWriter, r *http.Request,
 
 // Confirm POST /orders/{id}/confirm
 func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	h.mutate(w, r, func(ctx context.Context, tx pgx.Tx, o *orderRow, me *auth.UserRow) (int, string, string) {
 		if o.Status != "pending_confirm" && o.Status != "confirmed" {
 			return 409, "INVALID_ORDER_STATUS", "仅待确认订单可确认。"
@@ -128,6 +131,9 @@ func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
 
 // Pool POST /orders/{id}/pool
 func (h *Handler) Pool(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	h.mutate(w, r, func(ctx context.Context, tx pgx.Tx, o *orderRow, me *auth.UserRow) (int, string, string) {
 		if o.Status != "confirmed" && o.Status != "pending_confirm" {
 			return 409, "INVALID_ORDER_STATUS", "仅已确认/待确认订单可进池。"
@@ -156,6 +162,9 @@ func (h *Handler) Pool(w http.ResponseWriter, r *http.Request) {
 
 // Cancel POST /orders/{id}/cancel
 func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	h.mutate(w, r, func(ctx context.Context, tx pgx.Tx, o *orderRow, me *auth.UserRow) (int, string, string) {
 		if o.Status == "converted" || o.Status == "completed" {
 			return 409, "INVALID_ORDER_STATUS", "已派单/已完成订单不可取消。"
@@ -170,6 +179,9 @@ func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
 
 // Claim POST /orders/{id}/claim —— 调度锁定（行锁防抢单）
 func (h *Handler) Claim(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	h.mutate(w, r, func(ctx context.Context, tx pgx.Tx, o *orderRow, me *auth.UserRow) (int, string, string) {
 		if o.Status != "pooled" || o.ClaimedBy != nil {
 			return 409, "ORDER_NOT_CLAIMABLE", "订单已被锁定或不在池中。"
@@ -191,6 +203,9 @@ func (h *Handler) Claim(w http.ResponseWriter, r *http.Request) {
 
 // Release POST /orders/{id}/release —— 退回订单池
 func (h *Handler) Release(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	h.mutate(w, r, func(ctx context.Context, tx pgx.Tx, o *orderRow, me *auth.UserRow) (int, string, string) {
 		if o.Status != "dispatching" {
 			return 409, "ORDER_NOT_DISPATCHING", "仅调度中订单可退回池。"
@@ -206,6 +221,9 @@ func (h *Handler) Release(w http.ResponseWriter, r *http.Request) {
 
 // Unassign POST /orders/{id}/unassign —— 总调度撤销分单
 func (h *Handler) Unassign(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	h.mutate(w, r, func(ctx context.Context, tx pgx.Tx, o *orderRow, me *auth.UserRow) (int, string, string) {
 		if chief, _ := h.isChiefDispatcher(ctx, me); !chief {
 			return 403, "NOT_CHIEF", "仅总调度可撤销分单。"
@@ -221,6 +239,9 @@ func (h *Handler) Unassign(w http.ResponseWriter, r *http.Request) {
 
 // Assign POST /orders/assign —— 总调度批量分单 {ids, dispatcher}
 func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {

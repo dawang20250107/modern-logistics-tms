@@ -1,0 +1,196 @@
+// Package wbstatus 运单状态在**统计口径**上的唯一定义。
+//
+// 存在的理由是一次实测出来的错账：
+//
+// 运单状态机里，departed / in_transit 没有通往 cancelled / voided 的边
+// （实测 POST transition 回 409）。也就是说，车已经发了之后要作废这一单，
+// 系统允许的唯一路径是 departed → in_transit → arrived → rejected → cancelled——
+// 必须先记一次**没有发生过的到达**。而 arrived 会写 arrived_at 里程碑。
+//
+// 承运商评分卡那三处的准班率按 `arrived_at IS NOT NULL` 取样，
+// 状态上只排除了 voided、没排除 cancelled。于是那张被取消的运单
+// 既进分母又进分子——一单根本没送到的货，算成了一次准点交付。
+// 实测：取消前 分母=0 分子=0，走完上面那条路径后 分母=1 分子=1，
+// 该承运商准班率 100%。
+//
+// 而 analytics 里的两处（ops.on_time_rate 的定义与看板）本来就是对的，
+// 它们按 status IN ('arrived','signed','delivered','settled') 取样。
+// 所以这不是要新定一套口径，是让跑偏的三处回到已有的那套——
+// 同一个承运商在看板上和评分卡上给出两个准班率，比给错一个更伤信任。
+package wbstatus
+
+import (
+	"sort"
+	"strings"
+)
+
+// Delivered 已实际完成交付动作的运单状态。
+//
+// 统计"送到了没有""准不准点"这类指标时，样本必须从这里取：
+//   - cancelled / voided 没有送达，不该出现在准班率的任何一侧
+//   - rejected（到了但被拒收）也不计入：口径与 analytics 的 ops.on_time_rate 对齐。
+//     代价是承运商的准点表现被低估了一点（车确实按时到了，是货被拒的），
+//     但拒收本身已由异常率单独反映；两套口径不一致的代价更大。
+var Delivered = []string{"arrived", "signed", "delivered", "settled"}
+
+// DeliveredSQL 供拼进 SQL 的字面量，形如 ('arrived','signed',…)。
+// 用常量而不是占位符，是为了能直接嵌进已有的大段 CTE 而不打乱参数序号。
+const DeliveredSQL = `('arrived','signed','delivered','settled')`
+
+// Aborted 中止：车已经发出去了，但这一趟不会送到了。
+//
+// 加这个状态之前，departed / in_transit 没有任何出口——想作废一张已发车的运单，
+// 系统允许的唯一路径是 departed → in_transit → arrived → rejected → cancelled，
+// 必须先记一次**没有发生过的到达**，那个假 arrived_at 会永久留在运单时间线上。
+//
+// 为什么不复用已有的两个：
+//
+//	· voided（作废）= 当它没发生过。承运商统计整个排除它，split/merge 的原单
+//	  也用它。但车确实开出去过、人和车确实被占用过，说"没发生过"是在抹掉事实。
+//	· cancelled（取消）= 业务被取消，车还没走。
+//	· aborted（中止）= 走了但没送到。几乎总有钱要算：空驶费、半程运费、货损。
+//
+// 所以 aborted 的唯一出口是 settled——**中止必须过一次结算**。
+// 不给它直连终态，是因为中止基本都有费用争议，让它悄悄消失才是坏设计；
+// 没有费用时结算 0 元也是一次明确的确认。
+const Aborted = "aborted"
+
+// Label 运单状态的中文标签。**全仓库唯一一份。**
+//
+// 收拢之前这张表在后端有 5 份一模一样的拷贝
+// （driver / orders.workflow / orders.public / waybills.cards / analytics.handler），
+// 加一个状态要改 5 处，漏掉任何一处的表现是「界面上显示成原始英文码」——
+// 不报错，只是看起来像没翻译。
+var Label = map[string]string{
+	"draft":            "草稿",
+	"pending_dispatch": "待调度",
+	"dispatched":       "已派车",
+	"loaded":           "已装车",
+	"departed":         "已发车",
+	"in_transit":       "运输中",
+	"arrived":          "已到达",
+	"partially_signed": "部分签收",
+	"rejected":         "已拒收",
+	"signed":           "已签收",
+	"delivered":        "已送达",
+	"settled":          "已结算",
+	"cancelled":        "已取消",
+	"voided":           "已作废",
+	Aborted:            "已中止",
+}
+
+// LabelOf 取标签；未知状态原样返回，便于排查而不是显示成空白。
+func LabelOf(s string) string {
+	if v, ok := Label[s]; ok {
+		return v
+	}
+	return s
+}
+
+// LabelCaseSQL 生成 SQL 里的 CASE 表达式，供那些在库里拼标签的查询用。
+// col 形如 "w.status"。同样是为了不再出现第二份状态词表。
+func LabelCaseSQL(col string) string {
+	var b strings.Builder
+	b.WriteString("(CASE " + col)
+	// 固定顺序输出，保证生成的 SQL 稳定（map 遍历是随机的，
+	// 不排序的话每次启动拼出来的语句都不一样，查询计划缓存会失效）
+	keys := make([]string, 0, len(Label))
+	for k := range Label {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.WriteString(" WHEN '" + k + "' THEN '" + Label[k] + "'")
+	}
+	b.WriteString(" ELSE " + col + " END)")
+	return b.String()
+}
+
+// ── 回单状态 ──────────────────────────────────────────────
+//
+// 和上面的运单状态是同一个故事的第二遍：后端写的值和前端认得的值**完全不重叠**。
+//
+//	后端写入   received（签收/部分签收/流转到已签收三处）、confirmed（回单确认）
+//	前端词表   pending 待追回 / returned 已回收 / audited 已核销
+//
+// 交集为空。也就是说，一张运单只要走过签收，回单那一列就会显示原始英文
+// （渲染处是 RECEIPT_LABEL[x] ?? x，缺键就把 key 露出来），
+// 而「回单状态」筛选器里根本没有能选中它的选项——那批单子筛不出来。
+// 回单是回单付结算的前提，筛不出来就意味着催不了款。
+//
+// 收敛到库里实际在用的那套（pending / returned / audited），
+// 并保留把历史值映射过来的入口。
+const (
+	ReceiptPending  = "pending"  // 待追回：回单还没回来
+	ReceiptReturned = "returned" // 已回收：回单收到了
+	ReceiptAudited  = "audited"  // 已核销：回单已核验，可以据此结算
+)
+
+// ReceiptLabel 回单状态词表。必须与前端 RECEIPT_LABEL 逐键一致
+// （由 TestReceiptStatusLabelsMatchFrontend 盯着）。
+var ReceiptLabel = map[string]string{
+	ReceiptPending:  "待追回",
+	ReceiptReturned: "已回收",
+	ReceiptAudited:  "已核销",
+}
+
+// receiptAliases 历史上写进过库的别名。
+//
+// 留着它不是为了兼容代码——代码里的写入点已经全部改成常量了——
+// 而是为了兼容**已经落在库里的行**。删掉这张表，那些行会在界面上
+// 重新变回英文码，而且没有任何报错提示发生了什么。
+var receiptAliases = map[string]string{
+	"received":  ReceiptReturned, // 签收时写的"收到回单"，与"已回收"同义
+	"confirmed": ReceiptAudited,  // 回单确认通过，与"已核销"同义
+}
+
+// NormalizeReceipt 把历史别名折算成正式取值；未知值原样返回。
+func NormalizeReceipt(s string) string {
+	if v, ok := receiptAliases[s]; ok {
+		return v
+	}
+	return s
+}
+
+// ValidReceipt 该取值是否可以由接口写入。
+// 别名只读不写：允许写入 received 等于允许把词表再分叉一次。
+func ValidReceipt(s string) bool {
+	_, ok := ReceiptLabel[s]
+	return ok
+}
+
+// ReceiptLabelOf 取回单状态标签（先折算别名）。
+func ReceiptLabelOf(s string) string {
+	if v, ok := ReceiptLabel[NormalizeReceipt(s)]; ok {
+		return v
+	}
+	return s
+}
+
+// ── 司机提醒状态 ──────────────────────────────────────────
+//
+// 只有两个取值，但它们分布在三个包里（driver 拉待办、resources 收确认、
+// waybills 发提醒），第三个是后补的——补的时候写成了 'sent'，
+// 而司机端拉待办的条件是 status='pending'，于是**发出去的提醒司机永远看不到**。
+// 接口返回 201、列表里也有那一条，只是司机端那个强制弹窗不会弹。
+// 端到端跑一遍才发现：发完之后司机的待确认列表还是 0 条。
+const (
+	ReminderPending      = "pending"      // 已发出、等司机确认（司机端按这个拉强制弹窗）
+	ReminderAcknowledged = "acknowledged" // 司机已确认
+)
+
+// ── 单张回单的状态 ────────────────────────────────────────
+//
+// 注意和上面的 Receipt* 不是一回事：那一组是**运单**上的"回单回收到哪一步"，
+// 这一组是**单张回单单据**自己的状态。两者名字像，含义不同，
+// 写代码时最容易张冠李戴，所以分开命名并各自留注释。
+const (
+	PODUploaded  = "uploaded"  // 传上来了，还没核验
+	PODConfirmed = "confirmed" // 核验通过（签收凭证成立）
+	PODRejected  = "rejected"  // 核验不通过 / 拒收回单
+)
+
+// ValidPOD 单张回单的状态是否合法。
+func ValidPOD(s string) bool {
+	return s == PODUploaded || s == PODConfirmed || s == PODRejected
+}

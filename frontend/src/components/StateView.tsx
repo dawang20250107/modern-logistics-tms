@@ -1,4 +1,5 @@
 // 五态统一视图：加载 / 错误 / 空 / 离线 / 无权限（信息层级一致、反馈明确）
+import { isPermissionDenied } from "../api/client";
 import {
   IconBox, IconCheckCircle, IconClock, IconInbox, IconLock, IconReceipt, IconTruck, IconWarning, IconWifiOff,
 } from "./Icons";
@@ -26,7 +27,7 @@ const SCENE: Record<string, { icon?: React.ReactNode; title: string; hint: strin
 };
 
 export function StateView({
-  kind, scene, title, hint, action, onRetry, compact,
+  kind, scene, title, hint, action, onRetry, compact, error,
 }: {
   kind: StateKind;
   scene?: keyof typeof SCENE;
@@ -35,7 +36,25 @@ export function StateView({
   action?: React.ReactNode;
   onRetry?: () => void;
   compact?: boolean;
+  /** 查询的错误对象。是 403 时自动改写成「无权限」，并且不给重试按钮——
+   *  权限不够时那颗按钮点多少次都一样，摆在那里只会浪费用户的时间。 */
+  error?: unknown;
 }) {
+  // 403 不是"出错了"。原样按 error 渲染的话，页面写的是
+  // 「加载失败：数据获取出错，请重试或稍后再来」，还配一颗重试按钮——
+  // 而真相是这个角色就是看不了这一块，点一万次也一样。
+  // forbidden 这一态本来就在（图标是把锁），只是没有人把 403 接到它上面。
+  if (kind === "error" && isPermissionDenied(error)) {
+    return (
+      <StateView
+        kind="forbidden"
+        title={title}
+        hint={hint ?? "你的角色没有被授予相应权限点。请让管理员在「组织与权限 → 权限授权」里勾上。"}
+        action={action}
+        compact={compact}
+      />
+    );
+  }
   const s = scene ? SCENE[scene] : undefined;
   const p = { ...PRESET[kind], ...(s ?? {}) };
   if (kind === "loading") {

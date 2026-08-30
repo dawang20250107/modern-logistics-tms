@@ -14,14 +14,18 @@
 package resources
 
 import (
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/expitem"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type (
 	cfg = masterdata.ResourceCfg
 	wcf = masterdata.WriteCfg
 	fld = masterdata.Field
+	upl = masterdata.UploadCfg
 	ff  = filters.FilterField
 )
 
@@ -122,7 +126,8 @@ var PermissionsCfg = cfg{
 }
 
 var PermissionWrite = wcf{
-	Table: "iam_permission", Model: "Permission", Alias: "pm", ReadOnly: true,
+	WritePerm: "org.rbac",
+	Table:     "iam_permission", Model: "Permission", Alias: "pm", ReadOnly: true,
 	ReadPerm: "org.rbac",
 }
 
@@ -141,7 +146,9 @@ SELECT ot.id::text AS id, ot.name, ot.payload, COALESCE(cu.username,'') AS creat
 }
 
 var OrderTemplateWrite = wcf{
-	Table: "ops_order_template", Model: "OrderTemplate", Alias: "ot", SoftDelete: true,
+	ReadPerm:  "waybill.view",
+	WritePerm: "waybill.manage",
+	Table:     "ops_order_template", Model: "OrderTemplate", Alias: "ot", SoftDelete: true,
 	Fields: map[string]fld{
 		"name":       {Kind: fText, Required: true},
 		"payload":    {Kind: fJSON, Default: "{}"},
@@ -164,7 +171,9 @@ var ReminderTemplatesCfg = cfg{
 }
 
 var ReminderTemplateWrite = wcf{
-	Table: "ops_reminder_template", Model: "ReminderTemplate", Alias: "rt", SoftDelete: true,
+	ReadPerm:  "waybill.view",
+	WritePerm: "waybill.manage",
+	Table:     "ops_reminder_template", Model: "ReminderTemplate", Alias: "rt", SoftDelete: true,
 	Fields: map[string]fld{
 		"name":       {Kind: fText, Required: true},
 		"category":   {Kind: fText},
@@ -196,7 +205,9 @@ LEFT JOIN md_driver dv ON dv.id = dr.driver_id`,
 }
 
 var DriverReminderWrite = wcf{
-	Table: "ops_driver_reminder", Model: "DriverReminder", Alias: "dr",
+	ReadPerm:  "waybill.view",
+	WritePerm: "waybill.manage",
+	Table:     "ops_driver_reminder", Model: "DriverReminder", Alias: "dr",
 	NoUpdate: true, NoDelete: true,
 	Fields: map[string]fld{
 		"waybill":         {Kind: fUUID, Ref: "ops_waybill"},
@@ -219,7 +230,9 @@ var ReceiptsCfg = cfg{
 	SelectSQL: `
 SELECT rc.id::text AS id, rc.waybill_id::text AS waybill, COALESCE(wb.waybill_no,'') AS waybill_no,
        rc.receipt_type, rc.status, NULLIF(rc.file,'') AS file,
-       COALESCE(NULLIF(rc.file,''), rc.file_url) AS file_display, rc.file_url,
+       -- file_display 是前端直接塞进 <a href> 的值：落盘的文件要带 /media/ 前缀，
+       -- 只给存放键（receipts/xxx）的话点开是 404——库里有文件、页面上打不开。
+       (CASE WHEN rc.file <> '' THEN '/media/' || rc.file ELSE rc.file_url END) AS file_display, rc.file_url,
        rc.ocr_status, rc.ocr_result, rc.signatory, rc.signed_at, rc.created_at,
        rc.outcome, rc.total_quantity::text AS total_quantity, rc.signed_quantity::text AS signed_quantity,
        rc.damaged_quantity::text AS damaged_quantity, rc.shortage_quantity::text AS shortage_quantity,
@@ -235,7 +248,9 @@ SELECT rc.id::text AS id, rc.waybill_id::text AS waybill, COALESCE(wb.waybill_no
 }
 
 var ReceiptWrite = wcf{
-	Table: "ops_receipt", Model: "Receipt", Alias: "rc",
+	ReadPerm:  "waybill.view",
+	WritePerm: "waybill.manage",
+	Table:     "ops_receipt", Model: "Receipt", Alias: "rc",
 	Fields: map[string]fld{
 		"waybill":           {Kind: fUUID, Ref: "ops_waybill", Required: true},
 		"receipt_type":      {Kind: fText, Default: "signed_pod"},
@@ -255,6 +270,8 @@ var ReceiptWrite = wcf{
 	ModelDefaults: map[string]any{"status": "uploaded", "ocr_status": "pending", "ocr_result": "{}"},
 	BeforeCreate:  stampUploadedBy,
 	AfterWrite:    kickReceiptOCR, // 对齐 perform_create 里的 process_receipt_ocr.delay
+	// 运单详情页传回单走的是 multipart（WaybillDetailPage），必须声明才收得下文件。
+	Upload: &upl{Field: "file", Prefix: "receipts/"},
 }
 
 // DispatchBatchesCfg /api/v1/dispatch-batches（ReadOnlyModelViewSet）
@@ -334,7 +351,8 @@ LEFT JOIN LATERAL (
 }
 
 var DispatchBatchWrite = wcf{
-	Table: "ops_dispatch_batch", Model: "DispatchBatch", Alias: "db", ReadOnly: true,
+	ReadPerm: "waybill.view",
+	Table:    "ops_dispatch_batch", Model: "DispatchBatch", Alias: "db", ReadOnly: true,
 }
 
 // ─────────────────────────── telematics：设备 / 围栏 / 报警 ───────────────────────────
@@ -420,7 +438,8 @@ LEFT JOIN ops_waybill wb ON wb.id = al.waybill_id`,
 }
 
 var AlertWrite = wcf{
-	Table: "tel_alert", Model: "Alert", Alias: "al", ReadOnly: true,
+	WritePerm: "telematics.manage",
+	Table:     "tel_alert", Model: "Alert", Alias: "al", ReadOnly: true,
 	ReadPerm: "telematics.view",
 }
 
@@ -438,7 +457,9 @@ SELECT ei.id::text AS id, ei.code, ei.name, ei.direction,
 }
 
 var ExpenseItemWrite = wcf{
-	Table: "fin_expense_item", Model: "ExpenseItem", Verbose: "费用项", Alias: "ei",
+	ReadPerm:  "finance.view",
+	WritePerm: "finance.manage",
+	Table:     "fin_expense_item", Model: "ExpenseItem", Verbose: "费用项", Alias: "ei",
 	Fields: map[string]fld{
 		"code": {Kind: fText, Required: true, Unique: true, Label: "code"},
 		"name": {Kind: fText, Required: true},
@@ -467,7 +488,9 @@ SELECT er.id::text AS id, er.waybill_id::text AS waybill, er.direction, er.expen
 }
 
 var ExpenseRecordWrite = wcf{
-	Table: "fin_expense_record", Model: "ExpenseRecord", Alias: "er",
+	ReadPerm:  "finance.view",
+	WritePerm: "finance.manage",
+	Table:     "fin_expense_record", Model: "ExpenseRecord", Alias: "er",
 	Fields: map[string]fld{
 		"waybill":           {Kind: fUUID, Ref: "ops_waybill"},
 		"direction":         {Kind: fText, Required: true},
@@ -500,7 +523,9 @@ SELECT pr.id::text AS id, pr.request_no, pr.waybill_id::text AS waybill, pr.coun
 }
 
 var PaymentRequestWrite = wcf{
-	Table: "fin_payment_request", Model: "PaymentRequest", Verbose: "付款申请", Alias: "pr",
+	ReadPerm:  "finance.view",
+	WritePerm: "finance.manage",
+	Table:     "fin_payment_request", Model: "PaymentRequest", Verbose: "付款申请", Alias: "pr",
 	Fields: map[string]fld{
 		"request_no":           {Kind: fText, Required: true, Unique: true, Label: "request no"},
 		"waybill":              {Kind: fUUID, Ref: "ops_waybill"},
@@ -542,13 +567,21 @@ LEFT JOIN md_carrier cr ON cr.id = pg.carrier_id`,
 }
 
 var PricingRuleWrite = wcf{
-	Table: "fin_pricing_rule", Model: "PricingRule", Alias: "pg",
+	ReadPerm:  "finance.view",
+	WritePerm: "finance.manage",
+	Table:     "fin_pricing_rule", Model: "PricingRule", Alias: "pg",
 	Fields: map[string]fld{
 		"name":       {Kind: fText, Required: true},
 		"price_type": {Kind: fEnum, Required: true, Choices: []string{"income", "cost"}},
 		"charge_method": {Kind: fEnum, Default: "tiered_weight",
 			Choices: []string{"tiered_weight", "flat", "per_volume", "per_piece", "per_km", "per_ton_km"}},
-		"expense_item_code":  {Kind: fText, Required: true},
+		// 科目必须是词表里的。原先是自由文本，而前端表单把它写死成 "FREIGHT"——
+		// 一个两份词表里都没有的码。手工录费用那条路径校验得很严
+		// （waybills.AddExpense 比对词表），规则生成这条一点都不校验，
+		// 于是规则算出来的钱落进一个谁也不认识的科目：财务看板按科目分组时
+		// 它进一个没有名字的桶，对账单行上显示的就是那个原始码。
+		// 同一个字段两套标准时，宽的那套决定了实际数据的质量。
+		"expense_item_code":  {Kind: fEnum, Required: true, Choices: expitem.AllCodes()},
 		"customer":           {Kind: fUUID, Ref: "md_customer"},
 		"carrier":            {Kind: fUUID, Ref: "md_carrier"},
 		"route_name":         {Kind: fText},
@@ -576,7 +609,9 @@ SELECT wh.id::text AS id, wh.name, wh.target_url, wh.events, wh.is_active, wh.cr
 }
 
 var WebhookWrite = wcf{
-	Table: "fin_webhook", Model: "Webhook", Alias: "wh",
+	ReadPerm:  "org.manage",
+	WritePerm: "org.manage",
+	Table:     "fin_webhook", Model: "Webhook", Alias: "wh",
 	Fields: map[string]fld{
 		"name":       {Kind: fText, Required: true},
 		"target_url": {Kind: fURL, Required: true},
@@ -599,7 +634,8 @@ SELECT wd.id::text AS id, wd.webhook_id::text AS webhook, wd.event_type, wd.payl
 }
 
 var WebhookDeliveryWrite = wcf{
-	Table: "fin_webhook_delivery", Model: "WebhookDelivery", Alias: "wd", ReadOnly: true,
+	ReadPerm: "org.manage",
+	Table:    "fin_webhook_delivery", Model: "WebhookDelivery", Alias: "wd", ReadOnly: true,
 }
 
 // ReimbursementsCfg /api/v1/reimbursements
@@ -633,7 +669,9 @@ LEFT JOIN accounts_user su ON su.id = rb.submitted_by_id`,
 }
 
 var ReimbursementWrite = wcf{
-	Table: "fin_reimbursement", Model: "Reimbursement", Alias: "rb",
+	ReadPerm:  "finance.view",
+	WritePerm: "finance.manage",
+	Table:     "fin_reimbursement", Model: "Reimbursement", Alias: "rb",
 	NoCreate: true, // create 由 ReimbursementCreate 接管（走 submit_reimbursement 语义）
 	Fields: map[string]fld{
 		"waybill":  {Kind: fUUID, Ref: "ops_waybill"},
@@ -647,13 +685,13 @@ var ReimbursementWrite = wcf{
 	ModelDefaults: map[string]any{"status": "submitted"},
 }
 
-// waybillStatusLabel 运单状态中文标签（与 waybills 域保持同一份口径）
-const waybillStatusLabel = `(CASE w.status
-    WHEN 'draft' THEN '草稿' WHEN 'pending_dispatch' THEN '待调度' WHEN 'dispatched' THEN '已派车'
-    WHEN 'loaded' THEN '已装车' WHEN 'departed' THEN '已发车' WHEN 'in_transit' THEN '运输中'
-    WHEN 'arrived' THEN '已到达' WHEN 'partially_signed' THEN '部分签收' WHEN 'rejected' THEN '已拒收'
-    WHEN 'signed' THEN '已签收' WHEN 'delivered' THEN '已送达' WHEN 'settled' THEN '已结算'
-    WHEN 'cancelled' THEN '已取消' WHEN 'voided' THEN '已作废' ELSE w.status END)`
+// waybillStatusLabel 运单状态中文标签。
+//
+// 原来这里是一份写死的 CASE，注释还写着"与 waybills 域保持同一份口径"——
+// 而"保持同一份口径"恰恰是拷贝做不到的事：加一个状态就得记得回来改这里，
+// 漏了的表现是同一个状态在别处显示中文、在这个接口里显示原始英文码。
+// 现在从 wbstatus 生成，口径只有一处。
+var waybillStatusLabel = wbstatus.LabelCaseSQL("w.status")
 
 // ─────────────────────────── finance：运输合同（商务/价格合同）───────────────────────────
 
@@ -694,7 +732,9 @@ SELECT ct.id::text AS id, ct.contract_no, ct.name, ct.contract_type,
 }
 
 var ContractWrite = wcf{
-	Table: "fin_contract", Model: "Contract", Verbose: "合同", Alias: "ct", SoftDelete: true,
+	ReadPerm:  "finance.view",
+	WritePerm: "finance.manage",
+	Table:     "fin_contract", Model: "Contract", Verbose: "合同", Alias: "ct", SoftDelete: true,
 	Fields: map[string]fld{
 		"contract_no": {Kind: fText, Required: true, Unique: true, Label: "contract no"},
 		"name":        {Kind: fText},
@@ -747,7 +787,9 @@ LEFT JOIN accounts_user u ON u.id = pj.manager_id`,
 }
 
 var ProjectWrite = wcf{
-	Table: "fin_project", Model: "Project", Verbose: "项目", Alias: "pj", SoftDelete: true,
+	ReadPerm:  "masterdata.view",
+	WritePerm: "masterdata.manage",
+	Table:     "fin_project", Model: "Project", Verbose: "项目", Alias: "pj", SoftDelete: true,
 	Fields: map[string]fld{
 		"project_no": {Kind: fText, Required: true, Unique: true, Label: "project no"},
 		"name":       {Kind: fText, Required: true},

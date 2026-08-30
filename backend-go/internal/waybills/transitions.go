@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // 合法状态流转表（对齐 ALLOWED_TRANSITIONS + _VOIDABLE_FROM）
@@ -27,16 +29,22 @@ var allowedTransitions = map[string][]string{
 	"pending_dispatch": {"dispatched", "cancelled", "voided"},
 	"dispatched":       {"loaded", "pending_dispatch", "cancelled", "voided"},
 	"loaded":           {"departed", "voided"},
-	"departed":         {"in_transit"},
-	"in_transit":       {"arrived"},
+	// 发车之后就不能再「作废」了——车真的开出去过，人和车真的被占用过，
+	// 说"当它没发生过"是在抹掉事实。能走的是「中止」：见 wbstatus.Aborted。
+	"departed":         {"in_transit", wbstatus.Aborted},
+	"in_transit":       {"arrived", wbstatus.Aborted},
 	"arrived":          {"signed", "partially_signed", "rejected"},
 	"partially_signed": {"signed", "delivered", "rejected"},
 	"rejected":         {"settled", "cancelled"},
 	"signed":           {"delivered"},
 	"delivered":        {"settled"},
-	"settled":          {},
-	"cancelled":        {},
-	"voided":           {},
+	// 中止唯一的出口是结算：空驶费、半程运费、货损基本都要算一笔。
+	// 不给它直连终态，是因为让一趟出过车的运输悄悄消失才是坏设计；
+	// 确实没有费用时，结算 0 元也是一次明确的确认。
+	wbstatus.Aborted: {"settled"},
+	"settled":        {},
+	"cancelled":      {},
+	"voided":         {},
 }
 
 var milestoneField = map[string]string{
@@ -95,6 +103,17 @@ func doTransition(ctx context.Context, tx pgx.Tx, w *wbRow, to, remark string) (
 	if !canGo(w.Status, to) {
 		return 409, "INVALID_TRANSITION", "不允许从 " + w.Status + " 流转到 " + to + "。"
 	}
+	// 中止必须写明原因。
+	//
+	// 别的流转都是业务正常往前走，事后看状态本身就说明了发生过什么；
+	// 中止不是——它意味着一趟已经出车的运输被人为终止，后面必然跟着
+	// 费用争议（空驶费怎么算、半程运费给不给）和责任认定。
+	// 那时候唯一能还原现场的就是这条原因，没有它只剩一个"已中止"，
+	// 谁也说不清当时发生了什么。
+	if to == wbstatus.Aborted && strings.TrimSpace(remark) == "" {
+		return 400, "ABORT_REASON_REQUIRED",
+			"中止运输必须填写原因（事故 / 客户取消 / 装错货 / 车辆故障等），后续费用认定要依据它。"
+	}
 	from := w.Status
 	set := "status=$2, updated_at=now()"
 	if f, ok := milestoneField[to]; ok {
@@ -137,6 +156,9 @@ func completeOrderOnDelivery(ctx context.Context, tx pgx.Tx, w *wbRow, to string
 
 // Transition POST /api/v1/waybills/{no}/transition {to_status, remark}
 func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -182,6 +204,9 @@ func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
 
 // Sign POST /api/v1/waybills/{no}/sign —— e-POD 签收：落回单 + 状态推进 + 订单完成 + 司机累计
 func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -240,7 +265,7 @@ func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, code, appCode, msg)
 		return
 	}
-	if _, err := tx.Exec(ctx, "UPDATE ops_waybill SET receipt_status='received', updated_at=now() WHERE id=$1::uuid", wb.ID); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE ops_waybill SET receipt_status='"+wbstatus.ReceiptReturned+"', updated_at=now() WHERE id=$1::uuid", wb.ID); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回单状态更新失败")
 		return
 	}
@@ -268,6 +293,9 @@ func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
 
 // StopEvent POST /api/v1/waybills/{no}/stop-event {seq, event: arrived|departed}
 func (h *Handler) StopEvent(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -302,10 +330,12 @@ func (h *Handler) StopEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	pj, _ := json.Marshal(map[string]any{"seq": body.Seq})
 	eid, _ := uuid.NewV7()
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), 'manual', $4, $5)`,
-		eid.String(), wbID, "stop_"+body.Event, "stop#"+strconv.Itoa(body.Seq), pj)
+		eid.String(), wbID, "stop_"+body.Event, "stop#"+strconv.Itoa(body.Seq), pj); err != nil {
+		slog.Warn("运单流转写库失败", "err", err)
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"waybill_no": no, "seq": body.Seq, "event": body.Event})
 }
 

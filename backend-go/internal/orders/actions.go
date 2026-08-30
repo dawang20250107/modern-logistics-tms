@@ -13,10 +13,14 @@ package orders
 // batch_orders, batch_update_orders, import_orders} 与 OrderViewSet.attachments。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -44,6 +48,9 @@ func inList(s string, xs []string) bool {
 
 // approvalGate approve/reject 共用：仅待审批可动，落审批事件后回整份订单
 func (h *Handler) approvalGate(w http.ResponseWriter, r *http.Request, approved bool) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -80,7 +87,7 @@ func (h *Handler) approvalGate(w http.ResponseWriter, r *http.Request, approved 
 		args = append(args, me.ID)
 	}
 	if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	h.orderEvent(ctx, id, eventType, "", "", me.ID, "approval", map[string]any{"remark": body.Remark})
@@ -138,11 +145,13 @@ func (h *Handler) orderEvent(ctx context.Context, orderID, eventType, from, to, 
 	}
 	pj, _ := json.Marshal(payload)
 	eid, _ := uuid.NewV7()
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type,
 		  from_status, to_status, actor_id, source, payload)
 		VALUES ($1, now(), now(), clock_timestamp(), $2::uuid, $3, $4, $5, $6::uuid, $7, $8)`,
-		eid.String(), orderID, eventType, from, to, nilIfBlank(actorID), source, pj)
+		eid.String(), orderID, eventType, from, to, nilIfBlank(actorID), source, pj); err != nil {
+		slog.Warn("订单写库失败", "err", err)
+	}
 }
 
 // spawnOrder 以蓝本订单表头新建订单（不含货物/站点），供拆单/合单复用。
@@ -218,6 +227,9 @@ func recomputeCargo(ctx context.Context, tx pgx.Tx, orderID string) error {
 
 // Split POST /api/v1/orders/{id}/split {groups:[{cargo_item_ids:[...]}]}
 func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -273,6 +285,36 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "SPLIT_NEEDS_GROUPS", "至少拆成两组（每组至少一项货物）。")
 		return
 	}
+	// 每一项货物明细都必须被分到某一组，且只能进一组。
+	//
+	// 拆单会把明细搬到子订单、然后把原单作废。没被任何一组选中的明细
+	// 就留在那张已作废的原单上——从流程里消失，不报错、不提示。
+	// 实测 3 项只分 2 项：60 件 / 12 吨，拆完只剩 30 件 / 6 吨，而接口回 201。
+	//
+	// 界面上不会发出这种请求（未分组的默认归第 1 组），但这个端点对所有
+	// 已鉴权调用方开放，而"货不能凭空少"该由服务端保证。
+	assigned := map[string]bool{}
+	dupCount := 0
+	for _, g := range valid {
+		for _, i := range g {
+			if assigned[i] {
+				dupCount++
+			}
+			assigned[i] = true
+		}
+	}
+	if dupCount > 0 {
+		// 同一项被分进两组：搬运是"最后一次写入生效"，等于凭空少一份货
+		httpx.Err(w, http.StatusBadRequest, "SPLIT_ITEM_DUPLICATED",
+			fmt.Sprintf("有 %d 项货物被分到了多个组里，请检查分组。", dupCount))
+		return
+	}
+	if missing := len(items) - len(assigned); missing > 0 {
+		httpx.Err(w, http.StatusBadRequest, "SPLIT_ITEMS_UNASSIGNED",
+			fmt.Sprintf("还有 %d 项货物没有分到任何一组。拆单会作废原单，"+
+				"没分组的货会跟着原单一起失效——请把每一项都分到组里。", missing))
+		return
+	}
 
 	childIDs := []string{}
 	childNos := []string{}
@@ -308,7 +350,7 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"children": childNos})
 	})
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "拆单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "拆单失败", err)
 		return
 	}
 	h.respondMany(w, r, childIDs, me, http.StatusCreated)
@@ -316,6 +358,9 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 
 // Merge POST /api/v1/orders/merge {ids:[...]}
 func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -400,11 +445,30 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		if err := recomputeCargo(ctx, tx, mid); err != nil {
 			return err
 		}
+		// 没有货物明细行的订单，货量只写在表头。
+		//
+		// recomputeCargo 带着 "EXISTS 明细行" 的条件（对拆单是对的），
+		// 于是这种订单合完之后，新单的表头是从第一张源单**整列复制**来的：
+		// 合并 A(3 件) 和 B(7 件) 得到一张写着 7 件的新单，另一张的货凭空没了。
+		// 而这恰恰是最常见的订单形态——库里 5 万单只有 28 单有明细行。
+		if _, err := tx.Exec(ctx, `
+			UPDATE ops_order o SET
+			  cargo_quantity = t.q, cargo_weight_ton = t.w, cargo_volume_cbm = t.v,
+			  updated_at = now()
+			FROM (SELECT COALESCE(sum(cargo_quantity),0) q,
+			             COALESCE(sum(cargo_weight_ton),0) w,
+			             COALESCE(sum(cargo_volume_cbm),0) v
+			      FROM ops_order WHERE id::text = ANY($2)) t
+			WHERE o.id = $1::uuid
+			  AND NOT EXISTS (SELECT 1 FROM ops_order_cargo_item WHERE order_id = $1::uuid)`,
+			mid, ids); err != nil {
+			return err
+		}
 		return txEvent(ctx, tx, mid, "created", "", base.status, me.ID, "merge",
 			map[string]any{"merged_from": nos})
 	})
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "合单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "合单失败", err)
 		return
 	}
 	h.respondOneStatus(w, r, mergedID, me, http.StatusCreated)
@@ -412,6 +476,9 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 // Batch POST /api/v1/orders/batch {action, ids}
 func (h *Handler) Batch(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -470,14 +537,33 @@ func (h *Handler) Batch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// applyBatchAction 单条执行；返回非空错误码表示该条失败（不影响其余）
+// applyBatchAction 单条执行；返回非空错误码表示该条失败（不影响其余）。
+//
+// 这里原先四个 UPDATE 全是 `_, _ = h.DB.Exec(...)`——**错误被丢掉，
+// 然后一律 return "", ""（成功）**。于是批量确认 50 单时，哪怕每一条
+// UPDATE 都失败，接口照样回 `ok_count: 50`，界面弹一句"已处理 50 单"，
+// 而库里一条都没变。这套系统这一轮已经因为同一个写法栽过一次
+// （回单状态重算，静默不生效）。
+//
+// 现在每条都判错并把失败原因带回去：批量操作的价值全在"哪几条没成功"上，
+// 报一个笼统的成功数，等于把核对的活推给用户，而他手上没有核对的依据。
 func (h *Handler) applyBatchAction(ctx context.Context, action, id, status, approval, actorID string) (string, string) {
+	// exec 统一判错。失败时给出的是**这一条**为什么没成，不是整批的笼统失败。
+	exec := func(sql string, args ...any) (string, string) {
+		if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
+			slog.Error("批量操作写库失败", "action", action, "order", id, "err", err)
+			return "DB_WRITE_FAILED", "写入失败，请重试。"
+		}
+		return "", ""
+	}
 	switch action {
 	case "confirm":
 		if status != "pending_confirm" && status != "confirmed" {
 			return "INVALID_ORDER_STATUS", "仅待确认订单可确认。"
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_order SET status='confirmed', updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(`UPDATE ops_order SET status='confirmed', updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 		h.orderEvent(ctx, id, "confirmed", status, "confirmed", actorID, "cs", nil)
 	case "pool":
 		if status != "confirmed" && status != "pending_confirm" {
@@ -489,17 +575,23 @@ func (h *Handler) applyBatchAction(ctx context.Context, action, id, status, appr
 		if approval == "rejected" {
 			return "ORDER_APPROVAL_REJECTED", "订单审批被驳回，不可进池。"
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_order SET status='pooled', pooled_at=now(), updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(`UPDATE ops_order SET status='pooled', pooled_at=now(), updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 		h.orderEvent(ctx, id, "pooled", status, "pooled", actorID, "cs", nil)
 	case "cancel":
 		if status == "converted" || status == "completed" {
 			return "INVALID_ORDER_STATUS", "已派单/已完成订单不可取消。"
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_order SET status='cancelled', updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(`UPDATE ops_order SET status='cancelled', updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 		h.orderEvent(ctx, id, "cancelled", status, "cancelled", actorID, "cs", nil)
 	case "delete":
-		_, _ = h.DB.Exec(ctx,
-			`UPDATE ops_order SET is_deleted=true, deleted_at=now(), updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(
+			`UPDATE ops_order SET is_deleted=true, deleted_at=now(), updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 	}
 	return "", ""
 }
@@ -512,6 +604,9 @@ var batchFieldChoices = map[string][]string{
 
 // BatchUpdate POST /api/v1/orders/batch-update {field, value, ids}
 func (h *Handler) BatchUpdate(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -594,6 +689,9 @@ func validUUIDs(in []string) []string {
 //
 // 逐行建单、失败隔离：一行脏数据不该让整批白跑。
 func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
+	if !h.allowAny(w, r, "waybill.create", "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -665,6 +763,9 @@ func mapList(v any) []map[string]any {
 
 // Attachments GET/POST /api/v1/orders/{id}/attachments
 func (h *Handler) Attachments(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -684,7 +785,7 @@ func (h *Handler) Attachments(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
 		return
 	}
-	kind, name, fileURL := "other", "", ""
+	kind, name, fileURL, fileRel := "other", "", "", ""
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -698,17 +799,46 @@ func (h *Handler) Attachments(w http.ResponseWriter, r *http.Request) {
 			kind = v
 		}
 		name, fileURL = r.FormValue("name"), r.FormValue("file_url")
-		if _, fh, err := r.FormFile("file"); err == nil && name == "" {
-			name = fh.Filename
+		// 这里原先只取了文件名，字节直接丢掉：库里 file='' ，
+		// 前端拿到的 file_display 是空串，那一行渲染成不可点的纯文字，
+		// 而 toast 照样说"附件已上传"。合同、磅单、回单是这门生意的凭证，
+		// 上传的人不会去点开验一遍，等到对账要证据那天才发现没有——
+		// 那时候文件早就找不着了。
+		if f, fh, err := r.FormFile("file"); err == nil {
+			defer f.Close()
+			if name == "" {
+				name = fh.Filename
+			}
+			buf, rerr := io.ReadAll(io.LimitReader(f, attachmentMaxBytes+1))
+			if rerr != nil {
+				httpx.Err(w, http.StatusBadRequest, "UPLOAD_FAILED", "文件读取失败。")
+				return
+			}
+			if int64(len(buf)) > attachmentMaxBytes {
+				httpx.Err(w, http.StatusBadRequest, "FILE_TOO_LARGE", "文件过大，请控制在 32MB 内。")
+				return
+			}
+			// 文件名不进存放路径：用户可以传"../../x"这种名字。
+			// 只留扩展名，且扩展名本身也要过滤掉分隔符。
+			rel := "attachments/" + uuid.NewString() + safeExt(fh.Filename)
+			if err := h.store().Put(ctx, rel, bytes.NewReader(buf),
+				int64(len(buf)), http.DetectContentType(buf)); err != nil {
+				// 存不下就必须报错，不能静默建一条没有文件的附件行——
+				// 那正是修之前的行为，用户以为存下了。
+				slog.Error("附件写入失败", "err", err, "order", id)
+				httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "文件保存失败，请重试。")
+				return
+			}
+			fileRel = rel
 		}
 	}
 	aid, _ := uuid.NewV7()
 	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_order_attachment (id, created_at, updated_at, order_id, kind, name,
 		  file, file_url, uploaded_by_id)
-		VALUES ($1, now(), now(), $2::uuid, $3, $4, '', $5, $6::uuid)`,
-		aid.String(), id, kind, name, fileURL, nilIfBlank(me.ID)); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, $6, $7::uuid)`,
+		aid.String(), id, kind, name, fileRel, fileURL, nilIfBlank(me.ID)); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	list, _ := h.childRows(ctx, attachmentSelect+" WHERE a.id=$1::uuid", aid.String())
@@ -745,16 +875,48 @@ func normalizeAttachments(rows []map[string]any) []map[string]any {
 	return out
 }
 
+// attachmentMaxBytes 单个附件上限。与前端 ParseMultipartForm 的 32MB 对齐。
+const attachmentMaxBytes = 32 << 20
+
+// safeExt 从用户给的文件名里取一个可以安全拼进存放路径的扩展名。
+//
+// filepath.Ext("../../etc/passwd") 会给出 ""，但 Ext("x.tar/../../y") 之类
+// 仍可能带出分隔符，所以拿到之后再筛一遍：只留字母数字。
+// 拿不到干净扩展名就不要——存放键本来就是 uuid，扩展名只是方便人看。
+func safeExt(filename string) string {
+	ext := filepath.Ext(filename)
+	if len(ext) < 2 || len(ext) > 12 {
+		return ""
+	}
+	for _, c := range ext[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return ""
+		}
+	}
+	return ext
+}
+
 // DeleteAttachment DELETE /api/v1/orders/{id}/attachments/{att_id}
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
 	}
 	attID := chi.URLParam(r, "att_id")
 	if _, err := uuid.Parse(attID); err == nil {
-		_, _ = h.DB.Exec(r.Context(),
-			`DELETE FROM ops_order_attachment WHERE id=$1::uuid AND order_id=$2::uuid`, attID, id)
+		// 先取存放键再删行：删完就没地方查了，文件会一直留在盘上/桶里。
+		// 存放键是每行一个 uuid，不会有第二行引用它，删掉是安全的。
+		var rel string
+		_ = h.DB.QueryRow(r.Context(),
+			`SELECT COALESCE(file,'') FROM ops_order_attachment WHERE id=$1::uuid AND order_id=$2::uuid`,
+			attID, id).Scan(&rel)
+		if _, derr := h.DB.Exec(r.Context(),
+			`DELETE FROM ops_order_attachment WHERE id=$1::uuid AND order_id=$2::uuid`, attID, id); derr == nil && rel != "" {
+			_ = h.store().Delete(r.Context(), rel)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

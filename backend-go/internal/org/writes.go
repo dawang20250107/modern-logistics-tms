@@ -151,10 +151,33 @@ func (h *Handler) ToggleEmployee(active bool) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if userID != nil {
-			_, _ = h.DB.Exec(ctx, `UPDATE accounts_user SET is_active=$2 WHERE id=$1::uuid`, *userID, active)
+		// 一个事务里做完，且失败要报出来。
+		//
+		// 停用是有人离职、或者账号被盗时按的那颗按钮，它必须同时做两件事：
+		// 员工档案标记停用，以及把登录账号关掉。原先两条 UPDATE 各写各的、
+		// 错误都被 `_, _ =` 丢掉、也不在同一个事务里——关账号那条失败时，
+		// 接口照样返回 200、界面照样显示「停用」，而人还能登进来。
+		// 按下这颗按钮的人不会再去验一遍。
+		tx, err := h.DB.Begin(ctx)
+		if err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+			return
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE iam_employee SET status=$2, updated_at=now() WHERE id=$1::uuid`, empID, status)
+		defer func() { _ = tx.Rollback(ctx) }()
+		if userID != nil {
+			if _, err := tx.Exec(ctx, `UPDATE accounts_user SET is_active=$2 WHERE id=$1::uuid`, *userID, active); err != nil {
+				httpx.Fail(w, r, "INTERNAL", "更新账号状态失败", err)
+				return
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE iam_employee SET status=$2, updated_at=now() WHERE id=$1::uuid`, empID, status); err != nil {
+			httpx.Fail(w, r, "INTERNAL", "更新员工状态失败", err)
+			return
+		}
+		if err := tx.Commit(ctx); err != nil {
+			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交失败")
+			return
+		}
 		h.respondRow(w, ctx, employeesCfg, "e.id = $1::uuid", empID, http.StatusOK)
 	}
 }
@@ -181,6 +204,9 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	hash := auth.MakeDjangoPassword(newPwd)
 	var username string
 	_ = h.DB.QueryRow(ctx, `UPDATE accounts_user SET password=$2 WHERE id=$1::uuid RETURNING username`, *userID, hash).Scan(&username)
+	// 管理员重置密码同样要作废该账号既有会话：常见触发原因就是"这人离职了"
+	// 或"账号可能被盗"，不踢会话等于只改了个门锁没换掉已配出去的钥匙。
+	_ = auth.RevokeAllForUser(ctx, h.DB, *userID)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"employee_no": empNo, "username": username, "password": newPwd,
 	})

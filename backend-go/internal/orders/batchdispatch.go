@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,10 +42,33 @@ type dispatchableOrder struct {
 	ExpectedDeliveryAt                                               *time.Time
 }
 
-// allocatePayable 分摊：按吨占比 / 均摊 / 逐单指定；末单吸收舍入误差（对齐 _allocate_payable）
+// allocatePayable 分摊：按吨占比 / 均摊 / 逐单指定。
+//
+// 用「最大余数法」（Hamilton）而不是「前 N-1 单四舍五入、末单吸收误差」：
+//
+// 后者的问题是末单可能变成**负数**。前 N-1 单各自 Round(2) 若都往上舍入，
+// 已分出去的会超过总额，末单于是等于一个负值。实测总额 0.10 分 20 单时，
+// 末单分到 -0.09——一张「应付 -0.09 元」的单会一路流进财务对账。
+// 触发条件是「总额 / 单数」落在半分钱附近；现实里多半是录单把 1000 敲成了 1，
+// 但系统不该把一个录入错误变成负应付。
+//
+// 最大余数法：先把每单的精确份额向下取整到分，再把余下的几分钱
+// 按小数部分从大到小逐分发出去。三条性质同时成立：
+//
+//	· 各单之和恒等于总额（末单吸收法也有这条）
+//	· 任何一单都不为负（末单吸收法没有）
+//	· 任意两单的偏差不超过一分钱（末单吸收法可能让末单差出好几分）
+//
+// 小数部分相同时按订单顺序发，保证同样的输入永远得到同样的结果——
+// 分钱的函数不能有不确定性，否则重跑一次对账就对不上了。
 func allocatePayable(total decimal.Decimal, orders []dispatchableOrder, allocation string, manual map[string]string) map[string]decimal.Decimal {
 	out := map[string]decimal.Decimal{}
 	if allocation == "manual" && manual != nil {
+		// 逐单指定：原样采纳，不校验合计是否等于总额。
+		// 这意味着批次上记的总额与各单之和可能对不上（调度员各填 1000、
+		// 总额却是 2000 时，系统照单全收）。要不要拦、拦了回 400 还是
+		// 按比例缩放，是业务决定——现状由 allocate_test.go 钉着，
+		// 将来谁改了语义那条用例会红。
 		for _, o := range orders {
 			v, _ := decimal.NewFromString(manual[o.ID])
 			out[o.ID] = v
@@ -57,26 +81,58 @@ func allocatePayable(total decimal.Decimal, orders []dispatchableOrder, allocati
 		}
 		return out
 	}
+
 	wsum := decimal.Zero
 	for _, o := range orders {
 		wsum = wsum.Add(o.Weight)
 	}
-	running := decimal.Zero
-	for i, o := range orders {
-		if i == len(orders)-1 {
-			out[o.ID] = total.Sub(running)
-			break
-		}
-		var part decimal.Decimal
-		if allocation == "by_weight" && wsum.GreaterThan(decimal.Zero) {
-			part = total.Mul(o.Weight).Div(wsum).Round(2)
-		} else {
-			part = total.Div(decimal.NewFromInt(int64(len(orders)))).Round(2)
-		}
-		out[o.ID] = part
-		running = running.Add(part)
+	byWeight := allocation == "by_weight" && wsum.GreaterThan(decimal.Zero)
+	n := decimal.NewFromInt(int64(len(orders)))
+
+	// 第一轮：各单精确份额向下取整到分，同时记下被截掉的小数部分
+	type frac struct {
+		id  string
+		rem decimal.Decimal // 被截掉的部分，越大越该优先补这一分
+		idx int
 	}
-	return out
+	base := make(map[string]decimal.Decimal, len(orders))
+	fracs := make([]frac, 0, len(orders))
+	allotted := decimal.Zero
+	for i, o := range orders {
+		var exact decimal.Decimal
+		if byWeight {
+			exact = total.Mul(o.Weight).Div(wsum)
+		} else {
+			exact = total.Div(n)
+		}
+		// Truncate 而不是 Round：向下取整才能保证「已分出去的 ≤ 总额」，
+		// 余数永远非负，也就永远不会出现负分摊。
+		b := exact.Truncate(2)
+		base[o.ID] = b
+		fracs = append(fracs, frac{id: o.ID, rem: exact.Sub(b), idx: i})
+		allotted = allotted.Add(b)
+	}
+
+	// 第二轮：把余下的分数按小数部分从大到小逐分发出去
+	leftover := total.Sub(allotted) // 恒 ≥ 0
+	cents := leftover.Mul(decimal.NewFromInt(100)).Round(0).IntPart()
+	sort.SliceStable(fracs, func(i, j int) bool {
+		if c := fracs[i].rem.Cmp(fracs[j].rem); c != 0 {
+			return c > 0
+		}
+		return fracs[i].idx < fracs[j].idx // 平手按订单顺序，保证可复现
+	})
+	one := decimal.New(1, -2) // 0.01
+	for i := int64(0); i < cents && int(i) < len(fracs); i++ {
+		base[fracs[i].id] = base[fracs[i].id].Add(one)
+	}
+	// 单数少于余数分数时（理论上不会，除非总额精度超过两位），
+	// 把还没分完的挂到第一单，保住「之和等于总额」这条。
+	if cents > int64(len(fracs)) {
+		extra := decimal.NewFromInt(cents - int64(len(fracs))).Mul(one)
+		base[fracs[0].id] = base[fracs[0].id].Add(extra)
+	}
+	return base
 }
 
 // carrierBlockReason 对齐 Carrier.dispatch_block_reason（黑名单/停用/资质过期）
@@ -107,6 +163,9 @@ func (h *Handler) carrierBlockReason(ctx context.Context, carrierID string) (nam
 
 // BatchDispatch POST /api/v1/orders/batch-dispatch
 func (h *Handler) BatchDispatch(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -319,9 +378,13 @@ func dispatchOneInBatch(ctx context.Context, tx pgx.Tx, o dispatchableOrder, bod
 		  order_id, customer_id, carrier_id, batch_id, route_name, ai_conversation_id, origin, destination,
 		  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
 		  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
-		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
+		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id,
+		  -- 同 dispatch.go：归属取建单人的组织，漏了这一列运单就没人看得见
+		  organization_id)
 		VALUES ($1, now(), now(), $2, $3, $4, '', $5::uuid, $6::uuid, $7::uuid, $8::uuid, $9, $10, $11, $12,
-		  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid)`,
+		  'pending_dispatch', 'pending_accept', 'none', 'not_due', 0, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid,
+		  (SELECT u.organization_id FROM ops_order oo
+		     LEFT JOIN accounts_user u ON u.id = oo.created_by_id WHERE oo.id = $5::uuid))`,
 		wid.String(), wbNo, body.DispatchType, body.PlatformName,
 		o.ID, o.CustomerID, carrierIDArg, batchID,
 		o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,

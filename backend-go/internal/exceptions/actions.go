@@ -8,6 +8,7 @@ package exceptions
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -28,7 +29,9 @@ var Cfg = func() masterdata.ResourceCfg {
 
 // Write 异常的可写字段；status 是只读的（read_only_fields），只能由处置动作推进
 var Write = masterdata.WriteCfg{
-	Table: "ops_exception", Model: "ExceptionRecord", Verbose: "异常", Alias: "x",
+	ReadPerm:  "waybill.view",
+	WritePerm: "waybill.manage",
+	Table:     "ops_exception", Model: "ExceptionRecord", Verbose: "异常", Alias: "x",
 	Fields: map[string]masterdata.Field{
 		"waybill":              {Kind: masterdata.FUUID, Ref: "ops_waybill"}, // null=True：不挂运单的异常也合法
 		"exception_type":       {Kind: masterdata.FEnum, Required: true, Choices: exceptionTypes},
@@ -55,6 +58,18 @@ var exceptionTypes = func() []string {
 }()
 
 // object 取异常并做数据范围校验；未命中时已写 404
+// need 权限闸。
+//
+// 这几个动作原先**一个权限检查都没有**：只要登录了、而且那张运单在你的数据范围里，
+// 就能指派、处理、乃至定责关闭——而关闭会按赔付金额落一条应付，
+// 把钱带进对账。数据范围挡住的是"看得见谁的单"，不是"能不能做这件事"，
+// 拿它当权限用是把两个不同的问题混成一个：同一个网点的客服照样能替公司定责赔钱。
+//
+// 这一批是发布前系统性排查 22 个读写配置时顺出来的（见 authz_test.go 的清单）。
+func (h *Handler) need(w http.ResponseWriter, r *http.Request, perm string) bool {
+	return h.MD.Allow(w, r, perm)
+}
+
 func (h *Handler) object(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -81,6 +96,9 @@ func (h *Handler) respond(w http.ResponseWriter, r *http.Request, id string) {
 
 // Timeline GET /api/v1/exceptions/{id}/timeline
 func (h *Handler) Timeline(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.view") {
+		return
+	}
 	id, ok := h.object(w, r)
 	if !ok {
 		return
@@ -115,6 +133,9 @@ func (h *Handler) Timeline(w http.ResponseWriter, r *http.Request) {
 
 // Assign POST /api/v1/exceptions/{id}/assign {assignee}
 func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id, ok := h.object(w, r)
 	if !ok {
@@ -139,7 +160,7 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_exception SET assignee_id=$2::uuid, status='handling', updated_at=now()
 		WHERE id=$1::uuid`, id, assignee); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	note := "取消指派"
@@ -158,6 +179,9 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 
 // Handle POST /api/v1/exceptions/{id}/handle {resolution}
 func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id, ok := h.object(w, r)
 	if !ok {
@@ -180,7 +204,7 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_exception SET status='pending_audit', resolution=$2, updated_at=now()
 		WHERE id=$1::uuid`, id, newRes); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	note, _ := body["resolution"].(string) // 事件 note 取的是本次入参而非合并后的值
@@ -190,6 +214,9 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 
 // Close POST /api/v1/exceptions/{id}/close {responsibility_party, amount, resolution}
 func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id, ok := h.object(w, r)
 	if !ok {
@@ -202,10 +229,43 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var from, party, amount, resolution string
 	var waybillID *string
-	_ = h.DB.QueryRow(ctx, `SELECT status, responsibility_party, amount::text, resolution, waybill_id::text
-		FROM ops_exception WHERE id=$1::uuid`, id).Scan(&from, &party, &amount, &resolution, &waybillID)
+	// 读状态必须在事务里、并且锁住这一行。
+	//
+	// 下面那个 `from == "closed"` 的守卫原先读在事务**外面**，
+	// 写又不带状态条件——串行点两次挡得住，并发就一起穿过去。
+	// 实测 6 个并发关闭：**6 个都返回 200，落了 6 条应付，
+	// 800 元的赔付计成 4800**。前端重试一次、或者两个调度同时处理
+	// 同一条异常，承运商就被多扣几倍。
+	if err := tx.QueryRow(ctx, `SELECT status, responsibility_party, amount::text, resolution, waybill_id::text
+		FROM ops_exception WHERE id=$1::uuid FOR UPDATE`, id).
+		Scan(&from, &party, &amount, &resolution, &waybillID); err != nil {
+		httpx.Err(w, http.StatusNotFound, "error", "No ExceptionRecord matches the given query.")
+		return
+	}
+
+	// 已关闭的异常不能再关一次。
+	//
+	// 关闭不是改个状态：责任金额 > 0 时会落一条应付，把异常成本带进对账。
+	// 这里原先没有任何守卫——同一条异常连关三次就生成三条应付，
+	// 实测 800 元的赔付被计成 2400 元，而三次都返回 200。
+	// 操作员双击一下、或者网络重试一次，承运商就被多扣一倍。
+	//
+	// 顺带也挡住"悄悄改写定责结论"：那个结论是要拿去跟承运商结算的，
+	// 要改就该是一次明确的动作，而不是再点一次关闭。
+	if from == "closed" {
+		httpx.Err(w, http.StatusConflict, "EXCEPTION_CLOSED",
+			"该异常已关闭。如需更正责任方或赔付金额，请先重新打开异常。")
+		return
+	}
 
 	if v, has := body["responsibility_party"].(string); has {
 		party = v
@@ -217,22 +277,22 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 	if v, has := body["resolution"].(string); has {
 		resolution = v
 	}
-	if _, err := h.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE ops_exception SET status='closed', responsibility_party=$2,
 		  amount=$3::numeric, resolution=$4, updated_at=now() WHERE id=$1::uuid`,
 		id, party, amount, resolution); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	// 责任金额 > 0 且挂了运单 → 落一条应付费用，把异常成本带进对账
 	if waybillID != nil {
 		var positive bool
-		_ = h.DB.QueryRow(ctx, `SELECT $1::numeric > 0`, amount).Scan(&positive)
+		_ = tx.QueryRow(ctx, `SELECT $1::numeric > 0`, amount).Scan(&positive)
 		if positive {
 			eid, _ := uuid.NewV7()
 			// 其余 NOT NULL 列按模型层的 blank/default 补零值；occurred_at 保持 NULL
 			// （Django 的 create() 没传，就不该被网关擅自填成"现在"）
-			if _, err := h.DB.Exec(ctx, `
+			if _, err := tx.Exec(ctx, `
 				INSERT INTO fin_expense_record (id, created_at, updated_at, waybill_id, direction,
 				  expense_item_code, amount, risk_status, source_system, external_id,
 				  currency, remark, payee_ref, payee_type, charge_method, matched_condition,
@@ -242,10 +302,14 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 				  'normal', 'exception', $4, 'CNY', '', '', '', '', '', '', '', '', '',
 				  '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)`,
 				eid.String(), *waybillID, amount, id); err != nil {
-				httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "异常费用落库失败："+err.Error())
+				httpx.Fail(w, r, "INTERNAL", "异常费用落库失败", err)
 				return
 			}
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交事务失败")
+		return
 	}
 	h.event(r, id, "close", from, "closed", me.ID, resolution,
 		map[string]any{"responsibility_party": party, "amount": amount})
@@ -277,9 +341,11 @@ func trimFloat(f float64) string {
 func (h *Handler) event(r *http.Request, excID, eventType, from, to, actorID, note string, payload map[string]any) {
 	eid, _ := uuid.NewV7()
 	pj, _ := json.Marshal(payload)
-	_, _ = h.DB.Exec(r.Context(), `
+	if _, err := h.DB.Exec(r.Context(), `
 		INSERT INTO ops_exception_event (id, created_at, updated_at, exception_id, event_type,
 		  from_status, to_status, actor_id, note, payload, event_time)
 		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, $6::uuid, $7, $8, clock_timestamp())`,
-		eid.String(), excID, eventType, from, to, actorID, note, pj)
+		eid.String(), excID, eventType, from, to, actorID, note, pj); err != nil {
+		slog.Warn("异常事件写库失败", "err", err)
+	}
 }

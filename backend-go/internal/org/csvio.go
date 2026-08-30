@@ -7,15 +7,20 @@ package org
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/csv"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // writeCSV 统一的 CSV 响应：一个 UTF-8 BOM + 表头 + 数据行。
@@ -23,12 +28,10 @@ import (
 // Django 侧把 charset 设成 utf-8-sig 又手写了一次 BOM，于是 HttpResponse 每次
 // write 都再补一个——表头前 3 个、每条数据行前 1 个。那是 Excel 里每行首格都带
 // 一个不可见字符的缺陷，不是契约，这里只发一个。
-func writeCSV(w http.ResponseWriter, filename string, header []string, rows pgx.Rows, cols int) {
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8-sig")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
-	cw := csv.NewWriter(w)
-	_ = cw.Write(header)
+// total 是符合条件的总行数（<0 表示未知），只用来判断要不要在文件末尾
+// 写「导出已截断」。见 httpx.NewExport。
+func writeCSV(w http.ResponseWriter, filename string, header []string, rows pgx.Rows, cols, total int) {
+	ex := httpx.NewExport(w, filename, header, total)
 	defer rows.Close()
 	for rows.Next() {
 		rec := make([]string, cols)
@@ -39,9 +42,18 @@ func writeCSV(w http.ResponseWriter, filename string, header []string, rows pgx.
 		if rows.Scan(ptrs...) != nil {
 			break
 		}
-		_ = cw.Write(rec)
+		if !ex.Row(rec) {
+			break
+		}
 	}
-	cw.Flush()
+	ex.Done()
+}
+
+// countRows 数一遍，供 writeCSV 判断截断用。数不出来就当未知，不影响导出。
+func (h *Handler) countRows(r *http.Request, sql string) int {
+	n := -1
+	_ = h.DB.QueryRow(r.Context(), sql).Scan(&n)
+	return n
 }
 
 // ExportOrganizations GET /api/v1/org/organizations/export
@@ -59,14 +71,14 @@ func (h *Handler) ExportOrganizations(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(p.code,''), o.manager_name, o.manager_phone, o.city,
 		       (CASE WHEN o.is_active THEN '是' ELSE '否' END)
 		FROM iam_organization o LEFT JOIN iam_organization p ON p.id = o.parent_id
-		ORDER BY o.sort_order, o.code LIMIT 5000`)
+		ORDER BY o.sort_order, o.code LIMIT `+strconv.Itoa(httpx.ExportMaxRows))
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
 	}
 	writeCSV(w, "organizations.csv",
 		[]string{"编码", "名称", "简称", "类型", "经营属性", "上级编码", "负责人", "负责人电话", "城市", "启用"},
-		rows, 10)
+		rows, 10, h.countRows(r, "SELECT count(*) FROM iam_organization"))
 }
 
 // ExportEmployees GET /api/v1/org/employees/export
@@ -82,13 +94,14 @@ func (h *Handler) ExportEmployees(w http.ResponseWriter, r *http.Request) {
 		FROM iam_employee e
 		LEFT JOIN iam_organization o ON o.id = e.organization_id
 		LEFT JOIN iam_employee s ON s.id = e.supervisor_id
-		ORDER BY e.employee_no LIMIT 5000`)
+		ORDER BY e.employee_no LIMIT `+strconv.Itoa(httpx.ExportMaxRows))
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
 	}
 	writeCSV(w, "employees.csv",
-		[]string{"工号", "姓名", "手机", "组织编码", "职位", "直接上级工号", "状态"}, rows, 7)
+		[]string{"工号", "姓名", "手机", "组织编码", "职位", "直接上级工号", "状态"}, rows, 7,
+		h.countRows(r, "SELECT count(*) FROM iam_employee"))
 }
 
 // ImportEmployees POST /api/v1/org/employees/import（multipart，字段名 file）
@@ -107,7 +120,7 @@ func (h *Handler) ImportEmployees(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	cr := csv.NewReader(bomReader(file))
+	cr := csv.NewReader(decodeCSV(file))
 	cr.FieldsPerRecord = -1
 	orgByCode := map[string]string{}
 	if rows, err := h.DB.Query(ctx, `SELECT code, id::text FROM iam_organization`); err == nil {
@@ -177,10 +190,12 @@ func (h *Handler) ImportEmployees(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, link := range supLinks {
-		_, _ = h.DB.Exec(ctx, `
+		if _, err := h.DB.Exec(ctx, `
 			UPDATE iam_employee e SET supervisor_id = s.id, updated_at = now()
 			FROM iam_employee s
-			WHERE e.employee_no = $1 AND s.employee_no = $2 AND e.id <> s.id`, link[0], link[1])
+			WHERE e.employee_no = $1 AND s.employee_no = $2 AND e.id <> s.id`, link[0], link[1]); err != nil {
+			slog.Warn("组织导入写库失败", "err", err)
+		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"created": created, "updated": updated, "errors": errs,
@@ -194,6 +209,37 @@ func bomReader(r io.Reader) io.Reader {
 		_, _ = br.Discard(3)
 	}
 	return br
+}
+
+// decodeCSV 剥 BOM，并在内容不是合法 UTF-8 时按 GBK 解。
+//
+// 为什么需要这一步：这个接口吃的是**别人用 Excel 导出来的文件**，
+// 而中文 Windows 上 Excel 默认导出的就是 GBK——「CSV UTF-8」是另一个
+// 需要用户主动去选的菜单项，没人会注意到这个区别。
+//
+// 不转码的后果不是报错，是**静默导进一批乱码**：csv.Reader 把 GBK 字节
+// 当 UTF-8 读，姓名、部门、职位全变成问号，导入照样返回"成功 N 条"。
+// 等有人翻员工名录才发现，那时候已经导进去几百条了。
+//
+// 判别方式是「先按 UTF-8 验，不合法才当 GBK」而不是反过来：
+// GBK 的双字节几乎都不是合法 UTF-8 序列，所以这个方向误判率极低；
+// 反过来则不行——绝大多数 UTF-8 中文字节串按 GBK 也能"解出"东西来，
+// 只是解出来是乱码。ASCII 两边一致，怎么走都不会被改坏。
+func decodeCSV(r io.Reader) io.Reader {
+	raw, err := io.ReadAll(bomReader(r))
+	if err != nil {
+		return bytes.NewReader(nil)
+	}
+	if utf8.Valid(raw) {
+		return bytes.NewReader(raw)
+	}
+	dec, err := simplifiedchinese.GBK.NewDecoder().Bytes(raw)
+	if err != nil {
+		// GBK 也解不出来：原样交给 csv.Reader，让它按能读多少读多少，
+		// 好过整个导入直接失败——至少 ASCII 列（工号、手机号）还是对的。
+		return bytes.NewReader(raw)
+	}
+	return bytes.NewReader(dec)
 }
 
 func anyNonBlank(row []string) bool {

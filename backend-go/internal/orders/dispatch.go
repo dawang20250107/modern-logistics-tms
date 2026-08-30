@@ -20,6 +20,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/contracts"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
 )
@@ -74,6 +75,9 @@ func expired(exp *time.Time, today time.Time) bool {
 
 // Dispatch POST /api/v1/orders/{id}/dispatch
 func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -335,9 +339,20 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		  order_id, customer_id, carrier_id, vehicle_id, driver_id, trailer_id, route_name, ai_conversation_id, origin, destination,
 		  status, dispatch_status, risk_level, receipt_status, eta_drift_minutes,
 		  cargo_quantity, cargo_weight_ton, cargo_volume_cbm,
-		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id)
+		  freight_term, freight_payer, cod_amount, cod_status, planned_arrival, project_id,
+		  -- 运单的组织归属 = **建单人的组织**。
+		  -- 漏了这一列的后果不是少个字段：ops_waybill.organization_id 决定
+		  -- 运单的数据范围，NULL 只有「全部」档看得见。也就是说，单子是哪个
+		  -- 网点接的，那个网点在派单的那一刻就失去了它的可见性——
+		  -- 订单列表里还看得见，点开运单是「运单不存在、无权访问」。
+		  -- 取建单人而不是派单人：中心调度替各网点派单是常态，
+		  -- 按派单人算会把网点自己的单子划走。转承运那条路径（quotes.go）
+		  -- 一直就是这么写的，三条路径统一到它。
+		  organization_id)
 		VALUES ($1, now(), now(), $2, $3, $4, $5, $6::uuid, $7::uuid, $8::uuid, $9::uuid, $10::uuid, $11::uuid,
-		  $12, $13, $14, $15, 'pending_dispatch', $16, 'none', 'not_due', 0, $17, $18, $19, $20, $21, $22, $23, $24, $25::uuid)`,
+		  $12, $13, $14, $15, 'pending_dispatch', $16, 'none', 'not_due', 0, $17, $18, $19, $20, $21, $22, $23, $24, $25::uuid,
+		  (SELECT u.organization_id FROM ops_order oo
+		     LEFT JOIN accounts_user u ON u.id = oo.created_by_id WHERE oo.id = $6::uuid))`,
 		wid.String(), wbNo, body.DispatchType, body.PlatformName, body.PlatformOrderNo,
 		o.ID, o.CustomerID, carrierID, vehArg, drvArg, trailerArg,
 		o.Origin+"→"+o.Destination, o.AIConvID, o.Origin, o.Destination,
@@ -455,9 +470,19 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		slog.Error("派单事件落库失败", "waybill_id", wid.String(), "err", err)
 	}
 	// 工作流编排：带司机派单自动生成承运合同（文本；PDF 生成留 Django/收官期）
+	// 正文模板在 internal/contracts 里，与运单详情页的「按需生成」共用同一份。
 	if drv != nil {
-		if err := generateContract(ctx, tx, wid.String(), wbNo, drv, veh, trailerArg,
-			o.Origin+"→"+o.Destination, cargoDesc, o.Weight, o.Quantity, agreed); err != nil {
+		plate := ""
+		if veh != nil {
+			plate = veh.PlateNo
+		}
+		if err := contracts.Generate(ctx, tx, contracts.Input{
+			WaybillID: wid.String(), WaybillNo: wbNo,
+			DriverID: drv.ID, DriverName: drv.Name,
+			VehiclePlate: plate, TrailerID: trailerArg,
+			Route: o.Origin + "→" + o.Destination, CargoDesc: cargoDesc,
+			Weight: o.Weight, Quantity: o.Quantity, Agreed: agreed,
+		}); err != nil {
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "合同生成失败")
 			return
 		}
@@ -489,74 +514,4 @@ func dispatchStatusFor(dispatchType string, hasDriver bool) string {
 		return "driver_assigned"
 	}
 	return "pending_driver_submit"
-}
-
-// generateContract 对齐 contracts.generate_contract（文本合同；PDF 留空不阻断）
-func generateContract(ctx context.Context, tx pgx.Tx, waybillID, waybillNo string, drv *drvRow, veh *vehRow,
-	trailerID *string, route, cargoDesc string, weight decimal.Decimal, quantity int, agreed *decimal.Decimal) error {
-	contractNo, err := nextNoScoped(ctx, tx, "HT", "contract")
-	if err != nil {
-		return err
-	}
-	vehPlate, trailerPlate := "—", "—"
-	if veh != nil {
-		vehPlate = veh.PlateNo
-	}
-	if trailerID != nil {
-		_ = tx.QueryRow(ctx, `SELECT plate_no FROM md_vehicle WHERE id=$1::uuid`, *trailerID).Scan(&trailerPlate)
-	}
-	if cargoDesc == "" {
-		cargoDesc = "见运单"
-	}
-	// 约定运费 = 该运单应付合计（此刻即议定快照金额）
-	freight := decimal.Zero
-	if agreed != nil {
-		freight = *agreed
-	}
-	drvPhone := ""
-	_ = tx.QueryRow(ctx, `SELECT COALESCE(phone,'') FROM md_driver WHERE id=$1::uuid`, drv.ID).Scan(&drvPhone)
-	if drvPhone == "" {
-		drvPhone = "—"
-	}
-	content := fmt.Sprintf(`运输承运合同
-
-合同编号：%s
-关联运单：%s
-签订日期：%s
-
-一、承运信息
-  承运司机：%s    联系电话：%s
-  牵引车牌：%s    挂车牌：%s
-
-二、运输内容
-  线路：%s
-  货物：%s    重量：%s 吨    件数：%d 件
-
-三、运费
-  约定运费（应付）：人民币 %s 元
-
-四、约定条款
-  1. 承运方应按约定时间、线路完成提货与送货，确保货物安全。
-  2. 全程接受平台 GPS 跟踪与节点回传，按要求上传回单。
-  3. 异常情况应第一时间报备，责任与费用按平台规则处理。
-  4. 本合同经司机线上确认即生效，与书面合同具有同等效力。
-
-承运方（司机）确认：__________      平台（智运）：__________
-`, contractNo, waybillNo, time.Now().In(cstZone).Format("2006-01-02"),
-		drv.Name, drvPhone, vehPlate, trailerPlate, route, cargoDesc, weight.String(), quantity, freight.String())
-	cid, _ := uuid.NewV7()
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO ops_contract (id, created_at, updated_at, contract_no, template_code, content,
-		  driver_reply, confirm_status, pdf, driver_id, waybill_id)
-		VALUES ($1, now(), now(), $2, '', $3, '', 'pending', '', $4::uuid, $5::uuid)`,
-		cid.String(), contractNo, content, drv.ID, waybillID); err != nil {
-		return err
-	}
-	evID, _ := uuid.NewV7()
-	pj, _ := json.Marshal(map[string]any{"contract_no": contractNo})
-	_, err = tx.Exec(ctx, `
-		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
-		VALUES ($1, now(), now(), $2::uuid, 'contract_generated', now(), 'contract', $3, $4)`,
-		evID.String(), waybillID, waybillNo, pj)
-	return err
 }

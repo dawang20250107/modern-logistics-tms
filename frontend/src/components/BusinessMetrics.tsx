@@ -6,7 +6,7 @@ import {
 } from "recharts";
 
 import { apiGet } from "../api/client";
-import { fmtMoney, fmtNum0, fmtWan } from "../api/format";
+import { EMPTY, fmtMoney, fmtNum0, fmtWan } from "../api/format";
 import { readCssVars, THEME_EVENT } from "../api/theme";
 
 import type { MetricCard } from "../api/types";
@@ -35,9 +35,23 @@ function useChartTokens() {
 type Trends = Record<string, Array<{ date: string; value: number }>>;
 
 function formatValue(m: MetricCard): string {
+  // 空 ≠ 零。比率类指标的分母为 0 意味着「这段时间没有可统计的单」，
+  // 后端此时回 value=0，前端若照直显示 0.0%，看板上写的就是
+  // 「准班率 0%」「运力在线率 0%」——把"没数据"说成了"表现极差"。
+  // 这条规则在 api/format.ts 里早就为金额定下了（fmtMoney(null) 返回 —
+  // 而不是 ¥0.00），比率没有理由例外。
+  if (m.unit === "%" && m.denominator === 0) return EMPTY;
   if (m.unit === "%") return `${(m.value * 100).toFixed(1)}%`;
   if (m.unit === "元") return fmtMoney(m.value);
   return `${fmtNum0(m.value, 0)}${m.unit}`;
+}
+
+/** 比率指标的样本量说明。显示 — 的时候必须说清为什么，否则看的人
+ *  只会以为是加载失败。 */
+function sampleNote(m: MetricCard): string | undefined {
+  if (m.unit !== "%" || m.denominator === undefined) return undefined;
+  if (m.denominator === 0) return "本期无可统计样本";
+  return `样本 ${m.numerator ?? 0} / ${m.denominator}`;
 }
 
 function trendDelta(points?: Array<{ value: number }>): { dir: "up" | "down" | "flat"; label: string } | null {
@@ -155,7 +169,11 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
             <div className="section-label">车队运营成本构成占比</div>
             {pieData.length === 0 ? (
               <div className="muted" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-                近 {financeMetrics.data?.period ?? ""} 内暂无应付成本记录
+                {/* period 后端给的就是「近 N 天」，自带「近」字。
+                    前面再拼一个就成了「近 近 30 天 内暂无…」——这行字在驾驶舱首屏，
+                    是新客户第一眼会看到的地方。同一个 period 在上面标题里
+                    （营业额与利润 (近 30 天)）用法是对的，只有这一处多加了。 */}
+                {financeMetrics.data?.period ?? "本期"}内暂无应付成本记录
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -175,7 +193,7 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
       {dash.isLoading ? (
         <StateView kind="loading" compact />
       ) : dash.isError ? (
-        <StateView kind="error" hint="经营指标暂时无法加载。" onRetry={() => dash.refetch()} compact />
+        <StateView kind="error" hint="经营指标暂时无法加载。" error={dash.error} onRetry={() => dash.refetch()} compact />
       ) : (
         grouped.map((g) => (
           <div key={g.domain} className="panel">
@@ -194,7 +212,8 @@ export function BusinessMetrics({ days: externalDays }: { days?: number } = {}) 
                       <span className="kpi-label">{m.name}</span>
                       {delta && <span className={`kpi-delta ${delta.dir}`}>{delta.label}</span>}
                     </div>
-                    <div className="kpi-value">{formatValue(m)}</div>
+                    <div className="kpi-value" title={sampleNote(m)}>{formatValue(m)}</div>
+                    {m.denominator === 0 && <div className="kpi-note">本期无可统计样本</div>}
                     {trends[m.code] && trends[m.code].length > 1 && (
                       <div className="kpi-spark"><Sparkline values={trends[m.code].map((p) => p.value)} /></div>
                     )}

@@ -21,6 +21,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // pyRound 复刻 Python round(float, n)：十进制半偶入（Go 的 FormatFloat 同口径）
@@ -112,6 +114,11 @@ const orderBriefJSON = `json_build_object(
 
 // CustomerContext GET /api/v1/customers/{id}/context
 func (h *Handler) CustomerContext(w http.ResponseWriter, r *http.Request) {
+	// 客户档案这一面统一按 masterdata.view。原先这两条没写，
+	// 挡住它们的只是"恰好调用方都有这个权限"。
+	if !h.Allow(w, r, "masterdata.view") {
+		return
+	}
 	id, ok := h.resolveID(w, r, "md_customer", "Customer")
 	if !ok {
 		return
@@ -133,7 +140,7 @@ func (h *Handler) CustomerContext(w http.ResponseWriter, r *http.Request) {
 	if err := h.DB.QueryRow(ctx, customerContextSQL, id).Scan(
 		&total, &openCnt, &outstanding, &excCnt, &receiptPending,
 		&routes, &pickups, &deliveries, &recent, &openList); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取客户上下文失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取客户上下文失败", err)
 		return
 	}
 	credit := map[string]any{
@@ -166,6 +173,9 @@ func (h *Handler) CustomerContext(w http.ResponseWriter, r *http.Request) {
 
 // CustomerLaneSuggest GET /api/v1/customers/{id}/lane-suggest?origin=&destination=
 func (h *Handler) CustomerLaneSuggest(w http.ResponseWriter, r *http.Request) {
+	if !h.Allow(w, r, "masterdata.view") {
+		return
+	}
 	id, ok := h.resolveID(w, r, "md_customer", "Customer")
 	if !ok {
 		return
@@ -200,7 +210,7 @@ func (h *Handler) CustomerLaneSuggest(w http.ResponseWriter, r *http.Request) {
 		     FROM o WHERE delivery_address <> '' GROUP BY 1 ORDER BY n DESC, last_at DESC LIMIT 5) t), '[]'::json)
 		`, id, origin, dest).Scan(&cargo, &quoteMin, &quoteMax, &deliveries)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取线路建议失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取线路建议失败", err)
 		return
 	}
 
@@ -235,6 +245,12 @@ func bandOf(lo, hi *float64) []float64 {
 
 // CarrierPerformance GET /api/v1/carriers/{id}/performance?origin=&destination=
 func (h *Handler) CarrierPerformance(w http.ResponseWriter, r *http.Request) {
+	// 承运商列表要 carrier.view（CarrierWrite.ReadPerm），
+	// 这条绩效却谁都能看：成交量、异常率、常跑线路——
+	// 比列表本身更敏感的一组数字，反而是敞开的。
+	if !h.Allow(w, r, "carrier.view") {
+		return
+	}
 	id, ok := h.resolveID(w, r, "md_carrier", "Carrier")
 	if !ok {
 		return
@@ -256,12 +272,16 @@ func (h *Handler) CarrierPerformance(w http.ResponseWriter, r *http.Request) {
 		)
 		SELECT
 		  (SELECT count(*) FROM w),
-		  (SELECT count(*) FROM w WHERE planned_arrival IS NOT NULL AND arrived_at IS NOT NULL),
-		  (SELECT count(*) FROM w WHERE planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
+		  -- 同 suggestion.go：准班率只从真的送达过的单里取样，
+		  -- 否则「发车后取消」那条路径留下的假 arrived_at 会算成准点交付。
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
+		     AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL),
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
+		     AND planned_arrival IS NOT NULL AND arrived_at IS NOT NULL
 		     AND arrived_at <= planned_arrival),
 		  (SELECT count(*) FROM w WHERE EXISTS (SELECT 1 FROM ops_exception x WHERE x.waybill_id = w.id)),
-		  (SELECT count(*) FROM w WHERE status IN ('arrived','signed','delivered','settled')),
-		  (SELECT count(*) FROM w WHERE status IN ('arrived','signed','delivered','settled')
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`),
+		  (SELECT count(*) FROM w WHERE status IN `+wbstatus.DeliveredSQL+`
 		     AND receipt_status IN ('returned','audited')),
 		  (SELECT count(*) FROM route),
 		  -- 本线路应付均价：先按运单汇总再取均值（对齐 annotate(Sum) + aggregate(Avg)），
@@ -273,7 +293,7 @@ func (h *Handler) CarrierPerformance(w http.ResponseWriter, r *http.Request) {
 		`, id, origin, dest).Scan(&total, &timedTotal, &onTimeHits, &excTotal, &doneTotal, &receiptHits,
 		&routeHits, &lanePayable)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取承运商表现失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "读取承运商表现失败", err)
 		return
 	}
 
@@ -352,7 +372,7 @@ func (h *Handler) CarrierBlacklist(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(r.Context(), `
 		UPDATE md_carrier SET blacklisted=$2, blacklist_reason=$3, updated_at=now()
 		WHERE id=$1::uuid`, id, blacklisted, reason); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	it, err := h.OneDetail(r.Context(), CarriersCfg, "ca.id = $1::uuid", id)
@@ -396,7 +416,7 @@ func (h *Handler) DriverRefreshStats(w http.ResponseWriter, r *http.Request) {
 		     WHERE w.driver_id = d.id AND e.direction = 'payable'),
 		  updated_at = now()
 		WHERE d.id = $1::uuid`, id); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "刷新失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "刷新失败", err)
 		return
 	}
 	it, err := h.OneDetail(r.Context(), DriversCfg, "d.id = $1::uuid", id)

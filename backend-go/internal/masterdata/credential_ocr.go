@@ -92,6 +92,9 @@ func CredentialAfterWrite(ctx context.Context, h *Handler, id string, _ map[stri
 
 // CredentialOCR POST /driver-credentials/{id}/ocr —— 重新触发识别
 func (h *Handler) CredentialOCR(w http.ResponseWriter, r *http.Request) {
+	if !h.Allow(w, r, "masterdata.manage") {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", "No DriverCredential matches the given query.")

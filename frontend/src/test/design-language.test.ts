@@ -58,6 +58,29 @@ const isFieldUse = (sel: string) => FIELD_USE.test(sel);
 // token 定义块：唯一允许出现裸色值的地方
 const TOKEN_SEL = /^:root/;
 
+// 两份豁免名单，拆成一条条写——整条正则塞在用例里时，
+// 里面某个分支哪天不再对应任何选择器也没人看得出来。
+// 而一个不再命中任何东西的分支不是"无害的多余"：它是**悄悄放宽了的规则**，
+// 下一个人读到只会以为"这些是有意豁免的"。SMALL_OK 早就有这个自检，
+// 这两份一直没有。
+
+/** 渐变承载信息（进度/加载中/可拖拽），不是装饰。
+ *  原先还挂着 ov-bar / ct-bar / progress / scrollbar / ^input / ^textarea，
+ *  这六条一条都没在豁免任何东西（^textarea 连一个选择器都匹配不上）。 */
+const GRADIENT_OK = ["skeleton", "dt-resizer", "^select$", "gp-bar", "dt-loadbar"];
+
+/** 深色门面上的前景允许写死：它不随主题变——深底上的字永远是浅色。
+ *  原先有十条，九条是多余的：要么那些选择器本来就没写死 hex，
+ *  要么（hero）已经被 isFieldUse 的公开页规则盖住了。 */
+const HEX_OK = ["on-dark"];
+
+// 空名单必须变成"谁也不匹配"，不能是 new RegExp("")——那个匹配一切，
+// 于是名单被清空时整条规则反而全部豁免。承重性自检每次都要把某一条
+// 拿掉再跑，名单只剩一条时就正好踩到这里：它会把最后那条真正承重的
+// 也报成"死的"。**一个让检查静默失效的边界，恰恰藏在检查自己里。**
+const re = (parts: string[], flags = "") =>
+  parts.length ? new RegExp(parts.join("|"), flags) : /(?!)/;
+
 describe("设计语汇 · 结构面", () => {
   it("圆角不超过 8px：结构面直角，可点元素 3–4px", () => {
     const hits: string[] = [];
@@ -73,11 +96,9 @@ describe("设计语汇 · 结构面", () => {
   });
 
   it("不引入新的渐变：渐变把装饰和状态混进同一个视觉通道", () => {
-    // 允许的例外：这些渐变承载信息（进度/加载中/可拖拽），不是装饰
-    const ALLOW = /skeleton|dt-resizer|^select$|ov-bar|ct-bar|progress|scrollbar|^input|^textarea|gp-bar|dt-loadbar/;
     const hits: string[] = [];
     for (const r of RULES) {
-      if (isFieldUse(r.sel) || ALLOW.test(r.sel)) continue;
+      if (isFieldUse(r.sel) || re(GRADIENT_OK).test(r.sel)) continue;
       if (/linear-gradient|radial-gradient|conic-gradient/.test(r.body)) {
         hits.push(`${r.sel} (L${r.line})`);
       }
@@ -108,11 +129,9 @@ describe("设计语汇 · 结构面", () => {
 
 describe("设计语汇 · 颜色", () => {
   it("token 定义之外不写死 hex 颜色", () => {
-    // 深色门面上的前景允许写死：它不随主题变——深底上的字永远是浅色。
-    const ALLOW = /on-dark|hero|side-|cmdk-overlay|modal-overlay|wb-overlay|brand-mark|topbar-avatar|profile-avatar|\bkbd\b/i;
     const hits: string[] = [];
     for (const r of RULES) {
-      if (TOKEN_SEL.test(r.sel) || isFieldUse(r.sel) || ALLOW.test(r.sel)) continue;
+      if (TOKEN_SEL.test(r.sel) || isFieldUse(r.sel) || re(HEX_OK, "i").test(r.sel)) continue;
       for (const m of r.body.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
         if (/^#f{3,8}$/i.test(m[0])) continue;   // 深底上的白字
         if (/^#0{3,8}$/i.test(m[0])) continue;   // color-mix 压暗时的黑锚点，不是主题色
@@ -159,6 +178,31 @@ describe("设计语汇 · 密度与可读性", () => {
       }
     }
     expect(hits, "字号 <12px 不可用于长时间阅读。要么提到 12px，要么进 SMALL_OK 并写明它不是文字").toEqual([]);
+  });
+
+  // 承重性自检：把某个分支拿掉，重新跑一遍这条规则，如果一条都不多报，
+  // 说明它谁也没在豁免。只查"这个分支能匹配上某个选择器"是不够的——
+  // 匹配上但那条选择器本来就不违规，这个分支同样是死的。
+  const gradientHits = (allow: string[]) =>
+    RULES.filter((r) => !isFieldUse(r.sel) && !re(allow).test(r.sel)
+      && /linear-gradient|radial-gradient|conic-gradient/.test(r.body)).length;
+
+  const hexHits = (allow: string[]) =>
+    RULES.filter((r) => !TOKEN_SEL.test(r.sel) && !isFieldUse(r.sel)
+      && !re(allow, "i").test(r.sel)
+      && [...r.body.matchAll(/#[0-9a-fA-F]{3,8}\b/g)]
+        .some((m) => !/^#f{3,8}$/i.test(m[0]) && !/^#0{3,8}$/i.test(m[0]))).length;
+
+  it("渐变豁免名单里的每一条都还在承重", () => {
+    const base = gradientHits(GRADIENT_OK);
+    const dead = GRADIENT_OK.filter((x) => gradientHits(GRADIENT_OK.filter((y) => y !== x)) === base);
+    expect(dead, "拿掉这些分支一条都不会多报——它们谁也没在豁免，从 GRADIENT_OK 里删掉").toEqual([]);
+  });
+
+  it("写死 hex 的豁免名单里的每一条都还在承重", () => {
+    const base = hexHits(HEX_OK);
+    const dead = HEX_OK.filter((x) => hexHits(HEX_OK.filter((y) => y !== x)) === base);
+    expect(dead, "拿掉这些分支一条都不会多报——它们谁也没在豁免，从 HEX_OK 里删掉").toEqual([]);
   });
 
   it("SMALL_OK 里的例外都还在用（名单不留过期项）", () => {

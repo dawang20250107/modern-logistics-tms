@@ -41,7 +41,7 @@ export function AuditPage() {
     <div className="stack table-page">
       <div className="panel">
         {t.isError ? (
-          <StateView kind="error" hint="无权限或加载失败（仅管理员可查）。" onRetry={() => t.refetch()} />
+          <StateView kind="error" hint="无权限或加载失败（仅管理员可查）。" error={t.error} onRetry={() => t.refetch()} />
         ) : (
           <DataTable<AuditLog>
             viewKey="audit"
@@ -50,6 +50,7 @@ export function AuditPage() {
             rowKey={(l) => l.id}
             server={t.server}
             exportName="审计日志"
+            exportAll={t.fetchAll}
             fill
             toolbarLeft={
               <>

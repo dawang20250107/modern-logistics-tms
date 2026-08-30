@@ -309,7 +309,7 @@ export function ProfilePage() {
             {history.isLoading ? (
               <StateView kind="loading" compact />
             ) : history.isError ? (
-              <StateView kind="error" onRetry={() => history.refetch()} />
+              <StateView kind="error" error={history.error} onRetry={() => history.refetch()} />
             ) : (history.data ?? []).length === 0 ? (
               <StateView kind="empty" title="暂无登录记录" />
             ) : (

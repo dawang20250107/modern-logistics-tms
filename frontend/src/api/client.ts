@@ -19,8 +19,25 @@ export class ApiError extends Error {
   }
 }
 
+/** 这个错是"没权限"而不是"出错了"。
+ *
+ * 后端两处闸的 code 拼写不一样（通用 CRUD 引擎回 permission_denied，
+ * 各 handler 里回 PERMISSION_DENIED），所以这里不区分大小写。
+ * 分辨这两者有实际意义：页面上写「数据获取出错，请重试」会让用户一直点重试，
+ * 而真相是他的角色就是看不了这一块——重试一万次也一样。 */
+export function isPermissionDenied(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  const c = err.code.toLowerCase();
+  return c === "permission_denied" || c === "403";
+}
+
 let accessToken = localStorage.getItem("access") ?? "";
 let refreshToken = localStorage.getItem("refresh") ?? "";
+
+/** 退出登录时要把 refresh 交回服务端作废，所以需要读得到它。 */
+export function getRefreshToken(): string {
+  return refreshToken;
+}
 
 export function setTokens(access: string, refresh: string): void {
   accessToken = access;
@@ -44,18 +61,71 @@ export function getAccess(): string {
   return accessToken;
 }
 
-async function tryRefresh(): Promise<boolean> {
-  if (!refreshToken) return false;
+/**
+ * 同一时刻只允许有一次刷新在飞。
+ *
+ * 刷新是**轮换**的：后端签发新券的同时把旧券作废（那是防重放的关键，
+ * 见 auth/handlers.go 里"先校验再签发"那段）。而前端原先是谁 401 谁去刷，
+ * 没有任何协调——驾驶舱一进来就并发发 5 个请求（运单统计、订单漏斗、
+ * 工作台、财务敞口、证件预警），令牌到期时它们**同时** 401，
+ * 于是 5 个刷新拿着同一张 refresh 打出去。
+ *
+ * 实测拿同一张券并发换 5 次：**3 个 200、2 个 401**。
+ * 而拿到 401 的那两个会 clearTokens() —— 刷新其实成功了，人却被踢下线。
+ * 用户看到的是"这系统隔一阵就把我踢出去"，而且只在页面开着好几个查询、
+ * 恰好赶上令牌到期时才出现，复现不了。
+ *
+ * 修法是把并发本身消掉：第一个发起刷新，其余等同一个 promise。
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = doRefresh().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function doRefresh(): Promise<boolean> {
+  // 以 localStorage 为准，而不是模块变量。
+  //
+  // 模块变量是**每个标签页各存一份**、页面加载时读一次的。而刷新是轮换的：
+  // 同一个人开两个标签页，A 标签刷新之后旧券就作废了，
+  // B 标签内存里那张还是旧的——它下次刷新必然 401，然后清空令牌把人踢走。
+  // 实测：A 用 R0 换到 R1，B 稍后再用 R0 → 401「该凭证已失效，请重新登录」。
+  // localStorage 是两个标签页共享的，A 换完就写在那儿，B 读它就能续上。
+  const sent = localStorage.getItem("refresh") ?? refreshToken;
+  if (!sent) return false;
+  refreshToken = sent;
   const resp = await fetch(`${API_BASE}/auth/token/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh: refreshToken }),
+    body: JSON.stringify({ refresh: sent }),
   });
   if (!resp.ok) {
+    // 还有一种情形：我们在飞的这几百毫秒里，另一个标签页正好把券轮换了。
+    // 那时候手上这张是刚作废的，而 localStorage 里已经是新的——重试一次。
+    // 只重试一次：真的失效时不该在这儿打转。
+    const now = localStorage.getItem("refresh") ?? "";
+    if (now && now !== sent) {
+      refreshToken = now;
+      const again = await fetch(`${API_BASE}/auth/token/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh: now }),
+      });
+      if (again.ok) return applyRefreshed(await again.json());
+    }
     clearTokens();
     return false;
   }
-  const env = (await resp.json()) as Envelope<{ access: string; refresh?: string }>;
+  return applyRefreshed(await resp.json());
+}
+
+/** 把刷新回来的新券存下；成功返回 true，否则清空令牌。 */
+function applyRefreshed(raw: unknown): boolean {
+  const env = raw as Envelope<{ access: string; refresh?: string }>;
   if (env.success && env.data?.access) {
     accessToken = env.data.access;
     localStorage.setItem("access", accessToken);

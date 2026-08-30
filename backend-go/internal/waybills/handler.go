@@ -24,6 +24,37 @@ type Handler struct {
 	Svc *auth.Service
 }
 
+// allow 权限闸：这个动作要不要这个权限点。
+//
+// 由来是发布前的一次系统性排查：拿一个只有 masterdata.view + waybill.view 的
+// 客服账号，把 100 条动作路由挨个打了一遍，**53 条没有被 403 挡住**。
+// 挡住其中一部分的只是数据范围——而数据范围管的是"看得见谁的单"，
+// 不是"能不能做这件事"：同一个网点的客服照样能派单、能签收、能核销。
+//
+// 这个包里本来就有带权限的入口（resolve(w, r, "waybill.manage")），
+// 只是那些自己取参数、不走 resolve 的 handler 全都漏了。
+// 现在缺的那些补上，并逐条登记进 cmd/server/authz_test.go 的清单。
+func (h *Handler) allow(w http.ResponseWriter, r *http.Request, want string) bool {
+	ctx := r.Context()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return false
+	}
+	_, _, perms, err := h.Svc.RolesAndPerms(ctx, me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取权限失败")
+		return false
+	}
+	for _, p := range perms {
+		if p == "*" || p == want {
+			return true
+		}
+	}
+	httpx.Err(w, http.StatusForbidden, "PERMISSION_DENIED", "缺少所需权限。")
+	return false
+}
+
 var dispatchTypeLabel = map[string]string{
 	"own_vehicle": "自营单车", "fleet": "自营车队", "third_party": "外包承运商", "platform": "网货平台",
 }
@@ -142,7 +173,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			where = append(where, fmt.Sprintf("w.%s = %s", f, args.Add(v)))
 		}
 	}
-	if frag := filters.Apply(q.Get("filter"), filterFields, args); frag != "" {
+	// 已知字段上的非法值（比如日期框里打了「今天」）要当场说清是哪个字段，
+	// 而不是让 Postgres 报错变成 500，也不是默默把这个条件丢掉。
+	frag, ferr := filters.Apply(q.Get("filter"), filterFields, args)
+	if ferr != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_FILTER", ferr.Error())
+		return
+	}
+	if frag != "" {
 		where = append(where, frag)
 	}
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
@@ -202,10 +240,20 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 // Stats GET /api/v1/waybills/stats —— 状态药丸计数
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
+	// 这条原先既没有权限闸也没有数据范围：任何登录账号都能拿到全库运单的
+	// 状态分布与总数。是 cmd/server/authz_test.go 第一次跑就抓出来的——
+	// 和财务域同一类漏（手写 handler 忘了挂闸），只是当初手工探针没打到这条。
+	actor := h.Svc.Guard(w, r, "waybill.view", "无运单查看权限")
+	if actor == nil {
+		return
+	}
 	ctx := r.Context()
 	byStatus := map[string]int{}
 	total := 0
-	rows, err := h.DB.Query(ctx, "SELECT status, count(*) FROM ops_waybill GROUP BY status")
+	args := &filters.Args{}
+	scope := actor.ScopeSQL("w.organization_id::text", args)
+	rows, err := h.DB.Query(ctx,
+		"SELECT w.status, count(*) FROM ops_waybill w WHERE "+scope+" GROUP BY w.status", args.Values...)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,7 +66,9 @@ func (s *Service) Authenticate(ctx context.Context, username, password string) (
 	if err != nil || !ok {
 		return nil, ErrInvalidCredentials
 	}
-	_, _ = s.DB.Exec(ctx, "UPDATE accounts_user SET last_login = now() WHERE id = $1::uuid", u.ID)
+	if _, err := s.DB.Exec(ctx, "UPDATE accounts_user SET last_login = now() WHERE id = $1::uuid", u.ID); err != nil {
+		slog.Warn("更新最后登录时间失败", "err", err)
+	}
 	return u, nil
 }
 

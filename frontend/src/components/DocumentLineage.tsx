@@ -32,7 +32,7 @@ export function DocumentLineage({ orderId }: { orderId: string }) {
       {q.isLoading ? (
         <StateView kind="loading" compact />
       ) : q.isError || !q.data ? (
-        <StateView kind="error" onRetry={() => q.refetch()} />
+        <StateView kind="error" error={q.error} onRetry={() => q.refetch()} />
       ) : (
         <div className="lineage">
           {/* 订单根节点 + 汇总 */}

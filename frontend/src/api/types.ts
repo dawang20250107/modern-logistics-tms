@@ -30,6 +30,8 @@ export interface UserPreferences {
 export interface AuthMethods {
   password: boolean;
   wechat: { enabled: boolean; note: string };
+  /** 自助注册默认关闭（B2B 内部系统，账号由管理员在员工名录里开） */
+  registration: { enabled: boolean };
 }
 
 export interface LoginAttemptRow {
@@ -73,6 +75,19 @@ export interface Reimbursement {
   submitted_by_name: string;
   created_at: string;
 }
+
+// 回单状态词表。**必须与后端 internal/wbstatus 的 ReceiptLabel 完全一致**，
+// 由 cmd/server 的 TestReceiptStatusLabelsMatchFrontend 逐键比对着。
+//
+// 这两份表本来就已经漂了，而且漂得比运单状态那次更彻底：后端签收时写
+// received、回单确认时写 confirmed，前端只认 pending/returned/audited——
+// **交集为空**。于是一张运单只要走过签收，回单那一列就显示原始英文
+// （渲染处是 RECEIPT_LABEL[x] ?? x，缺键就把 key 露出来），
+// 而「回单状态」筛选器里根本没有能选中它的选项，那批单子筛不出来。
+// 回单是回单付结算的前提，筛不出来就催不了款。
+export const RECEIPT_LABEL: Record<string, string> = {
+  pending: "待追回", returned: "已回收", audited: "已核销",
+};
 
 export const REIMB_CATEGORY_LABEL: Record<string, string> = {
   freight_advance: "运费垫付", toll: "过路费", fuel: "油费",
@@ -299,6 +314,13 @@ export interface Receipt {
   created_at: string;
 }
 
+// 运单状态标签。**必须与后端 internal/wbstatus/wbstatus.go 的 Label 完全一致**，
+// 由 cmd/server 的 TestStatusLabelsMatchFrontend 逐键比对着。
+//
+// 加这条约束是因为两边本来就已经漂了：partially_signed 和 rejected
+// 后端有、这里没有，于是「部分签收」和「已拒收」的运单在界面上显示成
+// 原始英文码（渲染处是 STATUS_LABEL[s] ?? s，缺键就露出 key）。
+// 不报错、不崩，只是用户看到一串看不懂的英文。
 export const STATUS_LABEL: Record<string, string> = {
   draft: "草稿",
   pending_dispatch: "待调度",
@@ -307,11 +329,16 @@ export const STATUS_LABEL: Record<string, string> = {
   departed: "已发车",
   in_transit: "运输中",
   arrived: "已到达",
+  partially_signed: "部分签收",
+  rejected: "已拒收",
   signed: "已签收",
   delivered: "已送达",
   settled: "已结算",
   cancelled: "已取消",
   voided: "已作废",
+  // 中止：车已发出但这一趟不会送到了。与「已取消」（车还没走）和
+  // 「已作废」（当它没发生过）是三件不同的事，见后端 wbstatus 包的说明。
+  aborted: "已中止",
 };
 
 // ── 车联网监控 ──────────────────────────────────────────
@@ -972,6 +999,10 @@ export interface MetricCard {
   unit: string;
   domain: string;
   value: number;
+  /** 比率类指标的分子/分母。分母为 0 表示**样本为空**，不是"比率是 0"——
+   *  两者显示成同一个 0.0% 会把「这段时间没有可统计的单」说成「准班率为零」。 */
+  numerator?: number;
+  denominator?: number;
   breakdown?: Array<{ key: string; label?: string; value: number }>;
 }
 export const METRIC_DOMAIN_LABEL: Record<string, string> = {
@@ -1024,6 +1055,13 @@ export const CRED_TYPE_LABEL: Record<string, string> = {
 };
 export const OCR_STATUS_LABEL: Record<string, string> = {
   pending: "待识别", processing: "识别中", done: "已识别", failed: "识别失败", manual: "待人工",
+};
+
+// 单张回单的核验状态。**必须与后端 internal/wbstatus 的 PODUploaded/
+// PODConfirmed/PODRejected 一致**——这三个值是 ValidPOD 的全集，
+// 后端会拒掉词表外的取值，前端也就不该显示第四种说法。
+export const POD_STATUS_LABEL: Record<string, string> = {
+  uploaded: "待核验", confirmed: "已核验", rejected: "已驳回",
 };
 
 // ── 通知 / 订单事件 ─────────────────────────────────────

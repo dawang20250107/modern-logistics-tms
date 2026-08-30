@@ -8,7 +8,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -54,9 +54,7 @@ func (h *Handler) require(w http.ResponseWriter, r *http.Request) (*auth.UserRow
 		return nil, false
 	}
 	// LLM 成本闸：与 Django scope="ai" 同档（默认 30/min，按用户计）
-	if ok, wait := aiThrottle.Allow(me.ID); !ok {
-		httpx.Err(w, http.StatusTooManyRequests, "throttled",
-			fmt.Sprintf("请求已被限流。 预计 %d 秒后可用。", wait))
+	if !aiThrottle.GuardKey(w, me.ID) {
 		return nil, false
 	}
 	return me, true
@@ -126,11 +124,13 @@ func (h *Handler) audit(r *http.Request, me *auth.UserRow, name string, args map
 		"arguments": args, "risk_detected": res["risk_detected"],
 	})
 	resourceID, _ := args["waybill_no"].(string)
-	_, _ = h.DB.Exec(r.Context(), `
+	if _, err := h.DB.Exec(r.Context(), `
 		INSERT INTO audit_log (id, created_at, updated_at, actor_id, action, resource_type, resource_id,
 		  request_id, method, path, status_code, ip, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, 'waybill', $4, '', $5, $6, 200, NULLIF($7,'')::inet, $8)`,
-		id.String(), me.ID, "agent_tool:"+name, resourceID, r.Method, r.URL.Path, clientIP(r), payload)
+		id.String(), me.ID, "agent_tool:"+name, resourceID, r.Method, r.URL.Path, clientIP(r), payload); err != nil {
+		slog.Warn("AI 会话写库失败", "err", err)
+	}
 }
 
 func clientIP(r *http.Request) string {
@@ -171,7 +171,10 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.Err(w, http.StatusBadGateway, "AGENT_FAILED", err.Error())
+		// 上游的原始错误可能带着请求 URL 和内部细节，进日志不进响应。
+		slog.Error("上游 AI 服务报错", "code", "AGENT_FAILED", "err", err,
+			"method", r.Method, "path", r.URL.Path)
+		httpx.Err(w, http.StatusBadGateway, "AGENT_FAILED", "AI 助手调用失败，请稍后再试。")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, res)
@@ -214,7 +217,8 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 
 // suggestionWrite AI 建议只读：状态只能由 confirm 动作推进
 var suggestionWrite = masterdata.WriteCfg{
-	Table: "ai_agent_suggestion", Model: "AgentSuggestion", Verbose: "Agent 建议", Alias: "g", ReadOnly: true,
+	ReadPerm: "ai.use",
+	Table:    "ai_agent_suggestion", Model: "AgentSuggestion", Verbose: "Agent 建议", Alias: "g", ReadOnly: true,
 }
 
 // SuggestionDetail GET /api/v1/ai/suggestions/{id}（数据范围同列表）

@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -44,12 +45,40 @@ type statementReq struct {
 	ScopeRef         string `json:"scope_ref"`  // 项目 id 或线路名
 	Start            string `json:"start"`
 	End              string `json:"end"`
-	DueDate          string `json:"due_date"`
-	ExternalTotal    string `json:"external_total"`
+	// PeriodStart / PeriodEnd 是界面上用的名字（账期），与 Start/End 同义。
+	//
+	// 两边原先对不上：前端发 period_start / period_end，这里只认 start / end，
+	// 于是对账中心那颗「生成」按钮点下去恒定报「start 与 end 必填」——
+	// 而用户明明选了账期。两个名字都收下，比逼一边改更稳。
+	PeriodStart string `json:"period_start"`
+	PeriodEnd   string `json:"period_end"`
+	DueDate     string `json:"due_date"`
+	// ExternalTotal 金额，数字和字符串两种写法都收。
+	//
+	// JSON 里金额写成数字是最自然的，而这里原先是 string——前端在用户没填时
+	// 发的是数字 0，一个数字就让**整个请求体**解不开，报错还是
+	// 「请求体不是合法 JSON」，排查方向完全被带偏。
+	ExternalTotal json.Number `json:"external_total"`
+}
+
+// period 取账期：优先 period_start/period_end（界面用的名字），回落到 start/end。
+func (q statementReq) period() (string, string) {
+	s, e := q.PeriodStart, q.PeriodEnd
+	if s == "" {
+		s = q.Start
+	}
+	if e == "" {
+		e = q.End
+	}
+	return s, e
 }
 
 // GenerateStatement POST /finance/statements/generate
 func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
+	actor := h.Svc.Guard(w, r, PermManage, denyManage)
+	if actor == nil {
+		return
+	}
 	ctx := r.Context()
 	var req statementReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -68,8 +97,10 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "INVALID_COUNTERPARTY", "counterparty_id 必须是合法 UUID。")
 		return
 	}
-	if req.Start == "" || req.End == "" {
-		httpx.Err(w, http.StatusBadRequest, "PERIOD_REQUIRED", "start 与 end 必填（对账必须带账期）。")
+	periodStart, periodEnd := req.period()
+	if periodStart == "" || periodEnd == "" {
+		httpx.Err(w, http.StatusBadRequest, "PERIOD_REQUIRED",
+			"账期必填（period_start 与 period_end，旧字段名 start/end 亦可）。")
 		return
 	}
 	if req.ScopeType == "" {
@@ -83,7 +114,7 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scopeCond, scopeName := "true", ""
-	args := []any{req.Direction, req.Start, req.End, req.CounterpartyID}
+	args := []any{req.Direction, periodStart, periodEnd, req.CounterpartyID}
 	switch req.ScopeType {
 	case "project":
 		if _, err := uuid.Parse(req.ScopeRef); err != nil {
@@ -108,11 +139,26 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 归集也要收窄到调用者的数据范围：否则一个只管本网点的角色，
+	// 生成对账单时照样能把全集团的费用收进自己这张单里——读路径拦住了、
+	// 写路径没拦，等于没拦。
+	scopeSQL := "true"
+	if actor.ScopeIDs != nil {
+		if len(actor.ScopeIDs) == 0 {
+			scopeSQL = "false"
+		} else {
+			args = append(args, actor.ScopeIDs)
+			scopeSQL = fmt.Sprintf("w.organization_id::text = ANY($%d)", len(args))
+		}
+	}
+
 	rows, err := h.DB.Query(ctx, `
-		SELECT e.id::text, COALESCE(w.waybill_no,''), e.expense_item_code, e.amount, e.occurred_at
+		SELECT e.id::text, COALESCE(w.waybill_no,''), e.expense_item_code, e.amount, e.occurred_at,
+		       w.organization_id::text
 		FROM fin_expense_record e
 		JOIN ops_waybill w ON w.id = e.waybill_id
-		WHERE e.direction = $1
+		WHERE `+scopeSQL+`
+		  AND e.direction = $1
 		  AND e.occurred_at IS NOT NULL
 		  AND (e.occurred_at AT TIME ZONE 'Asia/Shanghai')::date >= $2::date
 		  AND (e.occurred_at AT TIME ZONE 'Asia/Shanghai')::date <= $3::date
@@ -122,27 +168,59 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		  AND NOT EXISTS (SELECT 1 FROM fin_statement_line l WHERE l.expense_record_id = e.id)
 		ORDER BY e.occurred_at, e.id`, args...)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "归集失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "归集失败", err)
 		return
 	}
 	type lineRow struct {
 		expenseID, waybillNo, itemCode string
 		amount                         decimal.Decimal
 		occurredAt                     time.Time
+		orgID                          *string
 	}
 	lines := []lineRow{}
 	total := decimal.Zero
+	// 对账单的归属组织 = 全部明细所属运单的组织，且必须唯一。
+	// 跨组织（或存在无组织归属的运单）时留 NULL —— 在 scope 语义里 NULL 只有
+	// all 档看得见，这是保守且正确的答案，比随便挑一个组织"归错档"强。
+	orgs := map[string]struct{}{}
+	orgUnknown := false
 	for rows.Next() {
 		var l lineRow
-		if err := rows.Scan(&l.expenseID, &l.waybillNo, &l.itemCode, &l.amount, &l.occurredAt); err != nil {
+		if err := rows.Scan(&l.expenseID, &l.waybillNo, &l.itemCode, &l.amount, &l.occurredAt, &l.orgID); err != nil {
 			rows.Close()
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取失败")
 			return
 		}
 		lines = append(lines, l)
 		total = total.Add(l.amount)
+		if l.orgID == nil {
+			orgUnknown = true
+		} else {
+			orgs[*l.orgID] = struct{}{}
+		}
 	}
 	rows.Close()
+	var stmtOrg any
+	if !orgUnknown && len(orgs) == 1 {
+		for id := range orgs {
+			stmtOrg = id
+		}
+	}
+
+	// 一条明细都没有就不该建单。
+	//
+	// 原先照建不误：一张有单号、有账期、金额 0、明细 0 的草稿对账单，
+	// 出现在客户的对账中心里。财务选错账期点一下，就得去解释并作废一张
+	// 正式编号的单据——而对账单号是连号的，这个号就这么烧掉了。
+	// 演示库里攒下 235 张空单（每跑一轮用例多 4 张）才注意到这件事。
+	//
+	// 归集不到通常只有两种原因，都写进提示里，省得财务对着空列表猜。
+	if len(lines) == 0 {
+		httpx.Err(w, http.StatusConflict, "STATEMENT_EMPTY",
+			"这个账期内没有可对账的费用，没有生成对账单。"+
+				"常见原因：运单的费用还没生成，或者这些费用已经进过别的对账单。")
+		return
+	}
 
 	var cpName string
 	table := "md_customer"
@@ -160,7 +238,7 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 
 	stmtNo, err := nextStatementNo(ctx, tx)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "取号失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "取号失败", err)
 		return
 	}
 	sid, _ := uuid.NewV7()
@@ -168,13 +246,13 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO fin_statement (id, created_at, updated_at, statement_no, direction,
 		  counterparty_type, counterparty_id, counterparty_name, period_start, period_end, due_date,
 		  total_amount, item_count, external_total, settled_amount, status,
-		  scope_type, scope_id, scope_name)
+		  scope_type, scope_id, scope_name, organization_id)
 		VALUES ($1, now(), now(), $2, $3, $4, $5, $6, $7::date, $8::date, $9::date,
-		        $10::numeric, $11, $12::numeric, 0, 'draft', $13, $14::uuid, $15)`,
+		        $10::numeric, $11, $12::numeric, 0, 'draft', $13, $14::uuid, $15, $16::uuid)`,
 		sid.String(), stmtNo, req.Direction, req.CounterpartyType, req.CounterpartyID, cpName,
-		req.Start, req.End, nullIfEmpty(req.DueDate), total.String(), len(lines),
-		orZeroStr(req.ExternalTotal), req.ScopeType, scopeIDArg(req), scopeName); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "建单失败："+err.Error())
+		periodStart, periodEnd, nullIfEmpty(req.DueDate), total.String(), len(lines),
+		orZeroStr(req.ExternalTotal.String()), req.ScopeType, scopeIDArg(req), scopeName, stmtOrg); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "建单失败", err)
 		return
 	}
 	for _, l := range lines {
@@ -236,6 +314,9 @@ func shanghai() *time.Location {
 
 // ConfirmStatement POST /finance/statements/{id}/confirm
 func (h *Handler) ConfirmStatement(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -266,6 +347,9 @@ func (h *Handler) ConfirmStatement(w http.ResponseWriter, r *http.Request) {
 
 // AuditStatement POST /finance/statements/{id}/audit —— 按同科目同方向历史均值检出异常高费用
 func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -289,7 +373,7 @@ func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
 		) s ON true
 		WHERE l.statement_id = $1::uuid`, id, direction)
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "审计失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "审计失败", err)
 		return
 	}
 	type auditRow struct {
@@ -312,9 +396,13 @@ func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
 	anomalies := 0
 	for _, a := range all {
 		if a.baseline == nil || a.n < anomalyMinSamples || a.baseline.IsZero() {
-			_, _ = h.DB.Exec(ctx, `
+			// 样本不够就清掉旧基线。这是派生值，失败不阻断审计，
+			// 但要留下日志——悄悄失败会让界面上留着一条过期的偏差百分比。
+			if _, err := h.DB.Exec(ctx, `
 				UPDATE fin_statement_line SET baseline_avg=NULL, deviation_pct=NULL,
-				  is_anomaly=false, updated_at=now() WHERE id=$1::uuid`, a.lineID)
+				  is_anomaly=false, updated_at=now() WHERE id=$1::uuid`, a.lineID); err != nil {
+				slog.Warn("清理对账单行基线失败", "line", a.lineID, "err", err)
+			}
 			continue
 		}
 		base := *a.baseline
@@ -337,14 +425,26 @@ func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
 			if isAnomaly {
 				risk = "high_deviation"
 			}
-			_, _ = h.DB.Exec(ctx,
-				"UPDATE fin_expense_record SET risk_status=$2, updated_at=now() WHERE id=$1::uuid", *a.expenseID, risk)
+			if _, err := h.DB.Exec(ctx,
+				"UPDATE fin_expense_record SET risk_status=$2, updated_at=now() WHERE id=$1::uuid",
+				*a.expenseID, risk); err != nil {
+				// 同步给下游的风险标记，失败不阻断审计本身，但不能一声不吭
+				slog.Warn("同步费用记录风险标记失败", "expense", *a.expenseID, "err", err)
+			}
 		}
 	}
+	// 审计时间戳落不下去就不能说"审计完了"。
+	// 原先这里是 `_ = h.DB.QueryRow(...)`：失败时 auditedAt 是零值，
+	// 而响应照样带着 "audited_at": "0001-01-01T00:00:00Z" 回去，
+	// 界面上就是一条"已审计"——库里却没有这个事实。对账是要拿去跟客户
+	// 对话的，"这单我们审过了"必须有据可查。
 	var auditedAt time.Time
-	_ = h.DB.QueryRow(ctx,
+	if err := h.DB.QueryRow(ctx,
 		"UPDATE fin_statement SET audited_at=now(), updated_at=now() WHERE id=$1::uuid RETURNING audited_at", id).
-		Scan(&auditedAt)
+		Scan(&auditedAt); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "审计结果已算出，但标记审计时间失败，请重试。")
+		return
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"total_lines": len(all), "anomaly_count": anomalies, "audited_at": auditedAt.Format(time.RFC3339Nano),
 	})
@@ -360,6 +460,9 @@ type settleReq struct {
 
 // SettleStatement POST /finance/statements/{id}/settle —— 登记一笔实际收/付款（支持分次核销）
 func (h *Handler) SettleStatement(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -419,7 +522,7 @@ func (h *Handler) SettleStatement(w http.ResponseWriter, r *http.Request) {
 		  paid_at, reference_no, remark, created_by_id)
 		VALUES ($1, now(), now(), $2::uuid, $3::numeric, $4, $5::date, $6, $7, $8::uuid)`,
 		pid.String(), id, amt.String(), method, paidAt, req.ReferenceNo, req.Remark, actor); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "登记失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "登记失败", err)
 		return
 	}
 	newSettled := settled.Add(amt)
@@ -444,6 +547,9 @@ func (h *Handler) SettleStatement(w http.ResponseWriter, r *http.Request) {
 
 // StatementPayments GET /finance/statements/{id}/payments —— 该单的收付款流水
 func (h *Handler) StatementPayments(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermView, denyView) == nil {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", "No Statement matches the given query.")

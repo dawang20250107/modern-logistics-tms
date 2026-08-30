@@ -75,12 +75,33 @@ export function useServerTable<T>(opts: ServerTableOptions) {
     loading: q.isFetching,
   };
 
+  // filterQuery 是「当前这批是怎么筛出来的」——search + filter + 排序，
+  // 不含 page/page_size。导出要用它：界面上「导出」按钮就在搜索框旁边，
+  // 用户的预期是导出他正看着的那批，而不是另一批毫不相干的数据。
+  const filterQuery = () => {
+    const params = new URLSearchParams();
+    if (sort) params.set("ordering", (sort.dir === "desc" ? "-" : "") + sort.field);
+    if (filterParam) params.set("filter", filterParam);
+    if (search) params.set("search", search);
+    for (const [k, v] of Object.entries(opts.extraParams ?? {})) {
+      if (v != null && v !== "") params.set(k, String(v));
+    }
+    return params.toString();
+  };
+
+  const fetchAll = (max = EXPORT_MAX) => fetchAllPages<T>(opts.path, filterQuery(), max);
+
   return {
+    filterQuery,
+    fetchAll,
     rows: q.data?.items ?? [],
     total: q.data?.total ?? 0,
     pages: q.data?.pages ?? 1,
     isLoading: q.isLoading,
     isError: q.isError,
+    // 把错误对象也带出去：页面要靠它分辨「没权限」和「出错了」——
+    // 403 时显示"加载失败，请重试"会让人一直点重试，而那点不出结果。
+    error: q.error,
     refetch: q.refetch,
     page,
     setPage,
@@ -88,4 +109,41 @@ export function useServerTable<T>(opts: ServerTableOptions) {
     setSort,
     server,
   };
+}
+
+/** EXPORT_MAX 单次导出取回的行数上限，与后端 httpx.ExportMaxRows 对齐。 */
+export const EXPORT_MAX = 50000;
+
+/** PAGE_CAP 服务端对 page_size 的上限（clampInt(..., 1, 200)）。 */
+const PAGE_CAP = 200;
+
+/**
+ * fetchAllPages 按筛选条件把**全部**行逐页取回来，供「导出」用。
+ *
+ * 服务端分页的表格，导出如果照当前页来，用户点一下拿到的是一页——
+ * 表头齐、格式对、文件打得开，只是少了绝大部分。这套系统在调度台上
+ * 栽过同一条（把 8336 说成 20）。
+ *
+ * 终止条件只能看 total 和「这一页是不是空的」。第一版写的是
+ * 「拿回来的比要的少 = 最后一页」，页大小要了 500 而服务端夹到 200，
+ * 于是第一页就停——实测 8367 条只导出 200 条，按钮上什么都不说。
+ * 请求超过上限的页大小时，拿回来的一定"少于要求"，那个条件天然是错的。
+ *
+ * 单独放在 hook 外面是为了能被用例直接调到：把翻页逻辑在测试里再抄一遍，
+ * 抄本和真身会各自演化，绿的就不再说明产品是对的。
+ */
+export async function fetchAllPages<T>(path: string, query: string, max = EXPORT_MAX): Promise<T[]> {
+  const out: T[] = [];
+  for (let p = 1; out.length < max; p++) {
+    const params = new URLSearchParams(query);
+    params.set("page", String(p));
+    params.set("page_size", String(PAGE_CAP));
+    const url = `${path}${path.includes("?") ? "&" : "?"}${params.toString()}`;
+    const res = await apiGet<{ items: T[]; total: number }>(url);
+    const items = res.items ?? [];
+    if (items.length === 0) break;
+    out.push(...items);
+    if (out.length >= (res.total ?? out.length)) break;
+  }
+  return out.slice(0, max);
 }

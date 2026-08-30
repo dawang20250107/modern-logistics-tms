@@ -2,8 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { useModalA11y } from "../api/useModalA11y";
-import { fmtDateTime, fmtMoney } from "../api/format";
+import { fmtDateTime, fmtMoney, fmtNum0 } from "../api/format";
 import { toast } from "../api/toast";
 import type {
   AgingReport, Carrier, Customer, Paginated, Statement, StatementAuditResult,
@@ -110,10 +111,13 @@ function SettleModal({ statement, onClose, onDone }: { statement: Statement; onC
 function OverviewTab() {
   const ov = useQuery({ queryKey: ["stmt-overview"], queryFn: () => apiGet<StatementOverview>("/finance/statement-overview") });
   if (ov.isLoading) return <StateView kind="loading" compact />;
-  if (ov.isError || !ov.data) return <StateView kind="error" onRetry={() => ov.refetch()} />;
+  if (ov.isError || !ov.data) return <StateView kind="error" error={ov.error} onRetry={() => ov.refetch()} />;
   const d = ov.data;
   const collectRate = d.receivable.total > 0 ? d.receivable.settled / d.receivable.total : 0;
   const payRate = d.payable.total > 0 ? d.payable.settled / d.payable.total : 0;
+  // 「还没有任何单据」与「金额恰好是零」要分开：前者不该被下任何结论。
+  const hasAnyStatement =
+    d.receivable.total !== 0 || d.payable.total !== 0 || d.period.count > 0;
 
   const StatusChips = ({ s }: { s: StatementOverview["receivable"] }) => (
     <div className="ov-status">
@@ -150,7 +154,14 @@ function OverviewTab() {
           {/* 净头寸为正是正常状态，不需要颜色——和运单详情的毛利、应收应付同一条规则：
               颜色只留给要动作的。为负才上红。 */}
           <div className="ov-value" style={d.net_position < 0 ? { color: "var(--red)" } : undefined}>{fmtMoney(d.net_position)}</div>
-          <div className="ov-sub">{d.net_position >= 0 ? "净应收，现金流向好" : "净应付，需备付资金"}</div>
+          {/* 一张单据都没有的时候不能说"现金流向好"——那是在没有依据的情况下
+              下判断。这跟准班率那条是同一条规则：「没有可统计的样本」和
+              「统计结果是零」是相反的两件事，前者要说"还没有"，不能说"很好"。
+              新客户第一天打开系统，看到的应该是"还没有单据"，不是一句体检结论。 */}
+          <div className="ov-sub">
+            {!hasAnyStatement ? "尚无对账单据"
+              : d.net_position >= 0 ? "净应收，现金流向好" : "净应付，需备付资金"}
+          </div>
           <div className="ov-split ov-foot">
             <div><span>本期新增单据</span><b>{d.period.count} 张</b></div>
             <div><span>本期应收</span><b>{fmtMoney(d.period.receivable)}</b></div>
@@ -162,7 +173,12 @@ function OverviewTab() {
           <div className="ov-value" style={{ color: (d.overdue.receivable.amount + d.overdue.payable.amount) > 0 ? "var(--red)" : "var(--muted)" }}>
             {fmtMoney(d.overdue.receivable.amount + d.overdue.payable.amount)}
           </div>
-          <div className="ov-sub">{(d.overdue.receivable.amount + d.overdue.payable.amount) > 0 ? "需重点催收/排款" : "无逾期，账期健康"}</div>
+          {/* 同上：没有单据时说"账期健康"是无依据的结论 */}
+          <div className="ov-sub">
+            {!hasAnyStatement ? "尚无对账单据"
+              : (d.overdue.receivable.amount + d.overdue.payable.amount) > 0
+                ? "需重点催收/排款" : "无逾期，账期健康"}
+          </div>
           <div className="ov-split ov-foot">
             <div><span>逾期应收</span><b style={d.overdue.receivable.amount > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(d.overdue.receivable.amount)}（{d.overdue.receivable.count}）</b></div>
             <div><span>逾期应付</span><b style={d.overdue.payable.amount > 0 ? { color: "var(--red)" } : {}}>{fmtMoney(d.overdue.payable.amount)}（{d.overdue.payable.count}）</b></div>
@@ -246,7 +262,7 @@ function AgingTab() {
         {aging.isLoading ? (
           <StateView kind="loading" compact />
         ) : aging.isError ? (
-          <StateView kind="error" onRetry={() => aging.refetch()} />
+          <StateView kind="error" error={aging.error} onRetry={() => aging.refetch()} />
         ) : rows.length === 0 ? (
           <StateView kind="empty" title="暂无账龄数据" hint="生成费用与对账单后，此处按对手方汇总账龄敞口。" />
         ) : (
@@ -281,10 +297,22 @@ export function ReconciliationPage() {
   const [showGen, setShowGen] = useState(false);
   const [settleTarget, setSettleTarget] = useState<Statement | null>(null);
 
+  // 财务（只读）这个角色真实存在（演示库里就有一个），它有 finance.view
+  // 没有 finance.manage。原先这一页的写按钮对它照常显示：台账上五个「确认」、
+  // 两个「核销」、「批量审计」「+ 生成对账单」全都亮着，点下去弹一句
+  // 「无财务操作权限」。看得见按不动的按钮比没有按钮更糟——
+  // 只读的人会以为是自己操作错了，反复点、然后来问。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "finance.manage");
+
   const cpType = direction === "receivable" ? "customer" : "carrier";
   const counterparties = useQuery({
     queryKey: ["cp", cpType],
     queryFn: () => apiGet<Paginated<Customer | Carrier>>(`/${cpType === "customer" ? "customers" : "carriers"}?page_size=200`),
+    // 只有展开「生成对账单」时才需要它。原先无条件预取 200 条对手方：
+    // 一是白拉一次，二是财务角色没有 masterdata.view，一进页面就吃一个
+    // 403（页面上什么都不说，只是那个下拉永远是空的）。
+    enabled: showGen && canManage,
   });
   // 对账单台账：服务端筛选 + 分页 + 排序（对全量生效）
   const st = useServerTable<Statement>({
@@ -339,6 +367,7 @@ export function ReconciliationPage() {
   const items = st.rows; // 当前页
   const stmtActiveCount = activeConditionCount(stmtModel, STMT_FILTER_FIELDS);
   const settleQueue = settleQ.data?.items ?? [];
+  const settleTotal = settleQ.data?.total ?? settleQueue.length;
 
   const auditOne = useMutation({
     mutationFn: (id: string) => apiPost<StatementAuditResult>(`/finance/statements/${id}/audit`, {}),
@@ -374,7 +403,8 @@ export function ReconciliationPage() {
     { key: "status", header: "状态", width: 100, filterable: true, filterValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, sortField: "status", sortValue: (s) => s.status, exportValue: (s) => STATEMENT_STATUS_LABEL[s.status] ?? s.status, render: (s) => statusTag(s) },
     { key: "act", header: "财务操作", width: 110, alwaysVisible: true, sticky: "right", render: (s) => (
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-        {s.status === "draft" ? <button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button>
+        {!canManage ? <span className="muted small" title="需要 finance.manage 权限点">只读</span>
+          : s.status === "draft" ? <button disabled={confirm.isPending} onClick={() => confirm.mutate(s.id)}>确认</button>
           : (s.status === "confirmed" || s.status === "partial") ? <button className="btn-primary" onClick={() => setSettleTarget(s)}>核销</button>
           : <span className="muted small">—</span>}
       </div>
@@ -390,12 +420,12 @@ export function ReconciliationPage() {
             {detail.data?.audited_at ? `已审计 · ${fmtDateTime(detail.data.audited_at)}` : "尚未审计"}
             {" · "}共 {detail.data?.lines?.length || 0} 笔明细
           </span>
-          {detail.data && (detail.data.status === "confirmed" || detail.data.status === "partial") && (
+          {canManage && detail.data && (detail.data.status === "confirmed" || detail.data.status === "partial") && (
             <button className="btn-primary" style={{ padding: "3px 12px", fontSize: 11 }} onClick={(e) => { e.stopPropagation(); setSettleTarget(detail.data!); }}>登记核销</button>
           )}
-          <button className="btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }} disabled={auditOne.isPending} onClick={(e) => { e.stopPropagation(); if (expanded) auditOne.mutate(expanded); }}>
+          {canManage && <button className="btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }} disabled={auditOne.isPending} onClick={(e) => { e.stopPropagation(); if (expanded) auditOne.mutate(expanded); }}>
             {auditOne.isPending ? "审计中…" : "审计本单"}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -452,7 +482,7 @@ export function ReconciliationPage() {
         </span>
         <div className="recon-tabs" role="tablist" aria-label="对账中心视图">
           {([["overview", "对账总览"], ["statements", "对账单台账"], ["aging", "账龄分析"], ["settle", "收付款核销"]] as const).map(([k, label]) => (
-            <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleQueue.length > 0 ? <span className="recon-badge">{settleQueue.length}</span> : null}</button>
+            <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}{k === "settle" && settleTotal > 0 ? <span className="recon-badge">{fmtNum0(settleTotal)}</span> : null}</button>
           ))}
         </div>
       </div>
@@ -474,8 +504,10 @@ export function ReconciliationPage() {
               </button>
               {showStmtFilter && <FilterBuilder fields={STMT_FILTER_FIELDS} model={stmtModel} onChange={setStmtModel} onClose={() => setShowStmtFilter(false)} />}
             </div>
-            <button className="btn-ghost" disabled={auditAll.isPending || items.length === 0} onClick={() => auditAll.mutate()}>{auditAll.isPending ? "审计中…" : `批量审计（${items.length}）`}</button>
-            <button className={`btn-primary${showGen ? " is-on" : ""}`} onClick={() => setShowGen((v) => !v)}>{showGen ? "收起" : "+ 生成对账单"}</button>
+            {canManage && <button className="btn-ghost" disabled={auditAll.isPending || items.length === 0} onClick={() => auditAll.mutate()}>{auditAll.isPending ? "审计中…" : `批量审计（${items.length}）`}</button>}
+            {canManage
+              ? <button className={`btn-primary${showGen ? " is-on" : ""}`} onClick={() => setShowGen((v) => !v)}>{showGen ? "收起" : "+ 生成对账单"}</button>
+              : <span className="muted small" title="需要 finance.manage 权限点">只读账号：可查看与导出，不能生成或核销</span>}
           </div>
 
           {showGen && (
@@ -514,7 +546,7 @@ export function ReconciliationPage() {
               </div>
             )}
             {st.isError ? (
-              <StateView kind="error" onRetry={() => st.refetch()} />
+              <StateView kind="error" error={st.error} onRetry={() => st.refetch()} />
             ) : (
               <DataTable<Statement>
                 columns={stmtColumns}
@@ -522,6 +554,7 @@ export function ReconciliationPage() {
                 rowKey={(s) => s.id}
                 viewKey="statements"
                 exportName="对账单"
+                exportAll={st.fetchAll}
                 server={st.server}
                 fill
                 onRowClick={(s) => setExpanded(expanded === s.id ? "" : s.id)}
@@ -537,14 +570,20 @@ export function ReconciliationPage() {
       {tab === "settle" && (
         <div className="panel" style={{ flex: 1 }}>
           <div className="panel-head" style={{ gap: 8, flexWrap: "wrap" }}>
-            <span>待核销队列<span className="ai-pill">{settleQueue.length}</span></span>
+            {/* 角标读服务端 total，不读 settleQueue.length —— 后者最多 200，
+                真到 200 张待核销时会把「至少 200」显示成「正好 200」。
+                下面的列表仍只列 200 条，所以超出时把话说明白。 */}
+            <span>待核销队列<span className="ai-pill">{fmtNum0(settleTotal)}</span></span>
             <div style={{ flex: 1 }} />
-            <span className="muted small">已确认 / 部分结算且仍有未结余额的对账单</span>
+            <span className="muted small">
+              已确认 / 部分结算且仍有未结余额的对账单
+              {settleTotal > settleQueue.length && ` · 下表为最早的 ${settleQueue.length} 张`}
+            </span>
           </div>
           {settleQ.isLoading ? (
             <StateView kind="loading" compact />
           ) : settleQ.isError ? (
-            <StateView kind="error" hint="待核销单据暂时无法加载。" onRetry={() => settleQ.refetch()} compact />
+            <StateView kind="error" hint="待核销单据暂时无法加载。" error={settleQ.error} onRetry={() => settleQ.refetch()} compact />
           ) : settleQueue.length === 0 ? (
             <StateView kind="empty" title="暂无待核销单据" hint="确认对账单后，会进入此队列等待收付款核销。" />
           ) : (
@@ -572,7 +611,9 @@ export function ReconciliationPage() {
                       <div><span className="muted small">已核销</span><b style={{ color: "var(--green)" }}>{fmtMoney(s.settled_amount)}</b></div>
                       <div><span className="muted small">未结</span><b style={{ color: "var(--accent)" }}>{fmtMoney(s.outstanding)}</b></div>
                     </div>
-                    <button className="btn-primary" onClick={() => setSettleTarget(s)}>登记{s.direction === "receivable" ? "收款" : "付款"}</button>
+                    {canManage
+                      ? <button className="btn-primary" onClick={() => setSettleTarget(s)}>登记{s.direction === "receivable" ? "收款" : "付款"}</button>
+                      : <span className="muted small" title="需要 finance.manage 权限点">只读</span>}
                   </div>
                 );
               })}

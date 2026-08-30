@@ -90,7 +90,7 @@ export function NotificationBell() {
             {list.isLoading ? (
               <StateView kind="loading" compact />
             ) : list.isError ? (
-              <StateView kind="error" compact onRetry={() => list.refetch()} />
+              <StateView kind="error" compact error={list.error} onRetry={() => list.refetch()} />
             ) : items.length === 0 ? (
               <StateView kind="empty" title="暂无通知" hint="新消息会在这里汇总。" compact />
             ) : (

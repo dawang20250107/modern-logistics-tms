@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -30,7 +31,9 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/contracts"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 // splittableFrom 只有还没进入执行的运单可拆/可合
@@ -50,6 +53,9 @@ func alreadySigned(status string) bool {
 // 受理状态直写，目标状态一律走状态机——绕开流转校验直改 status，是里程碑与
 // 事件链后来对不上的根因。
 func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -85,7 +91,7 @@ func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondWaybill(w, r, no)
@@ -113,7 +119,7 @@ func (h *Handler) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 }
 
 // wrote 统一把事务错误翻成响应；返回 true 表示没出错、可以继续写成功响应
-func (h *Handler) wrote(w http.ResponseWriter, err error) bool {
+func (h *Handler) wrote(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return true
 	}
@@ -121,7 +127,7 @@ func (h *Handler) wrote(w http.ResponseWriter, err error) bool {
 		httpx.Err(w, he.Status, he.Code, he.Message)
 		return false
 	}
-	httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "处理失败："+err.Error())
+	httpx.Fail(w, r, "INTERNAL", "处理失败", err)
 	return false
 }
 
@@ -138,7 +144,13 @@ func (h *Handler) respondWaybill(w http.ResponseWriter, r *http.Request, no stri
 // Events GET·POST /api/v1/waybills/{no}/events
 func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, no, ok := h.resolve(w, r, "waybill.view")
+	// 这条路由既读也写（POST 追加事件）。原先读写都按 waybill.view 放行——
+	// 运单事件是时间线，往里塞一条等于伪造一段历史，得要 manage。
+	perm := "waybill.view"
+	if r.Method == http.MethodPost {
+		perm = "waybill.manage"
+	}
+	id, no, ok := h.resolve(w, r, perm)
 	if !ok {
 		return
 	}
@@ -181,7 +193,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		  source, resource, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, COALESCE($4::timestamptz, now()), $5, $6, $7)`,
 		eid.String(), id, body.EventType, nilIfBadTime(body.EventTime), source, resource, pj); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	rows, err := h.DB.Query(ctx, eventSelect+" WHERE e.id=$1::uuid", eid.String())
@@ -275,7 +287,7 @@ func (h *Handler) AddExpense(w http.ResponseWriter, r *http.Request) {
 		  $6, $7, $8, '', '', '', '', '', '', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)`,
 		eid.String(), id, body.Direction, body.ExpenseItemCode, amt.String(),
 		body.PayeeType, body.PayeeRef, body.Remark); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, map[string]any{"ok": true})
@@ -312,6 +324,176 @@ func (h *Handler) latestContract(ctx context.Context, waybillID string) (id, sta
 	return id, status, driverID, true
 }
 
+// Patch PATCH /api/v1/waybills/{no} —— 只开放回单状态一个字段。
+//
+// 运单列表上的批量「标记回单已回收」就是打这里。此前这条路径只注册了 GET，
+// 前端每一条都吃 405，而失败被 catch 吞掉，最后照样弹一个**成功**提示
+// 「已标记 0/5 条运单回单为「已回收」」——绿色对勾、语气笃定，什么都没发生。
+// 回单是回单付结算的前提，操作员以为标完了，财务那边却一条都催不动。
+//
+// 字段白名单而不是通用 PATCH：运单上挂着状态机、司机车辆、金额，
+// 开一个什么都能改的 PATCH 等于绕开状态机和所有业务校验。
+// 批量标回单这一个需求，不值这个代价。
+func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, _, ok := h.resolve(w, r, "waybill.manage")
+	if !ok {
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_BODY", "请求体不是合法 JSON。")
+		return
+	}
+	// 多传一个字段就整体拒绝，不做"忽略未知字段"。
+	// 静默忽略会让调用方以为改成功了——这正是这一条要修的那个毛病。
+	for k := range body {
+		if k != "receipt_status" {
+			httpx.Err(w, http.StatusBadRequest, "FIELD_NOT_PATCHABLE",
+				"该接口只支持修改 receipt_status，不接受字段："+k)
+			return
+		}
+	}
+	rs, _ := body["receipt_status"].(string)
+	if !wbstatus.ValidReceipt(rs) {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_RECEIPT_STATUS",
+			"回单状态取值非法："+rs)
+		return
+	}
+	if _, err := h.DB.Exec(ctx,
+		`UPDATE ops_waybill SET receipt_status=$2, updated_at=now() WHERE id=$1::uuid`,
+		id, rs); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"id": id, "receipt_status": rs, "receipt_status_label": wbstatus.ReceiptLabelOf(rs),
+	})
+}
+
+// ContractGenerate POST /api/v1/waybills/{no}/contract —— 按需生成承运合同。
+//
+// 派单时带司机会自动生成一份，但派单时**没有**司机的运单（后补司机是常规操作）
+// 就永远拿不到合同——「发送给司机」「司机确认」两步也跟着走不到，
+// 工作流面板上「承运合同 未生成」会一直挂着。
+// 前端早就写好了 genContract/sendContract/confirmContract 三个 mutation
+// （genContract 正是 POST 到这个地址），但它们一个都没有被渲染出来，
+// 而后端这条路由此前也只注册了 GET——两边各缺一半，
+// 于是「承运合同」这一整段功能从界面上完全够不着。
+//
+// 正文模板与派单那条路共用 internal/contracts.Generate ——
+// 出事时双方拿的是同一份东西，不能因为入口不同而条款不同。
+func (h *Handler) ContractGenerate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, no, ok := h.resolve(w, r, "waybill.manage")
+	if !ok {
+		return
+	}
+	// 已确认的那份是双方已经达成的约定，不能一键覆盖——
+	// 否则就有了「先让司机签，再改运费」这条路。
+	if _, status, _, found := h.latestContract(ctx, id); found && status == "confirmed" {
+		httpx.Err(w, http.StatusConflict, "CONTRACT_CONFIRMED",
+			"该运单的合同已由司机确认，不能重新生成。如需变更请走变更流程。")
+		return
+	}
+
+	var in contracts.Input
+	// 这些列都可能是 NULL（司机未指派、没挂车、没有费用记录），
+	// 一律扫进指针再取值——直接扫进 string 会让整条查询报错，
+	// 而报出来的是"读取运单失败"，看不出真正缺的是哪一样。
+	var driverID, driverName, plate, trailer *string
+	var weight, quantity, agreed *string
+	err := h.DB.QueryRow(ctx, `
+		SELECT wb.id::text, wb.waybill_no, wb.driver_id::text, d.name, v.plate_no,
+		       wb.trailer_id::text, COALESCE(wb.origin,'')||'→'||COALESCE(wb.destination,''),
+		       COALESCE(o.cargo_desc,''), wb.cargo_weight_ton::text, wb.cargo_quantity::text,
+		       (SELECT sum(c.amount)::text FROM fin_expense_record c
+		         WHERE c.waybill_id = wb.id AND c.direction='payable')
+		FROM ops_waybill wb
+		LEFT JOIN md_driver d ON d.id = wb.driver_id
+		LEFT JOIN md_vehicle v ON v.id = wb.vehicle_id
+		LEFT JOIN ops_order o ON o.id = wb.order_id
+		WHERE wb.id=$1::uuid`, id).
+		Scan(&in.WaybillID, &in.WaybillNo, &driverID, &driverName, &plate,
+			&trailer, &in.Route, &in.CargoDesc, &weight, &quantity, &agreed)
+	if err != nil {
+		httpx.Fail(w, r, "INTERNAL", "读取运单失败", err)
+		return
+	}
+	in.DriverID = deref(driverID)
+	if in.DriverID == "" {
+		// 承运人空着的合同不是合同。宁可不生成，也不出一份签不了的。
+		httpx.Err(w, http.StatusBadRequest, "NO_DRIVER",
+			"该运单还没有指派司机，无法生成承运合同。请先指派司机。")
+		return
+	}
+	in.DriverName = deref(driverName)
+	in.VehiclePlate = deref(plate)
+	in.TrailerID = trailer
+	in.Weight = decFrom(weight)
+	in.Quantity = intFrom(quantity)
+	if agreed != nil {
+		d := decFrom(agreed)
+		in.Agreed = &d
+	}
+
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := contracts.Generate(ctx, tx, in); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "合同生成失败", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交失败")
+		return
+	}
+	cid, _, _, found := h.latestContract(ctx, id)
+	if !found {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回读失败")
+		return
+	}
+	_ = no
+	var out json.RawMessage
+	if err := h.DB.QueryRow(ctx, contractJSON+" WHERE c.id=$1::uuid", cid).Scan(&out); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回读失败")
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, out)
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func decFrom(s *string) decimal.Decimal {
+	if s == nil {
+		return decimal.Zero
+	}
+	d, err := decimal.NewFromString(*s)
+	if err != nil {
+		return decimal.Zero
+	}
+	return d
+}
+
+func intFrom(s *string) int {
+	if s == nil {
+		return 0
+	}
+	d, err := decimal.NewFromString(*s)
+	if err != nil {
+		return 0
+	}
+	return int(d.IntPart())
+}
+
 // ContractSend POST /api/v1/waybills/{no}/contract/send
 func (h *Handler) ContractSend(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -331,7 +513,7 @@ func (h *Handler) ContractSend(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_contract SET sent_at=now(), confirm_status='sent', updated_at=now()
 		WHERE id=$1::uuid`, cid); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	h.contractRecord(ctx, id, "contract_sent", cid, "")
@@ -354,7 +536,7 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 	if body.Accepted != nil {
 		accepted = *body.Accepted
 	}
-	cid, _, driverID, found := h.latestContract(ctx, id)
+	cid, cur, driverID, found := h.latestContract(ctx, id)
 	if !found {
 		httpx.Err(w, http.StatusNotFound, "NO_CONTRACT", "无可确认的合同。")
 		return
@@ -363,19 +545,38 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 	if !accepted {
 		newStatus, eventType = "rejected", "contract_rejected"
 	}
+	// 已确认的合同不能被改判。
+	//
+	// 这里原先没有任何状态守卫：谁在什么时候点一下「司机拒签」，都会把一份
+	// **司机已经确认过**的合同改写成"已拒签"，并顺手重写 confirmed_at。
+	// 承运合同是出事时双方唯一的书面依据，"他签过"这件事不该被后来的一次
+	// 点击抹掉。要变更就走重新生成那条路（那条也拒绝覆盖已确认的合同）。
+	if cur == "confirmed" && newStatus != "confirmed" {
+		httpx.Err(w, http.StatusConflict, "CONTRACT_CONFIRMED",
+			"该合同司机已确认，不能改判。如需变更请重新生成合同并重新发送。")
+		return
+	}
+	// 结果一样就什么都不做：重复提交多半是网络重试或手滑，
+	// 不该把已经记下的确认时间往后挪。
+	if cur == newStatus {
+		h.respondContract(w, r, cid)
+		return
+	}
 	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_contract SET confirm_status=$2, confirmed_at=now(), driver_reply=$3, updated_at=now()
 		WHERE id=$1::uuid`, cid, newStatus, body.Reply); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	h.contractRecord(ctx, id, eventType, cid, body.Reply)
 	// 合同确认 → 司机入驻完成 + 刷新累计（工作流编排的一环）
 	if accepted && driverID != "" {
-		_, _ = h.DB.Exec(ctx, `
+		if _, err := h.DB.Exec(ctx, `
 			UPDATE md_driver SET app_registered=true, app_registered_at=now(), updated_at=now()
-			WHERE id=$1::uuid AND NOT app_registered`, driverID)
-		_, _ = h.DB.Exec(ctx, `
+			WHERE id=$1::uuid AND NOT app_registered`, driverID); err != nil {
+			slog.Warn("运单动作写库失败", "err", err)
+		}
+		if _, err := h.DB.Exec(ctx, `
 			UPDATE md_driver d SET
 			  cumulative_waybills = (SELECT count(*) FROM ops_waybill x
 			     WHERE x.driver_id=d.id AND x.status IN ('signed','delivered','settled')),
@@ -383,7 +584,9 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 			     JOIN ops_waybill x ON x.id=e.waybill_id
 			     WHERE x.driver_id=d.id AND e.direction='payable'), 0),
 			  updated_at = now()
-			WHERE d.id=$1::uuid`, driverID)
+			WHERE d.id=$1::uuid`, driverID); err != nil {
+			slog.Warn("运单动作写库失败", "err", err)
+		}
 	}
 	h.respondContract(w, r, cid)
 }
@@ -398,12 +601,14 @@ func (h *Handler) contractRecord(ctx context.Context, waybillID, eventType, cont
 	}
 	pj, _ := json.Marshal(payload)
 	eid, _ := uuid.NewV7()
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time,
 		  source, resource, payload)
 		SELECT $1, now(), now(), $2::uuid, $3, clock_timestamp(), 'contract', w.waybill_no, $4
 		FROM ops_waybill w WHERE w.id = $2::uuid`,
-		eid.String(), waybillID, eventType, pj)
+		eid.String(), waybillID, eventType, pj); err != nil {
+		slog.Warn("运单动作写库失败", "err", err)
+	}
 }
 
 func (h *Handler) respondContract(w http.ResponseWriter, r *http.Request, contractID string) {
@@ -430,6 +635,9 @@ FROM ops_contract c LEFT JOIN md_driver d ON d.id=c.driver_id`
 
 // PartialSign POST /api/v1/waybills/{no}/partial-sign
 func (h *Handler) PartialSign(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -501,7 +709,7 @@ func (h *Handler) PartialSign(w http.ResponseWriter, r *http.Request) {
 		}
 		finalStatus = wb.Status
 		if _, err := tx.Exec(ctx,
-			`UPDATE ops_waybill SET receipt_status='received', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
+			`UPDATE ops_waybill SET receipt_status='`+wbstatus.ReceiptReturned+`', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
 			return err
 		}
 		level := "medium"
@@ -514,7 +722,7 @@ func (h *Handler) PartialSign(w http.ResponseWriter, r *http.Request) {
 			pyNum(total), pyNum(signed), pyNum(damaged), pyNum(shortage), body.Note))
 		return openDeliveryException(ctx, tx, wb.ID, "cargo_damage", level, desc, me.ID)
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondSignOutcome(w, r, no, finalStatus, receiptID)
@@ -525,6 +733,9 @@ func pyNum(d decimal.Decimal) string { return d.String() }
 
 // Reject POST /api/v1/waybills/{no}/reject {reason, signatory, sign_source}
 func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -577,12 +788,12 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 		}
 		finalStatus = wb.Status
 		if _, err := tx.Exec(ctx,
-			`UPDATE ops_waybill SET receipt_status='received', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
+			`UPDATE ops_waybill SET receipt_status='`+wbstatus.ReceiptReturned+`', updated_at=now() WHERE id=$1::uuid`, wb.ID); err != nil {
 			return err
 		}
 		return openDeliveryException(ctx, tx, wb.ID, "customer_complaint", "high", "整车拒收："+body.Reason, me.ID)
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondSignOutcome(w, r, no, finalStatus, receiptID)
@@ -645,6 +856,9 @@ func nilIfEmpty(s string) any {
 
 // codAction collect/remit 共用：改状态 + 落时间戳 + 事件
 func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -660,8 +874,17 @@ func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) 
 		}
 		amt, _ := decimal.NewFromString(amount)
 		if remit {
+			// 已回款和还没代收是两件事，报错不能都说成"仅已代收的货款可回款"——
+			// 那句话会让操作员以为漏了代收那一步，于是回头去点「已代收」，
+			// 而钱其实早就回过了。回款不做幂等（重复回款是真金白银），
+			// 但至少要把话说清楚。
+			if codStatus == "remitted" {
+				return httpErr{http.StatusConflict, "COD_ALREADY_REMITTED",
+					"该运单的代收货款已经回款过了，无需重复操作。"}
+			}
 			if codStatus != "collected" {
-				return httpErr{http.StatusConflict, "COD_NOT_COLLECTED", "仅已代收的货款可回款。"}
+				return httpErr{http.StatusConflict, "COD_NOT_COLLECTED",
+					"该运单还没有确认代收，请先确认收到货款再回款。"}
 			}
 			if _, err := tx.Exec(ctx, `UPDATE ops_waybill SET cod_status='remitted',
 				cod_remitted_at=now(), updated_at=now() WHERE id=$1::uuid`, id); err != nil {
@@ -677,6 +900,17 @@ func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) 
 		if codStatus == "remitted" {
 			return httpErr{http.StatusConflict, "COD_REMITTED", "代收货款已回款，不能重复代收。"}
 		}
+		// 已经代收过就什么都不做。
+		//
+		// 原先这里只挡了"已回款"，于是再点一次「已代收」会重写 cod_collected_at：
+		// 司机 10:00 收的现金，下午有人手滑再点一次，记录变成 15:00——
+		// 而这条时间戳正是现金纠纷时唯一能拿出来的东西。顺带时间线上还会多出
+		// 一条「已代收」，看起来像收了两次。
+		// 不报错而是直接返回当前状态：重复提交多半是网络重试或手滑，
+		// 报一个错只会让人以为出了问题，幂等地什么都不做才是对的。
+		if codStatus == "collected" {
+			return nil
+		}
 		if _, err := tx.Exec(ctx, `UPDATE ops_waybill SET cod_status='collected',
 			cod_collected_at=now(), updated_at=now() WHERE id=$1::uuid`, id); err != nil {
 			return err
@@ -685,7 +919,7 @@ func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) 
 			map[string]any{"amount": amount, "__source": "settlement"})
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.Detail(w, r) // 两个动作都回 WaybillDetailSerializer
@@ -710,6 +944,9 @@ const waybillSpawnDefaultVals = `'pending_accept', 'none', 'not_due', 0,
 
 // Split POST /api/v1/waybills/{no}/split {splits:[{cargo_quantity, cargo_weight_ton, cargo_volume_cbm}]}
 func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -731,6 +968,45 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(body.Splits) < 2 {
 			return httpErr{http.StatusBadRequest, "INVALID_SPLIT", "拆单至少需要 2 个子单。"}
+		}
+		// 子单的货量之和必须等于父单。
+		//
+		// 这里的件数/吨/方是**调用方给的**，而父单随即作废：
+		// 少给等于货凭空消失，多给等于凭空多出——而吨数直接进承运商运费，
+		// 把 10 吨拆成两个 10 吨，就是凭空多付一倍的钱。
+		// 实测两个方向都放行，接口都回 201。
+		var sumQ, sumW, sumV decimal.Decimal
+		for _, part := range body.Splits {
+			q, _ := toDecimal(part["cargo_quantity"])
+			wt, _ := toDecimal(part["cargo_weight_ton"])
+			v, _ := toDecimal(part["cargo_volume_cbm"])
+			sumQ, sumW, sumV = sumQ.Add(q), sumW.Add(wt), sumV.Add(v)
+		}
+		var pq, pw, pv decimal.Decimal
+		var pqi int
+		var pws, pvs string
+		if err := tx.QueryRow(ctx, `
+			SELECT cargo_quantity, cargo_weight_ton::text, cargo_volume_cbm::text
+			FROM ops_waybill WHERE id=$1::uuid`, wb.ID).Scan(&pqi, &pws, &pvs); err != nil {
+			return err
+		}
+		pq = decimal.NewFromInt(int64(pqi))
+		pw, _ = decimal.NewFromString(pws)
+		pv, _ = decimal.NewFromString(pvs)
+		var bad []string
+		if !sumQ.Equal(pq) {
+			bad = append(bad, fmt.Sprintf("件数 %s ≠ %s", sumQ.String(), pq.String()))
+		}
+		if !sumW.Equal(pw) {
+			bad = append(bad, fmt.Sprintf("吨数 %s ≠ %s", sumW.String(), pw.String()))
+		}
+		if !sumV.Equal(pv) {
+			bad = append(bad, fmt.Sprintf("方数 %s ≠ %s", sumV.String(), pv.String()))
+		}
+		if len(bad) > 0 {
+			return httpErr{http.StatusBadRequest, "SPLIT_CARGO_MISMATCH",
+				"子单货量之和与原运单对不上（" + strings.Join(bad, "；") +
+					"）。拆完原单即作废，对不上就意味着货凭空多了或少了。"}
 		}
 		for idx, part := range body.Splits {
 			q, _ := toDecimal(part["cargo_quantity"])
@@ -760,7 +1036,7 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 		wbEvent(ctx, tx, wb.ID, "split", wb.No, map[string]any{"children": children, "__source": "split"})
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	h.respondWaybillList(w, r, children, http.StatusCreated, map[string]any{"parent": no})
@@ -768,6 +1044,9 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 
 // Merge POST /api/v1/waybills/merge {waybill_nos:[...], route_name}
 func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -845,7 +1124,7 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"sources": nos, "__source": "merge"})
 		return nil
 	})
-	if !h.wrote(w, err) {
+	if !h.wrote(w, r, err) {
 		return
 	}
 	it, err := SerializeByNo(ctx, h.DB, mergedNo)

@@ -8,44 +8,31 @@ package waybills
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/expitem"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
-var costItems = map[string]string{
-	"TRANSPORT_COST": "运费", "FUEL_CARD": "油卡", "TOLL": "过路费", "LOADING": "装卸费",
-	"DETENTION": "押车费", "INFO_FEE": "信息费", "RECEIPT_FEE": "回单费", "DEDUCTION": "扣款",
-	"EXCEPTION_COST": "异常费用", "OTHER_COST": "其他成本",
-}
-var incomeItems = map[string]string{
-	"TRANSPORT_INCOME": "运费收入", "SURCHARGE": "附加费", "INSURANCE": "保险费",
-	"WAITING_FEE": "等候费", "OTHER_INCOME": "其他收入",
-}
-var payeeLabels = map[string]string{
-	"carrier": "承运商", "driver": "司机", "fuel_card": "油卡商", "customer": "客户", "other": "其他",
-}
-var wbStatusLabel = map[string]string{
-	"draft": "草稿", "pending_dispatch": "待调度", "dispatched": "已派车", "loaded": "已装车",
-	"departed": "已发车", "in_transit": "运输中", "arrived": "已到达", "partially_signed": "部分签收",
-	"rejected": "已拒收", "signed": "已签收", "delivered": "已送达", "settled": "已结算",
-	"cancelled": "已取消", "voided": "已作废",
-}
+// 词表收在 internal/expitem 里（原先这里和 finance/dashboard.go 各存一份，
+// 而计价规则那条路径压根不校验）。这里只留别名，改科目改那一个文件。
+var (
+	costItems   = expitem.Cost
+	incomeItems = expitem.Income
+	payeeLabels = expitem.Payees
+)
 
-func itemLabel(code string) string {
-	if v, ok := costItems[code]; ok {
-		return v
-	}
-	if v, ok := incomeItems[code]; ok {
-		return v
-	}
-	return code
-}
+func itemLabel(code string) string { return expitem.Label(code) }
 
 // resolve 鉴权 + 权限 + 数据范围，返回运单主键；失败时已写响应
 func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, perm string) (id, no string, ok bool) {
@@ -236,8 +223,10 @@ func (h *Handler) ETA(w http.ResponseWriter, r *http.Request) {
 		if plannedArrival != nil {
 			newDrift = int(estimated.Sub(*plannedArrival).Minutes())
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_waybill SET estimated_arrival=$2, eta_drift_minutes=$3, updated_at=now()
-			WHERE id=$1::uuid`, id, estimated, newDrift)
+		if _, err := h.DB.Exec(ctx, `UPDATE ops_waybill SET estimated_arrival=$2, eta_drift_minutes=$3, updated_at=now()
+			WHERE id=$1::uuid`, id, estimated, newDrift); err != nil {
+			slog.Warn("运单卡片写库失败", "err", err)
+		}
 		estimatedArrival, drift = &estimated, newDrift
 		rkm := math.Round(km*10) / 10
 		rsp := math.Round(speed*10) / 10
@@ -402,7 +391,7 @@ func (h *Handler) ReplyCard(w http.ResponseWriter, r *http.Request) {
 	_ = h.DB.QueryRow(ctx, `SELECT exception_type FROM ops_exception
 		WHERE waybill_id=$1::uuid AND status <> 'resolved' ORDER BY created_at DESC LIMIT 1`, id).Scan(&excType)
 
-	statusLbl := wbStatusLabel[status]
+	statusLbl := wbstatus.Label[status]
 	receiptLbl := "待回收"
 	switch receiptStatus {
 	case "returned":
@@ -498,6 +487,80 @@ func (h *Handler) Reminders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// SendReminder POST /api/v1/waybills/{no}/reminders —— 给这张运单的司机发作业提醒。
+//
+// 运单详情页上那颗「发送提醒」按钮打的就是这里，而此前只注册了 GET，恒定 405。
+// 司机端那一侧一直是全的：/driver/tasks 会把待确认的提醒当强制弹窗推给司机，
+// /driver/reminders/{id}/ack 收确认。收的一头做好了，发的一头没有——
+// 「装车前先拍照」「这批货不能倒放」发不出去，调度员只能打电话，
+// 而电话说过的话，出事时谁都不认。
+func (h *Handler) SendReminder(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, _, ok := h.resolve(w, r, "waybill.manage")
+	if !ok {
+		return
+	}
+	var body struct {
+		Template    string `json:"template"`
+		Title       string `json:"title"`
+		Content     string `json:"content"`
+		AckRequired *bool  `json:"ack_required"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	// 模板只是把正文填进来的快捷方式；正文才是发给司机的东西。
+	content := strings.TrimSpace(body.Content)
+	var tplID any
+	if body.Template != "" {
+		if _, err := uuid.Parse(body.Template); err == nil {
+			var tplContent string
+			if h.DB.QueryRow(ctx, `SELECT content FROM ops_reminder_template
+				WHERE id=$1::uuid AND NOT is_deleted`, body.Template).Scan(&tplContent) == nil {
+				tplID = body.Template
+				if content == "" {
+					content = strings.TrimSpace(tplContent)
+				}
+			}
+		}
+	}
+	if content == "" {
+		httpx.Err(w, http.StatusBadRequest, "REMINDER_CONTENT", "提醒内容不能为空。")
+		return
+	}
+
+	// 提醒是发给**人**的：司机端按 driver_id 拉待办，绑不上就永远收不到。
+	// 与其落一条没人会看到的记录，不如直接说清楚。
+	var driverID *string
+	_ = h.DB.QueryRow(ctx, `SELECT driver_id::text FROM ops_waybill WHERE id=$1::uuid`, id).Scan(&driverID)
+	if driverID == nil || *driverID == "" {
+		httpx.Err(w, http.StatusBadRequest, "NO_DRIVER",
+			"该运单还没有指派司机，提醒发不出去。请先指派司机。")
+		return
+	}
+
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		title = "作业提醒"
+	}
+	ack := true
+	if body.AckRequired != nil {
+		ack = *body.AckRequired
+	}
+	rid, _ := uuid.NewV7()
+	if _, err := h.DB.Exec(ctx, `
+		INSERT INTO ops_driver_reminder (id, created_at, updated_at, waybill_id, driver_id,
+		  template_id, title, content, ack_required, status, level, sent_at)
+		VALUES ($1, now(), now(), $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, '`+wbstatus.ReminderPending+`', 'important', now())`,
+		rid.String(), id, *driverID, tplID, title, content, ack); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, map[string]any{
+		"id": rid.String(), "title": title, "content": content,
+		"ack_required": ack, "status": wbstatus.ReminderPending,
+	})
 }
 
 var cardCST = time.FixedZone("CST", 8*3600)

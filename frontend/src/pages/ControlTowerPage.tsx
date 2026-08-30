@@ -54,8 +54,27 @@ export function ControlTowerPage() {
   const stats = useQuery({ queryKey: ["waybills", "stats"], queryFn: () => apiGet<WbStats>("/waybills/stats"), refetchInterval: 30000 });
   const funnel = useQuery({ queryKey: ["orders", "funnel"], queryFn: () => apiGet<Funnel>("/orders/funnel"), refetchInterval: 30000 });
   const wb = useQuery({ queryKey: ["workbench"], queryFn: () => apiGet<Workbench>("/workbench"), refetchInterval: 30000 });
-  const fin = useQuery({ queryKey: ["statement-overview"], queryFn: () => apiGet<StatementOverview>("/finance/statement-overview"), refetchInterval: 60000 });
-  const compliance = useQuery({ queryKey: ["compliance-mini"], queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30"), refetchInterval: 60000 });
+  // 财务那几块要 finance.view。没有就**不要发这个请求**——
+  // 原先照发不误，客服打开驾驶舱就吃一个 403，页面上显示的是
+  // 「财务数据暂不可用」加一颗重试按钮。那读起来像系统故障，
+  // 而真相是这个角色永远看不了这一块，重试一万次也一样。
+  const canFinance = hasPerm(user, "finance.view");
+  const fin = useQuery({
+    queryKey: ["statement-overview"],
+    queryFn: () => apiGet<StatementOverview>("/finance/statement-overview"),
+    refetchInterval: 60000,
+    enabled: canFinance,
+  });
+  // 证件预警要 masterdata.view，和上面的财务块同理：财务（只读）角色没有它，
+  // 打开驾驶舱就吃一个 403，磁贴上写着「证件数据暂不可用」——
+  // 读起来像同步出了问题，实际是这个角色本来就看不了证件库。
+  const canMasterdata = hasPerm(user, "masterdata.view");
+  const compliance = useQuery({
+    queryKey: ["compliance-mini"],
+    queryFn: () => apiGet<ExpiringCredentials>("/credentials/expiring?days=30"),
+    refetchInterval: 60000,
+    enabled: canMasterdata,
+  });
 
   // 实时事件：到达即刷新看板
   const primaryQueries = [stats, funnel, wb];
@@ -87,7 +106,8 @@ export function ControlTowerPage() {
     { key: "ar", icon: <IconMoney size={17} />, label: "应收敞口", value: fin.isLoading ? "…" : fin.isError ? "—" : fmtWan(ov?.receivable.outstanding ?? 0), sub: fin.isLoading ? "正在同步财务数据" : fin.isError ? "财务数据暂不可用" : `应收单据 ${ov?.receivable.count ?? 0} 张`, tone: "grad", to: "/reconciliation" },
     { key: "overdue", icon: <IconWarning size={17} />, label: "逾期应收", value: fin.isLoading ? "…" : fin.isError ? "—" : fmtWan(ov?.overdue.receivable.amount ?? 0), sub: fin.isLoading ? "正在同步财务数据" : fin.isError ? "财务数据暂不可用" : `${ov?.overdue.receivable.count ?? 0} 张逾期`, tone: (ov?.overdue.receivable.amount ?? 0) > 0 ? "red" : "", to: "/reconciliation" },
     { key: "cred", icon: <IconShield size={17} />, label: "证件预警", value: compliance.isLoading ? "…" : compliance.isError ? "—" : String(credAlert), sub: compliance.isLoading ? "正在同步证件数据" : compliance.isError ? "证件数据暂不可用" : credAlert > 0 ? `${credSum?.expired ?? 0} 过期 · ${credSum?.critical ?? 0} 紧急` : "30 天内无临期", tone: credAlert > 0 ? "red" : "", to: "/fleet" },
-  ];
+  ].filter((t) => (canFinance || (t.key !== "ar" && t.key !== "overdue")) &&
+                  (canMasterdata || t.key !== "cred"));
 
   // 运单状态分布分段
   const segTotal = WB_PIPELINE.reduce((s, p) => s + (byStatus[p.key] ?? 0), 0) || 1;
@@ -216,15 +236,16 @@ export function ControlTowerPage() {
             </div>
           </div>
 
-          {/* 财务敞口 */}
-          <div className="panel">
+          {/* 财务敞口。没有 finance.view 就整块不出现——
+              留一个写着"暂不可用"的空壳，比不显示更让人以为是坏了。 */}
+          {canFinance && <div className="panel">
             <div className="panel-head">
               <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><IconReceipt size={15} />财务敞口</span>
               <Link className="link small" to="/reconciliation">对账中心 →</Link>
             </div>
             <div className="ct-side-body">
               {fin.isLoading ? <StateView kind="loading" compact /> : fin.isError ? (
-                <StateView kind="error" hint="财务敞口暂时无法同步。" compact onRetry={() => fin.refetch()} />
+                <StateView kind="error" hint="财务敞口暂时无法同步。" compact error={fin.error} onRetry={() => fin.refetch()} />
               ) : <><div className="ct-expo">
                 <div><span>应收未结</span><b className="num-grad">{fmtWan(ov?.receivable.outstanding ?? 0)}</b></div>
                 <div><span>应付未结</span><b>{fmtWan(ov?.payable.outstanding ?? 0)}</b></div>
@@ -240,17 +261,17 @@ export function ControlTowerPage() {
                 </div>
               ))}</>}
             </div>
-          </div>
+          </div>}
 
-          {/* 证件预警 */}
-          <div className="panel">
+          {/* 证件预警。同财务块：没有 masterdata.view 就整块不出现 */}
+          {canMasterdata && <div className="panel">
             <div className="panel-head">
               <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><IconShield size={15} />证件合规预警</span>
               <Link className="link small" to="/fleet">证件库 →</Link>
             </div>
             <div className="ct-side-body">
               {compliance.isLoading ? <StateView kind="loading" compact /> : compliance.isError ? (
-                <StateView kind="error" hint="证件状态暂时无法同步。" compact onRetry={() => compliance.refetch()} />
+                <StateView kind="error" hint="证件状态暂时无法同步。" compact error={compliance.error} onRetry={() => compliance.refetch()} />
               ) : credRows.length === 0 ? (
                 <div className="muted small" style={{ padding: "6px 2px" }}>30 天内无临期/过期证件。</div>
               ) : (
@@ -263,7 +284,7 @@ export function ControlTowerPage() {
                 ))
               )}
             </div>
-          </div>
+          </div>}
         </div>
       </div>
     </div>

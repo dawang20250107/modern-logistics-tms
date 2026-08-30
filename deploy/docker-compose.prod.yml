@@ -12,7 +12,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tms}
       POSTGRES_USER: ${POSTGRES_USER:-tms}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tms_prod_pwd}
+      # 同样不给默认值。一个写在仓库里的"生产默认口令"，
+      # 等于所有按文档部署的实例共用同一把钥匙——而且没人会想起来改。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?必须设置数据库口令，见 deploy/.env.prod.example}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,18 +31,61 @@ services:
     image: tms-gateway:prod
     environment:
       GO_LISTEN_ADDR: ":8000"
-      DATABASE_URL: ${DATABASE_URL:-postgres://tms:tms_prod_pwd@db:5432/tms}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-CHANGE-ME-IN-PRODUCTION-USE-32BYTES+}
+      DATABASE_URL: ${DATABASE_URL:?必须与上面的库口令一致，见 deploy/.env.prod.example}
+      # 没有默认值是有意的：漏配就起不来，好过带着占位密钥跑起来。
+      # 网关的启动前置检查（config.Preflight）在 DJANGO_DEBUG=false 时
+      # 会拒绝弱密钥/占位密钥——这把钥匙同时签发内部用户令牌与司机端令牌。
+      #   生成：openssl rand -base64 48
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?必须设置强随机密钥，见 deploy/.env.prod.example}
       DJANGO_DEBUG: "false"
-      DJANGO_CORS_ORIGINS: ${DJANGO_CORS_ORIGINS:-}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      DJANGO_CORS_ORIGINS: ${DJANGO_CORS_ORIGINS:?必须写明确的前端来源，不能用 *}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?必须是对外可访问的基址，媒体文件绝对地址靠它}
+      # 自助注册默认关闭：账号应由管理员在「组织与权限 → 员工名录」开通。
+      # 对外客户门户需要自助开户时才置 1。
+      TMS_ALLOW_SELF_REGISTRATION: ${TMS_ALLOW_SELF_REGISTRATION:-0}
       MEDIA_ROOT: /app/media
+      # 媒体存放。默认 local = 写容器本地盘，**只适用于单副本**：
+      # 起两个副本之后，上传落在 A 的盘上、下一次 GET 路由到 B 就 404，
+      # 而且是间歇性的（取决于路由到哪个副本），预发单副本永远复现不出来。
+      # 多副本部署前必须改成 s3 并配齐下面五项。
+      MEDIA_BACKEND: ${MEDIA_BACKEND:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      # MinIO、以及多数自建 S3 网关只支持 path-style；AWS/COS 两种都行
+      S3_PATH_STYLE: ${S3_PATH_STYLE:-0}
+      # 连接池上限。不设的话 pgx 默认 max(4, NumCPU)——4 条连接会成为整个
+      # 网关的吞吐天花板（5 万单实测锁死在 221 req/s）。
+      # 注意 池大小 × 副本数 不能超过 PG 的 max_connections（默认 100）。
+      DB_MAX_CONNS: ${DB_MAX_CONNS:-20}
+      DB_MIN_CONNS: ${DB_MIN_CONNS:-4}
+      # /metrics 的访问凭证。留空则该端点直接 404——指标里有内网结构与
+      # 流量画像，不该裸奔。接 Prometheus 时才配。
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # 验证码下发通道。留空 = 不开自助找回，前端会明确告诉用户"请联系管理员"，
+      # 而不是让人对着一个永远等不到码的输入框干等。
+      TMS_RESET_CHANNEL: ${TMS_RESET_CHANNEL:-}
+      # 变量名必须和代码里读的一致（internal/auth/notify.go）。
+      # 这几个原先写成 TMS_SMTP_*，而代码读的是 SMTP_*——运维把五个都填好、
+      # 重启，邮件仍然一封发不出去，日志里那句警告还在要一个他配置文件里
+      # 根本没有的 SMTP_HOST。设了没用比没得设更难查。
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      # 对公开放端点的限流。/track 的"密码"只是手机号后 4 位、订单号顺序可猜，
+      # 没有闸时穷举四位组合只要 60 秒。详见 docs/deployment.md「对公开放的面」。
+      THROTTLE_TRACK_ORDER: ${THROTTLE_TRACK_ORDER:-10/min}
+      THROTTLE_TRACK_FAIL_IP: ${THROTTLE_TRACK_FAIL_IP:-20/min}
+      THROTTLE_PUBLIC_INTAKE: ${THROTTLE_PUBLIC_INTAKE:-5/min}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-pro}
       ALERT_SPEED_LIMIT_KMH: ${ALERT_SPEED_LIMIT_KMH:-90}
       DEVICE_OFFLINE_MINUTES: ${DEVICE_OFFLINE_MINUTES:-10}
-      AMAP_KEY: ${AMAP_KEY:-}
       AGENT_MCP_SERVERS: ${AGENT_MCP_SERVERS:-}
       MQTT_HOST: ${MQTT_HOST:-}
       MQTT_PORT: ${MQTT_PORT:-1883}
@@ -51,19 +96,35 @@ services:
       - media:/app/media
     depends_on:
       db: { condition: service_healthy }
+    # healthcheck 由镜像自带（探 /readyz，会 ping 库）。
+    # 存活探针 /healthz 不查库是有意的：库抖一下就重启应用是错的处置，只会让恢复更慢。
+    # web 依赖 gateway 的 healthy 而不是 started —— 否则前端先起来，
+    # 用户看到的是一屏 502。
     restart: always
 
   web:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
+      args:
+        # 构建期变量，见 Dockerfile.frontend 里的说明
+        VITE_AMAP_KEY: ${VITE_AMAP_KEY:-}
     image: tms-frontend:prod
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      # TLS 证书。生产挂云厂商签发的证书或 certbot 的 live 目录；
+      # 本地预演先跑 `bash deploy/gen-dev-cert.sh` 生成自签证书。
+      # 目录不存在时 nginx 起不来——这是有意的：静默退回明文比起不来危险得多。
+      - ./certs:/etc/nginx/certs:ro
+      # certbot webroot 校验落点（用 Let's Encrypt 时需要）
+      - certbot-www:/var/www/certbot
     depends_on:
-      - gateway
+      gateway: { condition: service_healthy }
     restart: always
 
 volumes:
   pgdata:
   media:
+  certbot-www:

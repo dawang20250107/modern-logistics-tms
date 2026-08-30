@@ -22,7 +22,14 @@ interface WaybillBrief {
   pickup_address: string; delivery_address: string; pickup_contact_phone: string; delivery_contact_phone: string;
   cod_amount: number;
 }
-interface Tasks { driver: { name: string; phone: string }; waybills: WaybillBrief[]; pending_reminders: Reminder[] }
+interface Tasks {
+  driver: { name: string; phone: string };
+  waybills: WaybillBrief[];
+  /** 在途总数。列表被服务端截断过，所以这个数才是真的——
+   *  拿 waybills.length 当总数就是"把一页当全量"，这套系统已经犯过四次。 */
+  waybill_total?: number;
+  pending_reminders: Reminder[];
+}
 
 const CRED_TYPES: [string, string][] = [
   ["vehicle_license", "车头行驶证"], ["trailer_license", "车挂行驶证"], ["driving_license", "驾驶证"],
@@ -123,8 +130,19 @@ export function DriverPortalPage() {
         <div className="drv-body">
           <div className="drv-body-head">
             <h3>在途运输任务</h3>
-            <span className="tag tag-info">{tasks?.waybills.length ?? 0} 单进行中</span>
+            {/* 数字取服务端的 waybill_total，不是取回来这一批的条数。
+                列表最多返回 50 条（手机上一次拉 3000 条实测 1.19MB、
+                页面高一百多万像素），截断了就在下面明说。 */}
+            <span className="tag tag-info">{tasks?.waybill_total ?? tasks?.waybills.length ?? 0} 单进行中</span>
           </div>
+          {(tasks?.waybill_total ?? 0) > (tasks?.waybills.length ?? 0) && (
+            <div className="muted small" style={{ padding: "0 16px 8px" }}>
+              共 {tasks?.waybill_total} 单，先显示最近 {tasks?.waybills.length} 单。
+              {/* 这里原先写的是"用上方的搜索"——而司机端没有搜索框。
+                  指向一个不存在的东西，比不说更耽误人。 */}
+              更早的单请联系调度。
+            </div>
+          )}
 
           {(tasks?.waybills.length ?? 0) === 0 ? (
             <div style={{ background: "var(--panel)", borderRadius: 12, border: "1px dashed var(--line-2)" }}>
@@ -178,6 +196,41 @@ export function DriverPortalPage() {
 
 type Phase = "idle" | "locating" | "uploading" | "done" | "error";
 
+// 取定位，最多等 GEO_WAIT_MS，之后一律放行。
+//
+// 为什么不能只靠 getCurrentPosition 的 timeout 选项：**它不覆盖授权那一段**。
+// 浏览器弹出"允许获取位置吗"而司机没点（或点了拒绝），成功和失败两个回调
+// 都不会被调用——实测 15 秒过去仍然一个都没回。于是那个 Promise 永远不 resolve，
+// 打卡按钮永久卡在"正在定位…"，**这个司机从此再也打不了卡**。
+// 而打卡是司机端唯一要紧的按钮：装货、发车、到达全靠它，运单状态也靠它推进。
+//
+// 实测（headless Chromium，:5173，见 driver-walk.mjs 那一轮）：
+//   已授权     → 2ms 拿到坐标
+//   未答复弹窗 → 15 秒两个回调一个都没来
+//   未授权     → 15 秒两个回调一个都没来
+//
+// 所以必须自己拿计时器兜底。定位只是打卡的**附加证据**，缺了它照样要能提交——
+// 让一个可选信息把主流程卡死，方向就反了。
+const GEO_WAIT_MS = 6000;
+
+function getPosition(): Promise<GeolocationPosition | null> {
+  if (!navigator.geolocation) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (p: GeolocationPosition | null) => {
+      if (done) return;
+      done = true;
+      resolve(p);
+    };
+    const timer = setTimeout(() => finish(null), GEO_WAIT_MS);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { clearTimeout(timer); finish(p); },
+      () => { clearTimeout(timer); finish(null); },
+      { timeout: GEO_WAIT_MS, maximumAge: 60000 },
+    );
+  });
+}
+
 function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [feedback, setFeedback] = useState("");
@@ -191,8 +244,7 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
     // 弱网友好：定位失败也可继续提交，每一步都有明确反馈
     setPhase("locating");
     setFeedback("正在定位…");
-    const pos = await new Promise<GeolocationPosition | null>((res) =>
-      navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res(p), () => res(null), { timeout: 5000 }) : res(null));
+    const pos = await getPosition();
     if (!pos) setFeedback("定位失败，仍可继续提交");
     setPhase("uploading");
     setFeedback(file ? "照片上传中…" : "提交中…");
@@ -281,7 +333,8 @@ function CredentialUpload({ token }: { token: string }) {
       const fd = new FormData();
       fd.append("cred_type", credType); fd.append("side", side); fd.append("file", file);
       await dFetch("/driver/credentials", token, { method: "POST", body: fd });
-      toast.success("证件已上传，识别建档中");
+      // 未接 OCR 引擎时不会有任何"识别"发生，别让司机以为传完就没事了
+      toast.success("证件已上传，待人工核验建档");
     } catch (e) { toast.error(e instanceof Error ? e.message : "上传失败"); }
     finally { setBusy(false); }
   }

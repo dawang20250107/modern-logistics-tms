@@ -1,0 +1,391 @@
+#!/usr/bin/env bash
+# 发版闸门：把所有"机器能判的"检查跑成一条命令。
+#
+#   bash scripts/dev/release-check.sh          # 全跑
+#   bash scripts/dev/release-check.sh --quick  # 跳过压测与备份演练（约 1 分钟）
+#
+# 这是打 tag 之前该跑的那一条命令。CI 已经跑了构建/测试/类型检查，
+# 但 CI 跑不到的几项恰恰是最容易在发版时出事的：
+#   · 生产配置能不能通过前置检查（占位密钥、CORS=*）
+#   · 仓库里有没有混进真密钥
+#   · 有量之后接口还撑不撑得住
+#   · 备份到底能不能恢复
+#
+# 退出码非 0 = 不要发。每一项都会打印它到底判了什么，
+# 不合格时打印怎么复现——"红了但看不出为什么红"的门禁没人会认真对待。
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+# 既认参数也认环境变量。原先只认 --quick：写 QUICK=1 bash release-check.sh
+# 会被静默忽略，跑的其实是全量——不报错、只是慢，人会以为自己跳过了压测。
+QUICK="${QUICK:-0}"; [ "${1:-}" = "--quick" ] && QUICK=1
+
+PASS=0; FAIL=0; SKIP=0
+ok()   { echo "  ✓ $1"; PASS=$((PASS+1)); }
+bad()  { echo "  ✗ $1"; FAIL=$((FAIL+1)); }
+skip() { echo "  – $1"; SKIP=$((SKIP+1)); }
+sect() { echo; echo "── $1 ──"; }
+
+# 下面两个是各类走查的统一入口。它们存在的理由是同一条：
+# **一条检查失败时说的原因必须是真的。**
+#
+# 上一轮吃过两次亏：网关没起时 ui-audit 把登录页当业务页量了一遍，
+# 报出「点击目标过小」这种根本不存在的结论；而 smoke-ui 因为请求在网络层
+# 就断了、连响应都没有，反过来报绿——10 个页面它一个都没打开。
+# 报错原因不对，修的人会去改一个没坏的东西，真正坏的那个一直没人看见。
+#
+# 约定的退出码（四个浏览器脚本 + 四个静态走查脚本共用）：
+#   0 = 跑了，没发现问题
+#   1 = 跑了，有发现
+#   2 = 没跑起来 / 空转，本次结论不作数
+
+# browse_step：浏览器走查。2 记「跳过」——环境没搭起来不是代码的错，
+# 把"跑不起来"记成失败，几次之后大家就开始无视这一项了。
+browse_step() { # <标题> <日志文件> <命令...>
+  local title="$1" logf="$2"; shift 2
+  "$@" >"$logf" 2>&1
+  case $? in
+    0) ok "$title" ;;
+    2) skip "$title：脚本自报没跑起来（见 $logf）"; tail -4 "$logf" | sed 's/^/      /' ;;
+    *) bad "$title 有发现（见 $logf）："; tail -8 "$logf" | sed 's/^/      /' ;;
+  esac
+}
+
+# static_step：静态走查（扫源码，不需要起服务）。2 记「失败」——
+# 这类脚本靠正则活着，空转意味着这一类问题这轮根本没人看，发布前该拦。
+# 但抬头必须写"检查自己空转了"，不能写成"有调用对不上"。
+static_step() { # <日志文件> <失败时的抬头> <命令...>
+  local logf="$1" head="$2"; shift 2
+  "$@" >"$logf" 2>&1
+  case $? in
+    # 各脚本的总结行有的自带 "✓" 有的不带，去掉再交给 ok，免得打出 "✓ ✓ …"
+    0) ok "$(tail -1 "$logf" | sed 's/^✓ *//')" ;;
+    2) bad "检查自己空转了（不是发现了问题，是这一轮什么都没扫到）："
+       sed 's/^/      /' "$logf" ;;
+    *) bad "$head"; sed 's/^/      /' "$logf" ;;
+  esac
+}
+
+# ── 后端 ───────────────────────────────────────────────
+sect "后端"
+( cd backend-go && go build ./... ) >/tmp/rc-build.log 2>&1 \
+  && ok "go build" || { bad "go build（见 /tmp/rc-build.log）"; }
+( cd backend-go && go vet ./... ) >/tmp/rc-vet.log 2>&1 \
+  && ok "go vet" || bad "go vet（见 /tmp/rc-vet.log）"
+UNFMT=$( cd backend-go && gofmt -l . )
+[ -z "$UNFMT" ] && ok "gofmt" || bad "gofmt 未格式化：$UNFMT"
+
+if pg_isready -q 2>/dev/null; then
+  ( cd backend-go && DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" \
+      DJANGO_SECRET_KEY="${DJANGO_SECRET_KEY:-test-insecure-secret-min-32-bytes-long!!}" \
+      go test ./... ) >/tmp/rc-test.log 2>&1 \
+    && ok "go test（含需要库的鉴权矩阵/分页/共享状态用例）" \
+    || bad "go test（见 /tmp/rc-test.log）"
+else
+  # 没库时鉴权矩阵会 t.Skip——那正是最该跑的一批，不能算通过
+  skip "go test：连不上 Postgres，鉴权矩阵与分页用例会被跳过，不算数"
+fi
+
+# ── 前端 ───────────────────────────────────────────────
+sect "前端"
+if [ -d frontend/node_modules ]; then
+  ( cd frontend && npx tsc --noEmit ) >/tmp/rc-tsc.log 2>&1 \
+    && ok "tsc --noEmit" || bad "tsc（见 /tmp/rc-tsc.log）"
+  ( cd frontend && npx vitest run ) >/tmp/rc-vitest.log 2>&1 \
+    && ok "vitest" || bad "vitest（见 /tmp/rc-vitest.log）"
+  ( cd frontend && npx vite build ) >/tmp/rc-vite.log 2>&1 \
+    && ok "vite build" || bad "vite build（见 /tmp/rc-vite.log）"
+  # 分页口径走查不需要起服务，纯静态扫描
+  static_step /tmp/rc-paging.log "分页口径走查有发现：" \
+    node scripts/dev/paging-audit.mjs
+
+  # 走查要连开发服务器。连不上时必须报"没跑"，不能报"没过"——
+  # 把"跑不起来"记成失败，几次之后大家就开始无视这一项了。
+  #
+  # 四个浏览器脚本**全部**要连网关：前端只是壳，登录、列表、写操作都打 :8000。
+  # 网关没起时它们会被前端打回 /login，然后各自坏在不同的地方：
+  # ui-audit 把登录页当业务页量出一堆假发现，smoke-ui 因为请求在网络层就断了
+  # （连响应都没有）反而报绿。所以这一整段都挂在网关就绪之下，
+  # 而不是只挡住 e2e-flow 那一个。
+  #
+  if ! curl -sf -o /dev/null http://127.0.0.1:5173/ 2>/dev/null; then
+    skip "浏览器走查（UI/冒烟/端到端/写操作）：前端开发服务器没起（cd frontend && npm run dev）"
+  elif ! curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null; then
+    skip "浏览器走查（UI/冒烟/端到端/写操作）：网关没起（:8000/readyz 不通）"
+  else
+    browse_step "UI 走查（配色/间距预算）" /tmp/rc-ui.log node scripts/dev/ui-audit.mjs
+    browse_step "浏览器冒烟（各页无非 2xx、无未捕获异常）" /tmp/rc-smoke.log node scripts/dev/smoke-ui.mjs
+    browse_step "端到端业务链（建单→检索→详情→计数一致→翻页）" /tmp/rc-e2e.log node scripts/dev/e2e-flow.mjs
+    # 写操作要真按一次。这一轮三个凭证上传的问题（丢字节、400、页面上不显示）
+    # 上面那两个脚本一个都没抓到：一个只加载页面，一个只走建单那条链。
+    # 带上 DATABASE_URL：write-paths 造的异常要在跑完删掉，
+    # 否则每跑一次就给那张演示运单挂 800 元异常成本，毛利越跑越难看。
+    browse_step "各页写操作（上传的凭证能取回原件）" /tmp/rc-write.log \
+      env DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" node scripts/dev/write-paths.mjs
+    # 司机端是另一套界面、另一套鉴权（X-Driver-Token），上面四个脚本全都从
+    # 管理端 /login 进去，一个都没打开过它。第一次真按下去就查出两处：
+    # 预检没放行 X-Driver-Token（登录后一片空白）、未授权定位时打卡按钮永久卡住。
+    browse_step "司机端（登录→本人运单→拍照打卡→证件自助上传→回库核对）" /tmp/rc-driver.log node scripts/dev/driver-walk.mjs
+    # 验收链：把交付说明第七节那几步**按同一张单**从头走到尾。
+    # 前面几条各覆盖一段，没有一条跨过段与段的接缝——
+    # "费用不会在派单时自动生成"就是在这条链上才发现的：前四步都对，
+    # 第五步拿到一张 ¥0 的对账单。
+    browse_step "验收链（建单→派单→签收→回单→生成费用→对账→核销→查单）" /tmp/rc-acc.log \
+      env DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" node scripts/dev/acceptance-walk.mjs
+    # 上面五条全用超管跑，而超管带 `*` 权限，**永远看不到 403 长什么样**。
+    # 这一条用演示客服（waybill.view + waybill.create + masterdata.view、
+    # 数据范围只有本网点）真的登进去点一遍：该用的用得了、该挡的说人话、
+    # 能进的页面上没有没被说明的 403。
+    browse_step "受限角色（客服该用的用得了、该挡的说清了）" /tmp/rc-role.log \
+      env DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" node scripts/dev/role-walk.mjs
+  fi
+else
+  skip "前端：未装依赖（frontend/node_modules 不存在），先 npm ci"
+fi
+
+# ── 生产配置 ───────────────────────────────────────────
+sect "生产配置前置检查"
+# 用一套"看起来像生产但故意留坑"的环境跑 Preflight，确认它真的拦得住。
+# 只验"好配置能过"是验不出东西的——Preflight 的价值全在拦截上。
+# go run /dev/stdin 在 module 模式下会报 "outside main module"，
+# 所以落成模块内的临时文件再跑，跑完删掉。
+PFDIR="backend-go/internal/config/releasecheck_tmp"
+mkdir -p "$PFDIR"
+cat > "$PFDIR/main.go" <<'EOF'
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/config"
+)
+
+// 每组：环境变量 + 是否期望被拦下。
+// 只验"好配置能过"是验不出东西的——Preflight 的价值全在拦截上。
+var cases = []struct {
+	name string
+	env  map[string]string
+	deny bool
+}{
+	{"占位密钥", map[string]string{"DJANGO_SECRET_KEY": "dev-insecure-secret-change-me-min-32-bytes"}, true},
+	{"密钥过短", map[string]string{"DJANGO_SECRET_KEY": "short"}, true},
+	{"CORS 通配", map[string]string{"DJANGO_SECRET_KEY": "a-real-looking-production-secret-key-32b+", "DJANGO_CORS_ORIGINS": "*"}, true},
+	{"合规配置", map[string]string{"DJANGO_SECRET_KEY": "a-real-looking-production-secret-key-32b+", "DJANGO_CORS_ORIGINS": "https://tms.example.com"}, false},
+}
+
+func main() {
+	bad := 0
+	for _, c := range cases {
+		os.Clearenv()
+		os.Setenv("DJANGO_DEBUG", "false") // 生产口径：Preflight 只在非 debug 下生效
+		for k, v := range c.env {
+			os.Setenv(k, v)
+		}
+		err := config.Load().Preflight()
+		if got := err != nil; got != c.deny {
+			want := "放行"
+			if c.deny {
+				want = "拦截"
+			}
+			fmt.Printf("FAIL %s：期望%s，实际 err=%v\n", c.name, want, err)
+			bad++
+		}
+	}
+	if bad > 0 {
+		os.Exit(1)
+	}
+}
+EOF
+CHK=$( cd backend-go && go run ./internal/config/releasecheck_tmp 2>&1 )
+PFRC=$?
+rm -rf "$PFDIR"
+[ "$PFRC" -eq 0 ] && ok "Preflight：占位密钥/短密钥/CORS 通配都拦得住，合规配置放行" \
+             || bad "Preflight 行为不符预期：$CHK"
+
+# ── 密钥泄漏 ───────────────────────────────────────────
+sect "仓库里有没有混进真密钥"
+# 只扫会被打包进产物的地方。测试与示例里的假密钥不算，
+# 但它们必须长得一眼是假的——所以白名单是显式的，不是"含 test 就放过"。
+LEAK=$(grep -rInE '(sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
+        --include='*.go' --include='*.ts' --include='*.tsx' --include='*.yml' \
+        --include='*.yaml' --include='*.json' --include='*.env*' \
+        backend-go frontend/src deploy .github 2>/dev/null \
+      | grep -v 'deploy/certs/' || true)
+[ -z "$LEAK" ] && ok "未发现 API key / AWS key / 私钥" \
+               || { bad "疑似密钥："; echo "$LEAK" | sed 's/^/      /'; }
+
+# 只查生产编排。本地那份 docker-compose.yml 给缺省值是对的——
+# 它就是拿来"clone 完直接 up"的，要求先配一堆变量反而是坏设计。
+# 生产编排里任何一条"能跑起来的默认口令"都是问题：按文档部署的实例会共用它。
+PLACE=$(grep -nE '^\s+(DJANGO_SECRET_KEY|POSTGRES_PASSWORD|DATABASE_URL):.*:-' \
+          deploy/docker-compose.prod.yml 2>/dev/null || true)
+[ -z "$PLACE" ] && ok "生产编排里密钥/口令都是必填（:?），没有可用的默认值" \
+                || { bad "生产编排给了默认口令，按文档部署的实例会共用同一把钥匙："; echo "$PLACE" | sed 's/^/      /'; }
+
+sect "交付材料"
+for f in docs/delivery-notes.md docs/deployment.md docs/integrations.md; do
+  [ -s "$f" ] && ok "$f 存在" || bad "$f 缺失或为空"
+done
+# 交付说明里必须写到三件会被问到的事，漏一条就会在验收现场变成纠纷
+for kw in "OCR" "MEDIA_BACKEND" "adminctl"; do
+  grep -q "$kw" docs/delivery-notes.md \
+    && ok "交付说明覆盖了「$kw」" \
+    || bad "交付说明没提到「$kw」"
+done
+
+sect "对公开放端点的限流"
+# 免登录端点没有闸 = 互联网可以直接刷。/track 尤其要紧：
+# 它的"密码"只有手机号后 4 位，没有闸时 60 秒能穷举完。
+# 每个免登录的凭据校验端点都要有两道闸：按被猜的那个东西（单号/手机号）
+# 挡定向爆破，按 IP 只对失败计数挡广撒网——只有前者会被换 IP 绕开，
+# 只有后者会误伤共用出口（CGNAT、车队、企业 NAT）的正常用户。
+for kv in "PublicTrack:trackByOrderThrottle:backend-go/internal/orders/public.go" \
+          "PublicTrack:trackFailByIPThrottle:backend-go/internal/orders/public.go" \
+          "PublicIntake:intakeThrottle:backend-go/internal/orders/public.go" \
+          "DriverLogin:loginByPhoneThrottle:backend-go/internal/driver/handler.go" \
+          "DriverLogin:loginFailByIPThrottle:backend-go/internal/driver/handler.go"; do
+  fn="${kv%%:*}"; rest="${kv#*:}"; th="${rest%%:*}"; src="${rest##*:}"
+  if grep -q "$th" "$src"; then
+    ok "$fn 已挂 $th"
+  else
+    bad "$fn 缺少 $th —— 免登录端点没有限流"
+  fi
+done
+
+sect "前后端接口对齐"
+# 前端把请求发到一个后端没注册的方法/路径上，恒定 405/404，
+# 而失败常被 catch 吞掉、界面照样报成功。发布前这一轮抓到三处。
+static_step /tmp/rc-route.log "有前端调用对不上后端路由：" \
+  python3 scripts/dev/route-match.py
+
+# 反方向：后端有这个动作，界面上够不着。这一轮它出现了六次
+# （承运合同、司机报销、阶梯价、异常闭环、承运商拉黑、登录解锁），
+# 全都是"不报错、不崩、类型检查也过，只是少了一块"。
+static_step /tmp/rc-reach.log "有后端动作在界面上够不着：" \
+  python3 scripts/dev/reachable-actions.py
+
+# 并发下的守卫。状态检查读在事务外、UPDATE 又不带状态条件，
+# 串行点两次挡得住，两个人同时点就一起穿过去——这一轮实测：
+# 6 个并发关闭同一条异常，6 个都返回 200，800 元赔付落成 4800。
+static_step /tmp/rc-txn.log "有状态守卫读在事务外（并发下等于没有守卫）：" \
+  python3 scripts/dev/txn-guard.py
+
+# 上传物必须经网关发出：网关那侧按类型决定能不能内联，
+# 绕过去就等于把上传的 HTML 原样当网页发（司机自助上传就能种）。
+static_step /tmp/rc-media.log "上传物没有经过网关发出：" \
+  python3 scripts/dev/media-route.py
+
+sect "请求体字段对齐"
+# route-match 只比路径和方法，比不到 body 里面。而发布前最要命的那个 bug
+# 恰恰在 body 里：对账中心发 period_start，后端只认 start——用户明明选了账期，
+# 后端却报"start 与 end 必填"，对账中心第一步就走不通。
+static_step /tmp/rc-payload.log "有前端字段后端从没提过：" \
+  python3 scripts/dev/payload-match.py
+
+sect "凭证上传"
+# 回单、附件、司机证件是对账吵起来时唯一拿得出的东西。
+# 这三条路径都曾经"看起来成功、其实没存"或"存了但打不开"。
+if grep -q "Upload: &upl{" backend-go/internal/resources/registry.go; then
+  ok "回单资源声明了文件上传"
+else
+  bad "ReceiptWrite 没声明 Upload —— 运单详情页传回单会 400"
+fi
+if grep -q "Upload: &UploadCfg{" backend-go/internal/masterdata/writecfg.go; then
+  ok "司机证件资源声明了文件上传"
+else
+  bad "DriverCredWrite 没声明 Upload —— 资源库传证件会 400"
+fi
+if grep -q "h.store().Put" backend-go/internal/orders/actions.go; then
+  ok "订单附件的字节会真的落盘"
+else
+  bad "AddAttachment 没有存文件 —— 只记了文件名"
+fi
+# 链接必须指向 file_display：file_url 对上传上来的文件是空串，渲染出死链
+# 只看 .tsx（真正的渲染处）。第一版扫了整个 src/，结果匹配到了
+# file-link.test.ts 注释里那句"href={x.file_url}"——检查被自己的说明文字绊倒，
+# 报了一个不存在的问题。规则写在注释里的检查，扫描范围要绕开注释。
+if grep -rn --include=*.tsx 'href={[^}]*\.file_url' frontend/src >/dev/null 2>&1; then
+  bad "前端有 href 绑到 file_url —— 上传的凭证点开是死链（详见 file-link.test.ts）"
+else
+  ok "凭证链接都走 file_display"
+fi
+
+sect "部署配置与代码对得上"
+# SMTP 那五个变量在模板里叫 TMS_SMTP_*，代码读的是 SMTP_*：运维照着模板
+# 全填好、重启，邮件一封也发不出去，而且没有任何一处会报错。
+# 设了没用比没得设更难查——配置看起来是齐的，功能就是不工作。
+static_step /tmp/rc-env.log "部署配置里有设了没用的变量：" \
+  python3 scripts/dev/env-match.py
+
+sect "HTTPS"
+grep -q 'listen 443 ssl' deploy/nginx.conf && ok "nginx 配了 443 + TLS" || bad "nginx 没有 443"
+grep -q 'Strict-Transport-Security' deploy/nginx.conf && ok "配了 HSTS" || bad "缺 HSTS"
+grep -q 'return 301 https' deploy/nginx.conf && ok "80 跳 443" || bad "80 没跳 443"
+
+# ── 需要跑起来的检查 ───────────────────────────────────
+if [ "$QUICK" = 1 ]; then
+  sect "压测与备份演练"
+  skip "--quick：已跳过"
+else
+  sect "压测（需要网关在 127.0.0.1:8000）"
+  if curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null; then
+    ( cd backend-go && go build -o /tmp/tms-loadtest ./cmd/loadtest ) >/dev/null 2>&1
+    # 门槛按「4 核开发机 + 5 万单」定，只用来拦住数量级的退化，
+    # 不是 SLA。真实 SLA 要在目标硬件上重新标定。
+    /tmp/tms-loadtest -c 16 -d 15s -warmup 3s -p95 400 -maxerr 1 >/tmp/rc-load.log 2>&1 \
+      && ok "压测 p95 与错误率在门槛内（详见 /tmp/rc-load.log）" \
+      || { bad "压测超标（见 /tmp/rc-load.log）"; tail -6 /tmp/rc-load.log | sed 's/^/      /'; }
+  else
+    skip "压测：网关没起（bash scripts/dev/up.sh）"
+  fi
+
+  sect "从零起库"
+# 别的检查都跑在一个早就建好的库上。这一条回答的是另一个问题：
+# **新客户拿到这套东西，从一个空库开始，能不能跑起来。**
+# 这一轮就靠它抓到两个只有从零跑才看得见的问题：
+# 演示司机没有身份证号（司机端一个都登不进去）、演示账号没有员工档案。
+if [ "$QUICK" = 1 ]; then
+  skip "从零起库：QUICK 模式跳过（会建临时库，约 30 秒）"
+else
+  if bash scripts/dev/coldstart.sh >/tmp/rc-cold.log 2>&1; then
+    ok "空库 → 迁移 → 播种 → 起服务 → 登录 → 关键接口全通"
+  else
+    bad "从零起库失败："; grep -E "✗" /tmp/rc-cold.log | sed 's/^/      /'
+  fi
+fi
+
+sect "备份恢复演练"
+  if [ "${RELEASE_CHECK_DRILL:-0}" = 1 ]; then
+    bash scripts/dev/backup-drill.sh >/tmp/rc-drill.log 2>&1 \
+      && ok "备份→删库→恢复→取件校验全通过" \
+      || { bad "演练失败（见 /tmp/rc-drill.log）"; tail -8 /tmp/rc-drill.log | sed 's/^/      /'; }
+  else
+    # 会 DROP DATABASE，不能默认跑——发版前在预发环境上显式开。
+    skip "备份演练：会删库，需显式 RELEASE_CHECK_DRILL=1 才跑"
+  fi
+fi
+
+# ── 结论 ───────────────────────────────────────────────
+echo
+echo "════════════════════════════════════════"
+echo "通过 $PASS  失败 $FAIL  跳过 $SKIP"
+if [ "$SKIP" -gt 0 ]; then
+  echo "注意：跳过的项没有被验证过。发版前应当把它们补齐再跑一次，"
+  echo "      「跳过」不等于「通过」。"
+fi
+if [ "$FAIL" -gt 0 ]; then
+  echo "结论：不要发版。"
+  exit 1
+fi
+echo "结论：机器能判的都过了。"
+echo
+echo "机器判不了、仍需人工确认的（脚本不该假装它能替你判）："
+echo "  · 真实域名的证书链在浏览器里不报警"
+echo "  · 恢复出来的库里，随便点开一张运单，回单图片能显示"
+echo "  · 三处 OCR 仍是「尚未接入实现」——已写进 docs/delivery-notes.md，"
+echo "    交付/验收前请与客户当面对齐这一条"
+echo "  · 多副本部署必须把 MEDIA_BACKEND 改成 s3——默认的 local 是写容器本地盘，"
+echo "    多副本下会间歇性丢文件，而且预发（单副本）复现不出来"
+echo "  · S3 那条实现的签名没有对着真实端点验过（本机没有凭据）。"
+echo "    首次接入请先在预发用测试桶跑一遍上传与读取，确认签名被接受"

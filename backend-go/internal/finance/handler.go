@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
 
@@ -18,7 +19,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type Handler struct{ DB *pgxpool.Pool }
+type Handler struct {
+	DB  *pgxpool.Pool
+	Svc *auth.Service
+}
 
 var cst = time.FixedZone("CST", 8*3600) // Asia/Shanghai（业务日界）
 
@@ -35,6 +39,10 @@ type dirSummary struct {
 
 // StatementOverview GET /api/v1/finance/statement-overview
 func (h *Handler) StatementOverview(w http.ResponseWriter, r *http.Request) {
+	actor := h.Svc.Guard(w, r, PermView, denyView)
+	if actor == nil {
+		return
+	}
 	ctx := r.Context()
 	now := time.Now().In(cst)
 	today := now.Format("2006-01-02")
@@ -170,11 +178,23 @@ SELECT s.id::text AS id, s.statement_no, s.direction, s.counterparty_type,
 		"counterparty_type": "s.counterparty_type", "counterparty_id": "s.counterparty_id::text",
 	},
 	DefaultOrder: "ORDER BY s.created_at DESC, s.id",
+	// 数据范围：对账单归属组织见 005_statement_organization.sql。
+	// ScopeIncludeNull 保持 false —— 跨组织对账单（organization_id 为 NULL）
+	// 只对 all 档可见，这是保守的一侧。
+	ScopeOrgCol: "s.organization_id",
 }
 
 // Statements GET /api/v1/finance/statements（列表模式，无 lines 明细）
 func (h *Handler) Statements(md *masterdata.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { md.List(w, r, statementsCfg) }
+	// 这条走的是通用 CRUD 的 List，而不是 CRUD 路由包装器 —— 后者才带 gate(ReadPerm)。
+	// 直接调 List 会绕过权限闸，只剩数据范围；对没挂组织的账号恰好返回空列表，
+	// 看着"像是"拦住了，实际是巧合。闸要显式加。
+	return func(w http.ResponseWriter, r *http.Request) {
+		if h.Svc.Guard(w, r, PermView, denyView) == nil {
+			return
+		}
+		md.List(w, r, statementsCfg)
+	}
 }
 
 // StatementDetailCfg 详情多带一层对账明细（对齐 StatementSerializer 与
@@ -195,12 +215,17 @@ var StatementDetailCfg = func() masterdata.ResourceCfg {
 // StatementWrite 对账单只读（ListModelMixin + RetrieveModelMixin）：
 // 状态与金额只能由 generate/confirm/audit/settle 推进，不给直改的口子
 var StatementWrite = masterdata.WriteCfg{
-	Table: "fin_statement", Model: "Statement", Verbose: "对账单", Alias: "s", ReadOnly: true,
+	ReadPerm: "finance.view",
+	Table:    "fin_statement", Model: "Statement", Verbose: "对账单", Alias: "s", ReadOnly: true,
 }
 
 // Aging GET /api/v1/finance/aging?direction=receivable|payable
 // 账龄分桶(0-30/31-60/61-90/90+)按对手方汇总，对齐 services.aging_report。
 func (h *Handler) Aging(w http.ResponseWriter, r *http.Request) {
+	actor := h.Svc.Guard(w, r, PermView, denyView)
+	if actor == nil {
+		return
+	}
 	direction := r.URL.Query().Get("direction")
 	if direction == "" {
 		direction = "receivable"
@@ -255,6 +280,9 @@ func (h *Handler) Aging(w http.ResponseWriter, r *http.Request) {
 
 // GenerateCosts POST /waybills/{no}/generate-costs —— 按合同价生成运单应收/应付
 func (h *Handler) GenerateCosts(w http.ResponseWriter, r *http.Request) {
+	if h.Svc.Guard(w, r, PermManage, denyManage) == nil {
+		return
+	}
 	no := chi.URLParam(r, "no")
 	res, err := GenerateCosts(r.Context(), h.DB, no)
 	switch {
@@ -265,7 +293,7 @@ func (h *Handler) GenerateCosts(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusNotFound, "WAYBILL_NOT_FOUND", "运单不存在。")
 		return
 	case err != nil:
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "生成失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "生成失败", err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"waybill_no": no, "generated": res})

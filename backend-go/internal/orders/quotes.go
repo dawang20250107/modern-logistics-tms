@@ -88,6 +88,9 @@ func hasDot(s string) bool {
 
 // YmmQuote GET /api/v1/orders/{id}/ymm-quote
 func (h *Handler) YmmQuote(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -106,6 +109,9 @@ func (h *Handler) YmmQuote(w http.ResponseWriter, r *http.Request) {
 
 // Convert POST /api/v1/orders/{id}/convert —— 订单转运单（不带承运商/车辆的最简转换）
 func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -169,7 +175,7 @@ func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"waybill_no": no})
 	})
 	if err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "转运单失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "转运单失败", err)
 		return
 	}
 	it, err := waybills.SerializeByNo(ctx, h.DB, waybillNo)

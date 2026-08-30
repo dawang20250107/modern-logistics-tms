@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { confirmAction } from "../api/confirm";
 import { EMPTY as DASH, fmtMoney, fmtNum } from "../api/format";
 import { toast } from "../api/toast";
-import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
+import type { Carrier, CostCatalog, Customer, Paginated, PricingRule } from "../api/types";
 import { PRICE_TYPE_LABEL } from "../api/types";
 import { StateView } from "../components/StateView";
 
@@ -26,15 +27,20 @@ interface RuleForm {
   unit_price: string;
   min_charge_qty: string;
   min_price: string;
-  tier_prices: Array<{ min_ton: number; max_ton: number; price: number }>;
+  // 编辑期用字符串：数字类型下清空输入框会立刻变成 0，没法删了重填
+  tier_prices: Array<{ min_ton: string; max_ton: string; price: string }>;
   volumetric_factor: string;
   fuel_surcharge_pct: string;
   priority: string;
   is_active: boolean;
 }
 
+// 方向决定默认科目：收入价默认运费收入，成本价默认运费。
+// 原先两个方向共用一个写死的 "FREIGHT"，那个码在后端两份词表里都不存在。
+const defaultItem = (t: string) => (t === "cost" ? "TRANSPORT_COST" : "TRANSPORT_INCOME");
+
 const EMPTY: RuleForm = {
-  name: "", price_type: "income", charge_method: "tiered_weight", expense_item_code: "FREIGHT", customer: "", carrier: "",
+  name: "", price_type: "income", charge_method: "tiered_weight", expense_item_code: "TRANSPORT_INCOME", customer: "", carrier: "",
   route_name: "", base_price: "0", unit_price: "0", min_charge_qty: "0", min_price: "0",
   tier_prices: [], volumetric_factor: "0.33", fuel_surcharge_pct: "0", priority: "0", is_active: true,
 };
@@ -54,21 +60,79 @@ export function PricingPage() {
     queryFn: () => apiGet<Paginated<PricingRule>>(`/finance/pricing-rules?page_size=200${typeFilter ? `&price_type=${typeFilter}` : ""}`),
   });
   const customers = useQuery({ queryKey: ["customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=500") });
+  // 费用科目词表。原先表单把 expense_item_code 写死成 "FREIGHT"——一个后端两份
+  // 词表里都没有的码，于是规则算出来的钱落进一个谁也不认识的科目。
+  // 现在后端加了枚举校验（会直接 400），这里必须给出真实可选项。
+  const catalog = useQuery({ queryKey: ["cost-catalog"], queryFn: () => apiGet<CostCatalog>("/waybills/cost-catalog") });
   const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=500") });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["pricing-rules"] });
 
   const payload = () => ({
     name: form.name, price_type: form.price_type, charge_method: form.charge_method,
-    expense_item_code: form.expense_item_code || "FREIGHT",
+    expense_item_code: form.expense_item_code || defaultItem(form.price_type),
     customer: form.customer || null, carrier: form.carrier || null, route_name: form.route_name,
     base_price: form.base_price || 0, unit_price: form.unit_price || 0,
     min_charge_qty: form.min_charge_qty || 0, min_price: form.min_price || 0,
-    tier_prices: form.tier_prices, volumetric_factor: form.volumetric_factor || 0.3333,
+    // 存进去必须是数字：算价那边 decFrom 只认 float64 / json.Number，
+    // 收到字符串会取默认值 0，规则看着存上了、价却是零。
+    tier_prices: form.tier_prices.map((t) => ({
+      min_ton: Number(t.min_ton) || 0,
+      max_ton: Number(t.max_ton) || 0,
+      price: Number(t.price) || 0,
+    })),
+    volumetric_factor: form.volumetric_factor || 0.3333,
     fuel_surcharge_pct: form.fuel_surcharge_pct || 0,
     priority: Number(form.priority) || 0, is_active: form.is_active,
   });
 
+  const addTier = () => setForm((f) => ({
+    ...f,
+    // 新一档的起点接着上一档的终点，省得每次都要回头看上一行
+    tier_prices: [...f.tier_prices, {
+      min_ton: f.tier_prices.length ? (f.tier_prices[f.tier_prices.length - 1].max_ton || "") : "0",
+      max_ton: "", price: "",
+    }],
+  }));
+  const setTier = (i: number, k: "min_ton" | "max_ton" | "price", v: string) =>
+    setForm((f) => ({ ...f, tier_prices: f.tier_prices.map((t, j) => (j === i ? { ...t, [k]: v } : t)) }));
+  const removeTier = (i: number) =>
+    setForm((f) => ({ ...f, tier_prices: f.tier_prices.filter((_, j) => j !== i) }));
+
+  // 阶梯价的校验。三条都是**会算错钱**的配置，不是格式挑剔：
+  //   · 一档都没有 → 报价按 0 元/吨算，等于白配
+  //   · 止 ≤ 起    → 这一档永远匹配不上，重量落进来会掉到下一档或算成 0
+  //   · 有断档     → 落在缝里的重量匹配不到任何一档，同样算成 0
+  // 匹配是「第一条命中的赢」，所以重叠不报错（边界值靠前的那档生效，
+  // 说明文字里写了），但断档一定要拦。
+  const tierProblem = (() => {
+    if (form.charge_method !== "tiered_weight") return "";
+    if (form.tier_prices.length === 0) return "按重量阶梯至少要配一档，否则报价会按 0 元/吨算。";
+    const rows = form.tier_prices.map((t) => ({
+      min: Number(t.min_ton), max: Number(t.max_ton), price: Number(t.price),
+    }));
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!Number.isFinite(r.min) || !Number.isFinite(r.max) || !Number.isFinite(r.price)) {
+        return `第 ${i + 1} 档有空着或不是数字的格子。`;
+      }
+      if (r.max <= r.min) return `第 ${i + 1} 档的「止」要大于「起」，否则这一档永远匹配不上。`;
+      if (r.price <= 0) return `第 ${i + 1} 档的单价要大于 0。`;
+      if (i > 0 && r.min > rows[i - 1].max) {
+        return `第 ${i} 档止于 ${rows[i - 1].max} 吨，第 ${i + 1} 档才从 ${r.min} 吨开始：` +
+          `中间这段重量匹配不到任何一档，会按 0 元/吨算。`;
+      }
+    }
+    return "";
+  })();
+
   const reset = () => { setEditing(null); setForm(EMPTY); setFormOpen(false); };
+  // 计价规则读要 finance.view、写要 finance.manage（PricingRuleWrite）。
+  // 「财务（只读）」这个演示角色只有 view，却看得到「+ 新增规则」「编辑」「删除」
+  // 和那个启用/停用开关——和对账中心是同一个洞：看得见按不动。
+  // 尤其「删除」：只读的人点下去、弹一句无权限，他不会知道规则有没有被删掉。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "finance.manage");
+
   const save = useMutation({
     mutationFn: () => editing ? apiPatch(`/finance/pricing-rules/${editing}`, payload()) : apiPost("/finance/pricing-rules", payload()),
     onSuccess: () => { toast.success(editing ? "已更新合同价" : "已新增合同价"); reset(); invalidate(); },
@@ -91,7 +155,10 @@ export function PricingPage() {
       expense_item_code: r.expense_item_code,
       customer: r.customer ?? "", carrier: r.carrier ?? "", route_name: r.route_name,
       base_price: r.base_price, unit_price: r.unit_price ?? "0", min_charge_qty: r.min_charge_qty ?? "0",
-      min_price: r.min_price, tier_prices: r.tier_prices || [],
+      min_price: r.min_price,
+      tier_prices: (r.tier_prices ?? []).map((t) => ({
+        min_ton: String(t.min_ton ?? ""), max_ton: String(t.max_ton ?? ""), price: String(t.price ?? ""),
+      })),
       volumetric_factor: r.volumetric_factor, fuel_surcharge_pct: r.fuel_surcharge_pct,
       priority: String(r.priority), is_active: r.is_active,
     });
@@ -116,7 +183,12 @@ export function PricingPage() {
           <div className="grid-form">
             <label>规则名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如：比亚迪-沪蓉整车" /></label>
             <label>价格类型
-              <select value={form.price_type} onChange={(e) => set("price_type", e.target.value as "income" | "cost")}>
+              <select value={form.price_type} onChange={(e) => {
+                const v = e.target.value as "income" | "cost";
+                // 方向一换，原来那个科目多半属于另一个方向了，跟着切到该方向的默认科目。
+                // 不切的话保存会被后端的枚举校验挡下，而用户看不出是哪一格的问题。
+                setForm((f) => ({ ...f, price_type: v, expense_item_code: defaultItem(v) }));
+              }}>
                 {Object.entries(PRICE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </label>
@@ -138,6 +210,16 @@ export function PricingPage() {
                 {Object.entries(CHARGE_METHOD_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </label>
+            <label>费用科目
+              {/* 科目决定这笔钱记到哪一格。原先界面上够不着，全部落成写死的
+                  "FREIGHT"——后端词表里没有这个码，财务看板按科目分组时它进一个
+                  没有名字的桶，对账单行上显示的就是那个原始码。 */}
+              <select value={form.expense_item_code} onChange={(e) => set("expense_item_code", e.target.value)}>
+                {Object.entries(
+                  form.price_type === "cost" ? (catalog.data?.cost_items ?? {}) : (catalog.data?.income_items ?? {}),
+                ).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
             <label>{form.charge_method === "flat" ? "整车固定价(元)" : "起步价(元)"}<input value={form.base_price} onChange={(e) => set("base_price", e.target.value)} /></label>
             {form.charge_method !== "flat" && form.charge_method !== "tiered_weight" && (
               <label>单价({form.charge_method === "per_volume" ? "元/方" : form.charge_method === "per_piece" ? "元/件" : form.charge_method === "per_km" ? "元/公里" : "元/吨公里"})
@@ -150,16 +232,84 @@ export function PricingPage() {
               </label>
             )}
             <label>最低价(元下限)<input value={form.min_price} onChange={(e) => set("min_price", e.target.value)} /></label>
+            {form.charge_method !== "flat" && form.charge_method !== "per_piece" && form.charge_method !== "per_km" && (
+              // 体积折算系数决定"抛货按多少吨算"：1 方折 0.33 吨还是 0.25 吨，
+              // 是跟客户一单一议的商务条件，不是常量。原先界面上碰不到，
+              // 所有规则都是同一个 0.33。
+              <label title="1 立方米折算成多少吨。轻抛货按折算重与实重取大者计费。">
+                体积折算系数(吨/方)
+                <input value={form.volumetric_factor} onChange={(e) => set("volumetric_factor", e.target.value)} />
+              </label>
+            )}
             <label>燃油附加率(如0.025)<input value={form.fuel_surcharge_pct} onChange={(e) => set("fuel_surcharge_pct", e.target.value)} /></label>
             <label>优先级（大者优先）<input value={form.priority} onChange={(e) => set("priority", e.target.value)} /></label>
             <label className="check-label"><input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} /> 启用</label>
           </div>
+
+          {/* 阶梯价表。
+              这块原先**整个不存在**：表单默认的计费方式就是「按重量阶梯」，
+              而页面上没有任何地方能填那几档价。存下来的规则 tier_prices 是 []，
+              算价时 pricePerTon 取 0，于是报价 = 起步价（起步价为 0 时报价就是 0）。
+              用户在页面上认认真真配了一条合同价，报出来的是零——**没有报错**，
+              只是数字不对，而看到数字的人默认它就是系统算出来的。
+              和这一轮修的「承运合同」「司机报销」是同一种：功能写好了，界面上够不着。
+
+              字段名必须是 min_ton / max_ton / price——算价那边就按这三个键取值
+              （internal/finance/pricing.go 的 decFrom(tier["min_ton"]) …），
+              改名字这里不会报错，只会静默算成 0。
+
+              表格上那个 tier-table 类名是给走查脚本认的：这一页还有一张
+              规则列表表格，只按 .dt-table 选会在将来某天悄悄选到另一张上去。 */}
+          {form.charge_method === "tiered_weight" && (
+            <div className="stack-sm" style={{ marginTop: 12 }}>
+              <div className="cluster-between">
+                <b style={{ fontSize: 13 }}>重量阶梯 *</b>
+                <button className="btn-ghost small" onClick={addTier}>+ 加一档</button>
+              </div>
+              {form.tier_prices.length === 0 ? (
+                <div className="muted small">
+                  还没有任何一档。按重量阶梯必须至少配一档，否则报价会按 0 元/吨算。
+                </div>
+              ) : (
+                <table className="dt-table tier-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "30%" }}>起（吨，含）</th>
+                      <th style={{ width: "30%" }}>止（吨，含）</th>
+                      <th style={{ width: "30%" }}>单价（元/吨）</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.tier_prices.map((t, i) => (
+                      <tr key={i}>
+                        <td><input className="cell-input" value={t.min_ton} inputMode="decimal"
+                                   onChange={(e) => setTier(i, "min_ton", e.target.value)} /></td>
+                        <td><input className="cell-input" value={t.max_ton} inputMode="decimal"
+                                   onChange={(e) => setTier(i, "max_ton", e.target.value)} /></td>
+                        <td><input className="cell-input" value={t.price} inputMode="decimal"
+                                   onChange={(e) => setTier(i, "price", e.target.value)} /></td>
+                        <td><button className="btn-ghost small" onClick={() => removeTier(i)}>删除</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {tierProblem && <div className="form-error small">{tierProblem}</div>}
+              <div className="muted small">
+                取的是「总重落在哪一档，全部重量按那一档的单价算」，不是逐段累加。
+                5 吨这种边界值两档都能匹配时，按列表里靠前的那一档——所以顺序有意义。
+              </div>
+            </div>
+          )}
+
           <div className="muted small" style={{ marginTop: 8 }}>
             六种计费方式：整车一口价 / 按重量阶梯 / 按方 / 按件 / 按公里 / 吨公里；均取「最低价」为金额下限并叠加燃油附加。录单"自动报价"按客户/线路匹配优先级最高的收入价规则。
           </div>
         </div>
         <div className="form-actions">
-          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
+          <button className="btn-primary" disabled={!form.name.trim() || !!tierProblem || save.isPending} onClick={() => save.mutate()}
+                  title={!form.name.trim() ? "请先填写规则名称" : tierProblem || undefined}>
             {editing ? "保存修改" : "新增规则"}
           </button>
           <button className="btn-ghost" onClick={reset}>取消</button>
@@ -179,16 +329,17 @@ export function PricingPage() {
               <button key={k} className={typeFilter === k ? "active" : ""} onClick={() => setTypeFilter(k)}>{label}</button>
             ))}
           </div>
-          {!formOpen && (
+          {!formOpen && canManage && (
             <div className="panel-actions">
               <button className="btn-ghost small" onClick={() => setFormOpen(true)}>+ 新增规则</button>
             </div>
           )}
+          {!canManage && <span className="muted small" title="需要 finance.manage 权限点">只读账号：可查看规则，不能新增或修改</span>}
         </div>
         {rules.isLoading ? (
           <StateView kind="loading" compact />
         ) : rules.isError ? (
-          <StateView kind="error" hint="合同价目录暂时无法加载。" onRetry={() => rules.refetch()} />
+          <StateView kind="error" hint="合同价目录暂时无法加载。" error={rules.error} onRetry={() => rules.refetch()} />
         ) : items.length === 0 ? (
           <StateView kind="empty" title="暂无合同价规则" hint="新增规则后，录单即可自动报价" />
         ) : (
@@ -215,16 +366,18 @@ export function PricingPage() {
                   <td className="num">{r.volumetric_factor}</td>
                   <td className="num">{Number(r.fuel_surcharge_pct) > 0 ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>+{fmtNum(Number(r.fuel_surcharge_pct) * 100, 1)}%</span> : DASH}</td>
                   <td>
-                    <label className="switch-mini" title={r.is_active ? "已启用，点击停用" : "已停用，点击启用"}>
-                      <input type="checkbox" checked={r.is_active} onChange={() => patch.mutate({ id: r.id, is_active: !r.is_active })} />
+                    <label className="switch-mini" title={!canManage ? "需要 finance.manage 权限点" : r.is_active ? "已启用，点击停用" : "已停用，点击启用"}>
+                      <input type="checkbox" checked={r.is_active} disabled={!canManage} onChange={() => patch.mutate({ id: r.id, is_active: !r.is_active })} />
                       <span className={r.is_active ? undefined : "muted"}>{r.is_active ? "启用" : "停用"}</span>
                     </label>
                   </td>
                   <td className="row-actions">
-                    <button className="btn-ghost" onClick={() => startEdit(r)}>编辑</button>
-                    <button className="btn-ghost" disabled={remove.isPending} onClick={async () => {
-                      if (await confirmAction({ message: `删除规则「${r.name}」？`, tone: "danger", confirmText: "删除" })) remove.mutate(r.id);
-                    }}>删除</button>
+                    {canManage ? <>
+                      <button className="btn-ghost" onClick={() => startEdit(r)}>编辑</button>
+                      <button className="btn-ghost" disabled={remove.isPending} onClick={async () => {
+                        if (await confirmAction({ message: `删除规则「${r.name}」？`, tone: "danger", confirmText: "删除" })) remove.mutate(r.id);
+                      }}>删除</button>
+                    </> : <span className="muted small">只读</span>}
                   </td>
                 </tr>
               ))}

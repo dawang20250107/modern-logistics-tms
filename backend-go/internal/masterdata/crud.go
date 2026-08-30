@@ -11,19 +11,25 @@ package masterdata
 //   - 写入后一律用列表列面回读，保证读写序列化完全一致
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/shopspring/decimal"
+	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
 
@@ -116,6 +122,153 @@ type WriteCfg struct {
 	NoCreate bool
 	NoUpdate bool
 	NoDelete bool
+
+	// Upload 声明本资源接受 multipart 文件上传，并指定存到哪儿。
+	// 不声明的资源收到 multipart 会被明确拒绝，而不是继续按 JSON 解析
+	// 然后回一句"请求体不是合法 JSON"——那句话把"这个接口不收文件"
+	// 说成了"你的请求写错了"，排查方向整个反了。
+	Upload *UploadCfg
+}
+
+// UploadCfg 一个资源上的文件字段。
+type UploadCfg struct {
+	// Field 表单里的文件字段名，同时也是落库的列名（如 "file"）
+	Field string
+	// Prefix 存放键前缀，对齐 Django 的 upload_to（如 "receipts/"）
+	Prefix string
+	// MaxBytes 单文件上限，0 表示用 defaultUploadMax
+	MaxBytes int64
+}
+
+// defaultUploadMax 凭证类文件的默认上限。回单、证件多是手机拍的照片。
+const defaultUploadMax = 32 << 20
+
+// decodeWriteBody 解请求体：JSON 照旧，multipart 则把表单字段铺成 map，
+// 并把上传的文件真的存下来、把存放键写进 wc.Upload.Field。
+//
+// 为什么要在引擎这一层做：/receipts 和 /driver-credentials 前端都是 multipart
+// （运单详情传回单、资源库传证件），而引擎只解 JSON，于是这两个功能在页面上
+// 是**按下去就 400**的。司机自己那条路（/driver/credentials）另有实现且是好的，
+// 所以只用 App 验收不会发现。放在引擎里是因为往后每个带 FileField 的资源
+// 都会遇到同一件事，各写一份必然又会漏掉某一个。
+func (h *Handler) decodeWriteBody(w http.ResponseWriter, r *http.Request, wc WriteCfg) (map[string]any, bool) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+				map[string]any{"detail": []string{"请求体不是合法 JSON。"}})
+			return nil, false
+		}
+		return body, true
+	}
+	if wc.Upload == nil {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{"该接口不接受文件上传，请用 JSON 提交。"}})
+		return nil, false
+	}
+	maxBytes := wc.Upload.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultUploadMax
+	}
+	if err := r.ParseMultipartForm(maxBytes); err != nil {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{"表单解析失败，请确认文件大小。"}})
+		return nil, false
+	}
+	body := map[string]any{}
+	for k, v := range r.MultipartForm.Value {
+		if len(v) > 0 {
+			body[k] = coerceFormValue(wc.Fields[k].Kind, v[0])
+		}
+	}
+	// 存放键由服务端生成，客户端传什么都不算数——否则表单里塞一个
+	// file=../../etc/x 就能指到任意路径。
+	delete(body, wc.Upload.Field)
+
+	f, fh, err := r.FormFile(wc.Upload.Field)
+	if err != nil {
+		return body, true // 没带文件也允许：纯字段的 multipart 提交
+	}
+	defer f.Close()
+	buf, rerr := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if rerr != nil {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{"文件读取失败。"}})
+		return nil, false
+	}
+	if int64(len(buf)) > maxBytes {
+		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
+			map[string]any{"detail": []string{fmt.Sprintf("文件过大，请控制在 %dMB 内。", maxBytes>>20)}})
+		return nil, false
+	}
+	rel := wc.Upload.Prefix + uuid.NewString() + safeExt(fh.Filename)
+	if err := h.store().Put(r.Context(), rel, bytes.NewReader(buf),
+		int64(len(buf)), http.DetectContentType(buf)); err != nil {
+		// 存不下就报错。静默建一条没有文件的行，等于告诉用户"传好了"，
+		// 而凭证其实不存在——那比直接报错坏得多。
+		slog.Error("上传文件写入失败", "err", err, "table", wc.Table)
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "文件保存失败，请重试。")
+		return nil, false
+	}
+	body[wc.Upload.Field] = rel
+	return body, true
+}
+
+// coerceFormValue 把表单里的字符串按字段声明还原成对应类型。
+//
+// multipart 没有类型，什么都是字符串——前端一个 fd.append("self_uploaded", "false")，
+// 到这边就是字符串 "false"，而布尔校验只认真正的 bool，于是回 400
+// 「该字段必须是布尔值」。用户看到的是"上传失败"，没人猜得到是这个原因。
+// 数字和日期那几类校验本来就接受字符串，不用动；只有 bool 和 JSON 需要还原。
+//
+// 这条是补第一版的漏：那一版只把表单字段原样铺进 body，用后端用例
+// （只传了必填的几个字段）验过就以为成了，而页面上真正发的那一组里
+// 带着 self_uploaded——照抄前端的字段清单去测，才碰得到这条路。
+func coerceFormValue(kind FieldKind, s string) any {
+	switch kind {
+	case FBool:
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1", "on", "yes":
+			return true
+		case "false", "0", "off", "no", "":
+			return false
+		}
+		return s // 不认识的值交给校验去报错，别在这里猜
+	case FJSON:
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err == nil {
+			return v
+		}
+		return s
+	}
+	return s
+}
+
+// safeExt 从用户给的文件名里取一个能安全拼进存放键的扩展名。
+// 只留纯字母数字的短扩展名；拿不到就不要——键本来是 uuid，扩展名只为方便人看。
+func safeExt(filename string) string {
+	ext := filepath.Ext(filename)
+	if len(ext) < 2 || len(ext) > 12 {
+		return ""
+	}
+	for _, c := range ext[1:] {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return ""
+		}
+	}
+	return ext
+}
+
+// store 取媒体存放实现。Blob 为 nil 时退回本地盘（老的构造方式）。
+func (h *Handler) store() blob.Store {
+	if h.Blob != nil {
+		return h.Blob
+	}
+	root := h.MediaRoot
+	if root == "" {
+		root = "./media"
+	}
+	return blob.NewLocal(root)
 }
 
 // uniqueMsg 对齐 Django Model.unique_error_message：具有 <字段 verbose_name> 的 <模型 verbose_name> 已存在。
@@ -209,10 +362,20 @@ func normalize(key string, f Field, raw any) (any, string) {
 		case float64:
 			return fmt.Sprintf("%v", v), ""
 		case string:
-			if strings.TrimSpace(v) == "" {
+			s := strings.TrimSpace(v)
+			if s == "" {
 				return nil, ""
 			}
-			return strings.TrimSpace(v), ""
+			// 校验一遍再落库。这里原先原样透传：值作为 $N::numeric 交给 Postgres，
+			// 参数化挡住了注入，但挡不住"这不是个数"——
+			// 客户授信额度填「一万」、车辆核载填「十吨」，
+			// 请求变成 500，而且**把 Postgres 的原话抛回给了前端**：
+			//   更新失败：ERROR: invalid input syntax for type numeric: "一万" (SQLSTATE 22P02)
+			// 整数字段一直是好好的 400「请输入合法整数。」，小数这一档漏了。
+			if _, err := decimal.NewFromString(s); err != nil {
+				return nil, "请输入合法数字。"
+			}
+			return s, ""
 		}
 		return nil, "请输入合法数字。"
 	case FBool:
@@ -226,7 +389,17 @@ func normalize(key string, f Field, raw any) (any, string) {
 		if !ok || strings.TrimSpace(s) == "" {
 			return nil, ""
 		}
-		return strings.TrimSpace(s), ""
+		s = strings.TrimSpace(s)
+		// 同 FDecimal：不验就丢给 ::date / ::timestamptz，
+		// 「今天」和 2026-13-45 都会变成 500。日期框里打两个字、
+		// 或者把日期打错一位，是每天都会发生的事。
+		if !parsesAsTime(s, f.Kind == FDateTime) {
+			if f.Kind == FDate {
+				return nil, "请输入合法日期（如 2026-01-31）。"
+			}
+			return nil, "请输入合法日期时间。"
+		}
+		return s, ""
 	case FURL:
 		s, ok := raw.(string)
 		if !ok {
@@ -267,6 +440,25 @@ func (f Field) column(key string) string {
 }
 
 // castFor 给占位符补类型转换（pgx 对 text→uuid/date 等需要显式 cast）
+// parsesAsTime 判断这个字符串 Postgres 认不认。
+//
+// 覆盖前端会发的写法和人手填的常见写法，而不是只认一种——
+// 收得太紧会把本来能用的输入判成错的，那和 500 一样是产品问题。
+func parsesAsTime(s string, withTime bool) bool {
+	layouts := []string{"2006-01-02", "2006/01/02", "2006-1-2", "2006/1/2"}
+	if withTime {
+		layouts = append(layouts,
+			time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05",
+			"2006-01-02T15:04", "2006-01-02 15:04")
+	}
+	for _, l := range layouts {
+		if _, err := time.Parse(l, s); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func castFor(f Field) string {
 	switch f.Kind {
 	case FUUID:
@@ -362,10 +554,8 @@ func (h *Handler) Retrieve(w http.ResponseWriter, r *http.Request, cfg ResourceC
 // Create POST /<res>
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg, wc WriteCfg) {
 	ctx := r.Context()
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
-			map[string]any{"detail": []string{"请求体不是合法 JSON。"}})
+	body, ok := h.decodeWriteBody(w, r, wc)
+	if !ok {
 		return
 	}
 	// 先跑字段级校验再跑钩子：DRF 是 is_valid() 通过后才进 create()，
@@ -426,7 +616,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	}
 	sql := "INSERT INTO " + wc.Table + " (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(phs, ",") + ")"
 	if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "写入失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "写入失败", err)
 		return
 	}
 	if wc.AfterWrite != nil {
@@ -450,10 +640,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		return
 	}
 	id := chi.URLParam(r, "id")
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.ErrDetails(w, http.StatusBadRequest, "invalid", "请求参数校验失败",
-			map[string]any{"detail": []string{"请求体不是合法 JSON。"}})
+	body, ok := h.decodeWriteBody(w, r, wc)
+	if !ok {
 		return
 	}
 	// PUT 全量、PATCH 局部：二者都只写传入字段（DRF 的 required 校验仅 PUT 生效）
@@ -471,7 +659,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 		}
 		sql := "UPDATE " + wc.Table + " SET " + strings.Join(sets, ", ") + ", updated_at=now() WHERE " + wc.pk() + "=$1::uuid"
 		if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "更新失败", err)
 			return
 		}
 	}
@@ -501,19 +689,19 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	id := chi.URLParam(r, "id")
 	if wc.BeforeDelete != nil {
 		if err := wc.BeforeDelete(ctx, h, id); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "级联删除失败", err)
 			return
 		}
 	}
 	for tbl, col := range wc.NullifyTables {
 		if _, err := h.DB.Exec(ctx, "UPDATE "+tbl+" SET "+col+"=NULL WHERE "+col+"=$1::uuid", id); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "级联删除失败", err)
 			return
 		}
 	}
 	for tbl, col := range wc.CascadeTables {
 		if _, err := h.DB.Exec(ctx, "DELETE FROM "+tbl+" WHERE "+col+"=$1::uuid", id); err != nil {
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "级联删除失败："+err.Error())
+			httpx.Fail(w, r, "INTERNAL", "级联删除失败", err)
 			return
 		}
 	}
@@ -527,7 +715,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request, cfg ResourceCfg
 	if err != nil {
 		// 删失败（多半是没收干净的外键引用）不能伪装成 404——那会让调用方以为
 		// "本来就不存在"，而真相是"存在但删不掉"，两者要采取的动作完全不同。
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "删除失败："+err.Error())
+		httpx.Fail(w, r, "INTERNAL", "删除失败", err)
 		return
 	}
 	if ct.RowsAffected() == 0 {

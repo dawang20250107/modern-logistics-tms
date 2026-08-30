@@ -7,10 +7,11 @@ package driver
 // 而司机端能看到运单、能打卡推进状态、能传回单，顶号代价很高。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,28 +26,41 @@ import (
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/waybills"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
+
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
 type Handler struct {
 	DB        *pgxpool.Pool
 	Secret    string // 与 Django SECRET_KEY 同源，保证 token 跨栈互认
 	MediaRoot string
+	// Blob 媒体存放。为 nil 时退回 MediaRoot 直接落盘。
+	Blob blob.Store
 }
 
-// loginThrottle 对齐 DriverLoginRateThrottle（scope=driver_login，默认 10/min）：
-// 司机端登录是「手机号 + 6 位数字」，不限速等于把身份证尾号交给爆破。
-var loginThrottle = httpx.NewThrottle("THROTTLE_DRIVER_LOGIN", "10/min")
+// 司机端登录是「手机号 + 身份证后 6 位」，两道闸各挡一种打法。
+//
+// 原先只有一道按来源 IP 的闸（对齐 DriverLoginRateThrottle，10/min），实测两头都不对：
+//
+//	· 挡不住爆破——换 IP 就重置。同一个手机号连试 40 次、每次换来源 IP，
+//	  一次都没被限住；有代理池就能把 6 位数字慢慢试完。
+//	· 又会误伤——司机端是跑在运营商网络上的手机 App，一支车队共用一个出口 IP
+//	  是常态。实测同一出口的第 11 个司机**登录成功**也被 429 挡下，
+//	  早上集中上线时整队人互相挤掉。
+//
+// 所以：按手机号的闸挡定向爆破（被反复试的是那个号，换 IP 绕不开），
+// 按 IP 的闸只对**失败**计数、挡广撒网式扫描——正常司机登录成功不消耗它，
+// 共用出口就不会被连带挡住。/track 是同一套结构，见 orders/public.go。
+var (
+	loginByPhoneThrottle  = httpx.NewThrottle("THROTTLE_DRIVER_LOGIN", "10/min")
+	loginFailByIPThrottle = httpx.NewThrottle("THROTTLE_DRIVER_LOGIN_FAIL_IP", "20/min")
+)
 
 // 在途运单状态集（司机端只看这些）
 var activeWaybillStatuses = []string{
 	"dispatched", "loaded", "departed", "in_transit", "arrived", "pending_dispatch",
-}
-
-var waybillStatusLabel = map[string]string{
-	"draft": "草稿", "pending_dispatch": "待调度", "dispatched": "已派车", "loaded": "已装车",
-	"departed": "已发车", "in_transit": "运输中", "arrived": "已到达", "partially_signed": "部分签收",
-	"rejected": "已拒收", "signed": "已签收", "delivered": "已送达", "settled": "已结算",
-	"cancelled": "已取消", "voided": "已作废",
 }
 
 // checkinNodes 打卡节点 → 中文名（对齐 DriverCheckin.NODE_CHOICES，顺序即业务顺序）
@@ -120,11 +134,6 @@ func (h *Handler) authDriver(w http.ResponseWriter, r *http.Request, bodyToken s
 
 // Login POST /api/v1/driver/login —— 手机号 + 身份证后 6 位
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	if ok, wait := loginThrottle.Allow(httpx.ClientIP(r)); !ok {
-		httpx.Err(w, http.StatusTooManyRequests, "throttled",
-			fmt.Sprintf("请求已被限流。 预计 %d 秒后可用。", wait))
-		return
-	}
 	var body struct {
 		Phone  string `json:"phone"`
 		IDTail string `json:"id_tail"`
@@ -140,6 +149,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, "DRIVER_LOGIN_REQUIRED", "身份证后 6 位格式不正确。")
 		return
 	}
+	// 闸挂在被猜的那个号上，且要在查库**之前**——放到后面的话，
+	// 爆破照样能让数据库替它把每个候选值都查一遍。
+	if !loginByPhoneThrottle.GuardKey(w, phone) {
+		return
+	}
 	d := &driverRow{}
 	var idNo string
 	// 始终校验身份证后 6 位；档案缺身份证号则无法验证身份，拒绝登录
@@ -149,6 +163,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		ORDER BY created_at, id LIMIT 1`, phone).
 		Scan(&d.ID, &d.Name, &d.Phone, &d.AppRegistered, &idNo)
 	if err != nil || idNo == "" || !strings.HasSuffix(idNo, idTail) {
+		// 只有这里计 IP 配额：失败才算，成功不算。
+		if !loginFailByIPThrottle.Guard(w, r) {
+			return
+		}
 		httpx.Err(w, http.StatusUnauthorized, "DRIVER_LOGIN_FAILED", "手机号或身份证后 6 位不匹配。")
 		return
 	}
@@ -169,11 +187,34 @@ func allDigits(s string) bool {
 	return true
 }
 
+// driverTaskLimit 司机端一次最多返回多少张在途运单。
+//
+// 原先不限。演示库里一个司机有 3032 张在途单，实测一次 /driver/tasks：
+//
+//	**1.19 MB JSON**，前端把 3032 张卡片全渲染出来，
+//	页面高 1,140,794 px —— 视口 844 px，也就是 1351 屏。
+//
+// 这是**手机上**的页面：那 1.19 MB 要走司机的流量，而他要找的是下一单在哪。
+//
+// 50 是按"司机手上同时有多少活"定的：干散货/整车的一天几单，
+// 零担配送的一趟几十单，50 足够覆盖一天并留出余量；
+// 超出的部分由界面明说，而不是悄悄截断。
+const driverTaskLimit = 50
+
 // Tasks GET /api/v1/driver/tasks —— 在途运单 + 待确认提醒（强制弹窗）
 func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	d := h.authDriver(w, r, "")
 	if d == nil {
+		return
+	}
+	// 总数单独数一次：截断了就要在界面上说出来。
+	// "把一部分说成全部"这一轮已经踩过四次（导出、调度池、登录审计、待核销队列），
+	// 司机端这条是第五处——而且是最没被看见的一处：它在手机上。
+	var total int
+	if err := h.DB.QueryRow(ctx, `SELECT count(*) FROM ops_waybill
+		WHERE driver_id=$1::uuid AND status = ANY($2)`, d.ID, activeWaybillStatuses).Scan(&total); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
 	}
 	rows, err := h.DB.Query(ctx, `
@@ -183,7 +224,8 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(wb.cod_amount,0)::float8
 		FROM ops_waybill wb LEFT JOIN ops_order o ON o.id = wb.order_id
 		WHERE wb.driver_id=$1::uuid AND wb.status = ANY($2)
-		ORDER BY wb.created_at DESC, wb.id`, d.ID, activeWaybillStatuses)
+		ORDER BY wb.created_at DESC, wb.id
+		LIMIT $3`, d.ID, activeWaybillStatuses, driverTaskLimit)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
 		return
@@ -204,7 +246,7 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 		}
 		wbs = append(wbs, map[string]any{
 			"waybill_no": no, "route_name": route, "origin": origin, "destination": dest,
-			"status": status, "status_label": labelOr(waybillStatusLabel, status),
+			"status": status, "status_label": labelOr(wbstatus.Label, status),
 			"pickup_address": pickAddr, "delivery_address": delAddr,
 			"pickup_contact_phone": pickPhone, "delivery_contact_phone": delPhone,
 			"next_step": step, "cod_amount": cod,
@@ -215,7 +257,7 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 		SELECT dr.id::text, dr.title, dr.content, dr.level, dr.ack_required,
 		       COALESCE(wb.waybill_no,'')
 		FROM ops_driver_reminder dr LEFT JOIN ops_waybill wb ON wb.id = dr.waybill_id
-		WHERE dr.driver_id=$1::uuid AND dr.status='pending'
+		WHERE dr.driver_id=$1::uuid AND dr.status='`+wbstatus.ReminderPending+`'
 		ORDER BY dr.sent_at DESC, dr.id`, d.ID)
 	if err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "查询失败")
@@ -238,6 +280,7 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"driver":            map[string]any{"name": d.Name, "phone": d.Phone},
 		"waybills":          wbs,
+		"waybill_total":     total,
 		"pending_reminders": rems,
 	})
 }
@@ -274,7 +317,7 @@ func (h *Handler) AckReminder(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != "acknowledged" { // 幂等
 		if _, err := h.DB.Exec(ctx, `
-			UPDATE ops_driver_reminder SET status='acknowledged', acknowledged_at=now(), updated_at=now()
+			UPDATE ops_driver_reminder SET status='`+wbstatus.ReminderAcknowledged+`', acknowledged_at=now(), updated_at=now()
 			WHERE id=$1::uuid`, id); err != nil {
 			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
 			return
@@ -287,11 +330,13 @@ func (h *Handler) AckReminder(w http.ResponseWriter, r *http.Request) {
 			if wbNo != nil {
 				res = *wbNo
 			}
-			_, _ = h.DB.Exec(ctx, `
+			if _, err := h.DB.Exec(ctx, `
 				INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type,
 				  event_time, source, resource, payload)
 				VALUES ($1, now(), now(), $2::uuid, 'reminder_acknowledged', clock_timestamp(), 'driver', $3, $4)`,
-				eid.String(), *wbID, res, pj)
+				eid.String(), *wbID, res, pj); err != nil {
+				slog.Warn("司机端写库失败", "err", err)
+			}
 		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "status": status})
@@ -325,8 +370,12 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 		note = string([]rune(note)[:255])
 	}
 
+	// 打卡行的 id 先取出来：照片路径要带上它。
+	id, _ := uuid.NewV7()
+
 	// 水印照片：把拍摄时间、GPS、节点·司机·运单号焊进像素，事后无法靠改库洗掉
 	photoRel := ""
+	photoFailed := false
 	if raw, name := form.file("photo"); raw != nil {
 		_ = name
 		lines := []string{
@@ -335,19 +384,32 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 			checkinNodes[node] + " · " + d.Name + " · " + wbNo,
 		}
 		stamped := Watermark(raw, lines)
-		rel := "checkins/" + wbNo + "_" + node + ".jpg"
+		// 路径必须带打卡行的 id。原先是 "<运单号>_<节点>.jpg"——同一节点再打一次
+		// 就把上一张**原地覆盖**掉了，而弱网重试正是常规路径（界面上就有"重试"按钮）。
+		// 实测连打两次：库里两行打卡记录，photo 都指向同一个文件，
+		// 第一行拿到的是第二张照片——时间、GPS、节点全是第二次的。
+		// 水印"焊进像素、事后无法靠改库洗掉"的意义，被一次普通重试就抹掉了。
+		rel := "checkins/" + wbNo + "_" + node + "_" + id.String() + ".jpg"
 		if err := h.saveMedia(rel, stamped); err == nil {
 			photoRel = rel
+		} else {
+			// 存不下不该把打卡整个挡掉（司机在路上，打卡本身比照片要紧），
+			// 但也绝不能装作成功——原先这里错误被直接吞掉，接口照样返回 201 ok，
+			// 司机以为照片交了，实际上库里 photo 是 NULL。响应里如实说。
+			photoFailed = true
+			slog.Error("打卡照片存储失败", "waybill", wbNo, "node", node, "err", err)
 		}
 	}
 
-	id, _ := uuid.NewV7()
 	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_driver_checkin (id, created_at, updated_at, waybill_id, driver_id,
 		  node, lat, lng, photo, note, checkin_at)
 		VALUES ($1, now(), now(), $2::uuid, $3::uuid, $4, $5::numeric, $6::numeric, $7, $8, now())`,
 		id.String(), wbID, d.ID, node, lat, lng, nullIfEmpty(photoRel), note); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "打卡失败："+err.Error())
+		// 原始库错误只进日志：司机端的调用方是公网上的手机，
+		// 把 SQLSTATE 和列类型回给它没有意义，也不该。
+		slog.Error("打卡落库失败", "waybill", wbNo, "node", node, "err", err)
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "打卡失败，请稍后重试或联系调度。")
 		return
 	}
 
@@ -367,9 +429,14 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 	var checkinAt string
 	_ = h.DB.QueryRow(ctx, "SELECT checkin_at FROM ops_driver_checkin WHERE id=$1::uuid", id.String()).
 		Scan(&checkinAt)
-	httpx.JSON(w, http.StatusCreated, map[string]any{
+	resp := map[string]any{
 		"ok": true, "node": node, "checkin_at": checkinAt, "waybill_status": newStatus,
-	})
+		"photo_saved": photoRel != "",
+	}
+	if photoFailed {
+		resp["photo_error"] = "照片没能存下来，打卡已记录，请稍后在运单里补传。"
+	}
+	httpx.JSON(w, http.StatusCreated, resp)
 }
 
 // UploadCredential POST /api/v1/driver/credentials —— 司机自助上传证件（自传）
@@ -402,7 +469,8 @@ func (h *Handler) UploadCredential(w http.ResponseWriter, r *http.Request) {
 		  file, file_url, ocr_status, ocr_result, holder_name, cert_no, expiry_date, self_uploaded)
 		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, '', 'pending', '{}'::jsonb, '', '', NULL, true)`,
 		id.String(), d.ID, credType, side, fileRel); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "上传失败："+err.Error())
+		slog.Error("司机证件落库失败", "driver", d.ID, "cred_type", credType, "err", err)
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "上传失败，请稍后重试。")
 		return
 	}
 	// 建档即触发识别；未配引擎时只落 status=manual，绝不伪造证件号与有效期
@@ -425,18 +493,28 @@ func (h *Handler) applyCredentialOCR(ctx context.Context, id, source, credType s
 		result["note"] = "OCR 引擎 " + provider + " 尚未接入实现，证件信息待人工录入。"
 	}
 	rj, _ := json.Marshal(result)
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		UPDATE md_driver_credential SET ocr_result=$2::jsonb, ocr_status='manual', updated_at=now()
-		WHERE id=$1::uuid`, id, rj)
+		WHERE id=$1::uuid`, id, rj); err != nil {
+		slog.Warn("司机端写库失败", "err", err)
+	}
 	return "manual"
 }
 
+// saveMedia 存一份司机端上传的证件/打卡照。
+// 走 blob.Store 而不是直接落盘：多副本部署时本地盘上的文件，
+// 换个副本就读不到了。
 func (h *Handler) saveMedia(rel string, data []byte) error {
-	abs := filepath.Join(h.MediaRoot, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return err
+	return h.store().Put(context.Background(), rel, bytes.NewReader(data),
+		int64(len(data)), http.DetectContentType(data))
+}
+
+// store 取媒体存放实现。Blob 为 nil 时退回本地盘（老的构造方式）。
+func (h *Handler) store() blob.Store {
+	if h.Blob != nil {
+		return h.Blob
 	}
-	return os.WriteFile(abs, data, 0o644)
+	return blob.NewLocal(h.MediaRoot)
 }
 
 func nullIfEmpty(s string) any {

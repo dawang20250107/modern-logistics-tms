@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/blob"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
@@ -28,6 +29,9 @@ type Handler struct {
 	// CRUD 子路由是挂载式的，未声明的自定义动作（如 /carriers/{id}/blacklist）
 	// 不会回到父路由，必须在子路由上显式兜底，否则会被误判成 404。
 	Fallback http.Handler
+	// Blob 上传文件的存放。为 nil 时退回 MediaRoot 落盘。
+	Blob      blob.Store
+	MediaRoot string
 }
 
 type ResourceCfg struct {
@@ -258,7 +262,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request, cfg ResourceCfg) 
 			}
 		}
 	}
-	if frag := filters.Apply(q.Get("filter"), cfg.FilterFields, args); frag != "" {
+	// 已知字段上的非法值（比如日期框里打了「今天」）要当场说清是哪个字段，
+	// 而不是让 Postgres 报错变成 500，也不是默默把这个条件丢掉。
+	frag, ferr := filters.Apply(q.Get("filter"), cfg.FilterFields, args)
+	if ferr != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_FILTER", ferr.Error())
+		return
+	}
+	if frag != "" {
 		where = append(where, frag)
 	}
 	whereSQL := "WHERE " + strings.Join(where, " AND ")

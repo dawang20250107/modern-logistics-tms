@@ -11,6 +11,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/image v0.44.0
+	golang.org/x/text v0.40.0
 )
 
 require (
@@ -20,5 +21,4 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
 )

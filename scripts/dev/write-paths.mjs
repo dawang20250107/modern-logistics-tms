@@ -9,9 +9,7 @@
 // 用法（需先起好 :8000 网关与 :5173 前端）：
 //   node scripts/dev/write-paths.mjs [baseUrl]
 // 退出码非 0 = 有写操作打不通。
-const { chromium } = await import(
-  process.env.PLAYWRIGHT_PKG ?? "/opt/node22/lib/node_modules/playwright/index.js"
-).then((m) => m.default ?? m);
+import { launchBrowser } from "./lib/browser.mjs";
 import { writeFileSync } from "node:fs";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
@@ -26,7 +24,7 @@ const MARK = "WRITE-PATHS-" + Date.now().toString(36);
 const TMP = "/tmp/write-paths-sample.txt";
 writeFileSync(TMP, "凭证样本 " + MARK);
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+const browser = await launchBrowser();
 const ctx = await browser.newContext({ viewport: { width: 1680, height: 1000 } });
 const page = await ctx.newPage();
 

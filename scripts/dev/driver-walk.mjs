@@ -15,9 +15,7 @@
 // 退出码：0 过 / 1 有发现 / 2 没跑起来（对齐其余走查脚本）
 import { writeFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-const { chromium } = await import(
-  process.env.PLAYWRIGHT_PKG ?? "/opt/node22/lib/node_modules/playwright/index.js"
-).then((m) => m.default ?? m);
+import { launchBrowser } from "./lib/browser.mjs";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
 const API = process.env.API_BASE ?? "http://127.0.0.1:8000";
@@ -66,7 +64,7 @@ const before = Number(q(`SELECT count(*) FROM ops_driver_checkin c JOIN ops_wayb
            "跨域部署时司机端登录后一片空白，服务端什么都看不到");
 }
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+const browser = await launchBrowser();
 // 司机端是手机上用的：视口按手机来，桌面视口下有些布局问题根本不出现。
 //
 // **故意不给定位权限**。这不是省事，是这条走查最要紧的一个条件：

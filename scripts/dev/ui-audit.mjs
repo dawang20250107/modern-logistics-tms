@@ -7,9 +7,7 @@
 // 用法（需先起好 :8000 网关与 :5173 前端）：
 //   node scripts/dev/ui-audit.mjs [baseUrl] [--shots 输出目录]
 // 输出：每页每主题一行指标 + 汇总；可选写 PNG 截图供人工核对。
-const { chromium } = await import(
-  process.env.PLAYWRIGHT_PKG ?? "/opt/node22/lib/node_modules/playwright/index.js"
-).then((m) => m.default ?? m);
+import { launchBrowser } from "./lib/browser.mjs";
 import { mkdirSync } from "node:fs";
 import { login, assertAppPage } from "./lib/browser-login.mjs";
 
@@ -218,7 +216,7 @@ const MEASURE = () => {
 
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+const browser = await launchBrowser();
 const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2 });
 const page = await ctx.newPage();
 

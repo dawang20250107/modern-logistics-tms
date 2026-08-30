@@ -110,6 +110,112 @@ jobs:
         working-directory: .
         run: node scripts/dev/paging-audit.mjs
 
+  # 浏览器走查：真起一套（库 + 网关 + 前端），用真浏览器把关键链路按一遍。
+  #
+  # 这个 job 是补上 CI 最大的一个洞。这一轮发布前查出来的严重问题——
+  # 司机端跨域整个不能用（预检没放行 X-Driver-Token，登录后一片空白而
+  # 服务端日志一行没有）、打卡按钮在未授权定位时永久卡死、订单附件传了
+  # 丢字节、对账中心生成恒定 400——**没有一个是 tsc / vitest / go test /
+  # 静态走查能发现的，全部靠真按按钮**。而这批检查此前只在
+  # release-check.sh 里，也就是只有人想起来跑的时候才跑。
+  #
+  # 前端用 vite preview 起构建产物、网关单独一个进程，两者不同源——
+  # 这正是生产上前端单独部署的形态，也正是 CORS 那个洞唯一会现形的形态。
+  # 用 dev server 的话反而验不出来。
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: tms
+          POSTGRES_USER: tms
+          POSTGRES_PASSWORD: tms
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tms"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://tms:tms@localhost:5432/tms
+      DJANGO_SECRET_KEY: ci-insecure-secret-min-32-bytes-long
+      DJANGO_CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+      API_BASE: http://127.0.0.1:8000
+      # 让走查脚本用 npm 装的 playwright 与它自带的浏览器，
+      # 而不是开发机上那两条写死的路径（见 scripts/dev/lib/browser.mjs）
+      # 绝对路径：走查脚本从仓库根跑，而 playwright 装在 frontend/node_modules，
+      # ESM 的解析是相对导入它的那个模块的，NODE_PATH 对 ESM 不起作用。
+      PLAYWRIGHT_PKG: ${{ github.workspace }}/frontend/node_modules/playwright/index.js
+      # 演示超管，口令见 cmd/seed 的输出。脚本默认的 admin/Admin12345! 是
+      # 开发机上用 adminctl 开的那个，CI 的空库里没有。
+      TMS_USER: seed_admin
+      TMS_PASS: Demo12345!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend-go/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # 打卡照片要焊中文水印。没字体的话 Watermark 会**静默原样返回**，
+      # 而司机端走查正好会去比对"取回来的和原图是不是一模一样"。
+      # 字体：打卡照片要焊中文水印，没字体 Watermark 会静默原样返回。
+      # psql：司机端走查要回库核对打卡记录与照片路径。
+      - name: 安装 CJK 字体与 psql
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-unifont postgresql-client && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
+      - name: 装前端依赖并构建
+        working-directory: frontend
+        run: |
+          npm ci
+          npx vite build
+      - name: 装 playwright 与 chromium
+        working-directory: frontend
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: 建库 + 播种
+        working-directory: backend-go
+        run: |
+          go run ./cmd/migrate
+          go run ./cmd/seed
+      - name: 起网关与前端
+        run: |
+          (cd backend-go && go build -o /tmp/tms-gateway ./cmd/server)
+          MEDIA_ROOT="$PWD/media" /tmp/tms-gateway > /tmp/gw.log 2>&1 &
+          (cd frontend && npx vite preview --port 5173 --host 127.0.0.1 > /tmp/fe.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:8000/readyz && break; sleep 1; done
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:5173/ && break; sleep 1; done
+          # 两个都必须真的起来。起不来就在这里红，别让后面四步各自报一个
+          # 看起来像业务问题的错——"失败原因说的不是真的"这一晚上踩了三次。
+          curl -sf -o /dev/null http://127.0.0.1:8000/readyz || { echo "网关没起："; cat /tmp/gw.log; exit 1; }
+          curl -sf -o /dev/null http://127.0.0.1:5173/ || { echo "前端没起："; cat /tmp/fe.log; exit 1; }
+      # 四条走查的退出码约定：0 过 / 1 有发现 / 2 没跑起来（都算失败，
+      # 但脚本会自己说清是哪一种，见 scripts/dev/lib/browser-login.mjs）。
+      - name: 浏览器冒烟（各页无非 2xx、无未捕获异常）
+        run: node scripts/dev/smoke-ui.mjs
+      - name: 端到端业务链（建单→检索→详情→计数一致→翻页）
+        run: node scripts/dev/e2e-flow.mjs
+      - name: 各页写操作（上传的凭证能取回原件）
+        run: node scripts/dev/write-paths.mjs
+      - name: 司机端（登录→本人运单→拍照打卡→证件自助上传→回库核对）
+        run: node scripts/dev/driver-walk.mjs
+      # ui-audit 不进 CI：它量的是首屏容量、配色、对比度，
+      # 跟字体渲染强相关，换一台机器读数就不一样。
+      # 一条会因为环境不同而红的检查，最后只会被加上 continue-on-error。
+      - name: 失败时把日志带出来
+        if: failure()
+        run: |
+          echo "── 网关 ──"; tail -50 /tmp/gw.log || true
+          echo "── 前端 ──"; tail -20 /tmp/fe.log || true
+
   docker-build:
     runs-on: ubuntu-latest
     steps:

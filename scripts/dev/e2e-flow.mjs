@@ -12,23 +12,21 @@
 //
 // 断言的是**一致性**而不是具体数字：数字会随演示数据变，
 // 而"我刚建的那张单必须能在下一页找到"永远成立。
-const { chromium } = await import(
-  process.env.PLAYWRIGHT_PKG ?? "/opt/node22/lib/node_modules/playwright/index.js"
-).then((m) => m.default ?? m);
+import { launchBrowser } from "./lib/browser.mjs";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
 const API = process.env.API_BASE ?? "http://127.0.0.1:8000";
-const USER = process.env.E2E_USER ?? "admin";
-const PASS = process.env.E2E_PASS ?? "Admin12345!";
+// 账号变量各脚本原先各叫各的（E2E_USER / TMS_USER），CI 上要一个个记。
+// 统一以 TMS_USER/TMS_PASS 为准，老名字留作兼容。
+const USER = process.env.TMS_USER ?? process.env.E2E_USER ?? "admin";
+const PASS = process.env.TMS_PASS ?? process.env.E2E_PASS ?? "Admin12345!";
 
 const steps = [];
 let failed = 0;
 const ok = (m) => { steps.push(`  ✓ ${m}`); };
 const bad = (m) => { steps.push(`  ✗ ${m}`); failed++; };
 
-const browser = await chromium.launch({
-  executablePath: "/opt/pw-browsers/chromium", args: ["--no-sandbox"],
-});
+const browser = await launchBrowser();
 const ctx = await browser.newContext({ viewport: { width: 1680, height: 1000 } });
 const page = await ctx.newPage();
 

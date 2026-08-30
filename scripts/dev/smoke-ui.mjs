@@ -7,9 +7,7 @@
 // 用法（需先起好 :8000 网关与 :5173 前端）：
 //   node scripts/dev/smoke-ui.mjs [baseUrl]
 // 退出码非 0 表示发现问题，可直接接进 CI。
-const { chromium } = await import(
-  process.env.PLAYWRIGHT_PKG ?? "/opt/node22/lib/node_modules/playwright/index.js"
-).then((m) => m.default ?? m);
+import { launchBrowser } from "./lib/browser.mjs";
 import { login, assertAppPage } from "./lib/browser-login.mjs";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
@@ -27,7 +25,7 @@ const PAGES = [
 // 已知会 4xx 且属预期的（例如未配置 AI 时的 503）写在这里，避免噪声掩盖真问题
 const EXPECTED = [/\/ai\/deepseek\/status/];
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+const browser = await launchBrowser();
 const page = await (await browser.newContext({ viewport: { width: 1680, height: 1000 } })).newPage();
 
 const netErrors = new Map();

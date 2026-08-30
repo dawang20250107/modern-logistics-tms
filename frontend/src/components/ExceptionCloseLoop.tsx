@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { apiGet, apiPost } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { confirmAction } from "../api/confirm";
 import { EMPTY as DASH, fmtDateTime, fmtMoney } from "../api/format";
 import { toast } from "../api/toast";
@@ -96,6 +97,13 @@ function ExceptionRow({ ex, expanded, onToggle, onChanged }: {
     queryClient.invalidateQueries({ queryKey: ["exception", ex.id, "timeline"] });
     onChanged();
   };
+  // 指派、提交处理结论、定责闭环三个动作都要 waybill.manage
+  // （上报异常刻意只要 waybill.view——发现问题的常常是客服，
+  // 登记的门要低；而定责那一步会落一条应付，门要高）。
+  // 这个面板嵌在调度台和运单详情里，只读角色也看得到它。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "waybill.manage");
+
   const assign = useMutation({
     mutationFn: () => apiPost(`/exceptions/${ex.id}/assign`, { assignee }),
     onSuccess: () => done("已指派，异常进入处理中"),
@@ -139,9 +147,11 @@ function ExceptionRow({ ex, expanded, onToggle, onChanged }: {
                       <option key={m.id} value={m.user ?? ""}>{m.name}{m.position ? `（${m.position}）` : ""}</option>
                     ))}
                   </select>
-                  <button className="btn-primary" disabled={!assignee || assign.isPending}
-                          onClick={() => assign.mutate()}>指派</button>
-                  <span className="muted small">指派后异常进入「处理中」。</span>
+                  {canManage
+                    ? <><button className="btn-primary" disabled={!assignee || assign.isPending}
+                              onClick={() => assign.mutate()}>指派</button>
+                      <span className="muted small">指派后异常进入「处理中」。</span></>
+                    : <span className="muted small" title="需要 waybill.manage 权限点">只读账号：可查看进展，不能指派或定责</span>}
                 </div>
               )}
 
@@ -151,9 +161,9 @@ function ExceptionRow({ ex, expanded, onToggle, onChanged }: {
                             placeholder="处理结论：做了什么、现场如何、后续怎么办"
                             value={resolution} onChange={(e) => setResolution(e.target.value)} />
                   <div className="form-row" style={{ gap: 8, padding: 0 }}>
-                    <button className="btn-primary" disabled={!resolution.trim() || handle.isPending}
+                    {canManage && <><button className="btn-primary" disabled={!resolution.trim() || handle.isPending}
                             onClick={() => handle.mutate()}>提交处理结论</button>
-                    <span className="muted small">提交后进入「待审核」，由能定责的人关闭。</span>
+                    <span className="muted small">提交后进入「待审核」，由能定责的人关闭。</span></>}
                   </div>
                 </div>
               )}
@@ -183,7 +193,7 @@ function ExceptionRow({ ex, expanded, onToggle, onChanged }: {
                     　关闭后不能再次关闭，更正需重新打开异常。
                   </div>
                   <div className="form-row" style={{ gap: 8, padding: 0 }}>
-                    <button className="btn-danger" disabled={close.isPending}
+                    {canManage && <button className="btn-danger" disabled={close.isPending}
                             onClick={async () => {
                               const ok = await confirmAction({
                                 title: "确认闭环这条异常？",
@@ -193,7 +203,7 @@ function ExceptionRow({ ex, expanded, onToggle, onChanged }: {
                                 confirmText: "确认闭环",
                               });
                               if (ok) close.mutate();
-                            }}>定责并闭环</button>
+                            }}>定责并闭环</button>}
                   </div>
                 </div>
               )}

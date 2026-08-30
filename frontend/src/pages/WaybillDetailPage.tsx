@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { apiGet, apiPost, apiUpload } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
 import { COD_STATUS_LABEL, OCR_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
@@ -58,6 +59,20 @@ export function WaybillDetailPage() {
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["waybill", no] });
+
+  // 这一页上原先**一个权限判断都没有**：拿只有 waybill.view 的演示客服
+  // 打开一张它范围内的运单，看到的按钮和超管一模一样——
+  // 「已送达」「发送提醒」「生成费用」「保存」「提交报销」「生成合同」全在。
+  // 后端每一条都挂了闸（resolve(w, r, "waybill.manage") 之类），
+  // 所以点下去只是弹一句"无权限"；但对操作的人来说，
+  // 一屏可点却点不动的按钮就是"系统坏了"。
+  //
+  // 三档：运单动作要 waybill.manage、动钱的要 finance.manage、
+  // AI 分析要 ai.use。「紧急上报」刻意不设限——上报异常只要 waybill.view。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "waybill.manage");
+  const canFinance = hasPerm(user, "finance.manage");
+  const canAI = hasPerm(user, "ai.use");
 
   const transition = useMutation({
     mutationFn: (to: string) => apiPost<WaybillDetail>(`/waybills/${no}/transition`, { to_status: to }),
@@ -223,7 +238,9 @@ export function WaybillDetailPage() {
   
   const w = detail.data;
   const c = contract.data ?? null;
-  const editable = !["settled", "cancelled", "voided"].includes(w.status);
+  // editable 原先只看运单状态。手工补录费用（add-expense）后端要 waybill.manage，
+  // 所以还要看权限——否则只读角色能看到整个录入表单，填完点保存才被拒。
+  const editable = canManage && !["settled", "cancelled", "voided"].includes(w.status);
   
   const currentStepIdx = WORKFLOW_STEPS.findIndex(s => s.status === w.status);
 
@@ -252,10 +269,10 @@ export function WaybillDetailPage() {
               风险 {RISK_LABEL[w.risk_level]}
             </span>
             <div className="row-actions waybill-hero-buttons">
-              <button className="btn-ghost" disabled={analyze.isPending} onClick={() => analyze.mutate()}>
+              {canAI && <button className="btn-ghost" disabled={analyze.isPending} onClick={() => analyze.mutate()}>
                 风险分析
-              </button>
-              {w.next_statuses.map((s) => (
+              </button>}
+              {canManage && w.next_statuses.map((s) => (
                 <button
                   key={s}
                   className="btn-primary"
@@ -334,10 +351,10 @@ export function WaybillDetailPage() {
                         {s.actual_arrival_at ? <span style={{ color: "var(--green)", fontWeight: "bold" }}>✓ {fmt(s.actual_arrival_at)}</span> : <span className="muted">未到达</span>}
                       </td>
                       <td>
-                        {!s.actual_arrival_at && (
+                        {canManage && !s.actual_arrival_at && (
                           <button className="btn-ghost small" disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "arrived" })}>人工到站</button>
                         )}
-                        {s.actual_arrival_at && !s.actual_depart_at && (
+                        {canManage && s.actual_arrival_at && !s.actual_depart_at && (
                           <button className="btn-ghost small" disabled={stopEvent.isPending} onClick={() => stopEvent.mutate({ seq: s.seq, event: "departed" })}>发车放行</button>
                         )}
                       </td>
@@ -388,7 +405,7 @@ export function WaybillDetailPage() {
                   <input type="checkbox" checked={rmAck} onChange={(e) => setRmAck(e.target.checked)} />需确认阅读
                 </label>
                 <span style={{ flex: 1 }} />
-                <button className="btn-primary" disabled={sendReminder.isPending || !rmContent.trim()} onClick={() => sendReminder.mutate()}>发送提醒</button>
+                {canManage && <button className="btn-primary" disabled={sendReminder.isPending || !rmContent.trim()} onClick={() => sendReminder.mutate()}>发送提醒</button>}
               </div>
               <textarea className="search" style={{ width: "100%", minHeight: 70 }} placeholder="提醒下发内容（支持多行）" value={rmContent} onChange={(e) => setRmContent(e.target.value)} />
               {(reminders.data?.length ?? 0) > 0 && (
@@ -427,7 +444,7 @@ export function WaybillDetailPage() {
                       <span className={`tag tag-${s.status === "accepted" ? "low" : s.status === "rejected" ? "none" : "medium"}`}>
                         {s.status === "pending" ? "等待审批" : s.status === "accepted" ? "已采纳执行" : "已驳回"}
                       </span>
-                      {s.status === "pending" && (
+                      {canManage && s.status === "pending" && (
                         <>
                           <button className="btn-primary" style={{ padding: "3px 10px", fontSize: 11 }} onClick={() => confirm.mutate({ id: s.id, status: "accepted" })}>
                             采纳建议
@@ -467,10 +484,10 @@ export function WaybillDetailPage() {
                           {collection.data ? ` · 司机应收合计 ${fmtMoney(collection.data.total_to_collect)}` : ""}</div>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        {detail.data.cod_status === "pending" && (
+                        {canManage && detail.data.cod_status === "pending" && (
                           <button className="btn-primary" style={{ padding: "4px 12px", fontSize: 12 }} disabled={codAction.isPending} onClick={() => codAction.mutate("collect-cod")}>司机确认代收</button>
                         )}
-                        {detail.data.cod_status === "collected" && (
+                        {canManage && detail.data.cod_status === "collected" && (
                           <button className="btn-primary" style={{ padding: "4px 12px", fontSize: 12 }} disabled={codAction.isPending} onClick={() => codAction.mutate("remit-cod")}>财务确认回款</button>
                         )}
                         {detail.data.cod_status === "remitted" && <span className="tag tag-low">已回款客户</span>}
@@ -491,11 +508,11 @@ export function WaybillDetailPage() {
                   而正在找"费用怎么出来"的人也不会认得它。
                   实测走完整条验收链：建单→派单→签收之后费用记录 0 条，
                   对账单归集出来是 ¥0，看起来像对账坏了。 */}
-              <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }}
+              {canFinance && <button className="btn-ghost" style={{ fontSize: 11, padding: "4px 8px" }}
                       disabled={genCosts.isPending} onClick={() => genCosts.mutate()}
                       title={hasCosts ? "按当前合同价重算这张运单的应收应付" : "按合同价生成这张运单的应收应付"}>
                 {genCosts.isPending ? "生成中…" : hasCosts ? "重新生成" : "生成费用"}
-              </button>
+              </button>}
             </div>
             {costs.data ? (
               <>
@@ -566,7 +583,10 @@ export function WaybillDetailPage() {
           <div className="panel">
             <div className="panel-head">司机报销</div>
             <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {/* 提交报销要 waybill.manage（ReimbursementCreate）。
+                  只读角色看得到整张表单、填完点提交才被拒——
+                  而报销单要填类别、金额、事由，白填一遍很难受。 */}
+              {canManage && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <select className="search" style={{ minWidth: 110 }} value={bxCat} onChange={(e) => setBxCat(e.target.value)}>
                   {Object.entries(REIMB_CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
@@ -579,7 +599,7 @@ export function WaybillDetailPage() {
                 >
                   {submitReimb.isPending ? "提交中…" : "提交报销"}
                 </button>
-              </div>
+              </div>}
               {(reimbursements.data?.items ?? []).length === 0 ? (
                 <StateView kind="empty" title="暂无报销单" hint="过路费、油费等司机垫付的费用在此提交与审批。" compact />
               ) : (
@@ -596,13 +616,13 @@ export function WaybillDetailPage() {
                           <td className="small">{b.submitted_by_name || EMPTY}</td>
                           <td><span className={`tag tag-${b.status === "paid" ? "low" : b.status === "rejected" ? "high" : "medium"}`}>{b.status_label || b.status}</span></td>
                           <td style={{ display: "flex", gap: 6 }}>
-                            {b.status === "submitted" && (
+                            {canFinance && b.status === "submitted" && (
                               <>
                                 <button className="btn-ghost small" disabled={reimbAction.isPending} onClick={() => reimbAction.mutate({ id: b.id, action: "approve" })}>审批</button>
                                 <button className="btn-ghost small" disabled={reimbAction.isPending} onClick={() => reimbAction.mutate({ id: b.id, action: "reject" })}>驳回</button>
                               </>
                             )}
-                            {b.status === "approved" && (
+                            {canFinance && b.status === "approved" && (
                               <button className="btn-ghost small" disabled={reimbAction.isPending} onClick={() => reimbAction.mutate({ id: b.id, action: "pay" })}>标记已付</button>
                             )}
                             {!["submitted", "approved"].includes(b.status) && <span className="small muted">{EMPTY}</span>}
@@ -646,18 +666,18 @@ export function WaybillDetailPage() {
                     </pre>
                   </details>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {c.confirm_status === "pending" && (
+                    {canManage && c.confirm_status === "pending" && (
                       <button className="btn-primary small" disabled={sendContract.isPending} onClick={() => sendContract.mutate()}>
                         {sendContract.isPending ? "发送中…" : "发送给司机"}
                       </button>
                     )}
-                    {c.confirm_status === "sent" && (
+                    {canManage && c.confirm_status === "sent" && (
                       <>
                         <button className="btn-primary small" disabled={confirmContract.isPending} onClick={() => confirmContract.mutate(true)}>司机已确认</button>
                         <button className="btn-ghost small" disabled={confirmContract.isPending} onClick={() => confirmContract.mutate(false)}>司机拒签</button>
                       </>
                     )}
-                    {c.confirm_status !== "confirmed" && (
+                    {canManage && c.confirm_status !== "confirmed" && (
                       <button className="btn-ghost small" disabled={genContract.isPending} onClick={() => genContract.mutate()}>
                         {genContract.isPending ? "生成中…" : "重新生成"}
                       </button>
@@ -668,12 +688,12 @@ export function WaybillDetailPage() {
               ) : (
                 <>
                   <StateView kind="empty" title="尚未生成承运合同" hint="合同在派单指派司机时自动生成；派单时未指派司机的运单可在此补出。" compact />
-                  <div>
+                  {canManage && <div>
                     <button className="btn-primary small" disabled={genContract.isPending || !w.driver_name} onClick={() => genContract.mutate()}>
                       {genContract.isPending ? "生成中…" : "生成合同"}
                     </button>
                     {!w.driver_name && <span className="small muted" style={{ marginLeft: 8 }}>该运单还没有指派司机，先派司机才能出合同。</span>}
-                  </div>
+                  </div>}
                 </>
               )}
             </div>
@@ -683,13 +703,13 @@ export function WaybillDetailPage() {
           <div className="panel">
             <div className="panel-head">电子回单与签收</div>
             <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ background: "var(--panel-2)", padding: 12, borderRadius: "var(--radius)", border: "1px dashed var(--line-2)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              {canManage && <div style={{ background: "var(--panel-2)", padding: 12, borderRadius: "var(--radius)", border: "1px dashed var(--line-2)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <span className="section-label" style={{ marginBottom: 0 }}>上传回单照片</span>
                 <label className="btn-ghost small file-trigger" style={{ cursor: "pointer" }}>
                   {upload.isPending ? "上传中…" : "选择图片"}
                   <input className="file-input-accessible" type="file" accept="image/*" ref={fileInput} disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
                 </label>
-              </div>
+              </div>}
 
               {(receipts.data?.items ?? []).length === 0 ? (
                 <StateView kind="empty" title="暂无电子回单" hint="司机上传回单后在此查看。" compact />

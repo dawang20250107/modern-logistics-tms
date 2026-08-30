@@ -3,6 +3,7 @@ import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { apiDelete, apiGet, apiPost, apiUpload } from "../api/client";
+import { hasPerm, useAuth } from "../auth/auth";
 import { confirmAction } from "../api/confirm";
 import { fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
@@ -37,6 +38,14 @@ export function OrderDetailPage() {
   const workflow = useQuery({ queryKey: ["order", id, "workflow"], queryFn: () => apiGet<OrderWorkflow>(`/orders/${id}/workflow`) });
   const timeline = useQuery({ queryKey: ["order", id, "timeline"], queryFn: () => apiGet<OrderEvent[]>(`/orders/${id}/timeline`) });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["order", id] });
+
+  // 订单详情上的写动作（确认、进池、编辑保存、取消、审批/驳回、上传附件）
+  // 都要 waybill.manage；复制建单要 waybill.create（manage 也涵盖它）。
+  // 这一页原先没有任何权限判断——只有 waybill.view 的角色看到的按钮
+  // 和超管一样多，点下去才被拒。
+  const { user } = useAuth();
+  const canManage = hasPerm(user, "waybill.manage");
+  const canCreate = hasPerm(user, ["waybill.create", "waybill.manage"]);
 
   const act = useMutation({
     mutationFn: (action: string) => apiPost(`/orders/${id}/${action}`, {}),
@@ -96,7 +105,9 @@ export function OrderDetailPage() {
     });
     setEditing(true);
   };
-  const editable = !["converted", "completed", "cancelled"].includes(o.status);
+  // editable 原先只看状态。编辑保存和取消订单都要 waybill.manage，
+  // 所以还要看权限——否则只读角色能进编辑态，填完点保存才被拒。
+  const editable = canManage && !["converted", "completed", "cancelled"].includes(o.status);
 
   const kv = (label: string, value: ReactNode) => (
     <div><span>{label}</span><b>{value || EMPTY}</b></div>
@@ -133,13 +144,13 @@ export function OrderDetailPage() {
           </div>
         </div>
         <div className="wb-actions">
-          {(o.status === "draft" || o.status === "pending_confirm") && <button className="btn-ghost" onClick={() => act.mutate("confirm")}>确认</button>}
-          {(o.status === "confirmed" || o.status === "pending_confirm") && <button className="btn-ghost" onClick={() => act.mutate("pool")}>进池</button>}
+          {canManage && (o.status === "draft" || o.status === "pending_confirm") && <button className="btn-ghost" onClick={() => act.mutate("confirm")}>确认</button>}
+          {canManage && (o.status === "confirmed" || o.status === "pending_confirm") && <button className="btn-ghost" onClick={() => act.mutate("pool")}>进池</button>}
           {o.status === "pooled" && <Link className="btn-primary" to="/dispatch-board" style={{ textDecoration: "none" }}>去调度台派单</Link>}
           {editable && !editing && <button className="btn-ghost" onClick={startEdit}>编辑</button>}
           {editing && <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>保存</button>}
           {editing && <button className="btn-ghost" onClick={() => setEditing(false)}>取消编辑</button>}
-          <button className="btn-ghost" onClick={() => clone.mutate()}>复制建单</button>
+          {canCreate && <button className="btn-ghost" onClick={() => clone.mutate()}>复制建单</button>}
           {(o.waybill_nos ?? []).map((no) => (
             <Link key={no} className="btn-ghost mono" to={`/waybills/${no}`} style={{ textDecoration: "none" }}>运单 {no} →</Link>
           ))}
@@ -167,7 +178,7 @@ export function OrderDetailPage() {
             <span className="muted small">高价值订单需主管审批后方可进池派单</span>
             {o.approval_remark && <span className="muted small">· {o.approval_remark}</span>}
             <span style={{ flex: 1 }} />
-            {o.approval_status === "pending" && (
+            {canManage && o.approval_status === "pending" && (
               <>
                 <button className="btn-primary" disabled={approval.isPending} onClick={() => approval.mutate({ action: "approve", remark: "" })}>审批通过</button>
                 <button className="btn-danger" disabled={approval.isPending} onClick={async () => {
@@ -321,10 +332,10 @@ export function OrderDetailPage() {
               <select value={attKind} onChange={(e) => setAttKind(e.target.value)}>
                 {Object.entries(ATTACHMENT_KIND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
-              <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
+              {canManage && <label className="btn-ghost file-trigger" style={{ cursor: "pointer" }}>
                 {upload.isPending ? "上传中…" : "选择文件上传"}
                 <input className="file-input-accessible" type="file" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ""; }} />
-              </label>
+              </label>}
             </div>
             {o.attachments.length === 0 ? (
               <StateView kind="empty" title="暂无附件" hint="上传合同 / 磅单 / 回单等文件后在此查看。" compact />

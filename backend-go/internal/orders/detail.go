@@ -95,6 +95,15 @@ func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
 
 // Timeline GET /api/v1/orders/{id}/timeline —— OrderEventSerializer，event_time 升序
 func (h *Handler) Timeline(w http.ResponseWriter, r *http.Request) {
+	// 订单集合读补上 waybill.view 之后，**子资源这一半还开着**：
+	// 一个只有 masterdata.view 的账号打 /orders 是 403，
+	// 但换成 /orders/{id}/workflow、/timeline、/lineage、
+	// /dispatch-suggestion、/ymm-quote 就照样 200 ——
+	// 里面有单号、各阶段时间、推荐承运商、市场报价区间。
+	// 拿单号不难：客户在邮件里给的、司机报的、或者顺手枚举。
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {

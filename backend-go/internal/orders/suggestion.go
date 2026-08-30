@@ -373,6 +373,9 @@ func pct(v float64) string { return fmt.Sprintf("%.0f%%", roundN(v*100, 0)) }
 
 // DispatchSuggestion GET /api/v1/orders/{id}/dispatch-suggestion
 func (h *Handler) DispatchSuggestion(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return

@@ -274,6 +274,11 @@ func validCoord(v *float64) bool {
 
 // WaybillTracking GET /waybills/{no}/tracking —— 最近 200 个轨迹点（倒序）
 func (h *Handler) WaybillTracking(w http.ResponseWriter, r *http.Request) {
+	// 运单轨迹属于运单域。这条原先只校验运单存不存在，不校验权限——
+	// 知道单号就能拿到这台车的轨迹点。
+	if !h.requirePerm(w, r, "waybill.view") {
+		return
+	}
 	no := chi.URLParam(r, "no")
 	var exists bool
 	_ = h.DB.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM ops_waybill WHERE waybill_no=$1)", no).Scan(&exists)

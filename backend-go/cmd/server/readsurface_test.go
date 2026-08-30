@@ -26,6 +26,7 @@ package main
 // 免得"没扫到"被当成"没问题"。
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -190,4 +191,120 @@ func head(s string, n int) string {
 		return s[:n] + "…"
 	}
 	return s
+}
+
+// 带路径参数的读也要挂闸。
+//
+// 上面那条普查只打无参数的集合路由，把 64 条带 {id}/{no} 的跳过了——
+// 而它们正是"知道单号就能看"的那一类。这条把那个盲区补上。
+//
+// 造得出真实 ID 的就用真实 ID；造不出的用一个不存在的 UUID —— 这照样管用，
+// **因为挂了闸的路由会在查这个 ID 之前就 403**，没挂闸的才会走到查库、
+// 返回 404。403 和 404 的区别在这里就是"有没有闸"。
+//
+// 实测漏的六条（订单集合读补上闸之后，子资源这一半还开着）：
+//
+//	/orders/{id}/workflow            各阶段与时间
+//	/orders/{id}/timeline            全部流转记录
+//	/orders/{id}/lineage             拆并单血缘
+//	/orders/{id}/dispatch-suggestion 推荐承运商（3.4 KB）
+//	/orders/{id}/ymm-quote           市场报价区间
+//	/waybills/{no}/tracking          这台车的轨迹点
+//
+// 外加 /carriers/{id}/performance：承运商列表要 carrier.view，
+// 这条绩效（成交量、异常率、常跑线路）却谁都能看。
+var paramReadAllowed = map[string]string{
+	"/api/v1/customers/{id}":              "客户档案就是 masterdata.view 的本职",
+	"/api/v1/customers/{id}/context":      "同上，客户画像挂在客户档案下",
+	"/api/v1/customers/{id}/lane-suggest": "同上",
+	"/api/v1/drivers/{id}":                "司机档案，同上",
+	"/api/v1/driver-credentials/{id}":     "司机证件档案，同上",
+	"/api/v1/vehicles/{id}":               "车辆档案，同上",
+	"/api/v1/routes/{id}":                 "线路档案，同上",
+	"/api/v1/b2b-partners/{id}":           "B2B 伙伴档案，B2BWrite.ReadPerm 是 masterdata.view",
+	"/api/v1/finance/projects/{id}":       "项目档案按主数据管，同 readAllowed 里那条",
+}
+
+func TestParamReadsAreGated(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := context.Background()
+	low := e.mkUser(false, "masterdata.view")
+	su := e.mkUser(true)
+
+	orderID := e.mkOrder()
+	wbNo := e.mkWaybillAt("arrived")
+	excID := e.mkException(su, e.mkWaybillRow(), "high")
+	cust := e.mkCustomer()
+	const nilUUID = "00000000-0000-0000-0000-000000000000"
+	pick := func(prefix string) string {
+		one := func(q string) string {
+			var v string
+			_ = e.pool.QueryRow(ctx, q).Scan(&v)
+			if v == "" {
+				return nilUUID
+			}
+			return v
+		}
+		switch {
+		case strings.HasPrefix(prefix, "/api/v1/orders/"):
+			return orderID
+		case strings.HasPrefix(prefix, "/api/v1/exceptions/"):
+			return excID
+		case strings.HasPrefix(prefix, "/api/v1/customers/"):
+			return cust
+		case strings.HasPrefix(prefix, "/api/v1/carriers/"):
+			return one(`SELECT id::text FROM md_carrier LIMIT 1`)
+		case strings.HasPrefix(prefix, "/api/v1/drivers/"):
+			return one(`SELECT id::text FROM md_driver LIMIT 1`)
+		case strings.HasPrefix(prefix, "/api/v1/finance/statements/"):
+			return one(`SELECT id::text FROM fin_statement LIMIT 1`)
+		case strings.HasPrefix(prefix, "/api/v1/org/employees/"):
+			return one(`SELECT id::text FROM accounts_user LIMIT 1`)
+		}
+		return nilUUID
+	}
+
+	routes, ok := e.router.(chi.Routes)
+	if !ok {
+		t.Fatal("路由器不是 chi.Routes")
+	}
+	walked, seen := 0, map[string]bool{}
+	_ = chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if method != "GET" || !strings.HasPrefix(route, "/api/v1/") || !strings.Contains(route, "{") {
+			return nil
+		}
+		p := strings.ReplaceAll(route, "{no}", wbNo)
+		p = strings.ReplaceAll(p, "{code}", "order.count")
+		if i := strings.Index(p, "{"); i >= 0 {
+			j := strings.Index(p[i:], "}")
+			p = p[:i] + pick(route) + p[i+j+1:]
+		}
+		if strings.Contains(p, "{") { // 还有第二个参数填不上，报出来而不是悄悄跳过
+			t.Errorf("路由 %s 有填不上的路径参数，这条没被检查到", route)
+			return nil
+		}
+		walked++
+		seen[route] = true
+		rec := e.call(low, "GET", p, "")
+		if rec.Code == http.StatusForbidden {
+			return nil
+		}
+		if why, okAllow := paramReadAllowed[route]; okAllow {
+			_ = why
+			return nil
+		}
+		t.Errorf("GET %s 对只有 masterdata.view 的账号返回 %d（不是 403）—— "+
+			"要么补权限闸，要么写进 paramReadAllowed 并说明理由。返回：%s",
+			route, rec.Code, head(rec.Body.String(), 140))
+		return nil
+	})
+	t.Logf("带路径参数的 GET 路由走了 %d 条", walked)
+	if walked < 30 {
+		t.Fatalf("只走到 %d 条 —— 路由走查多半失配了，这次结果不作数", walked)
+	}
+	for route := range paramReadAllowed {
+		if !seen[route] {
+			t.Errorf("paramReadAllowed 里登记的 %s 已经不是一条 GET 路由了，名单该清理", route)
+		}
+	}
 }

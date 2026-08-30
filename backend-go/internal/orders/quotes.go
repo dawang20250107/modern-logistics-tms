@@ -88,6 +88,9 @@ func hasDot(s string) bool {
 
 // YmmQuote GET /api/v1/orders/{id}/ymm-quote
 func (h *Handler) YmmQuote(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return

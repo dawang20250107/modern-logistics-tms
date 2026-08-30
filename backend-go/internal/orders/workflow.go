@@ -76,6 +76,9 @@ func stage(key, name string, done bool, detail string, at *time.Time) map[string
 
 // Workflow GET /api/v1/orders/{id}/workflow
 func (h *Handler) Workflow(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -197,6 +200,9 @@ func deref(p *string) string {
 
 // Lineage GET /api/v1/orders/{id}/lineage —— 订单→运单→对账单全链路
 func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return

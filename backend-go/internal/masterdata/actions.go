@@ -114,6 +114,11 @@ const orderBriefJSON = `json_build_object(
 
 // CustomerContext GET /api/v1/customers/{id}/context
 func (h *Handler) CustomerContext(w http.ResponseWriter, r *http.Request) {
+	// 客户档案这一面统一按 masterdata.view。原先这两条没写，
+	// 挡住它们的只是"恰好调用方都有这个权限"。
+	if !h.Allow(w, r, "masterdata.view") {
+		return
+	}
 	id, ok := h.resolveID(w, r, "md_customer", "Customer")
 	if !ok {
 		return
@@ -168,6 +173,9 @@ func (h *Handler) CustomerContext(w http.ResponseWriter, r *http.Request) {
 
 // CustomerLaneSuggest GET /api/v1/customers/{id}/lane-suggest?origin=&destination=
 func (h *Handler) CustomerLaneSuggest(w http.ResponseWriter, r *http.Request) {
+	if !h.Allow(w, r, "masterdata.view") {
+		return
+	}
 	id, ok := h.resolveID(w, r, "md_customer", "Customer")
 	if !ok {
 		return
@@ -237,6 +245,12 @@ func bandOf(lo, hi *float64) []float64 {
 
 // CarrierPerformance GET /api/v1/carriers/{id}/performance?origin=&destination=
 func (h *Handler) CarrierPerformance(w http.ResponseWriter, r *http.Request) {
+	// 承运商列表要 carrier.view（CarrierWrite.ReadPerm），
+	// 这条绩效却谁都能看：成交量、异常率、常跑线路——
+	// 比列表本身更敏感的一组数字，反而是敞开的。
+	if !h.Allow(w, r, "carrier.view") {
+		return
+	}
 	id, ok := h.resolveID(w, r, "md_carrier", "Carrier")
 	if !ok {
 		return

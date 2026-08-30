@@ -17,6 +17,44 @@ import (
 // （把 8336 说成 20）：安静地把一部分当成全部。
 const ExportMaxRows = 50000
 
+// sanitizeCell 挡住 Excel 公式注入。
+//
+// CSV 本身没问题：encoding/csv 会把逗号、引号、换行正确转义。
+// 问题在**打开它的那个程序**——Excel/WPS 会把以 = + @ 开头的单元格当公式执行。
+// 而这套系统的导出正是给财务用 Excel 打开的，客户名、备注、地址
+// 又都来自用户输入（其中"自助下单"那条路还是对公网开放的）。
+//
+// 实测：把订单目的地填成 `=1+1`，导出的 CSV 里就是原样的 `=1+1`，
+// 财务一打开就变成 2。换成 `=HYPERLINK(...)` 或
+// `=cmd|'/c calc'!A1` 这类，性质就完全不同了。
+//
+// 处理办法是业界通用的：在前面加一个单引号，Excel 会把整格当文本。
+// 减号要单独判——**负数金额不能被误伤**：`-1200.50` 加了引号就从数字变成
+// 文本，财务那一列就再也求不了和了。所以只有"以减号开头且不是数字"才处理。
+func sanitizeCell(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '@', '\t', '\r':
+		return "'" + s
+	case '-':
+		if _, err := strconv.ParseFloat(s, 64); err == nil {
+			return s // 真的是负数，原样留着
+		}
+		return "'" + s
+	}
+	return s
+}
+
+func sanitizeRow(rec []string) []string {
+	out := make([]string, len(rec))
+	for i, v := range rec {
+		out[i] = sanitizeCell(v)
+	}
+	return out
+}
+
 // ExportWriter 统一的导出写法：BOM + 表头，并在截断时留下痕迹。
 type ExportWriter struct {
 	cw        *csv.Writer
@@ -45,7 +83,7 @@ func NewExport(w http.ResponseWriter, filename string, header []string, total in
 	}
 	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
 	e.cw = csv.NewWriter(w)
-	_ = e.cw.Write(header)
+	_ = e.cw.Write(sanitizeRow(header))
 	return e
 }
 
@@ -55,7 +93,7 @@ func (e *ExportWriter) Row(rec []string) bool {
 		e.truncated = true
 		return false
 	}
-	_ = e.cw.Write(rec)
+	_ = e.cw.Write(sanitizeRow(rec))
 	e.n++
 	return true
 }

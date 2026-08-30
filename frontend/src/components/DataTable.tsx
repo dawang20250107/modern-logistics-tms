@@ -446,7 +446,17 @@ export function DataTable<T>({
 
   const exportCsv = async () => {
     const rs = await gatherRows();
-    const esc = (v: string | number) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    // 加引号只解决 CSV 的正确性，解决不了**打开它的那个程序**：
+    // Excel/WPS 解析 CSV 时会先剥掉引号，然后把以 = + @ 开头的格子当公式执行。
+    // 客户名、备注、地址都来自用户输入（自助下单那条还是对公网开的），
+    // 所以在前面补一个单引号让 Excel 当文本。后端导出走同一套规则
+    // （internal/httpx/export.go 的 sanitizeCell）。
+    //
+    // 减号要单独判：负数金额不能被误伤——`-1200.50` 加了引号就从数字变文本，
+    // 财务那一列就再也求不了和了。
+    const deFormula = (s: string) =>
+      /^[=+@\t\r]/.test(s) || (s.startsWith("-") && !Number.isFinite(Number(s))) ? "'" + s : s;
+    const esc = (v: string | number) => `"${deFormula(String(v ?? "")).replace(/"/g, '""')}"`;
     const head = visibleCols.map((c) => esc(c.header)).join(",");
     const body = toCells(rs).map((cells) => cells.map(esc).join(","));
     download("﻿" + [head, ...body].join("\r\n"), `${exportName ?? viewKey}.csv`, "text/csv;charset=utf-8");

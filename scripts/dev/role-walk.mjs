@@ -239,13 +239,34 @@ for (const prof of PROFILES) {
     const rows = await page.$$eval("tbody tr", (trs) => trs.length);
     // "页面是空的"和"库里本来就没有"必须分得开：后者不是产品问题，
     // 报成失败会让人去修一个没坏的东西。
+    // 这个"该看见多少单"必须跟后端的数据范围**同一套语义**，否则它报出来的
+    // 数字是假的。原先这条只写了「data_scope='all' 或 建单人组织 = 我的组织」，
+    // 漏掉了 org_sub（本组织及下级）那一档——而调度员正是这一档。
+    // 于是 CI 上一直打印「有 12 行（库里该账号范围内共 6 单）」：
+    // 界面是对的，**这条检查报的数字是错的**。一个读日志的人只会得出
+    // "数据范围漏了、调度员看到了不该看的单"这个结论，然后去改一个没坏的东西。
+    // 后端是 auth.ScopeOrgIDs：all → 不限；self/org → 本组织；
+    // org_sub → 物化路径前缀子树。这里逐档对齐。
+    const scope = q(`SELECT r.data_scope FROM iam_role r
+      JOIN iam_role_assignment ra ON ra.role_id = r.id
+      JOIN accounts_user u ON u.id = ra.user_id WHERE u.username = '${prof.user}' LIMIT 1`);
+    const orgSQL = `(SELECT organization_id FROM accounts_user WHERE username = '${prof.user}')`;
+    const scopeWhere = scope === "all" ? "true"
+      : scope === "org_sub"
+        ? `cb.organization_id IN (SELECT o2.id FROM iam_organization o2
+             WHERE o2.path LIKE (SELECT COALESCE(NULLIF(path,''), id::text)
+                                 FROM iam_organization WHERE id = ${orgSQL}) || '%'
+                OR o2.id = ${orgSQL})`
+        : `cb.organization_id = ${orgSQL}`;
     const visible = Number(q(`SELECT count(*) FROM ops_order o
       JOIN accounts_user cb ON cb.id = o.created_by_id
-      WHERE NOT o.is_deleted AND ((SELECT r.data_scope FROM iam_role r
-            JOIN iam_role_assignment ra ON ra.role_id = r.id
-            JOIN accounts_user u ON u.id = ra.user_id WHERE u.username = '${prof.user}' LIMIT 1) = 'all'
-        OR cb.organization_id = (SELECT organization_id FROM accounts_user WHERE username = '${prof.user}'))`) ?? -1);
-    if (rows > 0) ok(`「${name}」有 ${rows} 行（库里该账号范围内共 ${visible} 单）`);
+      WHERE NOT o.is_deleted AND (${scopeWhere})`) ?? -1);
+    // 翻页时 rows < visible 是正常的（只渲染一页）。反过来不可能：
+    // 界面渲染出来的行**不可能多于这个账号有权看到的单**。
+    // 真出现就是数据范围漏了，那是泄漏，必须红。
+    if (visible >= 0 && rows > visible) {
+      bad(`「${name}」界面上有 ${rows} 行，而这个账号该看见的只有 ${visible} 单 —— 数据范围漏了`);
+    } else if (rows > 0) ok(`「${name}」有 ${rows} 行（库里该账号范围内共 ${visible} 单）`);
     else if (visible > 0) bad(`「${name}」一行都没有，而库里这个账号的范围内有 ${visible} 单 —— 数据被界面吞掉了`);
     else if (visible === 0) ok(`「${name}」是空的，但库里该账号范围内确实一单也没有（不是界面的问题）`);
     else ok(`「${name}」是空的；没有 DATABASE_URL，无法区分「界面吞了」和「本来就没有」`);

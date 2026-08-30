@@ -10,6 +10,7 @@
 //   node scripts/dev/write-paths.mjs [baseUrl]
 // 退出码非 0 = 有写操作打不通。
 import { launchBrowser } from "./lib/browser.mjs";
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
@@ -39,6 +40,25 @@ page.on("response", async (r) => {
 
 const fail = [];
 const note = (s) => console.log("  " + s);
+
+// 走查造的异常与它带出来的应付，跑完清掉。没有 DATABASE_URL 就明说没清。
+function cleanupExceptionByDesc(desc) {
+  const dsn = process.env.DATABASE_URL;
+  if (!dsn) {
+    note("· 没有 DATABASE_URL，走查造的这条异常留在库里了");
+    return;
+  }
+  // 按描述删而不是按 id：断言在拿到 id 之前就失败时，那条异常一样要清掉。
+  const where = `SELECT id FROM ops_exception WHERE description = '${desc}'`;
+  try {
+    execFileSync("psql", [dsn, "-tAq", "-c",
+      `DELETE FROM fin_expense_record WHERE external_id IN (SELECT id::text FROM (${where}) t);
+       DELETE FROM ops_exception_event WHERE exception_id IN (${where});
+       DELETE FROM ops_exception WHERE description = '${desc}';`], { encoding: "utf8" });
+  } catch (e) {
+    note(`· 清理走查异常失败（${String(e).split("\n")[0]}），它留在库里了`);
+  }
+}
 
 async function login() {
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
@@ -294,6 +314,120 @@ if (waybill) {
         // 清理：这条规则会影响后续报价，跑完删掉
         await page.request.delete(`${API}/api/v1/finance/pricing-rules/${found.id}`,
           { headers: { Authorization: `Bearer ${tk}` } });
+      }
+    }
+  }
+}
+
+// 异常闭环：立案 → 指派 → 处理 → 定责关闭，一路按到底再回库核对。
+//
+// 这条链的后半截原先**在界面上完全够不着**：后端 /assign /handle /close
+// /timeline 四个端点都是全的，界面只能上报和列出来。于是上报的异常永远停在
+// 「待处理」，各页那个「⚠ 异常」角标永远不消，而**关闭正是定责那一步**——
+// 责任方、赔付金额都在这里定，金额 > 0 时会落一条应付带进对账。
+//
+// 验收标准不是"四个请求都 200"，是**库里状态走完了、应付正好一条**。
+// 关闭曾经没有守卫，连点三次生成三条应付（800 元被记成 2400）。
+{
+  const tk = await token();
+  const excDesc = "写操作走查-异常闭环-" + MARK;
+  const wbNo = waybill?.waybill_no;
+  if (!wbNo) {
+    note("· 没有可用运单，跳过异常闭环走查");
+  } else {
+    await page.goto(`${BASE}/waybills/${wbNo}`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1200);
+    // 先数一次这张运单上已有的异常费用应付。
+    // 不能只数"金额 800 的有几条"——这个脚本每跑一次就在同一张运单上留一条，
+    // 跑第二次就变成 2 条，检查从此长红，而红的原因和本次运行无关。
+    // 要断言的是**这一次**多出来正好一条。
+    const countExcCost = async () => {
+      const r = await page.request.get(`${API}/api/v1/waybills/${wbNo}/costs`,
+        { headers: { Authorization: `Bearer ${tk}` } });
+      const rows = (await r.json())?.data?.payables ?? [];
+      return rows.filter((c) => c.expense_item_code === "EXCEPTION_COST").length;
+    };
+    const excCostBefore = await countExcCost();
+
+    const descBox = page.locator('textarea[placeholder*="异常"], input[placeholder*="异常"]').first();
+    if (!(await descBox.count())) {
+      fail.push("运单详情页找不到异常上报输入框");
+    } else {
+      await descBox.fill(excDesc);
+      await page.locator('button:has-text("紧急上报")').click();
+      await page.waitForTimeout(1500);
+
+      // 清理放在 finally 里：断言失败时也要清。
+      // 第一版把 cleanupException 写在成功分支里，结果回测那次（走到一半失败）
+      // 在库里留了一条，下一轮全量跑完还看得见——
+      // "只有成功才清理"等于"越是出问题越会攒垃圾"。
+      try {
+      const row = () => page.locator("table.table tbody tr", { hasText: excDesc }).first();
+      if (!(await row().count())) {
+        fail.push("异常上报后列表里没有出现这一条");
+      } else {
+        await row().click();
+        await page.waitForTimeout(1000);
+
+        // 指派
+        const emp = page.locator("select").filter({ hasText: "选择处理人" }).first();
+        if (!(await emp.count())) {
+          fail.push("异常展开后没有「指派」入口——异常的后半截界面上够不着，" +
+                    "上报的异常会永远停在待处理，赔付也进不了账");
+        } else {
+          await emp.selectOption({ index: 1 });
+          await page.locator('button:has-text("指派")').first().click();
+          // 动作完成后面板本来就还开着，别再点一次（再点是收起）
+          await page.locator('textarea[placeholder*="处理结论"]').first().waitFor({ timeout: 15000 })
+            .catch(() => fail.push("指派之后没有出现「填处理结论」，闭环卡在第二步"));
+
+          // 处理
+          await page.locator('textarea[placeholder*="处理结论"]').first().fill("走查：已联系承运商补送");
+          await page.locator('button:has-text("提交处理结论")').click();
+          // 按「赔付金额」这个 label 定位，不要用全页第一个 decimal 输入框——
+          // 运单详情页上还有别的数字输入框（费用明细的金额），
+          // 第一版就是这么写的：填进了别人家的格子，赔付金额留在 0，
+          // 检查报「金额是 0.00」，看起来像后端没存住。
+          const amtBox = page.locator('label:has-text("赔付金额") input').first();
+          await amtBox.waitFor({ timeout: 15000 })
+            .catch(() => fail.push("提交处理结论之后没有出现定责表单，闭环卡在第三步"));
+
+          // 定责关闭：800 元，会落一条应付
+          await amtBox.fill("800");
+          await page.locator('button:has-text("定责并闭环")').click();
+          await page.waitForTimeout(500);
+          await page.locator('button:has-text("确认闭环")').click().catch(() => {});
+          await page.waitForTimeout(1800);
+
+          // 回库核对
+          const list = await page.request.get(
+            `${API}/api/v1/exceptions?waybill=${waybill.id}&page_size=50`,
+            { headers: { Authorization: `Bearer ${tk}` } });
+          const ex = (await list.json())?.data?.items?.find((x) => x.description === excDesc);
+          if (!ex) {
+            fail.push("闭环之后接口里找不到这条异常");
+          } else if (ex.status !== "closed") {
+            fail.push(`异常状态是 ${ex.status}，不是 closed——界面走完了但库里没闭环`);
+          } else if (Number(ex.amount) !== 800) {
+            fail.push(`异常赔付金额是 ${ex.amount}，填的是 800`);
+          } else {
+            // 应付必须正好一条。这条断言钉的是"连点几次就多生成几条"那个 bug。
+            // 应付在 data.payables 里，不是 data.items——这个接口返回的是
+            // 一张按方向分好的账（payables / receivables / 合计 / 毛利），
+            // 不是通用分页列表。第一版按 data.items 读，拿到空数组，
+            // 报「生成了 0 条」——而库里那条应付好好的在。
+            const delta = (await countExcCost()) - excCostBefore;
+            if (delta !== 1) {
+              fail.push(`异常闭环让异常费用应付多了 ${delta} 条，应该正好 1 条` +
+                        "（关闭曾经没有守卫，连点几次就多生成几条：800 元被记成 2400）");
+            } else {
+              note("· 异常闭环：立案 → 指派 → 处理 → 定责关闭，库里 closed、应付正好多一条 800 元");
+            }
+          }
+        }
+      }
+      } finally {
+        cleanupExceptionByDesc(excDesc);
       }
     }
   }

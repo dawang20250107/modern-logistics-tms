@@ -118,7 +118,10 @@ if [ -d frontend/node_modules ]; then
     browse_step "端到端业务链（建单→检索→详情→计数一致→翻页）" /tmp/rc-e2e.log node scripts/dev/e2e-flow.mjs
     # 写操作要真按一次。这一轮三个凭证上传的问题（丢字节、400、页面上不显示）
     # 上面那两个脚本一个都没抓到：一个只加载页面，一个只走建单那条链。
-    browse_step "各页写操作（上传的凭证能取回原件）" /tmp/rc-write.log node scripts/dev/write-paths.mjs
+    # 带上 DATABASE_URL：write-paths 造的异常要在跑完删掉，
+    # 否则每跑一次就给那张演示运单挂 800 元异常成本，毛利越跑越难看。
+    browse_step "各页写操作（上传的凭证能取回原件）" /tmp/rc-write.log \
+      env DATABASE_URL="${DATABASE_URL:-postgres://tms:tms@127.0.0.1:5432/tms}" node scripts/dev/write-paths.mjs
     # 司机端是另一套界面、另一套鉴权（X-Driver-Token），上面四个脚本全都从
     # 管理端 /login 进去，一个都没打开过它。第一次真按下去就查出两处：
     # 预检没放行 X-Driver-Token（登录后一片空白）、未授权定位时打卡按钮永久卡住。

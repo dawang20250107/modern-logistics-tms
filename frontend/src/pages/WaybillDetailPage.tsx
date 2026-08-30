@@ -8,6 +8,7 @@ import { toast } from "../api/toast";
 import { COD_STATUS_LABEL, OCR_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { CopyCode } from "../components/CopyCode";
+import { ExceptionCloseLoop } from "../components/ExceptionCloseLoop";
 import { StateView } from "../components/StateView";
 import { TrajectoryMap, type Trajectory } from "../components/TrajectoryMap";
 
@@ -359,21 +360,18 @@ export function WaybillDetailPage() {
               <input className="search" style={{ flex: 1, minWidth: 200, background: "var(--panel)" }} placeholder="异常描述（如：高速拥堵预计延误2小时）" value={excDesc} onChange={(e) => setExcDesc(e.target.value)} />
               <button className="btn-danger" disabled={reportExc.isPending || !excDesc.trim()} onClick={() => reportExc.mutate()}>紧急上报</button>
             </div>
-            {(exceptions.data?.items?.length ?? 0) > 0 && (
-              <div className="table-wrap"><table className="table">
-                <thead><tr><th>类型</th><th>级别</th><th>描述</th><th>状态</th></tr></thead>
-                <tbody>
-                  {(exceptions.data?.items ?? []).map((ex) => (
-                    <tr key={ex.id}>
-                      <td>{EXC_TYPE_LABEL[ex.exception_type] ?? ex.exception_type}</td>
-                      <td><span className={`tag tag-${ex.level === "high" ? "high" : ex.level === "low" ? "low" : "medium"}`}>{RISK_LABEL[ex.level] ?? ex.level}</span></td>
-                      <td className="small">{ex.description || EMPTY}</td>
-                      <td><Link className="link" to="/dispatch-board">{EXC_STATUS_LABEL[ex.status] ?? ex.status}</Link></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table></div>
-            )}
+            {/* 原先这里是一张只读表，状态那格链到 /dispatch-board——
+                而调度台上并没有处理异常的地方，那个链接把人送去一个空手而归的页面。
+                异常的后半截（指派 / 处理 / 定责关闭）后端四个端点都是全的，
+                界面上一个入口都没有：上报的异常永远停在「待处理」，
+                各页那个「⚠ 异常」角标永远不消，赔付也永远进不了账。 */}
+            <ExceptionCloseLoop
+              items={exceptions.data?.items ?? []}
+              onChanged={() => {
+                queryClient.invalidateQueries({ queryKey: ["waybill", no, "exceptions"] });
+                queryClient.invalidateQueries({ queryKey: ["waybill", no, "costs"] });
+              }}
+            />
           </div>
 
           {/* 司机提醒 */}

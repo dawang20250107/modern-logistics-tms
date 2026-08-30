@@ -50,10 +50,14 @@ const USED = (name) =>
 const DELIBERATE = /最近|本页|当前页|已选|下表|\?\?/;
 
 let findings = 0;
+let scanned = 0;    // 扫过的 .tsx 个数
+let pagedVars = 0;  // 认出来的分页变量个数——正则还活着的证据
 for (const file of walk(ROOT)) {
+  scanned++;
   const src = readFileSync(file, "utf8");
   const paged = new Set();
   for (const m of src.matchAll(FROM_ITEMS)) paged.add(m[1] ?? m[2]);
+  pagedVars += paged.size;
   if (paged.size === 0) continue;
 
   const lines = src.split("\n");
@@ -83,8 +87,24 @@ for (const file of walk(ROOT)) {
   }
 }
 
+// 防空转。这个脚本"没发现"和"没扫到"打印的是同一句话，而它靠两条正则活着：
+// 目录扫空（传错路径）、`.tsx` 改了后缀、或者取分页数据的写法从
+// `.data?.items` 换成别的 hook —— 任何一条断了，它都会一直报绿。
+// 实测：拿一个空目录跑，它输出「✓ 没有把当前页条数当总数渲染的地方」、退出 0。
+// 一条永远绿的检查比没有这条检查更坏：它会让人以为这一类问题被盯着。
+// 退出码 2 = 检查自己空转了，结论不作数（对齐 route-match / env-match）。
+if (scanned === 0 || pagedVars === 0) {
+  console.error(
+    `\n✗ 这条检查正在空转：扫了 ${scanned} 个 .tsx，识别出 ${pagedVars} 个分页变量。\n` +
+    `  两条正则（取 items 的赋值、.length 的用法）之一已经失效，或者路径不对。\n` +
+    `  目录：${ROOT}\n` +
+    `  这不是「没发现问题」，是「没在检查」——请先修脚本再看结论。`,
+  );
+  process.exit(2);
+}
+
 if (findings === 0) {
-  console.log("✓ 没有把「当前页条数」当总数渲染的地方");
+  console.log(`✓ 没有把「当前页条数」当总数渲染的地方（扫 ${scanned} 个 .tsx，${pagedVars} 个分页变量）`);
   process.exit(0);
 }
 console.log(`\n共 ${findings} 处。若确属有意（界面已写明"最近 N 条"之类），在同一行注明即可。`);

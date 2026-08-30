@@ -26,6 +26,46 @@ bad()  { echo "  ✗ $1"; FAIL=$((FAIL+1)); }
 skip() { echo "  – $1"; SKIP=$((SKIP+1)); }
 sect() { echo; echo "── $1 ──"; }
 
+# 下面两个是各类走查的统一入口。它们存在的理由是同一条：
+# **一条检查失败时说的原因必须是真的。**
+#
+# 上一轮吃过两次亏：网关没起时 ui-audit 把登录页当业务页量了一遍，
+# 报出「点击目标过小」这种根本不存在的结论；而 smoke-ui 因为请求在网络层
+# 就断了、连响应都没有，反过来报绿——10 个页面它一个都没打开。
+# 报错原因不对，修的人会去改一个没坏的东西，真正坏的那个一直没人看见。
+#
+# 约定的退出码（四个浏览器脚本 + 四个静态走查脚本共用）：
+#   0 = 跑了，没发现问题
+#   1 = 跑了，有发现
+#   2 = 没跑起来 / 空转，本次结论不作数
+
+# browse_step：浏览器走查。2 记「跳过」——环境没搭起来不是代码的错，
+# 把"跑不起来"记成失败，几次之后大家就开始无视这一项了。
+browse_step() { # <标题> <日志文件> <命令...>
+  local title="$1" logf="$2"; shift 2
+  "$@" >"$logf" 2>&1
+  case $? in
+    0) ok "$title" ;;
+    2) skip "$title：脚本自报没跑起来（见 $logf）"; tail -4 "$logf" | sed 's/^/      /' ;;
+    *) bad "$title 有发现（见 $logf）："; tail -8 "$logf" | sed 's/^/      /' ;;
+  esac
+}
+
+# static_step：静态走查（扫源码，不需要起服务）。2 记「失败」——
+# 这类脚本靠正则活着，空转意味着这一类问题这轮根本没人看，发布前该拦。
+# 但抬头必须写"检查自己空转了"，不能写成"有调用对不上"。
+static_step() { # <日志文件> <失败时的抬头> <命令...>
+  local logf="$1" head="$2"; shift 2
+  "$@" >"$logf" 2>&1
+  case $? in
+    # 各脚本的总结行有的自带 "✓" 有的不带，去掉再交给 ok，免得打出 "✓ ✓ …"
+    0) ok "$(tail -1 "$logf" | sed 's/^✓ *//')" ;;
+    2) bad "检查自己空转了（不是发现了问题，是这一轮什么都没扫到）："
+       sed 's/^/      /' "$logf" ;;
+    *) bad "$head"; sed 's/^/      /' "$logf" ;;
+  esac
+}
+
 # ── 后端 ───────────────────────────────────────────────
 sect "后端"
 ( cd backend-go && go build ./... ) >/tmp/rc-build.log 2>&1 \
@@ -56,9 +96,8 @@ if [ -d frontend/node_modules ]; then
   ( cd frontend && npx vite build ) >/tmp/rc-vite.log 2>&1 \
     && ok "vite build" || bad "vite build（见 /tmp/rc-vite.log）"
   # 分页口径走查不需要起服务，纯静态扫描
-  node scripts/dev/paging-audit.mjs >/tmp/rc-paging.log 2>&1 \
-    && ok "分页口径（没有把「当前页条数」当总数）" \
-    || { bad "分页口径走查有发现："; sed 's/^/      /' /tmp/rc-paging.log; }
+  static_step /tmp/rc-paging.log "分页口径走查有发现：" \
+    node scripts/dev/paging-audit.mjs
 
   # 走查要连开发服务器。连不上时必须报"没跑"，不能报"没过"——
   # 把"跑不起来"记成失败，几次之后大家就开始无视这一项了。
@@ -69,18 +108,6 @@ if [ -d frontend/node_modules ]; then
   # （连响应都没有）反而报绿。所以这一整段都挂在网关就绪之下，
   # 而不是只挡住 e2e-flow 那一个。
   #
-  # browse_step 统一处理退出码：0 过、2 是脚本自报"我没跑起来"（登录失败/
-  # 页面没打开）记跳过、其余才算失败。见 lib/browser-login.mjs。
-  browse_step() { # <标题> <日志文件> <命令...>
-    local title="$1" logf="$2"; shift 2
-    "$@" >"$logf" 2>&1
-    case $? in
-      0) ok "$title" ;;
-      2) skip "$title：脚本自报没跑起来（见 $logf）"; tail -4 "$logf" | sed 's/^/      /' ;;
-      *) bad "$title 有发现（见 $logf）："; tail -8 "$logf" | sed 's/^/      /' ;;
-    esac
-  }
-
   if ! curl -sf -o /dev/null http://127.0.0.1:5173/ 2>/dev/null; then
     skip "浏览器走查（UI/冒烟/端到端/写操作）：前端开发服务器没起（cd frontend && npm run dev）"
   elif ! curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null; then
@@ -210,21 +237,15 @@ done
 sect "前后端接口对齐"
 # 前端把请求发到一个后端没注册的方法/路径上，恒定 405/404，
 # 而失败常被 catch 吞掉、界面照样报成功。发布前这一轮抓到三处。
-if python3 scripts/dev/route-match.py >/tmp/rc-route.log 2>&1; then
-  ok "$(tail -1 /tmp/rc-route.log)"
-else
-  bad "有前端调用对不上后端路由："; sed 's/^/      /' /tmp/rc-route.log
-fi
+static_step /tmp/rc-route.log "有前端调用对不上后端路由：" \
+  python3 scripts/dev/route-match.py
 
 sect "请求体字段对齐"
 # route-match 只比路径和方法，比不到 body 里面。而发布前最要命的那个 bug
 # 恰恰在 body 里：对账中心发 period_start，后端只认 start——用户明明选了账期，
 # 后端却报"start 与 end 必填"，对账中心第一步就走不通。
-if python3 scripts/dev/payload-match.py >/tmp/rc-payload.log 2>&1; then
-  ok "$(tail -1 /tmp/rc-payload.log)"
-else
-  bad "有前端字段后端从没提过："; grep -E "✗|      " /tmp/rc-payload.log | sed 's/^/      /'
-fi
+static_step /tmp/rc-payload.log "有前端字段后端从没提过：" \
+  python3 scripts/dev/payload-match.py
 
 sect "凭证上传"
 # 回单、附件、司机证件是对账吵起来时唯一拿得出的东西。
@@ -258,11 +279,8 @@ sect "部署配置与代码对得上"
 # SMTP 那五个变量在模板里叫 TMS_SMTP_*，代码读的是 SMTP_*：运维照着模板
 # 全填好、重启，邮件一封也发不出去，而且没有任何一处会报错。
 # 设了没用比没得设更难查——配置看起来是齐的，功能就是不工作。
-if python3 scripts/dev/env-match.py >/tmp/rc-env.log 2>&1; then
-  ok "$(tail -1 /tmp/rc-env.log)"
-else
-  bad "部署配置里有设了没用的变量："; grep -E "✗|      " /tmp/rc-env.log | sed 's/^/      /'
-fi
+static_step /tmp/rc-env.log "部署配置里有设了没用的变量：" \
+  python3 scripts/dev/env-match.py
 
 sect "HTTPS"
 grep -q 'listen 443 ssl' deploy/nginx.conf && ok "nginx 配了 443 + TLS" || bad "nginx 没有 443"

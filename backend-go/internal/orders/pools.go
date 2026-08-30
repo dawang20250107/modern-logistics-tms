@@ -70,7 +70,14 @@ func (h *Handler) poolPage(w http.ResponseWriter, r *http.Request, extraWhere fu
 	// 检索/筛选/仅看紧急交给库去做。以前这些全在前端对着取回来的那一页做，
 	// 一页装不下就等于只在 20 条里搜——数据一多就悄悄变成了抽样。
 	where = append(where, searchAndFilterWhere(q, args)...)
-	if frag := filters.Apply(q.Get("filter"), filterFields, args); frag != "" {
+	// 已知字段上的非法值（比如日期框里打了「今天」）要当场说清是哪个字段，
+	// 而不是让 Postgres 报错变成 500，也不是默默把这个条件丢掉。
+	frag, ferr := filters.Apply(q.Get("filter"), filterFields, args)
+	if ferr != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_FILTER", ferr.Error())
+		return
+	}
+	if frag != "" {
 		where = append(where, frag)
 	}
 	whereSQL := "WHERE " + strings.Join(where, " AND ")
@@ -316,7 +323,14 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 			where = append(where, fmt.Sprintf("o.%s = %s", f, args.Add(v)))
 		}
 	}
-	if frag := filters.Apply(q.Get("filter"), filterFields, args); frag != "" {
+	// 已知字段上的非法值（比如日期框里打了「今天」）要当场说清是哪个字段，
+	// 而不是让 Postgres 报错变成 500，也不是默默把这个条件丢掉。
+	frag, ferr := filters.Apply(q.Get("filter"), filterFields, args)
+	if ferr != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_FILTER", ferr.Error())
+		return
+	}
+	if frag != "" {
 		where = append(where, frag)
 	}
 	whereSQL := strings.Join(where, " AND ")

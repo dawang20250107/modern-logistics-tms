@@ -262,7 +262,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request, cfg ResourceCfg) 
 			}
 		}
 	}
-	if frag := filters.Apply(q.Get("filter"), cfg.FilterFields, args); frag != "" {
+	// 已知字段上的非法值（比如日期框里打了「今天」）要当场说清是哪个字段，
+	// 而不是让 Postgres 报错变成 500，也不是默默把这个条件丢掉。
+	frag, ferr := filters.Apply(q.Get("filter"), cfg.FilterFields, args)
+	if ferr != nil {
+		httpx.Err(w, http.StatusBadRequest, "INVALID_FILTER", ferr.Error())
+		return
+	}
+	if frag != "" {
 		where = append(where, frag)
 	}
 	whereSQL := "WHERE " + strings.Join(where, " AND ")

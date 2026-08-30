@@ -52,7 +52,7 @@ func TestDateFilterUsesBeijingDay(t *testing.T) {
 		VALUES (gen_random_uuid(), $2::timestamptz, now(), $1, 'tz-用例', 'draft', '',
 		  '时区用例', 1, 0, 0, 'cs', '', '', '杭州', '上海', '{}'::jsonb, '',
 		  'ftl', 0, '', '', '', false, false, '', '', '', '', 'normal', 0, 'monthly',
-		  'enterprise', '', 'pending', '', 'none', '', 0, 'none', 'consignor', 'prepaid')`,
+		  'enterprise', '', 'pending', '', 'none', '', 0, 'none', 'shipper', 'prepaid')`,
 		no, earlyBeijing); err != nil {
 		t.Fatalf("造单失败：%v", err)
 	}

@@ -62,10 +62,23 @@ var DriverWrite = WriteCfg{
 		"license_expiry":        {Kind: FDate},
 		"qualification_cert_no": {Kind: FText},
 		"qualification_expiry":  {Kind: FDate},
-		"employment_type":       {Kind: FText, Default: "employee"},
-		"carrier":               {Kind: FUUID, Ref: "md_carrier"},
-		"app_registered":        {Kind: FBool, Default: false},
-		"is_active":             {Kind: FBool, Default: true},
+		// 用工性质是**枚举**，不是自由文本。词表在 waybills/handler.go 的
+		// employmentLabel、列表 SQL 的 CASE、以及前端 DRIVER_EMP_LABEL 里
+		// 三处一致：employee / outsourced / carrier_driver / temp。
+		//
+		// 原先声明成 FText，写什么进什么。结果是我自己的走查脚本用了
+		// `fulltime` 这个哪儿都不存在的值造司机，一路安静地写进去——
+		// 演示库里 763 个在用司机有 758 个是它。表现不是报错，是
+		// **「用工」这一列空着**（列表 SQL 对未知值回空串），
+		// 而且按用工筛选永远筛不到它们：按「自有员工」筛只出 5 个。
+		//
+		// 声明成枚举之后，第一次写 `fulltime` 就会被 400 挡住并说
+		// "不是合法选项"——那才是它该有的样子。
+		"employment_type": {Kind: FEnum, Default: "employee",
+			Choices: []string{"employee", "outsourced", "carrier_driver", "temp"}},
+		"carrier":        {Kind: FUUID, Ref: "md_carrier"},
+		"app_registered": {Kind: FBool, Default: false},
+		"is_active":      {Kind: FBool, Default: true},
 	},
 }
 

@@ -97,7 +97,7 @@ func (e *testEnv) mkOrderWithRemark(remark string) {
 		VALUES ($1::uuid, now(), now(), $2, 'cs', 'pooled', $3, '测试货', 1, 1, 1, 'cs',
 		  '张三', '13800000000', '上海', '杭州', '{}'::jsonb, '', 'ftl', 0, '收货地址', '李四', '13900000000',
 		  false, false, '纸箱', '发货地址', '王五', '13700000000', 'normal', 0, 'monthly',
-		  'enterprise', '', 'pending', '', 'none', '', 0, 'none', 'consignor', 'prepaid')`,
+		  'enterprise', '', 'pending', '', 'none', '', 0, 'none', 'shipper', 'prepaid')`,
 		id, "EXP"+uuid.NewString()[:10], remark); err != nil {
 		e.t.Fatalf("造订单失败：%v", err)
 	}

@@ -34,7 +34,7 @@ func (e *testEnv) mkCustomer() string {
 		  contact_name, contact_phone, settlement_type, is_active, wechat_group,
 		  billing_day, credit_days, credit_limit, category, level)
 		VALUES ($1::uuid, now(), now(), false, $2, '对账用例客户', '', '', 'monthly', true, '',
-		        1, 30, 0, 'direct', 'A')`, id, code); err != nil {
+		        1, 30, 0, 'enterprise', 'A')`, id, code); err != nil {
 		// 不能 Skip：列名对不上时 Skip 会让这一组用例悄悄不跑，
 		// 而"悄悄不跑"正是这一轮反复吃亏的那件事。
 		e.t.Fatalf("造客户失败：%v", err)

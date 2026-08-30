@@ -39,7 +39,7 @@ func (e *testEnv) mkTrackableOrder() (orderNo, phone string) {
 		VALUES ($1::uuid, now(), now(), $2, 'cs', 'pooled', '', '测试货', 1, 1, 1, 'cs',
 		  '张三', $3, '上海', '杭州', '{}'::jsonb, '', 'ftl', 0, '收货地址', '李四', '13900000000',
 		  false, false, '纸箱', '发货地址', '王五', '13700000000', 'normal', 0, 'monthly',
-		  'enterprise', '', 'pending', '', 'none', '', 0, 'none', 'consignor', 'prepaid')`,
+		  'enterprise', '', 'pending', '', 'none', '', 0, 'none', 'shipper', 'prepaid')`,
 		id, orderNo, phone); err != nil {
 		e.t.Fatalf("造订单失败：%v", err)
 	}
@@ -228,7 +228,7 @@ func (e *testEnv) mkDriver() (phone, idTail string) {
 		  license_no, is_active, license_type, qualification_cert_no, employment_type,
 		  app_registered, cumulative_freight, cumulative_waybills, wechat)
 		VALUES ($1::uuid, now(), now(), false, '测试司机', $2, $3,
-		  '', true, '', '', 'fulltime', false, 0, 0, '')`, id, phone, idNo); err != nil {
+		  '', true, '', '', 'employee', false, 0, 0, '')`, id, phone, idNo); err != nil {
 		e.t.Fatalf("造司机失败：%v", err)
 	}
 	e.t.Cleanup(func() {

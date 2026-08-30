@@ -120,7 +120,7 @@ func TestCheckinPhotoIsNotOverwrittenByRetry(t *testing.T) {
 		 license_type, qualification_cert_no, employment_type, app_registered,
 		 cumulative_freight, cumulative_waybills, wechat)
 		VALUES ($1, now(), now(), false, $2, $3, $4, 'A2-'||$5, true,
-		        'A2', '', 'fulltime', false, 0, 0, '')`,
+		        'A2', '', 'employee', false, 0, 0, '')`,
 		drvID, "打卡用例司机", phone, idNo, sfx); err != nil {
 		t.Fatalf("造司机失败：%v", err)
 	}

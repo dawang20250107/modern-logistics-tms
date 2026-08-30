@@ -138,7 +138,7 @@ func (f *stmtFixture) mkWaybill() string {
 		  ai_conversation_id, cod_amount, cod_status, freight_payer, freight_term,
 		  platform_name, platform_order_no)
 		VALUES ($1::uuid, now(), now(), $2, 'signed', $3::uuid, $4::uuid, '测试线路', '甲地', '乙地',
-		        'assigned', 'low', 'returned', 0, 1, 1, 1, 'self', '', 0, 'none', 'consignor',
+		        'assigned', 'low', 'returned', 0, 1, 1, 1, 'self', '', 0, 'none', 'shipper',
 		        'prepaid', '', '')`,
 		id.String(), no, f.orgID, f.custID); err != nil {
 		f.t.Fatalf("建运单失败（若因缺列失败，说明 schema 变了，按新列补齐）：%v", err)
@@ -421,7 +421,7 @@ func TestCollectionRespectsOrgScope(t *testing.T) {
 		  ai_conversation_id, cod_amount, cod_status, freight_payer, freight_term,
 		  platform_name, platform_order_no)
 		VALUES ($1::uuid, now(), now(), $2, 'signed', $3::uuid, $4::uuid, '他组织线路', '甲', '乙',
-		        'assigned', 'low', 'returned', 0, 1, 1, 1, 'self', '', 0, 'none', 'consignor',
+		        'assigned', 'low', 'returned', 0, 1, 1, 1, 'self', '', 0, 'none', 'shipper',
 		        'prepaid', '', '')`,
 		oid.String(), otherWbNo, otherOrg, f.custID); err != nil {
 		t.Fatalf("建他组织运单失败：%v", err)

@@ -92,7 +92,7 @@ try {
     const mk = await jpost("/api/v1/drivers", {
       name: "验收走查司机 " + MARK, phone: "138" + String(Date.now()).slice(-8),
       id_no: "310101199001" + String(Date.now() % 1000000).padStart(6, "0"),
-      license_no: "SH" + MARK, license_type: "A2", employment_type: "fulltime", is_active: true,
+      license_no: "SH" + MARK, license_type: "A2", employment_type: "employee", is_active: true,
     });
     driver = mk.body?.data;
     if (!driver?.id) { bad(`第 3 步：没有空闲司机，且新建司机失败：${mk.status} ${JSON.stringify(mk.body).slice(0, 160)}`); throw new Error("stop"); }

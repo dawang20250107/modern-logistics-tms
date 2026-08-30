@@ -67,7 +67,7 @@ func (e *testEnv) mkCarrierWithWaybill(status string, arrivedOnTime bool) string
 		  carrier_id, planned_arrival, arrived_at)
 		SELECT gen_random_uuid(), now(), now(), $2, '甲 → 乙', '甲', '乙', $3,
 		  'assigned', 'low', 'pending', 0, 1, 1, 1, 'outsource', '', 0, 'none',
-		  'consignor', 'prepaid', '', '', $1::uuid, pa, `+arrivedExpr+`
+		  'shipper', 'prepaid', '', '', $1::uuid, pa, `+arrivedExpr+`
 		FROM (SELECT now() + interval '5 hours' AS planned_arrival, now() + interval '5 hours' AS pa) t`,
 		cid, "OTWB"+uuid.NewString()[:8], status); err != nil {
 		e.t.Fatalf("造运单失败：%v", err)
@@ -160,7 +160,7 @@ func TestOnTimeRateMixedSample(t *testing.T) {
 		  carrier_id, planned_arrival, arrived_at)
 		VALUES (gen_random_uuid(), now(), now(), $2, '甲 → 乙', '甲', '乙', 'cancelled',
 		  'assigned', 'low', 'pending', 0, 1, 1, 1, 'outsource', '', 0, 'none',
-		  'consignor', 'prepaid', '', '', $1::uuid,
+		  'shipper', 'prepaid', '', '', $1::uuid,
 		  -- 迟到 3 小时。这一点是有讲究的：如果这张脏样本本身"准点"，
 		  -- 那把它算进来 2/2 仍是 1.0，用例照样绿——只有让它迟到，
 		  -- 混进来才会把比率拉到 0.5，对称地去掉分子分母的状态门也能被抓到。
@@ -210,7 +210,7 @@ func TestOnTimeRateConsistentAcrossEndpoints(t *testing.T) {
 		  carrier_id, planned_arrival, arrived_at)
 		VALUES (gen_random_uuid(), now(), now(), $2, '甲 → 乙', '甲', '乙', 'cancelled',
 		  'assigned', 'low', 'pending', 0, 1, 1, 1, 'outsource', '', 0, 'none',
-		  'consignor', 'prepaid', '', '', $1::uuid,
+		  'shipper', 'prepaid', '', '', $1::uuid,
 		  -- 迟到 3 小时。这一点是有讲究的：如果这张脏样本本身"准点"，
 		  -- 那把它算进来 2/2 仍是 1.0，用例照样绿——只有让它迟到，
 		  -- 混进来才会把比率拉到 0.5，对称地去掉分子分母的状态门也能被抓到。
@@ -280,7 +280,7 @@ func TestOnTimeRateInDispatchSuggestion(t *testing.T) {
 		  carrier_id, planned_arrival, arrived_at)
 		VALUES (gen_random_uuid(), now(), now(), $2, '甲 → 乙', '甲', '乙', 'cancelled',
 		  'assigned', 'low', 'pending', 0, 1, 1, 1, 'outsource', '', 0, 'none',
-		  'consignor', 'prepaid', '', '', $1::uuid,
+		  'shipper', 'prepaid', '', '', $1::uuid,
 		  -- 迟到 3 小时。这一点是有讲究的：如果这张脏样本本身"准点"，
 		  -- 那把它算进来 2/2 仍是 1.0，用例照样绿——只有让它迟到，
 		  -- 混进来才会把比率拉到 0.5，对称地去掉分子分母的状态门也能被抓到。

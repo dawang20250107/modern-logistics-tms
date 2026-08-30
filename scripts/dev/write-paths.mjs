@@ -147,7 +147,7 @@ if (waybill) {
   const name = "走查司机" + tail;
   const mk = await page.request.post(`${API}/api/v1/drivers`, {
     headers: { Authorization: "Bearer " + (await token()) },
-    data: { name, phone: "137" + tail.padStart(8, "0"), id_no: idNo, employment_type: "fulltime" },
+    data: { name, phone: "137" + tail.padStart(8, "0"), id_no: idNo, employment_type: "employee" },
   });
   if (!mk.ok()) {
     fail.push(`司机证件：造不出司机（${mk.status()}），这一段没验到`);

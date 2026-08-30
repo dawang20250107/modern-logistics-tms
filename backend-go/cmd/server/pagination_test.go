@@ -53,7 +53,7 @@ func (e *testEnv) seedOrders(n int) (tag string, wantFirstNo string) {
 			  '测试货', 1, 1, 1, 'cs', '张三', '13800000000', '上海', '杭州', '{}'::jsonb, '',
 			  'ftl', 0, '收货地址', '李四', '13900000000', false, false, '纸箱', '发货地址',
 			  '王五', '13700000000', 'normal', 0, 'monthly', 'enterprise', '', 'pending',
-			  '', 'none', '', 0, 'none', 'consignor', 'prepaid')`,
+			  '', 'none', '', 0, 'none', 'shipper', 'prepaid')`,
 			oid, fmt.Sprint(i), no); err != nil {
 			e.t.Fatalf("造订单 %s 失败：%v", no, err)
 		}
@@ -85,7 +85,7 @@ func (e *testEnv) seedOrders(n int) (tag string, wantFirstNo string) {
 			  cod_amount, cod_status, freight_payer, freight_term, platform_name, platform_order_no, order_id)
 			VALUES ($1::uuid, now(), now(), $2, '杭州 → 上海', '杭州', '上海', 'dispatched',
 			  'assigned', 'low', 'pending', 0, 1, 1, 1, 'outsource', '', 0, 'none',
-			  'consignor', 'prepaid', '', '', $3::uuid)`,
+			  'shipper', 'prepaid', '', '', $3::uuid)`,
 			uuid.NewString(), tag+"-WB", oid); err != nil {
 			e.t.Fatalf("造运单失败：%v", err)
 		}

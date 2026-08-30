@@ -32,7 +32,7 @@ func (e *testEnv) mkWaybillAt(status string) string {
 		  planned_arrival, departed_at)
 		VALUES (gen_random_uuid(), now(), now(), $1, '甲 → 乙', '甲', '乙', $2,
 		  'assigned', 'low', 'pending', 0, 1, 1, 1, 'outsource', '', 0, 'none',
-		  'consignor', 'prepaid', '', '', now() + interval '5 hours', now())`, no, status); err != nil {
+		  'shipper', 'prepaid', '', '', now() + interval '5 hours', now())`, no, status); err != nil {
 		e.t.Fatalf("造运单失败：%v", err)
 	}
 	e.t.Cleanup(func() {

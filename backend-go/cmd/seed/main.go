@@ -432,7 +432,7 @@ func (s *seeder) ordersAndWaybills() {
 			        '演示货物', $5, $6::numeric, $7::numeric, 'cs', '联系人', '13800000000',
 			        $8, $9, '{}'::jsonb, '', 'ftl', 0, '', '', '', false, false, $14,
 			        '', '', '', 'normal', $10::numeric, 'monthly', $15, '', 'pending',
-			        '', 'none', '', 0, 'none', 'consignor', 'prepaid',
+			        '', 'none', '', 0, 'none', 'shipper', 'prepaid',
 			        $11::uuid, $12::uuid, $13::timestamptz, $16::uuid, $17::timestamptz)
 			ON CONFLICT (order_no) DO UPDATE SET status=EXCLUDED.status,
 			  claimed_by_id=EXCLUDED.claimed_by_id, claimed_at=EXCLUDED.claimed_at, updated_at=now()`,
@@ -465,7 +465,7 @@ func (s *seeder) ordersAndWaybills() {
 			  customer_id, carrier_id, organization_id, order_id, vehicle_id, driver_id)
 			VALUES ($1::uuid, now() - ($2 || ' days')::interval, now(), $3, $4, $5, $6, $7,
 			        'assigned', 'low', $8, 0, 20, 12.5, 30, 'outsource', '', 0, 'none',
-			        'consignor', 'prepaid', '', '',
+			        'shipper', 'prepaid', '', '',
 			        $9::uuid, $10::uuid, $11::uuid, $12::uuid, $13::uuid, $14::uuid)
 			ON CONFLICT (waybill_no) DO UPDATE SET status=EXCLUDED.status, updated_at=now()`,
 			id("waybill/"+no), fmt.Sprint(i+2), no, route[0]+"→"+route[1], route[0], route[1], st,

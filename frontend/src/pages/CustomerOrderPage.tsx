@@ -76,7 +76,17 @@ export function CustomerOrderPage() {
             <button className="btn-primary" style={{ width: "100%", marginTop: 14 }} disabled={!valid || submit.isPending} onClick={() => submit.mutate()}>
               {submit.isPending ? "提交中…" : "提交下单"}
             </button>
-            {submit.isError && <div className="login-error" role="alert">提交失败，请检查网络后重试。</div>}
+            {/* 显示服务端说的那句话。原先一律写"请检查网络后重试"——
+                而客户在"重量(吨)"里填了「三吨」时，问题跟网络毫无关系，
+                照着这句话重试一万次结果一样。后端现在会回
+                「重量(吨)请填数字。」，把它显示出来就够了。 */}
+            {submit.isError && (
+              <div className="login-error" role="alert">
+                {submit.error instanceof Error && submit.error.message
+                  ? submit.error.message
+                  : "提交失败，请稍后再试或直接联系客服。"}
+              </div>
+            )}
             {!valid && <div className="muted small" style={{ marginTop: 8, textAlign: "center" }}>请填写联系电话、始发地、目的地</div>}
             <div style={{ textAlign: "center", marginTop: 14 }}>
               <Link className="link small" to="/track">已下单？查询进度 →</Link>

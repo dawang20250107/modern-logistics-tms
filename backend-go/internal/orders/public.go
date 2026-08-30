@@ -9,7 +9,9 @@ package orders
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,11 +67,23 @@ func (h *Handler) PublicIntake(w http.ResponseWriter, r *http.Request) {
 		"origin":             origin,
 		"destination":        destination,
 		"cargo_desc":         str(body, "cargo_desc"),
-		"cargo_weight_ton":   orZero(body["cargo_weight_ton"]),
-		"cargo_quantity":     orZero(body["cargo_quantity"]),
 		"expected_pickup_at": body["expected_pickup_at"],
 		"remark":             str(body, "remark"),
 		"source_type":        "individual",
+	}
+	// 数值字段先校验再落库：填错格子的客户该拿到 400 和"哪一格错了"，
+	// 而不是 500 和一段 Postgres 报错（详见 numOrErr）。
+	for _, f := range []struct{ key, label string }{
+		{"cargo_weight_ton", "重量(吨)"},
+		{"cargo_quantity", "件数"},
+		{"cargo_volume_cbm", "体积(方)"},
+	} {
+		v, bad := numOrErr(body[f.key], f.label)
+		if bad != "" {
+			httpx.Err(w, http.StatusBadRequest, "PUBLIC_INTAKE_INVALID", f.label+"请填数字。")
+			return
+		}
+		data[f.key] = v
 	}
 	customerID := h.matchCustomer(ctx, data, channel, source, "")
 	enrich(data)
@@ -79,7 +93,15 @@ func (h *Handler) PublicIntake(w http.ResponseWriter, r *http.Request) {
 		CustomerID: customerID, ParseMeta: map[string]any{},
 	})
 	if code != "" {
-		httpx.Err(w, http.StatusInternalServerError, code, msg)
+		// **不把内部错误原文回给匿名调用方。**
+		// createOrder 的 msg 里带的是 Postgres 的原始报错（引擎、列类型、SQLSTATE），
+		// 那是给日志看的，不是给公网看的。实测泄露过这一句：
+		//   建单失败：ERROR: invalid input syntax for type numeric: "三吨" (SQLSTATE 22P02)
+		// 现在原文只进日志，回给客户的是一句能照着做的话。
+		slog.Error("公开建单失败", "code", code, "err", msg,
+			"ip", httpx.ClientIP(r), "phone", contactPhone)
+		httpx.Err(w, http.StatusInternalServerError, "PUBLIC_INTAKE_FAILED",
+			"下单失败，请稍后再试或直接联系客服。")
 		return
 	}
 	var orderNo, status string
@@ -94,11 +116,39 @@ func (h *Handler) PublicIntake(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func orZero(v any) any {
-	if v == nil || v == "" {
-		return 0
+// numOrErr 把公开表单里的数值字段归一成数字；不是数字就说清楚是哪一格。
+//
+// 原先是 orZero：空值补 0，其余**原样往下传**。于是客户在"重量(吨)"里
+// 填「三吨」时，那个字符串一路传到 INSERT，Postgres 报
+//
+//	invalid input syntax for type numeric: "三吨" (SQLSTATE 22P02)
+//
+// 而这条错误被原样塞进响应回给了**匿名用户**：HTTP 500，
+// 消息里带着数据库引擎、列类型和 SQLSTATE。
+// 界面上显示的则是「提交失败，请检查网络后重试」——指向一个错误的动作，
+// 客户会反复重试，而重试一万次结果一样。
+//
+// 一个填错格子的客户应该拿到 400 和"重量请填数字"，不是 500 和一段 SQL 报错。
+func numOrErr(v any, field string) (any, string) {
+	switch x := v.(type) {
+	case nil:
+		return 0, ""
+	case float64:
+		return x, ""
+	case json.Number:
+		return x, ""
+	case string:
+		t := strings.TrimSpace(x)
+		if t == "" {
+			return 0, ""
+		}
+		f, err := strconv.ParseFloat(t, 64)
+		if err != nil {
+			return nil, field
+		}
+		return f, ""
 	}
-	return v
+	return nil, field
 }
 
 // trackedEvents 对外只披露主干里程碑，内部流转（认领/释放/改单等）不出现在公开跟踪里

@@ -404,7 +404,10 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 		  node, lat, lng, photo, note, checkin_at)
 		VALUES ($1, now(), now(), $2::uuid, $3::uuid, $4, $5::numeric, $6::numeric, $7, $8, now())`,
 		id.String(), wbID, d.ID, node, lat, lng, nullIfEmpty(photoRel), note); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "打卡失败："+err.Error())
+		// 原始库错误只进日志：司机端的调用方是公网上的手机，
+		// 把 SQLSTATE 和列类型回给它没有意义，也不该。
+		slog.Error("打卡落库失败", "waybill", wbNo, "node", node, "err", err)
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "打卡失败，请稍后重试或联系调度。")
 		return
 	}
 
@@ -464,7 +467,8 @@ func (h *Handler) UploadCredential(w http.ResponseWriter, r *http.Request) {
 		  file, file_url, ocr_status, ocr_result, holder_name, cert_no, expiry_date, self_uploaded)
 		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, '', 'pending', '{}'::jsonb, '', '', NULL, true)`,
 		id.String(), d.ID, credType, side, fileRel); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "上传失败："+err.Error())
+		slog.Error("司机证件落库失败", "driver", d.ID, "cred_type", credType, "err", err)
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "上传失败，请稍后重试。")
 		return
 	}
 	// 建档即触发识别；未配引擎时只落 status=manual，绝不伪造证件号与有效期

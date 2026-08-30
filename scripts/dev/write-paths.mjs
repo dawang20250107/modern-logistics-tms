@@ -219,6 +219,88 @@ if (waybill) {
   }
 }
 
+// 计价规则：在页面上配一条阶梯价，然后拿它去报一次价。
+//
+// 这条比别的写操作多验一步「配完之后生效没有」。原因是这块曾经**整个够不着**：
+// 表单默认的计费方式就是「按重量阶梯」，而页面上没有任何地方能填那几档价，
+// 存下来 tier_prices 是 []，算价时单价取 0——用户认认真真配了一条合同价，
+// 报出来是零。没有报错，只是数字不对，而看到数字的人默认它就是系统算出来的。
+//
+// 所以这里的验收标准不是"保存返回 200"，是**同一个客户同样的重量，
+// 报出来的钱等于刚才填的那一档**。
+{
+  const tk = await token();
+  const mkName = "写操作走查-阶梯价-" + MARK;
+  await page.goto(`${BASE}/pricing`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  const openBtn = page.locator('button:has-text("新增")').first();
+  if (await openBtn.count()) await openBtn.click();
+  await page.waitForTimeout(400);
+
+  const nameInput = page.locator('input[placeholder*="比亚迪"]').first();
+  if (!(await nameInput.count())) {
+    fail.push("计价规则页打不开新增表单（找不到规则名称输入框）");
+  } else {
+    await nameInput.fill(mkName);
+    // 计费方式默认就是按重量阶梯，阶梯表应该跟着出现
+    const addTier = page.locator('button:has-text("+ 加一档")');
+    if (!(await addTier.count())) {
+      fail.push("按重量阶梯下没有「加一档」——页面上填不了阶梯价，" +
+                "存出来的规则报价会按 0 元/吨算");
+    } else {
+      // 0~5 吨 300 元/吨，5~30 吨 250 元/吨
+      for (const [min, max, price] of [["0", "5", "300"], ["5", "30", "250"]]) {
+        await addTier.click();
+        await page.waitForTimeout(150);
+        // 按 .tier-table 选，不按 .dt-table：这一页还有一张规则列表表格
+        const row = page.locator("table.tier-table tbody tr").last();
+        const cells = row.locator("input.cell-input");
+        await cells.nth(0).fill(min);
+        await cells.nth(1).fill(max);
+        await cells.nth(2).fill(price);
+      }
+      // 优先级拉高，免得被库里的演示通配规则压过去
+      const prio = page.locator('label:has-text("优先级") input').first();
+      if (await prio.count()) await prio.fill("500");
+      await page.locator('button:has-text("新增规则"), button:has-text("保存修改")').first().click();
+      await page.waitForTimeout(1500);
+
+      // 回库核对：存进去的阶梯必须是 min_ton/max_ton/price 三个键、数字类型
+      const listed = await page.request.get(`${API}/api/v1/finance/pricing-rules?page_size=200&search=${encodeURIComponent(MARK)}`,
+        { headers: { Authorization: `Bearer ${tk}` } });
+      const found = (await listed.json())?.data?.items?.find((x) => x.name === mkName);
+      if (!found) {
+        fail.push("阶梯价规则保存后在列表里找不到");
+      } else {
+        const tiers = found.tier_prices ?? [];
+        if (tiers.length !== 2) {
+          fail.push(`存下来的阶梯只有 ${tiers.length} 档，填的是 2 档`);
+        } else if (tiers.some((t) => t.min_ton === undefined || t.max_ton === undefined || t.price === undefined)) {
+          fail.push(`阶梯的字段名不对：${JSON.stringify(tiers[0])}，算价那边按 min_ton/max_ton/price 取值，` +
+                    "对不上就静默算成 0 元/吨");
+        } else {
+          // 8 吨落在 5~30 那一档：250 × 8 = 2000
+          const qr = await page.request.post(`${API}/api/v1/orders/quote`, {
+            headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+            data: { cargo_weight_ton: 8, cargo_volume_cbm: 0, cargo_quantity: 1 },
+          });
+          const q = (await qr.json())?.data ?? {};
+          if (q.rule_name !== mkName) {
+            note(`· 报价匹配到的是「${q.rule_name}」，不是刚配的那条（可能有更高优先级的规则），跳过金额核对`);
+          } else if (Math.abs((q.amount ?? 0) - 2000) > 0.01) {
+            fail.push(`按刚配的阶梯价报价得到 ${q.amount}，应为 2000（8 吨落在 5~30 档，250 元/吨）`);
+          } else {
+            note("· 计价规则：页面上配的阶梯价，报价按它算出来了（8 吨 → 2000 元）");
+          }
+        }
+        // 清理：这条规则会影响后续报价，跑完删掉
+        await page.request.delete(`${API}/api/v1/finance/pricing-rules/${found.id}`,
+          { headers: { Authorization: `Bearer ${tk}` } });
+      }
+    }
+  }
+}
+
 await page.waitForTimeout(500);
 console.log("\n写请求汇总：");
 const bad = [];

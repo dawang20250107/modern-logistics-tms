@@ -26,7 +26,8 @@ interface RuleForm {
   unit_price: string;
   min_charge_qty: string;
   min_price: string;
-  tier_prices: Array<{ min_ton: number; max_ton: number; price: number }>;
+  // 编辑期用字符串：数字类型下清空输入框会立刻变成 0，没法删了重填
+  tier_prices: Array<{ min_ton: string; max_ton: string; price: string }>;
   volumetric_factor: string;
   fuel_surcharge_pct: string;
   priority: string;
@@ -63,10 +64,57 @@ export function PricingPage() {
     customer: form.customer || null, carrier: form.carrier || null, route_name: form.route_name,
     base_price: form.base_price || 0, unit_price: form.unit_price || 0,
     min_charge_qty: form.min_charge_qty || 0, min_price: form.min_price || 0,
-    tier_prices: form.tier_prices, volumetric_factor: form.volumetric_factor || 0.3333,
+    // 存进去必须是数字：算价那边 decFrom 只认 float64 / json.Number，
+    // 收到字符串会取默认值 0，规则看着存上了、价却是零。
+    tier_prices: form.tier_prices.map((t) => ({
+      min_ton: Number(t.min_ton) || 0,
+      max_ton: Number(t.max_ton) || 0,
+      price: Number(t.price) || 0,
+    })),
+    volumetric_factor: form.volumetric_factor || 0.3333,
     fuel_surcharge_pct: form.fuel_surcharge_pct || 0,
     priority: Number(form.priority) || 0, is_active: form.is_active,
   });
+
+  const addTier = () => setForm((f) => ({
+    ...f,
+    // 新一档的起点接着上一档的终点，省得每次都要回头看上一行
+    tier_prices: [...f.tier_prices, {
+      min_ton: f.tier_prices.length ? (f.tier_prices[f.tier_prices.length - 1].max_ton || "") : "0",
+      max_ton: "", price: "",
+    }],
+  }));
+  const setTier = (i: number, k: "min_ton" | "max_ton" | "price", v: string) =>
+    setForm((f) => ({ ...f, tier_prices: f.tier_prices.map((t, j) => (j === i ? { ...t, [k]: v } : t)) }));
+  const removeTier = (i: number) =>
+    setForm((f) => ({ ...f, tier_prices: f.tier_prices.filter((_, j) => j !== i) }));
+
+  // 阶梯价的校验。三条都是**会算错钱**的配置，不是格式挑剔：
+  //   · 一档都没有 → 报价按 0 元/吨算，等于白配
+  //   · 止 ≤ 起    → 这一档永远匹配不上，重量落进来会掉到下一档或算成 0
+  //   · 有断档     → 落在缝里的重量匹配不到任何一档，同样算成 0
+  // 匹配是「第一条命中的赢」，所以重叠不报错（边界值靠前的那档生效，
+  // 说明文字里写了），但断档一定要拦。
+  const tierProblem = (() => {
+    if (form.charge_method !== "tiered_weight") return "";
+    if (form.tier_prices.length === 0) return "按重量阶梯至少要配一档，否则报价会按 0 元/吨算。";
+    const rows = form.tier_prices.map((t) => ({
+      min: Number(t.min_ton), max: Number(t.max_ton), price: Number(t.price),
+    }));
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!Number.isFinite(r.min) || !Number.isFinite(r.max) || !Number.isFinite(r.price)) {
+        return `第 ${i + 1} 档有空着或不是数字的格子。`;
+      }
+      if (r.max <= r.min) return `第 ${i + 1} 档的「止」要大于「起」，否则这一档永远匹配不上。`;
+      if (r.price <= 0) return `第 ${i + 1} 档的单价要大于 0。`;
+      if (i > 0 && r.min > rows[i - 1].max) {
+        return `第 ${i} 档止于 ${rows[i - 1].max} 吨，第 ${i + 1} 档才从 ${r.min} 吨开始：` +
+          `中间这段重量匹配不到任何一档，会按 0 元/吨算。`;
+      }
+    }
+    return "";
+  })();
 
   const reset = () => { setEditing(null); setForm(EMPTY); setFormOpen(false); };
   const save = useMutation({
@@ -91,7 +139,10 @@ export function PricingPage() {
       expense_item_code: r.expense_item_code,
       customer: r.customer ?? "", carrier: r.carrier ?? "", route_name: r.route_name,
       base_price: r.base_price, unit_price: r.unit_price ?? "0", min_charge_qty: r.min_charge_qty ?? "0",
-      min_price: r.min_price, tier_prices: r.tier_prices || [],
+      min_price: r.min_price,
+      tier_prices: (r.tier_prices ?? []).map((t) => ({
+        min_ton: String(t.min_ton ?? ""), max_ton: String(t.max_ton ?? ""), price: String(t.price ?? ""),
+      })),
       volumetric_factor: r.volumetric_factor, fuel_surcharge_pct: r.fuel_surcharge_pct,
       priority: String(r.priority), is_active: r.is_active,
     });
@@ -154,12 +205,71 @@ export function PricingPage() {
             <label>优先级（大者优先）<input value={form.priority} onChange={(e) => set("priority", e.target.value)} /></label>
             <label className="check-label"><input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} /> 启用</label>
           </div>
+
+          {/* 阶梯价表。
+              这块原先**整个不存在**：表单默认的计费方式就是「按重量阶梯」，
+              而页面上没有任何地方能填那几档价。存下来的规则 tier_prices 是 []，
+              算价时 pricePerTon 取 0，于是报价 = 起步价（起步价为 0 时报价就是 0）。
+              用户在页面上认认真真配了一条合同价，报出来的是零——**没有报错**，
+              只是数字不对，而看到数字的人默认它就是系统算出来的。
+              和这一轮修的「承运合同」「司机报销」是同一种：功能写好了，界面上够不着。
+
+              字段名必须是 min_ton / max_ton / price——算价那边就按这三个键取值
+              （internal/finance/pricing.go 的 decFrom(tier["min_ton"]) …），
+              改名字这里不会报错，只会静默算成 0。
+
+              表格上那个 tier-table 类名是给走查脚本认的：这一页还有一张
+              规则列表表格，只按 .dt-table 选会在将来某天悄悄选到另一张上去。 */}
+          {form.charge_method === "tiered_weight" && (
+            <div className="stack-sm" style={{ marginTop: 12 }}>
+              <div className="cluster-between">
+                <b style={{ fontSize: 13 }}>重量阶梯 *</b>
+                <button className="btn-ghost small" onClick={addTier}>+ 加一档</button>
+              </div>
+              {form.tier_prices.length === 0 ? (
+                <div className="muted small">
+                  还没有任何一档。按重量阶梯必须至少配一档，否则报价会按 0 元/吨算。
+                </div>
+              ) : (
+                <table className="dt-table tier-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "30%" }}>起（吨，含）</th>
+                      <th style={{ width: "30%" }}>止（吨，含）</th>
+                      <th style={{ width: "30%" }}>单价（元/吨）</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.tier_prices.map((t, i) => (
+                      <tr key={i}>
+                        <td><input className="cell-input" value={t.min_ton} inputMode="decimal"
+                                   onChange={(e) => setTier(i, "min_ton", e.target.value)} /></td>
+                        <td><input className="cell-input" value={t.max_ton} inputMode="decimal"
+                                   onChange={(e) => setTier(i, "max_ton", e.target.value)} /></td>
+                        <td><input className="cell-input" value={t.price} inputMode="decimal"
+                                   onChange={(e) => setTier(i, "price", e.target.value)} /></td>
+                        <td><button className="btn-ghost small" onClick={() => removeTier(i)}>删除</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {tierProblem && <div className="form-error small">{tierProblem}</div>}
+              <div className="muted small">
+                取的是「总重落在哪一档，全部重量按那一档的单价算」，不是逐段累加。
+                5 吨这种边界值两档都能匹配时，按列表里靠前的那一档——所以顺序有意义。
+              </div>
+            </div>
+          )}
+
           <div className="muted small" style={{ marginTop: 8 }}>
             六种计费方式：整车一口价 / 按重量阶梯 / 按方 / 按件 / 按公里 / 吨公里；均取「最低价」为金额下限并叠加燃油附加。录单"自动报价"按客户/线路匹配优先级最高的收入价规则。
           </div>
         </div>
         <div className="form-actions">
-          <button className="btn-primary" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()} title={!form.name.trim() ? "请先填写规则名称" : undefined}>
+          <button className="btn-primary" disabled={!form.name.trim() || !!tierProblem || save.isPending} onClick={() => save.mutate()}
+                  title={!form.name.trim() ? "请先填写规则名称" : tierProblem || undefined}>
             {editing ? "保存修改" : "新增规则"}
           </button>
           <button className="btn-ghost" onClick={reset}>取消</button>

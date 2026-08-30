@@ -11,6 +11,7 @@ const { chromium } = await import(
   process.env.PLAYWRIGHT_PKG ?? "/opt/node22/lib/node_modules/playwright/index.js"
 ).then((m) => m.default ?? m);
 import { mkdirSync } from "node:fs";
+import { login, assertAppPage } from "./lib/browser-login.mjs";
 
 const argv = process.argv.slice(2);
 const BASE = argv.find((a) => !a.startsWith("--")) ?? "http://127.0.0.1:5173";
@@ -18,6 +19,9 @@ const shotIdx = argv.indexOf("--shots");
 const SHOTS = shotIdx >= 0 ? (argv[shotIdx + 1] ?? "shots") : null;
 // 1680×1000 ≈ 13" 笔记本外接屏的常见工作区，调度台的真实使用环境
 const VIEWPORT = { width: 1680, height: 1000 };
+const API = process.env.API_BASE ?? "http://127.0.0.1:8000";
+const USER = process.env.TMS_USER ?? "admin";
+const PASS = process.env.TMS_PASS ?? "Admin12345!";
 
 const PAGES = [
   ["驾驶舱", "/"],
@@ -218,11 +222,9 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
 const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2 });
 const page = await ctx.newPage();
 
-await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
-await page.locator("input").nth(0).fill("admin");
-await page.locator("input").nth(1).fill("Admin12345!");
-await page.keyboard.press("Enter");
-await page.waitForTimeout(3000);
+// 登录必须确认成功。不确认的话，网关一挂就会把登录页当六个业务页各量一遍，
+// 报出一份"看着像真的"的走查结论（详见 lib/browser-login.mjs 的说明）。
+await login(page, BASE, { user: USER, pass: PASS, api: API });
 
 const results = [];
 for (const theme of ["light", "dark"]) {
@@ -233,6 +235,9 @@ for (const theme of ["light", "dark"]) {
   for (const [name, path] of PAGES) {
     await page.goto(BASE + path, { waitUntil: "networkidle" }).catch(() => {});
     await page.waitForTimeout(1800);
+    // 每页都确认一次：会话中途失效（令牌过期、网关重启）时，后面几页会被
+    // 静默打回登录页，只在开头断言一次是拦不住的。
+    await assertAppPage(page, name, API);
     const m = await page.evaluate(MEASURE);
     results.push({ theme, name, path, ...m });
     if (SHOTS) {

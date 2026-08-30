@@ -58,6 +58,20 @@ echo "  $OUT/media-$STAMP.tar.gz ($(du -h "$OUT/media-$STAMP.tar.gz"|cut -f1))"
 if [ "$KEEP" = 1 ]; then echo "── --keep：只备份，不演练恢复 ──"; exit 0; fi
 
 echo "── 模拟灾难（DROP DATABASE + 清空媒体）──"
+# 演练要把网关停掉（不停的话连接会挡住 DROP DATABASE），但**停之前它在不在**
+# 决定了跑完要不要把它起回来。原先只有"媒体非空"那一条分支会 start_gateway，
+# 媒体目录为空时演练结束就把网关留在停着的状态，之后同一台机器上再跑
+# release-check，浏览器走查会全部被打回登录页——而它报的是"UI 走查超预算"，
+# 一条根本不存在的问题。演练可以借用环境，但必须还回去。
+GW_WAS_UP=0
+curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null && GW_WAS_UP=1
+restore_gateway() {
+  [ "$GW_WAS_UP" = 1 ] || return 0
+  curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null && return 0
+  echo "── 还原环境：把演练前就在跑的网关起回来 ──"
+  start_gateway || echo "  ⚠ 网关没能起回来，后续依赖它的检查会记「没跑」"
+}
+trap restore_gateway EXIT
 stop_gateway   # 见上：按 PID 停，不按名字杀
 psql -d postgres -q -c "DROP DATABASE IF EXISTS $PGDATABASE"
 psql -d postgres -q -c "CREATE DATABASE $PGDATABASE OWNER $PGUSER"

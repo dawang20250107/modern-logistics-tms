@@ -62,27 +62,36 @@ if [ -d frontend/node_modules ]; then
 
   # 走查要连开发服务器。连不上时必须报"没跑"，不能报"没过"——
   # 把"跑不起来"记成失败，几次之后大家就开始无视这一项了。
-  if curl -sf -o /dev/null http://127.0.0.1:5173/ 2>/dev/null; then
-    node scripts/dev/ui-audit.mjs >/tmp/rc-ui.log 2>&1 \
-      && ok "UI 走查（配色/间距预算）" || bad "UI 走查超预算（见 /tmp/rc-ui.log）"
-    node scripts/dev/smoke-ui.mjs >/tmp/rc-smoke.log 2>&1 \
-      && ok "浏览器冒烟（各页无非 2xx、无未捕获异常）" \
-      || { bad "浏览器冒烟有发现："; tail -6 /tmp/rc-smoke.log | sed 's/^/      /'; }
-    # 端到端业务链要连网关，前面已确认它在
-    if curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null; then
-      node scripts/dev/e2e-flow.mjs >/tmp/rc-e2e.log 2>&1 \
-        && ok "端到端业务链（建单→检索→详情→计数一致→翻页）" \
-        || { bad "端到端业务链失败："; tail -10 /tmp/rc-e2e.log | sed 's/^/      /'; }
-      # 写操作要真按一次。这一轮三个凭证上传的问题（丢字节、400、页面上不显示）
-      # 上面那两个脚本一个都没抓到：一个只加载页面，一个只走建单那条链。
-      node scripts/dev/write-paths.mjs >/tmp/rc-write.log 2>&1 \
-        && ok "各页写操作（上传的凭证能取回原件）" \
-        || { bad "写操作走查有发现："; tail -10 /tmp/rc-write.log | sed 's/^/      /'; }
-    else
-      skip "端到端业务链：网关没起"
-    fi
+  #
+  # 四个浏览器脚本**全部**要连网关：前端只是壳，登录、列表、写操作都打 :8000。
+  # 网关没起时它们会被前端打回 /login，然后各自坏在不同的地方：
+  # ui-audit 把登录页当业务页量出一堆假发现，smoke-ui 因为请求在网络层就断了
+  # （连响应都没有）反而报绿。所以这一整段都挂在网关就绪之下，
+  # 而不是只挡住 e2e-flow 那一个。
+  #
+  # browse_step 统一处理退出码：0 过、2 是脚本自报"我没跑起来"（登录失败/
+  # 页面没打开）记跳过、其余才算失败。见 lib/browser-login.mjs。
+  browse_step() { # <标题> <日志文件> <命令...>
+    local title="$1" logf="$2"; shift 2
+    "$@" >"$logf" 2>&1
+    case $? in
+      0) ok "$title" ;;
+      2) skip "$title：脚本自报没跑起来（见 $logf）"; tail -4 "$logf" | sed 's/^/      /' ;;
+      *) bad "$title 有发现（见 $logf）："; tail -8 "$logf" | sed 's/^/      /' ;;
+    esac
+  }
+
+  if ! curl -sf -o /dev/null http://127.0.0.1:5173/ 2>/dev/null; then
+    skip "浏览器走查（UI/冒烟/端到端/写操作）：前端开发服务器没起（cd frontend && npm run dev）"
+  elif ! curl -sf -o /dev/null http://127.0.0.1:8000/readyz 2>/dev/null; then
+    skip "浏览器走查（UI/冒烟/端到端/写操作）：网关没起（:8000/readyz 不通）"
   else
-    skip "UI 走查：前端开发服务器没起（cd frontend && npm run dev）"
+    browse_step "UI 走查（配色/间距预算）" /tmp/rc-ui.log node scripts/dev/ui-audit.mjs
+    browse_step "浏览器冒烟（各页无非 2xx、无未捕获异常）" /tmp/rc-smoke.log node scripts/dev/smoke-ui.mjs
+    browse_step "端到端业务链（建单→检索→详情→计数一致→翻页）" /tmp/rc-e2e.log node scripts/dev/e2e-flow.mjs
+    # 写操作要真按一次。这一轮三个凭证上传的问题（丢字节、400、页面上不显示）
+    # 上面那两个脚本一个都没抓到：一个只加载页面，一个只走建单那条链。
+    browse_step "各页写操作（上传的凭证能取回原件）" /tmp/rc-write.log node scripts/dev/write-paths.mjs
   fi
 else
   skip "前端：未装依赖（frontend/node_modules 不存在），先 npm ci"

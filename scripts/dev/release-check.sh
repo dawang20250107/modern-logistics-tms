@@ -119,6 +119,10 @@ if [ -d frontend/node_modules ]; then
     # 写操作要真按一次。这一轮三个凭证上传的问题（丢字节、400、页面上不显示）
     # 上面那两个脚本一个都没抓到：一个只加载页面，一个只走建单那条链。
     browse_step "各页写操作（上传的凭证能取回原件）" /tmp/rc-write.log node scripts/dev/write-paths.mjs
+    # 司机端是另一套界面、另一套鉴权（X-Driver-Token），上面四个脚本全都从
+    # 管理端 /login 进去，一个都没打开过它。第一次真按下去就查出两处：
+    # 预检没放行 X-Driver-Token（登录后一片空白）、未授权定位时打卡按钮永久卡住。
+    browse_step "司机端（登录→本人运单→拍照打卡→回库核对）" /tmp/rc-driver.log node scripts/dev/driver-walk.mjs
   fi
 else
   skip "前端：未装依赖（frontend/node_modules 不存在），先 npm ci"

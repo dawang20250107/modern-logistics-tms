@@ -178,6 +178,41 @@ export function DriverPortalPage() {
 
 type Phase = "idle" | "locating" | "uploading" | "done" | "error";
 
+// 取定位，最多等 GEO_WAIT_MS，之后一律放行。
+//
+// 为什么不能只靠 getCurrentPosition 的 timeout 选项：**它不覆盖授权那一段**。
+// 浏览器弹出"允许获取位置吗"而司机没点（或点了拒绝），成功和失败两个回调
+// 都不会被调用——实测 15 秒过去仍然一个都没回。于是那个 Promise 永远不 resolve，
+// 打卡按钮永久卡在"正在定位…"，**这个司机从此再也打不了卡**。
+// 而打卡是司机端唯一要紧的按钮：装货、发车、到达全靠它，运单状态也靠它推进。
+//
+// 实测（headless Chromium，:5173，见 driver-walk.mjs 那一轮）：
+//   已授权     → 2ms 拿到坐标
+//   未答复弹窗 → 15 秒两个回调一个都没来
+//   未授权     → 15 秒两个回调一个都没来
+//
+// 所以必须自己拿计时器兜底。定位只是打卡的**附加证据**，缺了它照样要能提交——
+// 让一个可选信息把主流程卡死，方向就反了。
+const GEO_WAIT_MS = 6000;
+
+function getPosition(): Promise<GeolocationPosition | null> {
+  if (!navigator.geolocation) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (p: GeolocationPosition | null) => {
+      if (done) return;
+      done = true;
+      resolve(p);
+    };
+    const timer = setTimeout(() => finish(null), GEO_WAIT_MS);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { clearTimeout(timer); finish(p); },
+      () => { clearTimeout(timer); finish(null); },
+      { timeout: GEO_WAIT_MS, maximumAge: 60000 },
+    );
+  });
+}
+
 function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [feedback, setFeedback] = useState("");
@@ -191,8 +226,7 @@ function WaybillCard({ wb, token }: { wb: WaybillBrief; token: string }) {
     // 弱网友好：定位失败也可继续提交，每一步都有明确反馈
     setPhase("locating");
     setFeedback("正在定位…");
-    const pos = await new Promise<GeolocationPosition | null>((res) =>
-      navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res(p), () => res(null), { timeout: 5000 }) : res(null));
+    const pos = await getPosition();
     if (!pos) setFeedback("定位失败，仍可继续提交");
     setPhase("uploading");
     setFeedback(file ? "照片上传中…" : "提交中…");

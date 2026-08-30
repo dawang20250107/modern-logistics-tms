@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -342,8 +343,12 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 		note = string([]rune(note)[:255])
 	}
 
+	// 打卡行的 id 先取出来：照片路径要带上它。
+	id, _ := uuid.NewV7()
+
 	// 水印照片：把拍摄时间、GPS、节点·司机·运单号焊进像素，事后无法靠改库洗掉
 	photoRel := ""
+	photoFailed := false
 	if raw, name := form.file("photo"); raw != nil {
 		_ = name
 		lines := []string{
@@ -352,13 +357,23 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 			checkinNodes[node] + " · " + d.Name + " · " + wbNo,
 		}
 		stamped := Watermark(raw, lines)
-		rel := "checkins/" + wbNo + "_" + node + ".jpg"
+		// 路径必须带打卡行的 id。原先是 "<运单号>_<节点>.jpg"——同一节点再打一次
+		// 就把上一张**原地覆盖**掉了，而弱网重试正是常规路径（界面上就有"重试"按钮）。
+		// 实测连打两次：库里两行打卡记录，photo 都指向同一个文件，
+		// 第一行拿到的是第二张照片——时间、GPS、节点全是第二次的。
+		// 水印"焊进像素、事后无法靠改库洗掉"的意义，被一次普通重试就抹掉了。
+		rel := "checkins/" + wbNo + "_" + node + "_" + id.String() + ".jpg"
 		if err := h.saveMedia(rel, stamped); err == nil {
 			photoRel = rel
+		} else {
+			// 存不下不该把打卡整个挡掉（司机在路上，打卡本身比照片要紧），
+			// 但也绝不能装作成功——原先这里错误被直接吞掉，接口照样返回 201 ok，
+			// 司机以为照片交了，实际上库里 photo 是 NULL。响应里如实说。
+			photoFailed = true
+			slog.Error("打卡照片存储失败", "waybill", wbNo, "node", node, "err", err)
 		}
 	}
 
-	id, _ := uuid.NewV7()
 	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_driver_checkin (id, created_at, updated_at, waybill_id, driver_id,
 		  node, lat, lng, photo, note, checkin_at)
@@ -384,9 +399,14 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 	var checkinAt string
 	_ = h.DB.QueryRow(ctx, "SELECT checkin_at FROM ops_driver_checkin WHERE id=$1::uuid", id.String()).
 		Scan(&checkinAt)
-	httpx.JSON(w, http.StatusCreated, map[string]any{
+	resp := map[string]any{
 		"ok": true, "node": node, "checkin_at": checkinAt, "waybill_status": newStatus,
-	})
+		"photo_saved": photoRel != "",
+	}
+	if photoFailed {
+		resp["photo_error"] = "照片没能存下来，打卡已记录，请稍后在运单里补传。"
+	}
+	httpx.JSON(w, http.StatusCreated, resp)
 }
 
 // UploadCredential POST /api/v1/driver/credentials —— 司机自助上传证件（自传）

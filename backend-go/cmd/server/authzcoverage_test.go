@@ -70,8 +70,11 @@ func TestEveryMutatingHandlerHasAPermissionCheck(t *testing.T) {
 
 	// 各包的权限闸叫法不一样，但都是"取当前用户 → 比权限点 → 不过就 403"。
 	// require 是 AI 那个包的写法（比 ai.use）。
+	// allowAny 是"任一权限点满足即放行"，建单那几条用它
+	// （客服有 waybill.create，调度员只勾了 waybill.manage）。
+	// 它是真闸，只是这条用例原先不认识它——不登记的话建单会被误报成"没挂闸"。
 	guard := regexp.MustCompile(`Allow\(w, r,|requirePerm\(w, r,|resolve\(w, r,|Guard\(w, r,|` +
-		`allow\(w, r,|need\(w, r,|require\(w, r\)|guard\(w, r\)|MD\.Allow\(|` +
+		`allow\(w, r,|allowAny\(w, r,|need\(w, r,|require\(w, r\)|guard\(w, r\)|MD\.Allow\(|` +
 		`approvalGate\(w, r|codAction\(w, r`)
 	fn := regexp.MustCompile(`func \(h \*Handler\) (\w+)\(w http\.ResponseWriter, r \*http\.Request\) \{`)
 	factory := regexp.MustCompile(`func \(h \*Handler\) (\w+)\([^)]*\) http\.HandlerFunc \{`)

@@ -215,7 +215,7 @@ func coerceDT(v string) any {
 
 // Intake POST /api/v1/orders/intake
 func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
-	if !h.allow(w, r, "waybill.manage") {
+	if !h.allowAny(w, r, "waybill.create", "waybill.manage") {
 		return
 	}
 	ctx := r.Context()
@@ -251,7 +251,9 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 	} else {
 		sourceParts = append(sourceParts, me.Username)
 	}
-	source := strings.Join(sourceParts, "·")
+	// 来源标识是系统拼的（组织·姓名），落进 varchar(32)。
+	// 组织名长一点、再配个邮箱式用户名就会超——那不该把下单挡回去，截断即可。
+	source := clipRunes(strings.Join(sourceParts, "·"), 32)
 	channel := body.Channel
 	if channel == "" {
 		channel = "cs"
@@ -305,7 +307,13 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 		ParseMeta: parseMeta,
 	})
 	if code != "" {
-		httpx.Err(w, http.StatusInternalServerError, code, msg)
+		// 字段超长是用户填出来的，是 400 不是 500 —— 500 会被监控当成
+		// 服务端故障告警，而这里该做的只是把那一栏改短。
+		st := http.StatusInternalServerError
+		if code == "FIELD_TOO_LONG" {
+			st = http.StatusBadRequest
+		}
+		httpx.Err(w, st, code, msg)
 		return
 	}
 

@@ -689,7 +689,7 @@ func validUUIDs(in []string) []string {
 //
 // 逐行建单、失败隔离：一行脏数据不该让整批白跑。
 func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
-	if !h.allow(w, r, "waybill.manage") {
+	if !h.allowAny(w, r, "waybill.create", "waybill.manage") {
 		return
 	}
 	ctx := r.Context()

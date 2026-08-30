@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -91,15 +93,34 @@ func (h *Handler) createOrder(ctx context.Context, p createParams) (string, stri
 	for i, c := range cols {
 		base[c] = vals[i]
 	}
-	insCols, insVals, phs := []string{}, []any{}, []string{}
-	for c, v := range base {
+	// 列顺序按名字排定。base 是 map，直接遍历出来的顺序每次都不一样——
+	// 于是"哪个字段太长"这句提示会随机指向不同的字段（同时有两个超长时），
+	// 日志里的 SQL 也每次不同，对不上。
+	insCols, insVals, phs := make([]string, 0, len(base)), make([]any, 0, len(base)), make([]string, 0, len(base))
+	for c := range base {
 		insCols = append(insCols, c)
-		insVals = append(insVals, v)
+	}
+	sort.Strings(insCols)
+	for _, c := range insCols {
+		insVals = append(insVals, base[c])
 		phs = append(phs, fmt.Sprintf("$%d", len(insVals)))
+	}
+	// 先按库里真实的列长挡一道，别让它变成一句原始 SQL 报错。
+	// 实测（客服拿到建单权限之后第一次真按下去）：联系电话、包装、温区、
+	// 提货联系电话、货物名称、始发地、客户名称，只要超过 varchar(32)，
+	// 拿到的都是 HTTP 500 加
+	//   建单失败：ERROR: value too long for type character varying(32) (SQLSTATE 22001)
+	// ——而且不说是哪个字段。客服粘一段长地址进来就撞上，只能去问技术。
+	limits := colLimits.load(ctx, h.DB, []string{"ops_order", "ops_order_cargo_item", "ops_order_stop"})
+	if col, max, got := tooLong(limits["ops_order"], insCols, insVals); col != "" {
+		return "", "FIELD_TOO_LONG", tooLongMsg(col, max, got)
 	}
 	if _, err := tx.Exec(ctx,
 		"INSERT INTO ops_order ("+strings.Join(insCols, ",")+") VALUES ("+strings.Join(phs, ",")+")", insVals...); err != nil {
-		return "", "INTERNAL", "建单失败：" + err.Error()
+		// 原文只进日志。回给调用方的是错误码 + 一句能照着做的话——
+		// 引擎名、列类型、SQLSTATE 对下单的人没有任何用处。
+		slog.Error("建单写库失败", "err", err)
+		return "", "INTERNAL", "建单失败，请检查填写内容；如果反复失败请联系管理员。"
 	}
 
 	// 货物明细 + 货量汇总回写

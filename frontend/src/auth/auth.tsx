@@ -138,9 +138,19 @@ export function useAuth(): AuthState {
 }
 
 /** 前端权限判定：超管（["*"]）或持有该权限点即可。与后端 effective_permissions 一致。 */
-export function hasPerm(user: CurrentUser | null, code: string): boolean {
+/**
+ * 传数组表示「任一满足」。
+ *
+ * 需要它是因为建单那一档拆成了两个点：客服有 waybill.create，
+ * 调度员只勾了 waybill.manage（manage 天然涵盖建单）。
+ * 只判一个点会把调度员挡在客服工作台外面——而后端是放行的，
+ * 那种"界面说没权限、接口其实可以"比直接报错更难查。
+ */
+export function hasPerm(user: CurrentUser | null, code: string | string[]): boolean {
   if (!user) return false;
   if (user.is_superuser) return true;
   const perms = user.permissions ?? [];
-  return perms.includes("*") || perms.includes(code);
+  if (perms.includes("*")) return true;
+  const wanted = Array.isArray(code) ? code : [code];
+  return wanted.some((c) => perms.includes(c));
 }

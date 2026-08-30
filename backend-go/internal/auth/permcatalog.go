@@ -36,6 +36,13 @@ type Permission struct {
 var Catalog = []Permission{
 	// 运单
 	{"waybill.view", "查看运单", "waybill"},
+	// 建单和"管理运单"分开：交付说明第七节的验收链第一步就是
+	// 「客服工作台建一单」，而演示的客服角色只有 waybill.view，
+	// 实测 POST /orders/intake 返回 403 —— **文档写的验收链，
+	// 用文档给的角色跑不通**。
+	// 直接把 waybill.manage 给客服又太多：那一并给出去的是派单、签收、
+	// 代收货款打款、异常定责赔钱。所以单列一个只管"录进来"的点。
+	{"waybill.create", "录入订单（客服代下单、批量导入、复制建单）", "waybill"},
 	{"waybill.manage", "管理运单", "waybill"},
 	// 财务结算
 	{"finance.view", "查看费用与对账", "finance"},

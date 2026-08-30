@@ -13,7 +13,7 @@ import {
   IconReceipt, IconCreditCard, IconShield, IconFileText, IconBox,
 } from "./Icons";
 
-type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string };
+type NavItem = { to: string; label: string; icon: React.ReactNode; end?: boolean; adminOnly?: boolean; superOnly?: boolean; perm?: string | string[] };
 type NavGroup = { title: string; items: NavItem[] };
 const MOBILE_NAV_MEDIA = "(max-width: 900px)";
 
@@ -24,7 +24,10 @@ const NAV_GROUPS: NavGroup[] = [
     title: "工作台",
     items: [
       { to: "/", label: "运输驾驶舱", icon: <IconTower size={18} />, end: true },
-      { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} /> },
+      // 客服工作台的核心动作是建单，要 waybill.create（manage 也涵盖它）。
+      // 原先这一条没声明权限：财务只读点进去，表单能填满，
+      // 最后在提交那一下才告诉你"缺少所需权限"。
+      { to: "/intake", label: "客服工作台", icon: <IconFileText size={18} />, perm: ["waybill.create", "waybill.manage"] },
       { to: "/dispatch-board", label: "调度工作台", icon: <IconGrid size={18} />, perm: "waybill.view" },
       { to: "/waybills", label: "订单管理", icon: <IconDatabase size={18} />, perm: "waybill.view" },
     ],

@@ -17,7 +17,8 @@ import { hasPerm, useAuth } from "../auth/auth";
 import { StateView } from "./StateView";
 
 export function RequirePerm({ perm, label, children }: {
-  perm: string;
+  /** 传数组表示「任一满足」 */
+  perm: string | string[];
   /** 页面中文名，写进提示里——"你没有权限"不如"你没有查看对账中心的权限"有用 */
   label: string;
   children: ReactNode;
@@ -31,7 +32,7 @@ export function RequirePerm({ perm, label, children }: {
     <StateView
       kind="empty"
       title={`没有查看「${label}」的权限`}
-      hint={`这一页需要 ${perm} 权限点。请让管理员在「组织与权限 → 权限授权」里给你的角色勾上它。`}
+      hint={`这一页需要 ${Array.isArray(perm) ? perm.join(" 或 ") : perm} 权限点。请让管理员在「组织与权限 → 权限授权」里给你的角色勾上它。`}
       action={<Link className="btn-primary" to="/" style={{ textDecoration: "none" }}>返回驾驶舱</Link>}
     />
   );

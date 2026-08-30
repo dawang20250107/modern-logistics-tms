@@ -33,8 +33,10 @@ func TestEveryCheckedPermissionExistsInCatalog(t *testing.T) {
 	}
 
 	// 两种写法：直接传给闸函数，以及写在读写配置的 ReadPerm/WritePerm 上
-	callPat := regexp.MustCompile(`(?:Allow|allow|requirePerm|resolve|need|Guard|hasPerm)\(` +
-		`(?:w, r, |ctx, |perms, )?"([a-z][a-z0-9_.]*)"`)
+	// allowAny 一次传多个权限点，形如 allowAny(w, r, "a", "b")——
+	// 单独列一条把后面那些也扫出来，否则新加的点会漏检。
+	callPat := regexp.MustCompile(`(?:Allow|allowAny|allow|requirePerm|resolve|need|Guard|hasPerm)\(` +
+		`(?:w, r, |ctx, |perms, )?"([a-z][a-z0-9_.]*)"(?:, "([a-z][a-z0-9_.]*)")*`)
 	cfgPat := regexp.MustCompile(`(?:Read|Write)Perm:\s*"([a-z][a-z0-9_.]*)"`)
 
 	where := map[string]map[string]bool{}

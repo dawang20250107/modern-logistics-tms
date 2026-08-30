@@ -54,6 +54,36 @@ type Handler struct {
 // 这个包里本来就有带权限的入口（resolve(w, r, "waybill.manage")），
 // 只是那些自己取参数、不走 resolve 的 handler 全都漏了。
 // 现在缺的那些补上，并逐条登记进 cmd/server/authz_test.go 的清单。
+// allowAny 任一权限点满足即放行。
+//
+// 建单这几条要的是 waybill.create，而 waybill.manage 天然涵盖它——
+// 调度员只勾了 manage，不该因为多出一个点就建不了单。
+func (h *Handler) allowAny(w http.ResponseWriter, r *http.Request, wants ...string) bool {
+	ctx := r.Context()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return false
+	}
+	_, _, perms, err := h.Svc.RolesAndPerms(ctx, me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取权限失败")
+		return false
+	}
+	for _, p := range perms {
+		if p == "*" {
+			return true
+		}
+		for _, want := range wants {
+			if p == want {
+				return true
+			}
+		}
+	}
+	httpx.Err(w, http.StatusForbidden, "PERMISSION_DENIED", "缺少所需权限。")
+	return false
+}
+
 func (h *Handler) allow(w http.ResponseWriter, r *http.Request, want string) bool {
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))

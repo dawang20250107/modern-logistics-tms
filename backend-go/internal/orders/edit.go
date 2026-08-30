@@ -29,6 +29,12 @@ var fieldLabels = map[string]string{
 	"cargo_value": "货值", "package_type": "包装", "is_hazardous": "危险品", "temperature_range": "温区",
 	"quoted_amount": "报价", "expected_pickup_at": "期望提货", "expected_delivery_at": "期望送达",
 	"priority": "优先级", "business_type": "业务类型", "settlement_type": "结算方式", "remark": "备注",
+	// 这七个原先没有中文名。平时无所谓（编辑面只列上面那些），
+	// 但建单的长度校验会拿它报错，那时提示里蹦出的是英文列名——
+	// 「pickup_contact_phone太长了」对客服等于没说。
+	"pickup_contact_name": "提货联系人", "pickup_contact_phone": "提货联系电话",
+	"delivery_contact_name": "送货联系人", "delivery_contact_phone": "送货联系电话",
+	"freight_term": "运费条款", "freight_payer": "付费方", "source_type": "来源类型",
 }
 
 // Edit POST /api/v1/orders/{id}/edit {fields, cargo_items, stops}

@@ -14,7 +14,7 @@ import (
 
 // Clone POST /api/v1/orders/{id}/clone
 func (h *Handler) Clone(w http.ResponseWriter, r *http.Request) {
-	if !h.allow(w, r, "waybill.manage") {
+	if !h.allowAny(w, r, "waybill.create", "waybill.manage") {
 		return
 	}
 	id, ok := h.resolveOrder(w, r)
@@ -98,7 +98,13 @@ func (h *Handler) Clone(w http.ResponseWriter, r *http.Request) {
 		CustomerID: customerID, CargoItems: cargoItems, Stops: stops, ActorID: me.ID,
 	})
 	if code != "" {
-		httpx.Err(w, http.StatusInternalServerError, code, msg)
+		// 字段超长是用户填出来的，是 400 不是 500 —— 500 会被监控当成
+		// 服务端故障告警，而这里该做的只是把那一栏改短。
+		st := http.StatusInternalServerError
+		if code == "FIELD_TOO_LONG" {
+			st = http.StatusBadRequest
+		}
+		httpx.Err(w, st, code, msg)
 		return
 	}
 	h.respondOne(w, r, orderID, me)

@@ -196,8 +196,12 @@ func (s *seeder) rolesAndUsers() {
 			[]string{"waybill.view", "waybill.manage", "masterdata.view", "carrier.view", "telematics.view"}},
 		{"SEED_FINANCE", "财务（只读）", "all",
 			[]string{"finance.view", "waybill.view", "analytics.view"}},
+		// 客服要能建单：交付说明第七节的验收链第一步就是「客服工作台建一单」。
+		// 原先只有 view，那一步实测 403 —— 文档写的链，用文档给的角色跑不通。
+		// 给的是 waybill.create 而不是 manage：派单、签收、代收货款打款、
+		// 异常定责这些仍然轮不到客服。
 		{"SEED_CS", "客服", "org",
-			[]string{"waybill.view", "masterdata.view"}},
+			[]string{"waybill.view", "waybill.create", "masterdata.view"}},
 	}
 	for _, r := range roles {
 		rid := id("role/" + r.code)

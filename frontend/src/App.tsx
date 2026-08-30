@@ -44,11 +44,11 @@ export function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<ControlTowerPage />} />
-              <Route path="intake" element={<OrderIntakePage />} />
-              <Route path="orders/:id" element={<OrderDetailPage />} />
+              <Route path="intake" element={<RequirePerm perm={["waybill.create", "waybill.manage"]} label="客服工作台"><OrderIntakePage /></RequirePerm>} />
+              <Route path="orders/:id" element={<RequirePerm perm="waybill.view" label="订单详情"><OrderDetailPage /></RequirePerm>} />
               <Route path="dispatch-board" element={<RequirePerm perm="waybill.view" label="调度工作台"><DispatchBoardPage /></RequirePerm>} />
               <Route path="waybills" element={<RequirePerm perm="waybill.view" label="订单管理"><OrderManagePage /></RequirePerm>} />
-              <Route path="waybills/:no" element={<WaybillDetailPage />} />
+              <Route path="waybills/:no" element={<RequirePerm perm="waybill.view" label="运单详情"><WaybillDetailPage /></RequirePerm>} />
               <Route path="fleet" element={<RequirePerm perm="masterdata.view" label="资源库"><FleetPage /></RequirePerm>} />
               <Route path="reconciliation" element={<RequirePerm perm="finance.view" label="对账中心"><ReconciliationPage /></RequirePerm>} />
               <Route path="pricing" element={<RequirePerm perm="finance.view" label="计价规则"><PricingPage /></RequirePerm>} />

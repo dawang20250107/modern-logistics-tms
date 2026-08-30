@@ -207,6 +207,21 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 	_ = h.DB.QueryRow(ctx, `SELECT status, responsibility_party, amount::text, resolution, waybill_id::text
 		FROM ops_exception WHERE id=$1::uuid`, id).Scan(&from, &party, &amount, &resolution, &waybillID)
 
+	// 已关闭的异常不能再关一次。
+	//
+	// 关闭不是改个状态：责任金额 > 0 时会落一条应付，把异常成本带进对账。
+	// 这里原先没有任何守卫——同一条异常连关三次就生成三条应付，
+	// 实测 800 元的赔付被计成 2400 元，而三次都返回 200。
+	// 操作员双击一下、或者网络重试一次，承运商就被多扣一倍。
+	//
+	// 顺带也挡住"悄悄改写定责结论"：那个结论是要拿去跟承运商结算的，
+	// 要改就该是一次明确的动作，而不是再点一次关闭。
+	if from == "closed" {
+		httpx.Err(w, http.StatusConflict, "EXCEPTION_CLOSED",
+			"该异常已关闭。如需更正责任方或赔付金额，请先重新打开异常。")
+		return
+	}
+
 	if v, has := body["responsibility_party"].(string); has {
 		party = v
 	}

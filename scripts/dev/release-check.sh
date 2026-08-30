@@ -247,6 +247,12 @@ sect "前后端接口对齐"
 static_step /tmp/rc-route.log "有前端调用对不上后端路由：" \
   python3 scripts/dev/route-match.py
 
+# 反方向：后端有这个动作，界面上够不着。这一轮它出现了六次
+# （承运合同、司机报销、阶梯价、异常闭环、承运商拉黑、登录解锁），
+# 全都是"不报错、不崩、类型检查也过，只是少了一块"。
+static_step /tmp/rc-reach.log "有后端动作在界面上够不着：" \
+  python3 scripts/dev/reachable-actions.py
+
 sect "请求体字段对齐"
 # route-match 只比路径和方法，比不到 body 里面。而发布前最要命的那个 bug
 # 恰恰在 body 里：对账中心发 period_start，后端只认 start——用户明明选了账期，

@@ -720,6 +720,19 @@ function LoginAuditTab() {
   const total = totalQ.data?.total ?? 0;
   const fails = failQ.data?.total ?? 0;
   const truncated = total > rows.length;
+
+  // 解锁。连续失败会把账号锁一段时间（result=locked 那些行就是被锁挡回去的），
+  // 而后端的解锁端点**界面上原先没有任何入口**：账号一旦锁上，管理员在系统里
+  // 帮不了任何忙，只能等锁自己过期或者去连库。
+  // 安全闸配一个解锁入口是成套的——只有闸没有钥匙，闸最后会被拆掉。
+  const unlock = useMutation({
+    mutationFn: (username: string) => apiPost("/org/login-audit/unlock", { username }),
+    onSuccess: (_d, username) => {
+      toast.success(`已解锁 ${username}，该账号可以立即重试登录`);
+      q.refetch();
+    },
+    onError: (e: Error) => toast.error(e.message || "解锁失败"),
+  });
   return (
     <div className="panel">
       <div className="panel-head">
@@ -744,7 +757,7 @@ function LoginAuditTab() {
       ) : (
         <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>时间</th><th>用户名</th><th>结果</th><th>IP</th><th>客户端</th></tr></thead>
+          <thead><tr><th>时间</th><th>用户名</th><th>结果</th><th>IP</th><th>客户端</th><th /></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
@@ -753,6 +766,15 @@ function LoginAuditTab() {
                 <td><span className={`tag ${r.success ? "tag-low" : "tag-high"}`}>{r.result_label || (r.success ? "成功" : "失败")}</span></td>
                 <td className="mono small">{r.ip || EMPTY}</td>
                 <td className="small muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.user_agent}>{r.user_agent || EMPTY}</td>
+                <td>
+                  {/* 只在失败行上给解锁：成功行上摆一颗解锁按钮没有意义，
+                      而且会让这张表看起来到处都是可点的东西。 */}
+                  {!r.success && r.username && (
+                    <button className="btn-ghost small" disabled={unlock.isPending}
+                            title={`清掉 ${r.username} 的连续失败计数并解除锁定`}
+                            onClick={() => unlock.mutate(r.username)}>解锁</button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

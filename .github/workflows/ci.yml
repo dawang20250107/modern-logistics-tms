@@ -109,6 +109,10 @@ jobs:
       - name: 分页口径走查
         working-directory: .
         run: node scripts/dev/paging-audit.mjs
+      # 反方向：后端有动作、界面上够不着。纯静态，不需要起服务。
+      - name: 后端动作可达性走查
+        working-directory: .
+        run: python3 scripts/dev/reachable-actions.py
 
   # 浏览器走查：真起一套（库 + 网关 + 前端），用真浏览器把关键链路按一遍。
   #

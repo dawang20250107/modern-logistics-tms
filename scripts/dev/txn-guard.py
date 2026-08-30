@@ -44,10 +44,6 @@ ALLOW = {
     ("exceptions/actions.go", "Handle"):
         "提交处理结论只写 resolution 和 pending_audit，不生成单据；"
         "生成应付的是关闭那一步，它已经在事务里锁行。",
-    ("resources/actions.go", "ReceiptConfirm"):
-        "后写覆盖前写正是想要的语义；而回写运单的回单状态是按"
-        "「这张运单还有没有通过核验的回单」在同一条 SQL 里重算的，"
-        "不依赖前面那次读到的旧值，所以并发下不会错。",
     ("resources/actions.go", "PaymentResult"):
         "外部 OA/ERP 回写付款结果，语义本就是后到的结果覆盖先到的；"
         "那次读只用来补齐请求里没给的字段。",

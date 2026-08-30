@@ -135,12 +135,46 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 	if v, ok := str(body, "signatory"); ok {
 		signatory = v
 	}
-	if _, err := h.DB.Exec(ctx, `
-		UPDATE ops_receipt SET status=$2, signatory=$3, updated_at=now() WHERE id=$1::uuid`,
-		id, status, signatory); err != nil {
-		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
+	// 改回单 + 回写运单，必须在**同一个事务**里，并且先把运单行锁住。
+	//
+	// 这里原先是两条各自独立的语句，txn-guard.py 上还登记着一条豁免，
+	// 理由写的是"回写是按『这张运单还有没有通过核验的回单』在同一条 SQL 里
+	// 重算的，不依赖前面那次读到的旧值，所以并发下不会错"。
+	//
+	// **那条理由是错的。** 重算确实写在一条 SQL 里，但那个 EXISTS 子查询是在
+	// 语句开始时按当时的快照求值的；READ COMMITTED 下这条 UPDATE 要是卡在
+	// 运单行的锁上，等锁放开后它会拿着**已经过期的那个判断结果**写下去。
+	// 于是最后落库的可能是一个早就不成立的结论。
+	//
+	// 实测（12 并发 × 20 轮跑 25 次）：出现「回单是 confirmed，
+	// 而运单写着 returned」。这一次是往保守的方向偏，但机制是对称的——
+	// 反过来就是「一张通过核验的回单都没有，运单却写着已核销」：
+	// 凭证不成立而钱照付。
+	//
+	// 界面补上「核验通过 / 驳回」两颗按钮之后，"两个人同时点同一张回单"
+	// 从假想变成了日常，这条不能再留着。锁运单行让同一张运单上的核验串行。
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Fail(w, r, "INTERNAL", "更新失败", err)
 		return
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if waybillID != nil {
+		if _, err := tx.Exec(ctx,
+			`SELECT 1 FROM ops_waybill WHERE id=$1::uuid FOR UPDATE`, *waybillID); err != nil {
+			httpx.Fail(w, r, "INTERNAL", "更新失败", err)
+			return
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE ops_receipt SET status=$2, signatory=$3, updated_at=now() WHERE id=$1::uuid`,
+		id, status, signatory); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "更新失败", err)
+		return
+	}
+
 	// 回写运单的回单状态——**两个方向都要写**。
 	//
 	// 原先只有"核验通过 → 运单标已核销"这一个方向。把一张已核验的回单改判为
@@ -151,7 +185,7 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 		// 占位符要显式 ::text：CASE 各分支全是参数时 Postgres 推不出类型。
 		// 而这个错误原先被 `_, _ =` 丢掉了，表现是"接口 200、状态没变"——
 		// 查起来毫无线索。回写失败必须留下痕迹，不能装作成功。
-		if _, err := h.DB.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 			UPDATE ops_waybill w SET receipt_status = CASE
 			    WHEN EXISTS (SELECT 1 FROM ops_receipt rc
 			                 WHERE rc.waybill_id = w.id AND rc.status = $2::text)
@@ -162,10 +196,13 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 			WHERE w.id = $1::uuid`,
 			*waybillID, wbstatus.PODConfirmed, wbstatus.ReceiptAudited,
 			wbstatus.ReceiptReturned); err != nil {
-			slog.Error("回写运单回单状态失败", "waybill", *waybillID, "err", err)
-			httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "回写运单回单状态失败")
+			httpx.Fail(w, r, "INTERNAL", "回写运单回单状态失败", err)
 			return
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Fail(w, r, "INTERNAL", "更新失败", err)
+		return
 	}
 	h.echo(w, r, ReceiptsCfg, "rc.id = $1::uuid", id)
 }

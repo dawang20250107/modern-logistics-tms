@@ -160,9 +160,11 @@ func (in *Ingestor) persistReports(ctx context.Context, reports []Report) {
 			if in.db.QueryRow(ctx, "SELECT id::text, vehicle_id::text FROM tel_device WHERE device_no=$1",
 				r.DeviceNo).Scan(&id, &vid) == nil {
 				deviceID, deviceVehicleID = &id, vid
-				_, _ = in.db.Exec(ctx, `
+				if _, err := in.db.Exec(ctx, `
 					UPDATE tel_device SET last_seen_at=$2, status='online', updated_at=now() WHERE id=$1::uuid`,
-					id, reportedAt)
+					id, reportedAt); err != nil {
+					slog.Warn("轨迹上报写库失败", "err", err)
+				}
 			}
 		}
 		var waybillID *string
@@ -301,10 +303,14 @@ func (in *Ingestor) ScanOfflineDevices(ctx context.Context) int {
 	}
 	rows.Close()
 	for _, d := range devs {
-		_, _ = in.db.Exec(ctx, "UPDATE tel_device SET status='offline', updated_at=now() WHERE id=$1::uuid", d.id)
+		if _, err := in.db.Exec(ctx, "UPDATE tel_device SET status='offline', updated_at=now() WHERE id=$1::uuid", d.id); err != nil {
+			slog.Warn("轨迹上报写库失败", "err", err)
+		}
 		if d.vehicle != nil {
-			_, _ = in.db.Exec(ctx,
-				"UPDATE tel_vehicle_state SET online=false, updated_at=now() WHERE vehicle_id=$1::uuid", *d.vehicle)
+			if _, err := in.db.Exec(ctx,
+				"UPDATE tel_vehicle_state SET online=false, updated_at=now() WHERE vehicle_id=$1::uuid", *d.vehicle); err != nil {
+				slog.Warn("轨迹上报写库失败", "err", err)
+			}
 		}
 		raiseAlert(ctx, in.db, alertSpec{
 			AlertType: "offline", Level: "medium",

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -570,10 +571,12 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 	h.contractRecord(ctx, id, eventType, cid, body.Reply)
 	// 合同确认 → 司机入驻完成 + 刷新累计（工作流编排的一环）
 	if accepted && driverID != "" {
-		_, _ = h.DB.Exec(ctx, `
+		if _, err := h.DB.Exec(ctx, `
 			UPDATE md_driver SET app_registered=true, app_registered_at=now(), updated_at=now()
-			WHERE id=$1::uuid AND NOT app_registered`, driverID)
-		_, _ = h.DB.Exec(ctx, `
+			WHERE id=$1::uuid AND NOT app_registered`, driverID); err != nil {
+			slog.Warn("运单动作写库失败", "err", err)
+		}
+		if _, err := h.DB.Exec(ctx, `
 			UPDATE md_driver d SET
 			  cumulative_waybills = (SELECT count(*) FROM ops_waybill x
 			     WHERE x.driver_id=d.id AND x.status IN ('signed','delivered','settled')),
@@ -581,7 +584,9 @@ func (h *Handler) ContractConfirm(w http.ResponseWriter, r *http.Request) {
 			     JOIN ops_waybill x ON x.id=e.waybill_id
 			     WHERE x.driver_id=d.id AND e.direction='payable'), 0),
 			  updated_at = now()
-			WHERE d.id=$1::uuid`, driverID)
+			WHERE d.id=$1::uuid`, driverID); err != nil {
+			slog.Warn("运单动作写库失败", "err", err)
+		}
 	}
 	h.respondContract(w, r, cid)
 }
@@ -596,12 +601,14 @@ func (h *Handler) contractRecord(ctx context.Context, waybillID, eventType, cont
 	}
 	pj, _ := json.Marshal(payload)
 	eid, _ := uuid.NewV7()
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time,
 		  source, resource, payload)
 		SELECT $1, now(), now(), $2::uuid, $3, clock_timestamp(), 'contract', w.waybill_no, $4
 		FROM ops_waybill w WHERE w.id = $2::uuid`,
-		eid.String(), waybillID, eventType, pj)
+		eid.String(), waybillID, eventType, pj); err != nil {
+		slog.Warn("运单动作写库失败", "err", err)
+	}
 }
 
 func (h *Handler) respondContract(w http.ResponseWriter, r *http.Request, contractID string) {

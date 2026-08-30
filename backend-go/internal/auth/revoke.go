@@ -9,6 +9,7 @@ package auth
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -124,11 +125,17 @@ func StartRuntimeStatePurger(ctx context.Context, db *pgxpool.Pool, interval tim
 		defer t.Stop()
 		for {
 			// 登录锁定：窗口与锁都过期了才删，否则会把锁中的记录一起清掉
-			_, _ = db.Exec(ctx, `DELETE FROM iam_login_throttle
+			if _, err := db.Exec(ctx, `DELETE FROM iam_login_throttle
 				WHERE window_end < now() - interval '1 hour'
-				  AND (locked_until IS NULL OR locked_until < now())`)
-			_, _ = db.Exec(ctx, `DELETE FROM iam_rate_hit WHERE hit_at < now() - interval '1 day'`)
-			_, _ = db.Exec(ctx, `DELETE FROM iam_reset_code WHERE expires_at < now()`)
+				  AND (locked_until IS NULL OR locked_until < now())`); err != nil {
+				slog.Warn("过期数据清理失败", "err", err)
+			}
+			if _, err := db.Exec(ctx, `DELETE FROM iam_rate_hit WHERE hit_at < now() - interval '1 day'`); err != nil {
+				slog.Warn("过期数据清理失败", "err", err)
+			}
+			if _, err := db.Exec(ctx, `DELETE FROM iam_reset_code WHERE expires_at < now()`); err != nil {
+				slog.Warn("过期数据清理失败", "err", err)
+			}
 			select {
 			case <-ctx.Done():
 				return

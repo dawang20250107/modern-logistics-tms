@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -112,7 +113,9 @@ func runReceiptOCR(ctx context.Context, h *masterdata.Handler, id string) {
 	if err := h.DB.QueryRow(ctx, `
 		SELECT COALESCE(file,''), COALESCE(file_url,''), COALESCE(signatory,'')
 		FROM ops_receipt WHERE id=$1::uuid`, id).Scan(&file, &fileURL, &signatory); err != nil {
-		_, _ = h.DB.Exec(ctx, "UPDATE ops_receipt SET ocr_status='failed', updated_at=now() WHERE id=$1::uuid", id)
+		if _, err := h.DB.Exec(ctx, "UPDATE ops_receipt SET ocr_status='failed', updated_at=now() WHERE id=$1::uuid", id); err != nil {
+			slog.Warn("回单识别状态写库失败", "err", err)
+		}
 		return
 	}
 	source := file
@@ -125,9 +128,11 @@ func runReceiptOCR(ctx context.Context, h *masterdata.Handler, id string) {
 	}
 	rj, _ := json.Marshal(result)
 	status, _ := result["status"].(string)
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		UPDATE ops_receipt SET ocr_result=$2::jsonb, signatory=$3, ocr_status=$4, updated_at=now()
-		WHERE id=$1::uuid`, id, rj, signatory, status)
+		WHERE id=$1::uuid`, id, rj, signatory, status); err != nil {
+		slog.Warn("回单识别状态写库失败", "err", err)
+	}
 }
 
 func recognizeReceipt(source string) map[string]any {

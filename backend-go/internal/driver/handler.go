@@ -330,11 +330,13 @@ func (h *Handler) AckReminder(w http.ResponseWriter, r *http.Request) {
 			if wbNo != nil {
 				res = *wbNo
 			}
-			_, _ = h.DB.Exec(ctx, `
+			if _, err := h.DB.Exec(ctx, `
 				INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type,
 				  event_time, source, resource, payload)
 				VALUES ($1, now(), now(), $2::uuid, 'reminder_acknowledged', clock_timestamp(), 'driver', $3, $4)`,
-				eid.String(), *wbID, res, pj)
+				eid.String(), *wbID, res, pj); err != nil {
+				slog.Warn("司机端写库失败", "err", err)
+			}
 		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "status": status})
@@ -491,9 +493,11 @@ func (h *Handler) applyCredentialOCR(ctx context.Context, id, source, credType s
 		result["note"] = "OCR 引擎 " + provider + " 尚未接入实现，证件信息待人工录入。"
 	}
 	rj, _ := json.Marshal(result)
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		UPDATE md_driver_credential SET ocr_result=$2::jsonb, ocr_status='manual', updated_at=now()
-		WHERE id=$1::uuid`, id, rj)
+		WHERE id=$1::uuid`, id, rj); err != nil {
+		slog.Warn("司机端写库失败", "err", err)
+	}
 	return "manual"
 }
 

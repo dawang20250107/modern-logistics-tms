@@ -8,6 +8,7 @@ package exceptions
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -318,9 +319,11 @@ func trimFloat(f float64) string {
 func (h *Handler) event(r *http.Request, excID, eventType, from, to, actorID, note string, payload map[string]any) {
 	eid, _ := uuid.NewV7()
 	pj, _ := json.Marshal(payload)
-	_, _ = h.DB.Exec(r.Context(), `
+	if _, err := h.DB.Exec(r.Context(), `
 		INSERT INTO ops_exception_event (id, created_at, updated_at, exception_id, event_type,
 		  from_status, to_status, actor_id, note, payload, event_time)
 		VALUES ($1, now(), now(), $2::uuid, $3, $4, $5, $6::uuid, $7, $8, clock_timestamp())`,
-		eid.String(), excID, eventType, from, to, actorID, note, pj)
+		eid.String(), excID, eventType, from, to, actorID, note, pj); err != nil {
+		slog.Warn("异常事件写库失败", "err", err)
+	}
 }

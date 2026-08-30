@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -93,11 +94,13 @@ func nilIfEmpty(s string) any {
 func (h *Handler) excEvent(ctx context.Context, excID, eventType, toStatus, actorID, note, source string) {
 	eid, _ := uuid.NewV7()
 	pj, _ := json.Marshal(map[string]any{"source": source})
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_exception_event (id, created_at, updated_at, exception_id, event_type,
 		  from_status, to_status, actor_id, note, payload, event_time)
 		VALUES ($1, now(), now(), $2::uuid, $3, '', $4, $5::uuid, $6, $7, clock_timestamp())`,
-		eid.String(), excID, eventType, toStatus, actorID, note, pj)
+		eid.String(), excID, eventType, toStatus, actorID, note, pj); err != nil {
+		slog.Warn("异常事件写库失败", "err", err)
+	}
 }
 
 // Create POST /api/v1/exceptions —— 挂运单登记（运单详情页上报）
@@ -223,11 +226,13 @@ func (h *Handler) ReportForOrder(w http.ResponseWriter, r *http.Request) {
 	// 订单事件（record_order_event: exception_reported + note）
 	oe, _ := uuid.NewV7()
 	pj, _ := json.Marshal(map[string]any{"note": "登记异常：" + exceptionTypeLabel[excType]})
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type,
 		  from_status, to_status, actor_id, source, payload)
 		VALUES ($1, now(), now(), clock_timestamp(), $2::uuid, 'exception_reported', '', '', $3::uuid, 'exception', $4)`,
-		oe.String(), orderID, me.ID, pj)
+		oe.String(), orderID, me.ID, pj); err != nil {
+		slog.Warn("异常事件写库失败", "err", err)
+	}
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"id": id.String(), "order_no": orderNo, "exception_type": excType, "level": level,
 	})

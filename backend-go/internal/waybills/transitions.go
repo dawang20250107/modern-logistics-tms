@@ -330,10 +330,12 @@ func (h *Handler) StopEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	pj, _ := json.Marshal(map[string]any{"seq": body.Seq})
 	eid, _ := uuid.NewV7()
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type, event_time, source, resource, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, clock_timestamp(), 'manual', $4, $5)`,
-		eid.String(), wbID, "stop_"+body.Event, "stop#"+strconv.Itoa(body.Seq), pj)
+		eid.String(), wbID, "stop_"+body.Event, "stop#"+strconv.Itoa(body.Seq), pj); err != nil {
+		slog.Warn("运单流转写库失败", "err", err)
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"waybill_no": no, "seq": body.Seq, "event": body.Event})
 }
 

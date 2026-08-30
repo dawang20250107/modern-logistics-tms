@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -380,9 +381,13 @@ func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
 	anomalies := 0
 	for _, a := range all {
 		if a.baseline == nil || a.n < anomalyMinSamples || a.baseline.IsZero() {
-			_, _ = h.DB.Exec(ctx, `
+			// 样本不够就清掉旧基线。这是派生值，失败不阻断审计，
+			// 但要留下日志——悄悄失败会让界面上留着一条过期的偏差百分比。
+			if _, err := h.DB.Exec(ctx, `
 				UPDATE fin_statement_line SET baseline_avg=NULL, deviation_pct=NULL,
-				  is_anomaly=false, updated_at=now() WHERE id=$1::uuid`, a.lineID)
+				  is_anomaly=false, updated_at=now() WHERE id=$1::uuid`, a.lineID); err != nil {
+				slog.Warn("清理对账单行基线失败", "line", a.lineID, "err", err)
+			}
 			continue
 		}
 		base := *a.baseline
@@ -405,14 +410,26 @@ func (h *Handler) AuditStatement(w http.ResponseWriter, r *http.Request) {
 			if isAnomaly {
 				risk = "high_deviation"
 			}
-			_, _ = h.DB.Exec(ctx,
-				"UPDATE fin_expense_record SET risk_status=$2, updated_at=now() WHERE id=$1::uuid", *a.expenseID, risk)
+			if _, err := h.DB.Exec(ctx,
+				"UPDATE fin_expense_record SET risk_status=$2, updated_at=now() WHERE id=$1::uuid",
+				*a.expenseID, risk); err != nil {
+				// 同步给下游的风险标记，失败不阻断审计本身，但不能一声不吭
+				slog.Warn("同步费用记录风险标记失败", "expense", *a.expenseID, "err", err)
+			}
 		}
 	}
+	// 审计时间戳落不下去就不能说"审计完了"。
+	// 原先这里是 `_ = h.DB.QueryRow(...)`：失败时 auditedAt 是零值，
+	// 而响应照样带着 "audited_at": "0001-01-01T00:00:00Z" 回去，
+	// 界面上就是一条"已审计"——库里却没有这个事实。对账是要拿去跟客户
+	// 对话的，"这单我们审过了"必须有据可查。
 	var auditedAt time.Time
-	_ = h.DB.QueryRow(ctx,
+	if err := h.DB.QueryRow(ctx,
 		"UPDATE fin_statement SET audited_at=now(), updated_at=now() WHERE id=$1::uuid RETURNING audited_at", id).
-		Scan(&auditedAt)
+		Scan(&auditedAt); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "审计结果已算出，但标记审计时间失败，请重试。")
+		return
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"total_lines": len(all), "anomaly_count": anomalies, "audited_at": auditedAt.Format(time.RFC3339Nano),
 	})

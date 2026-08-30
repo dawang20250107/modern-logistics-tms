@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -189,10 +190,12 @@ func (h *Handler) ImportEmployees(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, link := range supLinks {
-		_, _ = h.DB.Exec(ctx, `
+		if _, err := h.DB.Exec(ctx, `
 			UPDATE iam_employee e SET supervisor_id = s.id, updated_at = now()
 			FROM iam_employee s
-			WHERE e.employee_no = $1 AND s.employee_no = $2 AND e.id <> s.id`, link[0], link[1])
+			WHERE e.employee_no = $1 AND s.employee_no = $2 AND e.id <> s.id`, link[0], link[1]); err != nil {
+			slog.Warn("组织导入写库失败", "err", err)
+		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"created": created, "updated": updated, "errors": errs,

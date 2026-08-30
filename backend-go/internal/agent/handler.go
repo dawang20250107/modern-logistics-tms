@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -123,11 +124,13 @@ func (h *Handler) audit(r *http.Request, me *auth.UserRow, name string, args map
 		"arguments": args, "risk_detected": res["risk_detected"],
 	})
 	resourceID, _ := args["waybill_no"].(string)
-	_, _ = h.DB.Exec(r.Context(), `
+	if _, err := h.DB.Exec(r.Context(), `
 		INSERT INTO audit_log (id, created_at, updated_at, actor_id, action, resource_type, resource_id,
 		  request_id, method, path, status_code, ip, payload)
 		VALUES ($1, now(), now(), $2::uuid, $3, 'waybill', $4, '', $5, $6, 200, NULLIF($7,'')::inet, $8)`,
-		id.String(), me.ID, "agent_tool:"+name, resourceID, r.Method, r.URL.Path, clientIP(r), payload)
+		id.String(), me.ID, "agent_tool:"+name, resourceID, r.Method, r.URL.Path, clientIP(r), payload); err != nil {
+		slog.Warn("AI 会话写库失败", "err", err)
+	}
 }
 
 func clientIP(r *http.Request) string {

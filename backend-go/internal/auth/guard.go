@@ -179,8 +179,10 @@ func RecordAttempt(ctx context.Context, db *pgxpool.Pool, r *http.Request, usern
 	if len(username) > 150 {
 		username = username[:150]
 	}
-	_, _ = db.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		INSERT INTO iam_login_attempt (id, created_at, updated_at, username, success, result, ip, user_agent, user_id)
 		VALUES ($1, now(), now(), $2, $3, $4, $5::inet, $6, $7::uuid)`,
-		id.String(), username, success, result, ip, ua, uid)
+		id.String(), username, success, result, ip, ua, uid); err != nil {
+		slog.Warn("登录审计写库失败", "err", err)
+	}
 }

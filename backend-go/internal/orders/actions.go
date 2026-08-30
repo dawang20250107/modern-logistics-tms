@@ -145,11 +145,13 @@ func (h *Handler) orderEvent(ctx context.Context, orderID, eventType, from, to, 
 	}
 	pj, _ := json.Marshal(payload)
 	eid, _ := uuid.NewV7()
-	_, _ = h.DB.Exec(ctx, `
+	if _, err := h.DB.Exec(ctx, `
 		INSERT INTO ops_order_event (id, created_at, updated_at, event_time, order_id, event_type,
 		  from_status, to_status, actor_id, source, payload)
 		VALUES ($1, now(), now(), clock_timestamp(), $2::uuid, $3, $4, $5, $6::uuid, $7, $8)`,
-		eid.String(), orderID, eventType, from, to, nilIfBlank(actorID), source, pj)
+		eid.String(), orderID, eventType, from, to, nilIfBlank(actorID), source, pj); err != nil {
+		slog.Warn("订单写库失败", "err", err)
+	}
 }
 
 // spawnOrder 以蓝本订单表头新建订单（不含货物/站点），供拆单/合单复用。
@@ -535,14 +537,33 @@ func (h *Handler) Batch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// applyBatchAction 单条执行；返回非空错误码表示该条失败（不影响其余）
+// applyBatchAction 单条执行；返回非空错误码表示该条失败（不影响其余）。
+//
+// 这里原先四个 UPDATE 全是 `_, _ = h.DB.Exec(...)`——**错误被丢掉，
+// 然后一律 return "", ""（成功）**。于是批量确认 50 单时，哪怕每一条
+// UPDATE 都失败，接口照样回 `ok_count: 50`，界面弹一句"已处理 50 单"，
+// 而库里一条都没变。这套系统这一轮已经因为同一个写法栽过一次
+// （回单状态重算，静默不生效）。
+//
+// 现在每条都判错并把失败原因带回去：批量操作的价值全在"哪几条没成功"上，
+// 报一个笼统的成功数，等于把核对的活推给用户，而他手上没有核对的依据。
 func (h *Handler) applyBatchAction(ctx context.Context, action, id, status, approval, actorID string) (string, string) {
+	// exec 统一判错。失败时给出的是**这一条**为什么没成，不是整批的笼统失败。
+	exec := func(sql string, args ...any) (string, string) {
+		if _, err := h.DB.Exec(ctx, sql, args...); err != nil {
+			slog.Error("批量操作写库失败", "action", action, "order", id, "err", err)
+			return "DB_WRITE_FAILED", "写入失败，请重试。"
+		}
+		return "", ""
+	}
 	switch action {
 	case "confirm":
 		if status != "pending_confirm" && status != "confirmed" {
 			return "INVALID_ORDER_STATUS", "仅待确认订单可确认。"
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_order SET status='confirmed', updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(`UPDATE ops_order SET status='confirmed', updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 		h.orderEvent(ctx, id, "confirmed", status, "confirmed", actorID, "cs", nil)
 	case "pool":
 		if status != "confirmed" && status != "pending_confirm" {
@@ -554,17 +575,23 @@ func (h *Handler) applyBatchAction(ctx context.Context, action, id, status, appr
 		if approval == "rejected" {
 			return "ORDER_APPROVAL_REJECTED", "订单审批被驳回，不可进池。"
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_order SET status='pooled', pooled_at=now(), updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(`UPDATE ops_order SET status='pooled', pooled_at=now(), updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 		h.orderEvent(ctx, id, "pooled", status, "pooled", actorID, "cs", nil)
 	case "cancel":
 		if status == "converted" || status == "completed" {
 			return "INVALID_ORDER_STATUS", "已派单/已完成订单不可取消。"
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_order SET status='cancelled', updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(`UPDATE ops_order SET status='cancelled', updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 		h.orderEvent(ctx, id, "cancelled", status, "cancelled", actorID, "cs", nil)
 	case "delete":
-		_, _ = h.DB.Exec(ctx,
-			`UPDATE ops_order SET is_deleted=true, deleted_at=now(), updated_at=now() WHERE id=$1::uuid`, id)
+		if code, msg := exec(
+			`UPDATE ops_order SET is_deleted=true, deleted_at=now(), updated_at=now() WHERE id=$1::uuid`, id); code != "" {
+			return code, msg
+		}
 	}
 	return "", ""
 }

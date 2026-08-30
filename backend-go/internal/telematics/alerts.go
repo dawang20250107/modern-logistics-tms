@@ -185,11 +185,13 @@ func maybeOpenException(ctx context.Context, db *pgxpool.Pool, alertType, level,
 		return
 	}
 	id, _ := uuid.NewV7()
-	_, _ = db.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		INSERT INTO ops_exception (id, created_at, updated_at, waybill_id, exception_type, level,
 		  source, description, status, responsibility_party, amount, resolution)
 		VALUES ($1, now(), now(), $2::uuid, $3, 'high', 'track', $4, 'open', '', 0, '')`,
-		id.String(), *waybillID, alertType, "[自动] "+message)
+		id.String(), *waybillID, alertType, "[自动] "+message); err != nil {
+		slog.Warn("车联网告警写库失败", "err", err)
+	}
 }
 
 type geofenceRow struct {
@@ -252,19 +254,23 @@ func evaluateGeofences(ctx context.Context, db *pgxpool.Pool, vehicleID *string,
 			Scan(&stateID, &wasInside, &since)
 		if err != nil { // get_or_create 的 create 分支
 			sid, _ := uuid.NewV7()
-			_, _ = db.Exec(ctx, `
+			if _, err := db.Exec(ctx, `
 				INSERT INTO tel_geofence_state (id, created_at, updated_at, vehicle_id, geofence_id, inside, since)
 				VALUES ($1, now(), now(), $2::uuid, $3::uuid, false, NULL)`,
-				sid.String(), *vehicleID, f.ID)
+				sid.String(), *vehicleID, f.ID); err != nil {
+				slog.Warn("车联网告警写库失败", "err", err)
+			}
 			stateID, wasInside, since = sid.String(), false, nil
 		}
 		if insideNow == wasInside && since != nil {
 			continue // 状态未变化
 		}
 		transitioned := since != nil && insideNow != wasInside
-		_, _ = db.Exec(ctx, `
+		if _, err := db.Exec(ctx, `
 			UPDATE tel_geofence_state SET inside=$2, since=$3, updated_at=now() WHERE id=$1::uuid`,
-			stateID, insideNow, reportedAt)
+			stateID, insideNow, reportedAt); err != nil {
+			slog.Warn("车联网告警写库失败", "err", err)
+		}
 		if !transitioned {
 			continue
 		}

@@ -519,7 +519,9 @@ func (h *Handlers) Avatar(w http.ResponseWriter, r *http.Request) {
 		_ = h.Svc.DB.QueryRow(ctx, "SELECT COALESCE(avatar,'') FROM accounts_user WHERE id=$1::uuid", uid).Scan(&cur)
 		if cur != "" {
 			_ = h.store().Delete(ctx, cur)
-			_, _ = h.Svc.DB.Exec(ctx, "UPDATE accounts_user SET avatar=NULL WHERE id=$1::uuid", uid)
+			if _, err := h.Svc.DB.Exec(ctx, "UPDATE accounts_user SET avatar=NULL WHERE id=$1::uuid", uid); err != nil {
+				slog.Warn("账号写库失败", "err", err)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return

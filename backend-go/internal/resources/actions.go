@@ -204,11 +204,13 @@ func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
 			if waybillNo != nil {
 				res = *waybillNo
 			}
-			_, _ = h.DB.Exec(ctx, `
+			if _, err := h.DB.Exec(ctx, `
 				INSERT INTO ops_waybill_event (id, created_at, updated_at, waybill_id, event_type,
 				  event_time, source, resource, payload)
 				VALUES ($1, now(), now(), $2::uuid, 'reminder_acknowledged', clock_timestamp(), 'driver', $3, $4)`,
-				eid.String(), *waybillID, res, pj)
+				eid.String(), *waybillID, res, pj); err != nil {
+				slog.Warn("资源动作写库失败", "err", err)
+			}
 		}
 	}
 	h.echo(w, r, DriverRemindersCfg, "dr.id = $1::uuid", id)

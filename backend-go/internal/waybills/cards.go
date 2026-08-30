@@ -8,6 +8,7 @@ package waybills
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -222,8 +223,10 @@ func (h *Handler) ETA(w http.ResponseWriter, r *http.Request) {
 		if plannedArrival != nil {
 			newDrift = int(estimated.Sub(*plannedArrival).Minutes())
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE ops_waybill SET estimated_arrival=$2, eta_drift_minutes=$3, updated_at=now()
-			WHERE id=$1::uuid`, id, estimated, newDrift)
+		if _, err := h.DB.Exec(ctx, `UPDATE ops_waybill SET estimated_arrival=$2, eta_drift_minutes=$3, updated_at=now()
+			WHERE id=$1::uuid`, id, estimated, newDrift); err != nil {
+			slog.Warn("运单卡片写库失败", "err", err)
+		}
 		estimatedArrival, drift = &estimated, newDrift
 		rkm := math.Round(km*10) / 10
 		rsp := math.Round(speed*10) / 10

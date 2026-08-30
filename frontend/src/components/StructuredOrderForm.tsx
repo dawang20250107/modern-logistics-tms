@@ -536,6 +536,15 @@ export function StructuredOrderForm({ onCreated, onCustomerChange }: { onCreated
                   {Object.entries(ORDER_CHANNEL_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </label>
+              {/* 来源明细：这一格原先**不存在**。form.source 在状态里、在提交的 payload 里、
+                  后端也存下来，CHANNEL_META 里连每个渠道该显示什么占位符都写好了
+                  （坐席/工号、客户账号、小程序用户、群名称、对接系统），
+                  就是没有任何一个输入框绑到它上面——于是每一单的来源明细都是空串。
+                  这一条是"这单是谁录的、从哪来的"的唯一记录，出了争议要靠它追。 */}
+              <label>来源明细
+                <input value={form.source} onChange={(e) => set("source", e.target.value)}
+                       placeholder={CHANNEL_META[form.channel]?.sourcePlaceholder ?? "来源标识"} />
+              </label>
               <label>合同客户
                 <select value={form.customer} onChange={(e) => { set("customer", e.target.value); onCustomerChange?.(e.target.value); }}>
                   <option value="">选择合同客户（可选）</option>

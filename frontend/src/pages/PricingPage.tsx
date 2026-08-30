@@ -5,7 +5,7 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import { confirmAction } from "../api/confirm";
 import { EMPTY as DASH, fmtMoney, fmtNum } from "../api/format";
 import { toast } from "../api/toast";
-import type { Carrier, Customer, Paginated, PricingRule } from "../api/types";
+import type { Carrier, CostCatalog, Customer, Paginated, PricingRule } from "../api/types";
 import { PRICE_TYPE_LABEL } from "../api/types";
 import { StateView } from "../components/StateView";
 
@@ -34,8 +34,12 @@ interface RuleForm {
   is_active: boolean;
 }
 
+// 方向决定默认科目：收入价默认运费收入，成本价默认运费。
+// 原先两个方向共用一个写死的 "FREIGHT"，那个码在后端两份词表里都不存在。
+const defaultItem = (t: string) => (t === "cost" ? "TRANSPORT_COST" : "TRANSPORT_INCOME");
+
 const EMPTY: RuleForm = {
-  name: "", price_type: "income", charge_method: "tiered_weight", expense_item_code: "FREIGHT", customer: "", carrier: "",
+  name: "", price_type: "income", charge_method: "tiered_weight", expense_item_code: "TRANSPORT_INCOME", customer: "", carrier: "",
   route_name: "", base_price: "0", unit_price: "0", min_charge_qty: "0", min_price: "0",
   tier_prices: [], volumetric_factor: "0.33", fuel_surcharge_pct: "0", priority: "0", is_active: true,
 };
@@ -55,12 +59,16 @@ export function PricingPage() {
     queryFn: () => apiGet<Paginated<PricingRule>>(`/finance/pricing-rules?page_size=200${typeFilter ? `&price_type=${typeFilter}` : ""}`),
   });
   const customers = useQuery({ queryKey: ["customers"], queryFn: () => apiGet<Paginated<Customer>>("/customers?page_size=500") });
+  // 费用科目词表。原先表单把 expense_item_code 写死成 "FREIGHT"——一个后端两份
+  // 词表里都没有的码，于是规则算出来的钱落进一个谁也不认识的科目。
+  // 现在后端加了枚举校验（会直接 400），这里必须给出真实可选项。
+  const catalog = useQuery({ queryKey: ["cost-catalog"], queryFn: () => apiGet<CostCatalog>("/waybills/cost-catalog") });
   const carriers = useQuery({ queryKey: ["carriers"], queryFn: () => apiGet<Paginated<Carrier>>("/carriers?page_size=500") });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["pricing-rules"] });
 
   const payload = () => ({
     name: form.name, price_type: form.price_type, charge_method: form.charge_method,
-    expense_item_code: form.expense_item_code || "FREIGHT",
+    expense_item_code: form.expense_item_code || defaultItem(form.price_type),
     customer: form.customer || null, carrier: form.carrier || null, route_name: form.route_name,
     base_price: form.base_price || 0, unit_price: form.unit_price || 0,
     min_charge_qty: form.min_charge_qty || 0, min_price: form.min_price || 0,
@@ -167,7 +175,12 @@ export function PricingPage() {
           <div className="grid-form">
             <label>规则名称 *<input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="如：比亚迪-沪蓉整车" /></label>
             <label>价格类型
-              <select value={form.price_type} onChange={(e) => set("price_type", e.target.value as "income" | "cost")}>
+              <select value={form.price_type} onChange={(e) => {
+                const v = e.target.value as "income" | "cost";
+                // 方向一换，原来那个科目多半属于另一个方向了，跟着切到该方向的默认科目。
+                // 不切的话保存会被后端的枚举校验挡下，而用户看不出是哪一格的问题。
+                setForm((f) => ({ ...f, price_type: v, expense_item_code: defaultItem(v) }));
+              }}>
                 {Object.entries(PRICE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </label>
@@ -189,6 +202,16 @@ export function PricingPage() {
                 {Object.entries(CHARGE_METHOD_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </label>
+            <label>费用科目
+              {/* 科目决定这笔钱记到哪一格。原先界面上够不着，全部落成写死的
+                  "FREIGHT"——后端词表里没有这个码，财务看板按科目分组时它进一个
+                  没有名字的桶，对账单行上显示的就是那个原始码。 */}
+              <select value={form.expense_item_code} onChange={(e) => set("expense_item_code", e.target.value)}>
+                {Object.entries(
+                  form.price_type === "cost" ? (catalog.data?.cost_items ?? {}) : (catalog.data?.income_items ?? {}),
+                ).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
             <label>{form.charge_method === "flat" ? "整车固定价(元)" : "起步价(元)"}<input value={form.base_price} onChange={(e) => set("base_price", e.target.value)} /></label>
             {form.charge_method !== "flat" && form.charge_method !== "tiered_weight" && (
               <label>单价({form.charge_method === "per_volume" ? "元/方" : form.charge_method === "per_piece" ? "元/件" : form.charge_method === "per_km" ? "元/公里" : "元/吨公里"})
@@ -201,6 +224,15 @@ export function PricingPage() {
               </label>
             )}
             <label>最低价(元下限)<input value={form.min_price} onChange={(e) => set("min_price", e.target.value)} /></label>
+            {form.charge_method !== "flat" && form.charge_method !== "per_piece" && form.charge_method !== "per_km" && (
+              // 体积折算系数决定"抛货按多少吨算"：1 方折 0.33 吨还是 0.25 吨，
+              // 是跟客户一单一议的商务条件，不是常量。原先界面上碰不到，
+              // 所有规则都是同一个 0.33。
+              <label title="1 立方米折算成多少吨。轻抛货按折算重与实重取大者计费。">
+                体积折算系数(吨/方)
+                <input value={form.volumetric_factor} onChange={(e) => set("volumetric_factor", e.target.value)} />
+              </label>
+            )}
             <label>燃油附加率(如0.025)<input value={form.fuel_surcharge_pct} onChange={(e) => set("fuel_surcharge_pct", e.target.value)} /></label>
             <label>优先级（大者优先）<input value={form.priority} onChange={(e) => set("priority", e.target.value)} /></label>
             <label className="check-label"><input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} /> 启用</label>

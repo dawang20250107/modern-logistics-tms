@@ -86,11 +86,14 @@ func TestPricingRuleSavedInUITakesEffectInQuote(t *testing.T) {
 	// 用例红了，但红的原因是我自己的样本写错了字段名——产品是对的。
 	// 这也正说明这条链值得钉：这三个键名在前后端之间没有任何编译期约束，
 	// 写错了不报错，只是价算错。
+	// 科目用 TRANSPORT_INCOME。第一版这里写的是 "FREIGHT"——从前端表单里抄来的，
+	// 而 FREIGHT 不在任何一份费用科目词表里。加上枚举校验之后这条用例立刻 400，
+	// 这正说明那个写死值一直在往库里塞不存在的科目。
 	rulePayload := `{
 		"name":"` + ruleName + `",
 		"price_type":"income",
 		"charge_method":"tiered_weight",
-		"expense_item_code":"FREIGHT",
+		"expense_item_code":"TRANSPORT_INCOME",
 		"customer":"` + cid.String() + `",
 		"carrier":null,
 		"route_name":"",

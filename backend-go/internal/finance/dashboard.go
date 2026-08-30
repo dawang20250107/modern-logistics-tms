@@ -9,16 +9,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/expitem"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 )
 
 var finCST = time.FixedZone("CST", 8*3600)
 
-var costItems = map[string]string{
-	"TRANSPORT_COST": "运费", "FUEL_CARD": "油卡", "TOLL": "过路费", "LOADING": "装卸费",
-	"DETENTION": "押车费", "INFO_FEE": "信息费", "RECEIPT_FEE": "回单费", "DEDUCTION": "扣款",
-	"EXCEPTION_COST": "异常费用", "OTHER_COST": "其他成本",
-}
+// 词表的唯一出处是 internal/expitem（这里原先自己存了一份拷贝）
+var costItems = expitem.Cost
 
 // DashboardMetrics GET /api/v1/finance/dashboard-metrics
 func (h *Handler) DashboardMetrics(w http.ResponseWriter, r *http.Request) {

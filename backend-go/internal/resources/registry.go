@@ -14,6 +14,7 @@
 package resources
 
 import (
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/expitem"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/filters"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/masterdata"
 
@@ -555,7 +556,13 @@ var PricingRuleWrite = wcf{
 		"price_type": {Kind: fEnum, Required: true, Choices: []string{"income", "cost"}},
 		"charge_method": {Kind: fEnum, Default: "tiered_weight",
 			Choices: []string{"tiered_weight", "flat", "per_volume", "per_piece", "per_km", "per_ton_km"}},
-		"expense_item_code":  {Kind: fText, Required: true},
+		// 科目必须是词表里的。原先是自由文本，而前端表单把它写死成 "FREIGHT"——
+		// 一个两份词表里都没有的码。手工录费用那条路径校验得很严
+		// （waybills.AddExpense 比对词表），规则生成这条一点都不校验，
+		// 于是规则算出来的钱落进一个谁也不认识的科目：财务看板按科目分组时
+		// 它进一个没有名字的桶，对账单行上显示的就是那个原始码。
+		// 同一个字段两套标准时，宽的那套决定了实际数据的质量。
+		"expense_item_code":  {Kind: fEnum, Required: true, Choices: expitem.AllCodes()},
 		"customer":           {Kind: fUUID, Ref: "md_customer"},
 		"carrier":            {Kind: fUUID, Ref: "md_carrier"},
 		"route_name":         {Kind: fText},

@@ -17,33 +17,21 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/auth"
+	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/expitem"
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/httpx"
 
 	"github.com/dawang20250107/modern-logistics-tms/backend-go/internal/wbstatus"
 )
 
-var costItems = map[string]string{
-	"TRANSPORT_COST": "运费", "FUEL_CARD": "油卡", "TOLL": "过路费", "LOADING": "装卸费",
-	"DETENTION": "押车费", "INFO_FEE": "信息费", "RECEIPT_FEE": "回单费", "DEDUCTION": "扣款",
-	"EXCEPTION_COST": "异常费用", "OTHER_COST": "其他成本",
-}
-var incomeItems = map[string]string{
-	"TRANSPORT_INCOME": "运费收入", "SURCHARGE": "附加费", "INSURANCE": "保险费",
-	"WAITING_FEE": "等候费", "OTHER_INCOME": "其他收入",
-}
-var payeeLabels = map[string]string{
-	"carrier": "承运商", "driver": "司机", "fuel_card": "油卡商", "customer": "客户", "other": "其他",
-}
+// 词表收在 internal/expitem 里（原先这里和 finance/dashboard.go 各存一份，
+// 而计价规则那条路径压根不校验）。这里只留别名，改科目改那一个文件。
+var (
+	costItems   = expitem.Cost
+	incomeItems = expitem.Income
+	payeeLabels = expitem.Payees
+)
 
-func itemLabel(code string) string {
-	if v, ok := costItems[code]; ok {
-		return v
-	}
-	if v, ok := incomeItems[code]; ok {
-		return v
-	}
-	return code
-}
+func itemLabel(code string) string { return expitem.Label(code) }
 
 // resolve 鉴权 + 权限 + 数据范围，返回运单主键；失败时已写响应
 func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, perm string) (id, no string, ok bool) {

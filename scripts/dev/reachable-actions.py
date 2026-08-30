@@ -19,11 +19,15 @@ route-match.py 查的是反方向：前端调了一个后端没有的路径（�
 挂载点自动带出来的那批），前端源码里必须出现得了它的路径特征。
 够不到的必须在 ALLOW 里写明为什么——写不出理由的，多半就是漏了。
 
+查两件事：
+  1. 动作路由（POST/PATCH/DELETE）前端有没有调用点
+  2. 通用 CRUD 挂载点前端有没有用过
+
+第 2 条是补第 1 条的盲区：车联网的设备与地理围栏整套没有界面，
+而它们只有 ack/close 两个动作路由露了出来，光查动作路由看不见整块的缺失。
+
 **抓不到什么**（写在这里，免得有人以为它管得比实际宽）：
 
-  · 只看动作路由。通用 CRUD 挂载点（p.Route(..., mdH.CRUD(...))）带出来的
-    增删改查不在范围内——车联网的设备与地理围栏就是这样整套没有界面而
-    这条检查看不见，只有它们的 ack/close 动作路由露了出来。
   · 匹配的是路径特征而不是真实调用。像 assign / close 这类常见词，
     另一个端点用了同一个词就会把它带过关：/orders/assign 存在时，
     /exceptions/{id}/assign 即使没人调也算"够得着"。
@@ -62,6 +66,34 @@ ALLOW = {
     "/api/v1/telematics/alerts/{id}/ack": "车联网告警：整个模块没有管理界面，已在交付说明里写明",
     "/api/v1/telematics/alerts/{id}/close": "同上",
 }
+
+
+# 后端有 CRUD 接口、管理端没有界面的资源。同样每条都要写清为什么。
+# 这些不是"忘了"——是发布前有意识地不做，理由写在这里也写在交付说明里，
+# 客户问起来能答上，而不是让他自己撞上。
+CRUD_ALLOW = {
+    "/api/v1/finance/contracts": "框架合同：合同价这条更精确的匹配路径没有界面，"
+                                 "报价走的是按客户/线路通配那条。要用合同价需单独排期",
+    "/api/v1/finance/expense-items": "费用科目词表在代码里（internal/expitem），这张表未启用",
+    "/api/v1/finance/expense-records": "费用明细通过运单详情的「录费用」增改，不单开管理页",
+    "/api/v1/finance/payment-requests": "付款申请由报销审批自动生成，付款动作在报销面板上；"
+                                        "跨运单的付款队列视图未做",
+    "/api/v1/finance/webhooks": "对外推送配置没有界面，需要时用接口配",
+    "/api/v1/finance/webhook-deliveries": "同上，投递记录只能走接口查",
+    "/api/v1/org/departments": "部门层级没有独立管理页，员工的组织归属在员工名录里选",
+    "/api/v1/org/employee-groups": "员工组没有界面，授权走的是角色",
+    "/api/v1/org/permissions": "权限点目录由代码维护（auth.EnsurePermissions），界面只读矩阵",
+    "/api/v1/reminders": "司机提醒在运单详情页发送与查看，这个 CRUD 挂载点是冗余的",
+    "/api/v1/routes": "线路主数据没有管理页，线路名在订单/规则里直接填",
+    "/api/v1/telematics/alerts": "车联网整块没有管理界面，见交付说明",
+    "/api/v1/telematics/devices": "同上",
+    "/api/v1/telematics/geofences": "同上",
+}
+
+
+def crud_mounts():
+    src = (ROOT / "backend-go/cmd/server/main.go").read_text()
+    return sorted({m.group(1) for m in re.finditer(r'\.Route\(\s*"(/api/v1/[^"]+)"', src)})
 
 
 def routes():
@@ -129,12 +161,30 @@ def main():
         if not reachable(path, src):
             unreachable.append(f"{verb} {path}")
 
+    mounts = crud_mounts()
+    if not mounts:
+        print("一个 CRUD 挂载点都没扫到——正则失效了，这条检查正在空转", file=sys.stderr)
+        return 2
+    dead_res, res_allowed = [], 0
+    for mount in mounts:
+        if mount in CRUD_ALLOW:
+            res_allowed += 1
+            continue
+        rel = mount.replace("/api/v1", "")
+        if not re.search(r'["`\']' + re.escape(rel) + r'[?`"\'/]', src):
+            dead_res.append(mount)
+
     for u in unreachable:
         print(f"  ✗ {u}")
         print("      后端有这个动作，前端源码里找不到调用点——功能在界面上够不着。")
         print("      要么把入口加上，要么在 reachable-actions.py 的 ALLOW 里写明为什么不需要。")
-    print(f"\n动作路由 {len(set(rs))} 条，已声明无需界面入口 {allowed} 条，够不着 {len(unreachable)} 条")
-    return 1 if unreachable else 0
+    for d in dead_res:
+        print(f"  ✗ {d}（整个资源）")
+        print("      后端有一整套增删改查，前端一次都没调过——这块功能没有界面。")
+        print("      要么做界面，要么在 CRUD_ALLOW 里写明为什么不做，并同步写进交付说明。")
+    print(f"\n动作路由 {len(set(rs))} 条（声明无需入口 {allowed}，够不着 {len(unreachable)}）；"
+          f"CRUD 资源 {len(mounts)} 个（声明无界面 {res_allowed}，未声明的够不着 {len(dead_res)}）")
+    return 1 if (unreachable or dead_res) else 0
 
 
 sys.exit(main())

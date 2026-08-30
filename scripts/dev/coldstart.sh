@@ -125,7 +125,7 @@ overpay=$(psql -d "$DB" -tAc "SELECT count(*) FROM fin_statement WHERE settled_a
 [ "$overpay" = "0" ] && ok "没有超额核销" || bad "$overpay 张对账单核销额超过了应收额"
 
 perms=$(psql -d "$DB" -tAc 'SELECT count(*) FROM iam_permission')
-[ "$perms" -ge 15 ] && ok "权限点 $perms 个" || bad "权限点只有 $perms 个"
+[ "$perms" -ge 16 ] && ok "权限点 $perms 个" || bad "权限点只有 $perms 个"
 
 echo
 if [ "$FAIL" = 0 ]; then echo "✓ 从零起库这条路是通的"; else echo "✗ 从零起库有问题"; exit 1; fi

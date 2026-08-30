@@ -154,6 +154,24 @@ func dispatchedWhere(scope, mine string) func(*filters.Args, *auth.UserRow, bool
 
 // PoolList GET /api/v1/orders/pool
 func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
+	// 订单这一面的读，权限点是 waybill.view —— 前端导航上早就是这么声明的
+	// （AppLayout 里「订单管理」「调度工作台」都写着 perm: "waybill.view"），
+	// 后端这 9 条读路由却一条都没执行。
+	//
+	// 实测一个只有 masterdata.view（"主数据查看"，听起来只是看客户和司机档案）
+	// 且数据范围给了"全部"的角色：
+	//   GET /api/v1/orders          → 200，全库订单
+	//   GET /api/v1/orders/export   → 200，5.26 MB、50002 行 CSV，
+	//                                  客户名、始发目的、报价一次拉走
+	//   GET /api/v1/orders/funnel   → 全库漏斗：cs 50839 单、self 1 单、各状态分布
+	// 同一个账号打 /waybills、/statements、/reimbursements 都规规矩矩 403 ——
+	// 订单是唯一漏的那一面，而它恰恰是数据量最大、最敏感的那一面。
+	//
+	// 数据范围挡不住这件事：范围管的是"看得见谁的单"，
+	// 给了"全部"就等于全库。三个内置角色都带 waybill.view，补上不影响它们。
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	q := r.URL.Query()
 	h.poolPage(w, r, poolWhere(q.Get("scope"), q.Get("mine")),
 		"ORDER BY o.priority DESC, o.pooled_at, o.id")
@@ -161,6 +179,9 @@ func (h *Handler) PoolList(w http.ResponseWriter, r *http.Request) {
 
 // Dispatched GET /api/v1/orders/dispatched
 func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	q := r.URL.Query()
 	h.poolPage(w, r, dispatchedWhere(q.Get("scope"), q.Get("mine")),
 		"ORDER BY o.created_at DESC, o.id")
@@ -168,6 +189,9 @@ func (h *Handler) Dispatched(w http.ResponseWriter, r *http.Request) {
 
 // Dispatchers GET /api/v1/orders/dispatchers
 func (h *Handler) Dispatchers(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -207,6 +231,9 @@ func (h *Handler) Dispatchers(w http.ResponseWriter, r *http.Request) {
 // 取该客户最近 200 个历史站点，按 (类型, 城市, 地址) 去重后各留 10 条。
 // 缺 customer 参数时回空，不报错——录单页在选客户前就会先打这个接口。
 func (h *Handler) CustomerAddresses(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	cid := r.URL.Query().Get("customer")
 	empty := map[string]any{"pickup": []any{}, "delivery": []any{}}
 	if cid == "" {
@@ -256,6 +283,9 @@ func headN(xs []map[string]any, n int) []map[string]any {
 
 // Export GET /api/v1/orders/export —— 当前筛选结果导出 CSV（带 BOM 供 Excel 识别中文）
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -347,6 +377,9 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 // 计数走的谓词与列表端点是同一份（poolWhere / dispatchedWhere / urgentSQL），
 // 所以「计数说有多少」和「点进去能翻到多少」不会各说各话。
 func (h *Handler) PoolCounts(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	q := r.URL.Query()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))

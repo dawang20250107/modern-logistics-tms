@@ -97,7 +97,20 @@ func newTestEnv(t *testing.T) *testEnv {
 
 // mkUser 建一个测试账号并授予指定权限点；返回 access token。
 // perms 为空 = 只登录、什么权限点都没有（就是当初那个探针账号）。
+// 角色的数据范围是 all —— 要测"范围收窄"就得用 mkUserScoped。
 func (e *testEnv) mkUser(superuser bool, perms ...string) string {
+	e.t.Helper()
+	return e.mkUserScoped(superuser, "all", perms...)
+}
+
+// mkUserScoped 同上，但可以指定角色的数据范围。
+//
+// 分开这两个入口是有原因的：权限点和数据范围是两层，
+// 「能不能进这个面」和「进来之后看得见谁的单」要分别测。
+// mkUser 给的是 all，用它去测范围收窄会永远测不出问题——
+// 而这正是订单域那道闸补上之后差点掩盖掉的事。
+// 数据范围 org 配上没有组织归属的账号，范围内就是一条都没有。
+func (e *testEnv) mkUserScoped(superuser bool, scope string, perms ...string) string {
 	e.t.Helper()
 	ctx := context.Background()
 	uid, _ := uuid.NewV7()
@@ -123,7 +136,7 @@ func (e *testEnv) mkUser(superuser bool, perms ...string) string {
 		roleCode := "authz_test_role_" + rid.String()
 		if _, err := e.pool.Exec(ctx, `
 			INSERT INTO iam_role (id, created_at, updated_at, code, name, data_scope, is_active)
-			VALUES ($1::uuid, now(), now(), $2, $2, 'all', true)`, rid.String(), roleCode); err != nil {
+			VALUES ($1::uuid, now(), now(), $2, $2, $3, true)`, rid.String(), roleCode, scope); err != nil {
 			e.t.Fatalf("建角色失败：%v", err)
 		}
 		e.t.Cleanup(func() {
@@ -459,19 +472,26 @@ func TestRevokeAllInvalidatesExistingAccess(t *testing.T) {
 	}
 }
 
-// ── 只靠数据范围收窄的端点 ────────────────────────────────
+// ── 数据范围这一层单独钉住 ────────────────────────────────
 //
-// 订单域没有 `order.view` 这种权限点，设计上就是「登录即可访问，
-// 但只看得见自己组织范围内的数据」。所以这几条对无组织账号应该是
-// **200 但空**，而不是 403 —— 期望值不同，判法也不同：要看返回体。
+// 这一组测的是**数据范围**，不是权限点：探针账号有 waybill.view
+// （所以过得了闸），但没有组织归属，于是范围内一条都不该有。
+// 期望是 **200 但空**，而不是 403 —— 判的是返回体不是状态码。
 //
-// 这一组同样是实测发现的：/orders 列表收窄了，但换个聚合口径的
+// 原先这里用的是一个什么权限都没有的账号，测的其实是"范围 + 恰好没挂闸"
+// 两件事混在一起。订单域后来补上了 waybill.view 的闸（见 readsurface_test.go：
+// 一个只有 masterdata.view 的账号曾经能导走 5 万行订单 CSV），
+// 闸一挂上这组就全变 403 了——那样它就不再检验范围这一层了。
+// 两层要分开测：闸由 readsurface_test.go 管，范围由这里管。
+//
+// 这一组当初是实测发现的：/orders 列表收窄了，但换个聚合口径的
 // /orders/funnel 把全库订单漏斗（总量/分状态/分渠道）原样放出去，
 // /workbench 更进一步，pool_top 给的是完整订单记录而不只是个数字。
 // 列表那道收窄，被同一批数据的另一个出口绕过去了。
 func TestScopeOnlyEndpointsReturnNothingForOrglessUser(t *testing.T) {
 	e := newTestEnv(t)
-	token := e.mkUser(false)
+	// 数据范围 org + 账号没有组织归属 = 范围内一条都没有
+	token := e.mkUserScoped(false, "org", "waybill.view")
 
 	// 前置：库里得真有订单，否则"返回空"是因为没数据，测了个寂寞
 	var total int
@@ -557,9 +577,24 @@ func TestScopeOnlyEndpointsReturnNothingForOrglessUser(t *testing.T) {
 	})
 
 	t.Run("waybills/stats 不泄漏全库统计", func(t *testing.T) {
-		// 这条有 waybill.view 闸，无权限时应 403（不是 200 空）
-		if rec := e.call(token, "GET", "/api/v1/waybills/stats", ""); rec.Code != http.StatusForbidden {
-			t.Errorf("期望 403，实际 %d：%s", rec.Code, truncate(rec.Body.String(), 160))
+		// 探针账号有 waybill.view，过得了闸；测的是过闸之后范围收不收窄。
+		// （"没有 waybill.view 就该 403"那一层在 readsurface_test.go 里。）
+		rec := e.call(token, "GET", "/api/v1/waybills/stats", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("期望 200，实际 %d：%s", rec.Code, truncate(rec.Body.String(), 160))
+		}
+		var env struct {
+			Data struct {
+				Total    int            `json:"total"`
+				ByStatus map[string]int `json:"by_status"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+			t.Fatalf("解析失败：%v", err)
+		}
+		if env.Data.Total != 0 || len(env.Data.ByStatus) != 0 {
+			t.Errorf("无组织账号看到运单统计 total=%d、%d 个状态（库里共 %d 单）——"+
+				"统计口径绕过了数据范围", env.Data.Total, len(env.Data.ByStatus), total)
 		}
 	})
 }

@@ -40,6 +40,15 @@ func (h *Handler) Workbench(w http.ResponseWriter, r *http.Request) {
 	// 对账草稿数属于财务域：没有 finance.view 就不该在工作台上看见它
 	_, _, myPerms, _ := h.Svc.RolesAndPerms(ctx, me)
 	canFinance := auth.HasPerm(myPerms, "finance.view")
+	// 同理，池中待派属于订单域。这里原先只收了数据范围、没判权限点：
+	// 一个只有 masterdata.view（"主数据查看"）、数据范围给了"全部"的角色，
+	// 打开工作台就看到 pool_count=4588 和 pool_top 里五条完整订单记录，
+	// 而它打 /orders 列表是规规矩矩 403 的——同一份数据，换个入口就出来了。
+	// 数据范围管的是"看得见谁的单"，管不了"该不该看订单这一面"。
+	canWaybill := auth.HasPerm(myPerms, "waybill.view")
+	if !canWaybill {
+		poolScope, poolArgs = "false", nil
+	}
 
 	var unread, myOpenExc, myPendingCount, myToday, poolCount, myClaimed, draftStmts int
 	_ = h.DB.QueryRow(ctx, `SELECT count(*) FROM ntf_notification WHERE recipient_id=$1::uuid AND NOT is_read`, me.ID).Scan(&unread)

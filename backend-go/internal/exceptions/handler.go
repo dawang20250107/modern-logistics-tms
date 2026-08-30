@@ -57,6 +57,16 @@ LEFT JOIN accounts_user u ON u.id = x.assignee_id`,
 
 // List GET /api/v1/exceptions（数据范围按运单组织归属）
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	// 这条路由**覆盖掉了**通用 CRUD 挂好的那条（main.go 里
+	// mdH.CRUD(...) 之后又写了 rt.Get("/", excH.List)），
+	// 于是 CRUD 上 ReadPerm: "waybill.view" 那道闸一起被盖掉了。
+	// 自实现的这份只做了数据范围——而范围管的是"看得见谁的单"，
+	// 不是"该不该看异常这一面"。实测一个只有 masterdata.view、
+	// 数据范围给"全部"的账号，打这里拿得到异常记录（含责任方、
+	// 赔付金额、处理结论）。
+	if !h.MD.Allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {

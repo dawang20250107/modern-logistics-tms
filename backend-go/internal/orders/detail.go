@@ -18,6 +18,24 @@ import (
 
 // Detail GET /api/v1/orders/{id} —— 与列表同一序列化（Django retrieve 亦复用 OrderSerializer）
 func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
+	// 订单这一面的读，权限点是 waybill.view —— 前端导航上早就是这么声明的
+	// （AppLayout 里「订单管理」「调度工作台」都写着 perm: "waybill.view"），
+	// 后端这 9 条读路由却一条都没执行。
+	//
+	// 实测一个只有 masterdata.view（"主数据查看"，听起来只是看客户和司机档案）
+	// 且数据范围给了"全部"的角色：
+	//   GET /api/v1/orders          → 200，全库订单
+	//   GET /api/v1/orders/export   → 200，5.26 MB、50002 行 CSV，
+	//                                  客户名、始发目的、报价一次拉走
+	//   GET /api/v1/orders/funnel   → 全库漏斗：cs 50839 单、self 1 单、各状态分布
+	// 同一个账号打 /waybills、/statements、/reimbursements 都规规矩矩 403 ——
+	// 订单是唯一漏的那一面，而它恰恰是数据量最大、最敏感的那一面。
+	//
+	// 数据范围挡不住这件事：范围管的是"看得见谁的单"，
+	// 给了"全部"就等于全库。三个内置角色都带 waybill.view，补上不影响它们。
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {

@@ -102,6 +102,12 @@ func (h *Handler) excEvent(ctx context.Context, excID, eventType, toStatus, acto
 
 // Create POST /api/v1/exceptions —— 挂运单登记（运单详情页上报）
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	// 上报异常按 waybill.view 放行而不是 waybill.manage：发现问题的常常是客服，
+	// 而他们只有查看权。**登记问题的门要低，定责赔钱的门要高**——
+	// 后面 Assign/Handle/Close 三个动作要的是 waybill.manage。
+	if !h.MD.Allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -164,6 +170,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // ReportForOrder POST /api/v1/orders/{id}/report-exception —— 订单池登记 + 订单事件
 func (h *Handler) ReportForOrder(w http.ResponseWriter, r *http.Request) {
+	// 与 Create 同一道门：发现问题的常常是只有查看权的客服
+	if !h.MD.Allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {

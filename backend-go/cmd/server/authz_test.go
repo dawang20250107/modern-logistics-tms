@@ -213,6 +213,56 @@ var protectedEndpoints = []endpoint{
 	{"GET", "/api/v1/customers", "masterdata.view", ""},
 	// 组织与权限
 	{"GET", "/api/v1/org/rbac/matrix", "org.rbac", ""},
+
+	// ── 通用 CRUD 资源：22 个读写配置里有 22 处没写全权限点 ──
+	//
+	// 这一批是发布前把 WriteCfg 逐个数出来的。gate 的语义是「want 为空 = 不设限」，
+	// 于是漏写一行就等于对所有登录用户敞开。实测：一个只有
+	// masterdata.view + waybill.view 的客服账号，**POST /finance/pricing-rules
+	// 返回 201**——它建出一条 priority=9999、base_price=99999 的通配收入价，
+	// 此后每一次报价与成本生成都会命中它。
+	//
+	// 这条链上还有一处更隐蔽的：异常的 assign/handle/close 三个动作
+	// 一个权限检查都没有，挡住它们的只有数据范围。**数据范围管的是
+	// "看得见谁的单"，不是"能不能做这件事"**——同一个网点的客服照样能替公司
+	// 定责赔钱（close 会按赔付金额落一条应付）。
+	//
+	// 下面每一条都登记期望码，漏挂闸的话 CI 会在合并前说话。
+	{"GET", "/api/v1/finance/pricing-rules", "finance.view", ""},
+	{"POST", "/api/v1/finance/pricing-rules", "finance.manage",
+		`{"name":"x","price_type":"income","charge_method":"flat","expense_item_code":"TRANSPORT_INCOME"}`},
+	{"GET", "/api/v1/finance/expense-records", "finance.view", ""},
+	{"POST", "/api/v1/finance/expense-records", "finance.manage", `{}`},
+	{"GET", "/api/v1/finance/payment-requests", "finance.view", ""},
+	{"POST", "/api/v1/finance/payment-requests", "finance.manage", `{}`},
+	{"GET", "/api/v1/finance/expense-items", "finance.view", ""},
+	{"POST", "/api/v1/finance/expense-items", "finance.manage", `{}`},
+	{"GET", "/api/v1/finance/contracts", "finance.view", ""},
+	{"POST", "/api/v1/finance/contracts", "finance.manage", `{}`},
+	{"GET", "/api/v1/finance/reimbursements", "finance.view", ""},
+	{"GET", "/api/v1/finance/webhooks", "org.manage", ""},
+	{"POST", "/api/v1/finance/webhooks", "org.manage", `{}`},
+	{"GET", "/api/v1/finance/webhook-deliveries", "org.manage", ""},
+	{"GET", "/api/v1/receipts", "waybill.view", ""},
+	{"POST", "/api/v1/receipts", "waybill.manage", `{}`},
+	{"GET", "/api/v1/order-templates", "waybill.view", ""},
+	{"POST", "/api/v1/order-templates", "waybill.manage", `{}`},
+	{"GET", "/api/v1/reminder-templates", "waybill.view", ""},
+	{"POST", "/api/v1/reminder-templates", "waybill.manage", `{}`},
+	{"GET", "/api/v1/dispatch-batches", "waybill.view", ""},
+	{"GET", "/api/v1/finance/projects", "masterdata.view", ""},
+	{"POST", "/api/v1/finance/projects", "masterdata.manage", `{}`},
+	{"GET", "/api/v1/telematics/alerts", "telematics.view", ""},
+	{"GET", "/api/v1/org/login-audit", "org.rbac", ""},
+	{"GET", "/api/v1/audit-logs", "org.rbac", ""},
+	{"GET", "/api/v1/org/permissions", "org.rbac", ""},
+
+	// 异常：登记的门低（waybill.view），定责赔钱的门高（waybill.manage）
+	{"POST", "/api/v1/exceptions", "waybill.view", `{"exception_type":"other","level":"low","description":"x"}`},
+	{"POST", "/api/v1/exceptions/" + zeroUUID + "/assign", "waybill.manage", `{}`},
+	{"POST", "/api/v1/exceptions/" + zeroUUID + "/handle", "waybill.manage", `{}`},
+	{"POST", "/api/v1/exceptions/" + zeroUUID + "/close", "waybill.manage", `{}`},
+	{"GET", "/api/v1/exceptions/" + zeroUUID + "/timeline", "waybill.view", ""},
 }
 
 const zeroUUID = "00000000-0000-0000-0000-000000000000"

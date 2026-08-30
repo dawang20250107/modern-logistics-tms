@@ -215,6 +215,9 @@ func coerceDT(v string) any {
 
 // Intake POST /api/v1/orders/intake
 func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	var body struct {
 		Text       string           `json:"text"`

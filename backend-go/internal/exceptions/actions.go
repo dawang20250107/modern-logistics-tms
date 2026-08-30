@@ -28,7 +28,9 @@ var Cfg = func() masterdata.ResourceCfg {
 
 // Write 异常的可写字段；status 是只读的（read_only_fields），只能由处置动作推进
 var Write = masterdata.WriteCfg{
-	Table: "ops_exception", Model: "ExceptionRecord", Verbose: "异常", Alias: "x",
+	ReadPerm:  "waybill.view",
+	WritePerm: "waybill.manage",
+	Table:     "ops_exception", Model: "ExceptionRecord", Verbose: "异常", Alias: "x",
 	Fields: map[string]masterdata.Field{
 		"waybill":              {Kind: masterdata.FUUID, Ref: "ops_waybill"}, // null=True：不挂运单的异常也合法
 		"exception_type":       {Kind: masterdata.FEnum, Required: true, Choices: exceptionTypes},
@@ -55,6 +57,18 @@ var exceptionTypes = func() []string {
 }()
 
 // object 取异常并做数据范围校验；未命中时已写 404
+// need 权限闸。
+//
+// 这几个动作原先**一个权限检查都没有**：只要登录了、而且那张运单在你的数据范围里，
+// 就能指派、处理、乃至定责关闭——而关闭会按赔付金额落一条应付，
+// 把钱带进对账。数据范围挡住的是"看得见谁的单"，不是"能不能做这件事"，
+// 拿它当权限用是把两个不同的问题混成一个：同一个网点的客服照样能替公司定责赔钱。
+//
+// 这一批是发布前系统性排查 22 个读写配置时顺出来的（见 authz_test.go 的清单）。
+func (h *Handler) need(w http.ResponseWriter, r *http.Request, perm string) bool {
+	return h.MD.Allow(w, r, perm)
+}
+
 func (h *Handler) object(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := chi.URLParam(r, "id")
 	if _, err := uuid.Parse(id); err != nil {
@@ -81,6 +95,9 @@ func (h *Handler) respond(w http.ResponseWriter, r *http.Request, id string) {
 
 // Timeline GET /api/v1/exceptions/{id}/timeline
 func (h *Handler) Timeline(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.view") {
+		return
+	}
 	id, ok := h.object(w, r)
 	if !ok {
 		return
@@ -115,6 +132,9 @@ func (h *Handler) Timeline(w http.ResponseWriter, r *http.Request) {
 
 // Assign POST /api/v1/exceptions/{id}/assign {assignee}
 func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id, ok := h.object(w, r)
 	if !ok {
@@ -158,6 +178,9 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 
 // Handle POST /api/v1/exceptions/{id}/handle {resolution}
 func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id, ok := h.object(w, r)
 	if !ok {
@@ -190,6 +213,9 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 
 // Close POST /api/v1/exceptions/{id}/close {responsibility_party, amount, resolution}
 func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
+	if !h.need(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id, ok := h.object(w, r)
 	if !ok {

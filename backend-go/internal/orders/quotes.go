@@ -106,6 +106,9 @@ func (h *Handler) YmmQuote(w http.ResponseWriter, r *http.Request) {
 
 // Convert POST /api/v1/orders/{id}/convert —— 订单转运单（不带承运商/车辆的最简转换）
 func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return

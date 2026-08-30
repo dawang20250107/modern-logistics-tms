@@ -33,6 +33,9 @@ var fieldLabels = map[string]string{
 
 // Edit POST /api/v1/orders/{id}/edit {fields, cargo_items, stops}
 func (h *Handler) Edit(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return

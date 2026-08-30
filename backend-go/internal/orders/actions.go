@@ -48,6 +48,9 @@ func inList(s string, xs []string) bool {
 
 // approvalGate approve/reject 共用：仅待审批可动，落审批事件后回整份订单
 func (h *Handler) approvalGate(w http.ResponseWriter, r *http.Request, approved bool) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -222,6 +225,9 @@ func recomputeCargo(ctx context.Context, tx pgx.Tx, orderID string) error {
 
 // Split POST /api/v1/orders/{id}/split {groups:[{cargo_item_ids:[...]}]}
 func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -350,6 +356,9 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 
 // Merge POST /api/v1/orders/merge {ids:[...]}
 func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -465,6 +474,9 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 
 // Batch POST /api/v1/orders/batch {action, ids}
 func (h *Handler) Batch(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -565,6 +577,9 @@ var batchFieldChoices = map[string][]string{
 
 // BatchUpdate POST /api/v1/orders/batch-update {field, value, ids}
 func (h *Handler) BatchUpdate(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -647,6 +662,9 @@ func validUUIDs(in []string) []string {
 //
 // 逐行建单、失败隔离：一行脏数据不该让整批白跑。
 func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -718,6 +736,9 @@ func mapList(v any) []map[string]any {
 
 // Attachments GET/POST /api/v1/orders/{id}/attachments
 func (h *Handler) Attachments(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return
@@ -850,6 +871,9 @@ func safeExt(filename string) string {
 
 // DeleteAttachment DELETE /api/v1/orders/{id}/attachments/{att_id}
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return

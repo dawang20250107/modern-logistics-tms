@@ -22,6 +22,9 @@ import (
 // 除了解析结果，还回两样客服真正用得上的东西：缺了哪些关键信息，
 // 以及近 24 小时有没有同电话/同线路的活跃单（防重复下单）。
 func (h *Handler) ParsePreview(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	var body struct {
 		Text string `json:"text"`
@@ -99,6 +102,9 @@ func isBlank(v any) bool {
 
 // Quote POST /api/v1/orders/quote —— 录单自动报价
 func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)

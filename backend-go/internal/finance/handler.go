@@ -215,7 +215,8 @@ var StatementDetailCfg = func() masterdata.ResourceCfg {
 // StatementWrite 对账单只读（ListModelMixin + RetrieveModelMixin）：
 // 状态与金额只能由 generate/confirm/audit/settle 推进，不给直改的口子
 var StatementWrite = masterdata.WriteCfg{
-	Table: "fin_statement", Model: "Statement", Verbose: "对账单", Alias: "s", ReadOnly: true,
+	ReadPerm: "finance.view",
+	Table:    "fin_statement", Model: "Statement", Verbose: "对账单", Alias: "s", ReadOnly: true,
 }
 
 // Aging GET /api/v1/finance/aging?direction=receivable|payable

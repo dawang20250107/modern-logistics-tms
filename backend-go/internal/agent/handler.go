@@ -211,7 +211,8 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 
 // suggestionWrite AI 建议只读：状态只能由 confirm 动作推进
 var suggestionWrite = masterdata.WriteCfg{
-	Table: "ai_agent_suggestion", Model: "AgentSuggestion", Verbose: "Agent 建议", Alias: "g", ReadOnly: true,
+	ReadPerm: "ai.use",
+	Table:    "ai_agent_suggestion", Model: "AgentSuggestion", Verbose: "Agent 建议", Alias: "g", ReadOnly: true,
 }
 
 // SuggestionDetail GET /api/v1/ai/suggestions/{id}（数据范围同列表）

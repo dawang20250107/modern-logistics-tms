@@ -156,6 +156,9 @@ func completeOrderOnDelivery(ctx context.Context, tx pgx.Tx, w *wbRow, to string
 
 // Transition POST /api/v1/waybills/{no}/transition {to_status, remark}
 func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -201,6 +204,9 @@ func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
 
 // Sign POST /api/v1/waybills/{no}/sign —— e-POD 签收：落回单 + 状态推进 + 订单完成 + 司机累计
 func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -287,6 +293,9 @@ func (h *Handler) Sign(w http.ResponseWriter, r *http.Request) {
 
 // StopEvent POST /api/v1/waybills/{no}/stop-event {seq, event: arrived|departed}
 func (h *Handler) StopEvent(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")

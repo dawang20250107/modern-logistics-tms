@@ -44,6 +44,37 @@ type Handler struct {
 	MediaRoot string
 }
 
+// allow 权限闸：这个动作要不要这个权限点。
+//
+// 由来是发布前的一次系统性排查：拿一个只有 masterdata.view + waybill.view 的
+// 客服账号，把 100 条动作路由挨个打了一遍，**53 条没有被 403 挡住**。
+// 挡住其中一部分的只是数据范围——而数据范围管的是"看得见谁的单"，
+// 不是"能不能做这件事"：同一个网点的客服照样能派单、能签收、能核销。
+//
+// 这个包里本来就有带权限的入口（resolve(w, r, "waybill.manage")），
+// 只是那些自己取参数、不走 resolve 的 handler 全都漏了。
+// 现在缺的那些补上，并逐条登记进 cmd/server/authz_test.go 的清单。
+func (h *Handler) allow(w http.ResponseWriter, r *http.Request, want string) bool {
+	ctx := r.Context()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return false
+	}
+	_, _, perms, err := h.Svc.RolesAndPerms(ctx, me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取权限失败")
+		return false
+	}
+	for _, p := range perms {
+		if p == "*" || p == want {
+			return true
+		}
+	}
+	httpx.Err(w, http.StatusForbidden, "PERMISSION_DENIED", "缺少所需权限。")
+	return false
+}
+
 // store 取媒体存放实现。
 func (h *Handler) store() blob.Store {
 	if h.Blob != nil {

@@ -30,6 +30,37 @@ type Handler struct {
 	MD  *masterdata.Handler
 }
 
+// allow 权限闸：这个动作要不要这个权限点。
+//
+// 由来是发布前的一次系统性排查：拿一个只有 masterdata.view + waybill.view 的
+// 客服账号，把 100 条动作路由挨个打了一遍，**53 条没有被 403 挡住**。
+// 挡住其中一部分的只是数据范围——而数据范围管的是"看得见谁的单"，
+// 不是"能不能做这件事"：同一个网点的客服照样能派单、能签收、能核销。
+//
+// 这个包里本来就有带权限的入口（resolve(w, r, "waybill.manage")），
+// 只是那些自己取参数、不走 resolve 的 handler 全都漏了。
+// 现在缺的那些补上，并逐条登记进 cmd/server/authz_test.go 的清单。
+func (h *Handler) allow(w http.ResponseWriter, r *http.Request, want string) bool {
+	ctx := r.Context()
+	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
+	if err != nil {
+		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
+		return false
+	}
+	_, _, perms, err := h.Svc.RolesAndPerms(ctx, me)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "读取权限失败")
+		return false
+	}
+	for _, p := range perms {
+		if p == "*" || p == want {
+			return true
+		}
+	}
+	httpx.Err(w, http.StatusForbidden, "PERMISSION_DENIED", "缺少所需权限。")
+	return false
+}
+
 func ocrProvider() string { return os.Getenv("OCR_PROVIDER") }
 
 // decodeBody 宽松解析请求体（DRF 允许空体调用 @action）
@@ -70,6 +101,9 @@ func (h *Handler) echo(w http.ResponseWriter, r *http.Request, cfg masterdata.Re
 // ── 回单确认 POST /receipts/{id}/confirm ──
 
 func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Receipt")
 	if id == "" {
@@ -139,6 +173,9 @@ func (h *Handler) ReceiptConfirm(w http.ResponseWriter, r *http.Request) {
 // ── 司机确认提醒 POST /reminders/{id}/acknowledge ──
 
 func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "DriverReminder")
 	if id == "" {
@@ -182,6 +219,9 @@ func (h *Handler) ReminderAcknowledge(w http.ResponseWriter, r *http.Request) {
 // AlertTransition 对齐 AlertViewSet._transition（status + handled_by + handled_at）
 func (h *Handler) AlertTransition(target string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !h.allow(w, r, "telematics.manage") {
+			return
+		}
 		ctx := r.Context()
 		id := pathUUID(w, r, "Alert")
 		if id == "" {
@@ -228,6 +268,9 @@ func genReimbNo() string {
 
 // ReimbursementCreate POST /reimbursements —— ViewSet.create 完全重写，走 submit_reimbursement
 func (h *Handler) ReimbursementCreate(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	body := decodeBody(r)
 
@@ -314,6 +357,9 @@ func reimbStatusLabel(s string) string {
 
 // ReimbursementApprove 审批通过：生成应付费用（计入毛利）+ 下游付款申请
 func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Reimbursement")
 	if id == "" {
@@ -404,6 +450,9 @@ func (h *Handler) ReimbursementApprove(w http.ResponseWriter, r *http.Request) {
 
 // ReimbursementReject 驳回：仅已提交可驳回，理由写入 remark
 func (h *Handler) ReimbursementReject(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Reimbursement")
 	if id == "" {
@@ -430,6 +479,9 @@ func (h *Handler) ReimbursementReject(w http.ResponseWriter, r *http.Request) {
 
 // ReimbursementPay 付款：同步把下游付款申请置为 paid
 func (h *Handler) ReimbursementPay(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	id := pathUUID(w, r, "Reimbursement")
 	if id == "" {
@@ -480,6 +532,9 @@ func (h *Handler) ReimbursementPay(w http.ResponseWriter, r *http.Request) {
 
 // PaymentResult POST /finance/payment-results —— 外部 OA/ERP 回写付款结果
 func (h *Handler) PaymentResult(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "finance.manage") {
+		return
+	}
 	ctx := r.Context()
 	body := decodeBody(r)
 	updated := false

@@ -163,6 +163,9 @@ func (h *Handler) carrierBlockReason(ctx context.Context, carrierID string) (nam
 
 // BatchDispatch POST /api/v1/orders/batch-dispatch
 func (h *Handler) BatchDispatch(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {

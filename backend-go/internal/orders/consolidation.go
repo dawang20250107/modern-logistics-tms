@@ -238,6 +238,9 @@ func floatOf(v any) float64 {
 // 订单池批量智能排线：同向小单合成整车需求 → 推荐承运商 + 整车报价。
 // 只出方案不落库，调度员看过再决定派不派——排线是建议，派单才是动作。
 func (h *Handler) DispatchPlan(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.view") {
+		return
+	}
 	ctx := r.Context()
 	var body struct {
 		IDs []string `json:"ids"`

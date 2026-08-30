@@ -29,7 +29,8 @@ SELECT a.id::text AS id, a.actor_id::text AS actor, COALESCE(u.username,'') AS a
 // LogsCfg / LogsWrite 供详情复用；审计日志只读，任何写口都不该开
 var LogsCfg = logsCfg
 var LogsWrite = masterdata.WriteCfg{
-	Table: "audit_log", Model: "AuditLog", Verbose: "审计日志", Alias: "a", ReadOnly: true,
+	ReadPerm: "org.rbac",
+	Table:    "audit_log", Model: "AuditLog", Verbose: "审计日志", Alias: "a", ReadOnly: true,
 }
 
 // Detail GET /api/v1/audit-logs/{id}（同样限管理员）

@@ -52,6 +52,9 @@ func alreadySigned(status string) bool {
 // 受理状态直写，目标状态一律走状态机——绕开流转校验直改 status，是里程碑与
 // 事件链后来对不上的根因。
 func (h *Handler) Dispatch(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -140,7 +143,13 @@ func (h *Handler) respondWaybill(w http.ResponseWriter, r *http.Request, no stri
 // Events GET·POST /api/v1/waybills/{no}/events
 func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id, no, ok := h.resolve(w, r, "waybill.view")
+	// 这条路由既读也写（POST 追加事件）。原先读写都按 waybill.view 放行——
+	// 运单事件是时间线，往里塞一条等于伪造一段历史，得要 manage。
+	perm := "waybill.view"
+	if r.Method == http.MethodPost {
+		perm = "waybill.manage"
+	}
+	id, no, ok := h.resolve(w, r, perm)
 	if !ok {
 		return
 	}
@@ -619,6 +628,9 @@ FROM ops_contract c LEFT JOIN md_driver d ON d.id=c.driver_id`
 
 // PartialSign POST /api/v1/waybills/{no}/partial-sign
 func (h *Handler) PartialSign(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -714,6 +726,9 @@ func pyNum(d decimal.Decimal) string { return d.String() }
 
 // Reject POST /api/v1/waybills/{no}/reject {reason, signatory, sign_source}
 func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	me, err := h.Svc.UserByID(ctx, auth.UserID(r))
 	if err != nil {
@@ -834,6 +849,9 @@ func nilIfEmpty(s string) any {
 
 // codAction collect/remit 共用：改状态 + 落时间戳 + 事件
 func (h *Handler) codAction(w http.ResponseWriter, r *http.Request, remit bool) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -919,6 +937,9 @@ const waybillSpawnDefaultVals = `'pending_accept', 'none', 'not_due', 0,
 
 // Split POST /api/v1/waybills/{no}/split {splits:[{cargo_quantity, cargo_weight_ton, cargo_volume_cbm}]}
 func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")
@@ -1016,6 +1037,9 @@ func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
 
 // Merge POST /api/v1/waybills/merge {waybill_nos:[...], route_name}
 func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	ctx := r.Context()
 	if _, err := h.Svc.UserByID(ctx, auth.UserID(r)); err != nil {
 		httpx.Err(w, http.StatusUnauthorized, "TOKEN_INVALID", "用户不存在")

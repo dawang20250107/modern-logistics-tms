@@ -14,6 +14,9 @@ import (
 
 // Clone POST /api/v1/orders/{id}/clone
 func (h *Handler) Clone(w http.ResponseWriter, r *http.Request) {
+	if !h.allow(w, r, "waybill.manage") {
+		return
+	}
 	id, ok := h.resolveOrder(w, r)
 	if !ok {
 		return

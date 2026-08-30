@@ -154,6 +154,59 @@ if (waybill) {
   }
 }
 
+// 派单：全系统用得最多的那个动作，走完整个抽屉。
+//
+// 这一段补的是一个真实缺口：e2e-flow 只比了「已调派」的计数一致性，
+// 从没真按过「确认派单」。而派单要落运单、落议定应付金额、改订单状态——
+// 中间任何一步坏了，前面那些计数照样自洽。
+//
+// 注意它会真的消耗一张池子里的订单（派完就转 converted）。池子里有几千张，
+// 每次跑掉一张可以接受；但这也是它只适合跑在开发/预发库上的原因。
+{
+  await page.goto(`${BASE}/dispatch-board`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1500);
+  // 先锁一单：待分配的单要锁定之后才能派
+  const free = page.locator("tbody tr").first();
+  const lockBtn = free.locator('button:has-text("锁定")').first();
+  if (await lockBtn.count()) {
+    await lockBtn.click();
+    await page.waitForTimeout(1500);
+  }
+  await page.locator('button:has-text("可调派")').first().click();
+  await page.waitForTimeout(1800);
+  const row = page.locator("tbody tr").first();
+  const orderNo = (await row.innerText().catch(() => "")).match(/LT-\d+|DD\d+/)?.[0] ?? "";
+  const dispatchBtn = row.locator('button:has-text("派单")').first();
+  if (!(await dispatchBtn.count())) {
+    fail.push("派单：可调派池里那一行没有「派单」按钮");
+  } else {
+    await dispatchBtn.click();
+    await page.waitForTimeout(1800);
+    // 承运商在抽屉的 <select> 里。（第一版我以为是可点的卡片，
+    // 因为 innerText 把 option 的文字也铺出来了，看着像一排按钮。）
+    let picked = "";
+    const sels = page.locator("select:visible");
+    for (let i = 0; i < (await sels.count()); i++) {
+      const opts = await sels.nth(i).locator("option").evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent })));
+      const hit = opts.find((o) => o.v && o.v.length > 20 && /承运|物流|运输|快运/.test(o.t || ""));
+      if (hit) { await sels.nth(i).selectOption(hit.v); picked = hit.t ?? ""; await page.waitForTimeout(900); break; }
+    }
+    if (!picked) {
+      fail.push("派单：抽屉里没找到可选的承运商");
+    } else {
+      const ok = page.locator('button:has-text("确认派单")').last();
+      await ok.click({ timeout: 8000 }).catch((e) => fail.push("派单：确认按钮点不动 —— " + e.message.split("\n")[0]));
+      await page.waitForTimeout(2500);
+      const toasts = (await page.locator('[class*="toast"]').allInnerTexts()).join(" ");
+      if (!/派单成功|已生成运单/.test(toasts)) {
+        fail.push(`派单：点了确认但没有成功提示（订单 ${orderNo}，承运商 ${picked}）`);
+      } else {
+        note(`✓ 派单 ${orderNo} → ${picked}，已生成运单`);
+      }
+    }
+  }
+}
+
 // 运单状态流转：调度员每天点最多的按钮
 if (waybill) {
   await page.goto(`${BASE}/waybills/${waybill.waybill_no}`, { waitUntil: "networkidle" });

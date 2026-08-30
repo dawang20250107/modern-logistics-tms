@@ -5,9 +5,15 @@
 // 订单读补闸、客服拿到建单权限、三条路由挂上权限门——
 // 这些改动的好坏，只有拿一个受限账号真的点一遍才知道。
 //
-// 两个演示角色各走一遍：
-//   客服（seed_cs）      waybill.view + waybill.create + masterdata.view，范围本网点
-//   财务只读（seed_finance） finance.view + waybill.view + analytics.view，范围全部
+// 三个演示角色各走一遍：
+//   客服（seed_cs）        waybill.view + waybill.create + masterdata.view，范围本网点
+//   调度员（seed_dispatcher） 加 waybill.manage + carrier.view + telematics.view，范围子树
+//   财务只读（seed_finance）  finance.view + waybill.view + analytics.view，范围全部
+//
+// 调度员那一档是**反方向**的：断言该有的写按钮必须在。
+// 前面几轮给全站加了大量权限门，而没有一条检查在防"加多了"——
+// 少给一个门只是多一次 403，多给一个门是让能干活的人干不了活，
+// 而且没人会来报（他会以为这功能就是这样）。
 // 各自该能做的和不该能做的都写在下面的档案里。
 //
 // 财务只读那一档抓到的是另一类：**看得见按不动的按钮**。
@@ -32,6 +38,9 @@ const BASE = process.argv[2] ?? "http://127.0.0.1:5173";
 const API = process.env.API_BASE ?? "http://127.0.0.1:8000";
 const PASS = process.env.TMS_ROLE_PASS ?? "Demo12345!";
 const DB = process.env.DATABASE_URL ?? "";
+// 对照组：超管。它带 `*` 权限，所有按钮都该看得到。
+const SU_USER = process.env.TMS_USER ?? "admin";
+const SU_PASS = process.env.TMS_PASS ?? "Admin12345!";
 
 // 已知会 403 的能力探测：界面据此把入口标成"无权限"而不是亮着让人点。
 // 这一条本身有 vitest 用例守着（capability-probe.test.ts）。
@@ -54,6 +63,33 @@ const PROFILES = [
     // 该能用的：订单管理要有数据、客服工作台要打得开
     listPage: ["订单管理", "/waybills"],
     openPage: ["客服工作台", "/intake"],
+  },
+  {
+    user: "seed_dispatcher",
+    label: "调度员",
+    perms: "carrier.view,masterdata.view,telematics.view,waybill.manage,waybill.view",
+    navMust: ["调度工作台", "订单管理", "资源库"],
+    navMustNot: ["对账中心", "计价规则", "组织与权限"],
+    blocked: [["对账中心", "/reconciliation", "finance.view"]],
+    listPage: ["订单管理", "/waybills"],
+    // 反方向：这个角色**必须**看得到这些写按钮。
+    // 前面几轮给全站加了大量权限门，而没有一条检查在防"加多了"——
+    // 少给一个门只是多一次 403，多给一个门是让能干活的人干不了活，
+    // 而且没人会来报（他会以为这功能就是这样）。
+    // 跟超管在**同一张运单**上对照，而不是手写一串按钮名。
+    // 手写的第一版就写错了：那张运单的合同已是「已确认」，
+    // 「生成合同」对所有人都不显示，超管也没有——
+    // 检查报的原因是假的，而假红比不报更伤。
+    // 对照法还自带空转防护：超管都没有按钮时说明这一页没打开。
+    mustMatchSuperuser: {
+      name: "运单详情",
+      path: "/waybills/LT-000000001",
+      // 这些是超管有、这个角色本就不该有的，按权限点逐条写明
+      allowedMissing: {
+        "风险分析": "要 ai.use",
+        "生成费用": "要 finance.manage",
+      },
+    },
   },
   {
     user: "seed_finance",
@@ -86,6 +122,26 @@ function q(sql) {
 }
 
 const browser = await launchBrowser();
+
+async function buttonsOn(page, path) {
+  await page.goto(`${BASE}${path}`, { waitUntil: "networkidle" });
+  await assertAppPage(page, path, API);
+  await page.waitForTimeout(1200);
+  return page.$$eval("button:not([role='tab'])",
+    (bs) => [...new Set(bs.map((b) => (b.textContent ?? "").trim()).filter(Boolean))]);
+}
+
+// 超管那一份单开一个浏览器上下文取，取完就关：对照组不能和被测角色共用会话。
+async function superuserButtonsOn(path) {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  try {
+    await login(page, BASE, { user: SU_USER, pass: SU_PASS, api: API });
+    return await buttonsOn(page, path);
+  } finally {
+    await ctx.close();
+  }
+}
 
 for (const prof of PROFILES) {
   console.log(`\n\u2550\u2550 ${prof.label}（${prof.user}）\u2550\u2550`);
@@ -188,6 +244,33 @@ for (const prof of PROFILES) {
     }
   }
 
+  // ── 该有的写按钮不能被门挡掉 ──
+  if (prof.mustMatchSuperuser) {
+    const m = prof.mustMatchSuperuser;
+    current = m.name;
+    console.log("\u2500\u2500 该有的写按钮（跟超管对照）\u2500\u2500");
+    const mine = await buttonsOn(page, m.path);
+    const su = await superuserButtonsOn(m.path);
+    // 空转防护：超管都没有按钮，说明这一页压根没打开（或者选错了运单），
+    // 那时候"没有缺失"和"根本没比较"长得一模一样。
+    if (su.length < 3) {
+      bad(`超管在「${m.name}」上只有 ${su.length} 个按钮 —— 这一页多半没打开，本次对照不作数`);
+    } else {
+      const missing = su.filter((b) => !mine.includes(b) && !(b in m.allowedMissing));
+      const unexpected = Object.keys(m.allowedMissing).filter((b) => mine.includes(b));
+      if (missing.length) {
+        bad(`「${m.name}」上这些按钮超管有、${prof.label}没有：${missing.join("、")}` +
+          `（这个角色有 waybill.manage，本该看得到——门加多了）`);
+      } else {
+        ok(`跟超管对照：${su.length} 个按钮里少了 ${su.length - mine.length} 个，` +
+          `都是写明理由的（${Object.entries(m.allowedMissing).map(([k, v]) => k + " " + v).join("、")}）`);
+      }
+      if (unexpected.length) {
+        bad(`「${m.name}」上这些按钮${prof.label}不该看到：${unexpected.join("、")}`);
+      }
+    }
+  }
+
   // ── 该挡住的面要说人话 ──
   console.log("\u2500\u2500 挡住的面 \u2500\u2500");
   const blockedNames = new Set();
@@ -224,5 +307,5 @@ for (const prof of PROFILES) {
 await browser.close();
 console.log(fail.length
   ? `\n\u2717 受限角色走查有 ${fail.length} 处不对`
-  : `\n\u2713 两个受限角色（客服 / 财务只读）该用的用得了、该挡的说清了`);
+  : `\n\u2713 三个受限角色（客服 / 调度员 / 财务只读）该用的用得了、该挡的说清了、该有的没被挡掉`);
 process.exit(fail.length ? 1 : 0);

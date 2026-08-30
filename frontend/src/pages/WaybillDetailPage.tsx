@@ -197,10 +197,17 @@ export function WaybillDetailPage() {
     },
   });
 
+  // 报销**列表**属于财务域（ReimbursementsCfg 的 ReadPerm 是 finance.view），
+  // 而**提交**报销是运单动作（要 waybill.manage）。两者权限点不同，
+  // 于是调度员的处境是：能提交、看不到列表。
+  // 原先照查不误——调度员一打开运单详情就吃一个 403，页面上什么都不说，
+  // 只是那块永远显示「暂无报销单」，看起来像提交没成功。
+  // 现在没有 finance.view 就不查，并在那一块明说这是权限而不是没有数据。
+  const canViewFinance = hasPerm(user, "finance.view");
   const reimbursements = useQuery({
     queryKey: ["waybill", no, "reimbursements"],
     queryFn: () => apiGet<Paginated<Reimbursement>>(`/finance/reimbursements?waybill=${detail.data?.id}&page_size=50`),
-    enabled: Boolean(detail.data?.id),
+    enabled: Boolean(detail.data?.id) && canViewFinance,
   });
   const invalidateReimb = () => queryClient.invalidateQueries({ queryKey: ["waybill", no, "reimbursements"] });
   const [bxCat, setBxCat] = useState("toll");
@@ -600,7 +607,10 @@ export function WaybillDetailPage() {
                   {submitReimb.isPending ? "提交中…" : "提交报销"}
                 </button>
               </div>}
-              {(reimbursements.data?.items ?? []).length === 0 ? (
+              {!canViewFinance ? (
+                <StateView kind="empty" title="报销记录需要财务查看权限"
+                  hint="你提交的报销会进入财务的待审批列表；要在这里看到它们的状态，需要 finance.view 权限点。" compact />
+              ) : (reimbursements.data?.items ?? []).length === 0 ? (
                 <StateView kind="empty" title="暂无报销单" hint="过路费、油费等司机垫付的费用在此提交与审批。" compact />
               ) : (
                 <div className="table-wrap">

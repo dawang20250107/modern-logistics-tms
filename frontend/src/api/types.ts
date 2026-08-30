@@ -1057,6 +1057,13 @@ export const OCR_STATUS_LABEL: Record<string, string> = {
   pending: "待识别", processing: "识别中", done: "已识别", failed: "识别失败", manual: "待人工",
 };
 
+// 单张回单的核验状态。**必须与后端 internal/wbstatus 的 PODUploaded/
+// PODConfirmed/PODRejected 一致**——这三个值是 ValidPOD 的全集，
+// 后端会拒掉词表外的取值，前端也就不该显示第四种说法。
+export const POD_STATUS_LABEL: Record<string, string> = {
+  uploaded: "待核验", confirmed: "已核验", rejected: "已驳回",
+};
+
 // ── 通知 / 订单事件 ─────────────────────────────────────
 export interface Notification {
   id: string;

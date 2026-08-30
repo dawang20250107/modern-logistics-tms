@@ -65,6 +65,7 @@ def main() -> int:
 
     scanned = 0
     naked = []           # 有裸守卫、又没登记
+    still_naked = set()  # 眼下仍然是裸守卫的，用来查名单里有没有过期条目
     guarded = 0          # 开了事务的
     for path in sorted(ROOT.rglob("*.go")):
         if path.name.endswith("_test.go"):
@@ -80,6 +81,7 @@ def main() -> int:
                 guarded += 1
                 continue
             if STATUS_READ.search(body) and WRITE.search(body):
+                still_naked.add((rel, name))
                 if (rel, name) not in ALLOW:
                     naked.append((rel, name))
 
@@ -96,6 +98,19 @@ def main() -> int:
     if guarded == 0:
         print("一个开事务的 handler 都没扫到 —— 事务的写法多半变了", file=sys.stderr)
         return 2
+
+    # 名单自检：**已经改成事务里做的，这条豁免就是过期的**。
+    #
+    # 过期条目比没有名单更坏：它让人以为"这里是想清楚了才不加事务的"，
+    # 于是再没人去看。车载上报那两条就是被一句与事实不符的豁免理由
+    # 藏了很久（写着"走设备凭据"，而它们既没有设备凭据也不在设备侧路由组上）。
+    stale = [f"{k[0]} · {k[1]}" for k in ALLOW if k not in still_naked]
+    if stale:
+        print(f"ALLOW 里这些已经不是裸守卫了，豁免过期（共 {len(stale)} 处）：\n")
+        for x in sorted(stale):
+            print(f"  {x}")
+        print("\n从 ALLOW 里删掉。名单一旦有一条不可信，整份名单就都不可信了。")
+        return 1
 
     if naked:
         print(f"这些 handler 的状态守卫读在事务外，并发下等于没有守卫（共 {len(naked)} 处）：\n")

@@ -6,7 +6,8 @@ import { apiGet, apiPost, apiUpload } from "../api/client";
 import { hasPerm, useAuth } from "../auth/auth";
 import { fmtDateTime, fmtMoney, EMPTY } from "../api/format";
 import { toast } from "../api/toast";
-import { COD_STATUS_LABEL, OCR_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
+import { confirmAction } from "../api/confirm";
+import { COD_STATUS_LABEL, OCR_STATUS_LABEL, POD_STATUS_LABEL, REIMB_CATEGORY_LABEL, STATUS_LABEL, type Contract, type CostCatalog, type CostSummary, type DriverCollection, type DriverReminder, type ExceptionRecord, type Paginated, type Reimbursement, type ReminderTemplate, type Receipt, type WaybillDetail } from "../api/types";
 import { SignaturePad } from "../components/SignaturePad";
 import { CopyCode } from "../components/CopyCode";
 import { ExceptionCloseLoop } from "../components/ExceptionCloseLoop";
@@ -133,6 +134,24 @@ export function WaybillDetailPage() {
       return apiUpload<Receipt>("/receipts", fd);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["waybill", no, "receipts"] }),
+  });
+  // 回单核验。后端一直有这条（POST /receipts/{id}/confirm），界面上没有入口——
+  // 于是「核验」在产品里只剩运单列表那个批量「标已回收」：它直接把运单上的
+  // 回单状态写成 returned，不看下面挂的是哪张回单、更没有驳回这一步。
+  // 而结算是认 audited 的，只有逐张核验通过才会把运单推到 audited。
+  //
+  // 驳回尤其重要：核验过的回单被改判时，后端会按「这张运单还有没有
+  // 通过核验的回单」把运单退回 returned。没有这颗按钮，一张错误核验过的
+  // 回单就再也退不回来，运单会一直挂着「凭证齐全」等着放款。
+  const confirmReceipt = useMutation({
+    mutationFn: (v: { id: string; status: "confirmed" | "rejected" }) =>
+      apiPost(`/receipts/${v.id}/confirm`, { status: v.status }),
+    onSuccess: (_d, v) => {
+      toast.success(v.status === "confirmed" ? "回单已核验通过" : "回单已驳回");
+      queryClient.invalidateQueries({ queryKey: ["waybill", no, "receipts"] });
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const [excType, setExcType] = useState("transit_delay");
@@ -757,6 +776,21 @@ export function WaybillDetailPage() {
                           <a href={r.file_display} target="_blank" rel="noreferrer" className="link small">查看原件</a>
                         ) : (
                           <span className="small" style={{ color: "var(--muted)" }}>无原件</span>
+                        )}
+                      </div>
+                      {/* 核验状态与动作。状态先摆出来——原先这一行只显示 OCR，
+                          回单自己是「待核验/已通过/已驳回」哪一档根本看不见。 */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        <span className={`tag tag-${r.status === "confirmed" ? "low" : r.status === "rejected" ? "high" : "medium"}`} style={{ fontSize: 10 }}>
+                          {POD_STATUS_LABEL[r.status] ?? r.status}
+                        </span>
+                        {canManage && r.status !== "confirmed" && (
+                          <button className="btn-ghost small" disabled={confirmReceipt.isPending}
+                            onClick={() => confirmReceipt.mutate({ id: r.id, status: "confirmed" })}>核验通过</button>
+                        )}
+                        {canManage && r.status !== "rejected" && (
+                          <button className="btn-ghost small" disabled={confirmReceipt.isPending}
+                            onClick={async () => { if (await confirmAction({ message: "驳回这张回单？运单的「回单已核验」会一并撤销，结算需重新走核验。", confirmText: "驳回" })) confirmReceipt.mutate({ id: r.id, status: "rejected" }); }}>驳回</button>
                         )}
                       </div>
                     </div>

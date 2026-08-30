@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -37,17 +38,17 @@ import (
 // 允许没有权限检查的 handler，每条都要写清为什么。
 var authzExempt = map[string]string{
 	"PublicIntake": "对外开放的客户自助下单，本就免登录（有独立限流）",
-	"Quote":        "报价预览，不落库（路由层按 waybill.view 放行）",
-	"ParsePreview": "解析预览，不落库",
-	"Read":         "标记自己的通知已读，没有别人的数据可动",
-	"ReadAll":      "同上",
+	"Read":         "标记自己的通知已读：SQL 带 recipient_id=$2，动不了别人的",
+	"ReadAll":      "同上，SQL 带 recipient_id=$1",
 	"PublicTrack":  "免登录查单，有两道限流",
 	// 司机端：走的是司机令牌（authDriver），不是后台用户的权限点体系。
-	// 它们各自校验"这张运单是不是本人的"，那才是这一侧该有的边界。
-	"Login":            "司机端登录",
-	"Checkin":          "司机打卡，authDriver + 本人运单校验",
-	"UploadCredential": "司机自助传证件，同上",
-	"AckReminder":      "司机确认提醒，同上",
+	// 每条的边界写清楚是**哪一条**校验，别写"同上"——
+	// 车载上报那两条就是被一句笼统的"走设备凭据"藏了很久，
+	// 而那句话与事实不符（它们既没有设备凭据，也不在设备侧路由组上）。
+	"Login":            "司机端登录，本来就是拿手机号+身份证后 6 位换令牌",
+	"Checkin":          "authDriver + 打卡时校验这张运单是不是本人的",
+	"UploadCredential": "authDriver + 落库写的是 d.ID，只能传给自己",
+	"AckReminder":      "authDriver + SQL 带 dr.driver_id=$2，确认不了别人的提醒",
 }
 
 func TestEveryMutatingHandlerHasAPermissionCheck(t *testing.T) {
@@ -77,6 +78,7 @@ func TestEveryMutatingHandlerHasAPermissionCheck(t *testing.T) {
 	factory := regexp.MustCompile(`func \(h \*Handler\) (\w+)\([^)]*\) http\.HandlerFunc \{`)
 
 	checked, missing := 0, []string{}
+	bodies := map[string]string{} // handler 名 → 函数体，名单自检要用
 	err = filepath.Walk("../../internal", func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
@@ -92,15 +94,16 @@ func TestEveryMutatingHandlerHasAPermissionCheck(t *testing.T) {
 				if !wanted[name] {
 					continue
 				}
-				if _, ok := authzExempt[name]; ok {
-					continue
-				}
-				checked++
 				// 函数体：从 { 到下一个顶格 } 之间
 				body := src[m[1]:]
 				if end := strings.Index(body, "\n}\n"); end > 0 {
 					body = body[:end]
 				}
+				bodies[name] = body
+				if _, ok := authzExempt[name]; ok {
+					continue
+				}
+				checked++
 				if !guard.MatchString(body) {
 					missing = append(missing, name+"（"+filepath.Base(path)+"）")
 				}
@@ -114,6 +117,26 @@ func TestEveryMutatingHandlerHasAPermissionCheck(t *testing.T) {
 	if checked < 20 {
 		t.Fatalf("只对上了 %d 个 handler——命名约定变了，这条用例正在空转", checked)
 	}
+	// 名单自检：**被豁免的 handler 如果其实带着权限检查，这条豁免就是过期的**。
+	//
+	// 过期条目比没有名单更坏：它让人以为"这里已经想过了、是有意不挂闸"，
+	// 于是再没人去看。实测这份名单里 Quote / ParsePreview 两条就是这样——
+	// 它们函数体第一行就是 h.allow(w, r, "waybill.view")，
+	// 豁不豁免结果一样，留着只是噪声。
+	stale := []string{}
+	for name := range authzExempt {
+		if body, ok := bodies[name]; ok && guard.MatchString(body) {
+			stale = append(stale, name)
+		}
+	}
+	sort.Strings(stale)
+	if len(stale) > 0 {
+		t.Errorf("这些 handler 其实有权限检查，豁免是过期的（%d 个）：%s\n"+
+			"  从 authzExempt 里删掉。留着会让人以为「这里是有意不挂闸」，"+
+			"而豁免名单一旦有一条不可信，整份名单就都不可信了。",
+			len(stale), strings.Join(stale, "、"))
+	}
+
 	if len(missing) > 0 {
 		t.Errorf("这些 handler 会改数据但函数体里没有任何权限检查（%d 个）：\n  %s\n\n"+
 			"挡住它们的可能只是数据范围，而数据范围管的是「看得见谁的单」，"+

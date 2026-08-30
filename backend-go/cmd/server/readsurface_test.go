@@ -110,6 +110,20 @@ func TestCollectionReadsAreGated(t *testing.T) {
 			t.Errorf("readAllowed 里登记的 %s 已经不是一条 GET 路由了，名单该清理", p)
 		}
 	}
+	// 名单自检的另一半：**已经挡住了的条目，豁免就是过期的**。
+	//
+	// 过期条目比没有名单更坏：它让人以为"这里是有意放开的"，于是再没人去看。
+	// 车载上报那两条就是被一句与事实不符的豁免理由藏了很久
+	// （写着"走设备凭据"，而它们既没有设备凭据也不在设备侧路由组上）。
+	for p := range readAllowed {
+		if !seen[p] {
+			continue
+		}
+		if e.call(tok, "GET", p, "").Code == http.StatusForbidden {
+			t.Errorf("readAllowed 里登记的 %s 现在已经是 403 了，这条豁免过期了 —— 删掉它。\n"+
+				"  名单一旦有一条不可信，整份名单就都不可信了。", p)
+		}
+	}
 }
 
 // TestOrderReadsRequireWaybillView 订单这一面的读要 waybill.view。
@@ -269,6 +283,7 @@ func TestParamReadsAreGated(t *testing.T) {
 		t.Fatal("路由器不是 chi.Routes")
 	}
 	walked, seen := 0, map[string]bool{}
+	codes := map[string]int{} // 路由 → 返回码，名单自检要用
 	_ = chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if method != "GET" || !strings.HasPrefix(route, "/api/v1/") || !strings.Contains(route, "{") {
 			return nil
@@ -286,6 +301,7 @@ func TestParamReadsAreGated(t *testing.T) {
 		walked++
 		seen[route] = true
 		rec := e.call(low, "GET", p, "")
+		codes[route] = rec.Code
 		if rec.Code == http.StatusForbidden {
 			return nil
 		}
@@ -305,6 +321,12 @@ func TestParamReadsAreGated(t *testing.T) {
 	for route := range paramReadAllowed {
 		if !seen[route] {
 			t.Errorf("paramReadAllowed 里登记的 %s 已经不是一条 GET 路由了，名单该清理", route)
+		}
+	}
+	// 同 readAllowed：已经 403 的条目，豁免是过期的
+	for route := range paramReadAllowed {
+		if code, ok := codes[route]; ok && code == http.StatusForbidden {
+			t.Errorf("paramReadAllowed 里登记的 %s 现在已经是 403 了，这条豁免过期了 —— 删掉它", route)
 		}
 	}
 }

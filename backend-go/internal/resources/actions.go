@@ -460,20 +460,40 @@ func (h *Handler) ReimbursementReject(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		return
 	}
+	// 同审批那条：状态检查要在事务里、并锁住行。
+	//
+	// 财务两个人同时处理同一笔报销，一个批一个驳，这在真实班次里不稀罕。
+	// 审批那一步不可逆——应付和付款申请都已经落库了——所以谁先落地谁算数。
+	// 原先这段读在事务外、UPDATE 又不带状态条件：驳回抢输了照样把状态
+	// 覆盖成"已驳回"并返回 200。实测就是这样：审批先提交，随后到的驳回
+	// 把它改成了 rejected。账上于是挂着一笔"已驳回"却仍要付的钱，
+	// 对账时两边谁也说不清。
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var status string
-	if err := h.DB.QueryRow(ctx, "SELECT status FROM fin_reimbursement WHERE id=$1::uuid", id).Scan(&status); err != nil {
+	if err := tx.QueryRow(ctx,
+		"SELECT status FROM fin_reimbursement WHERE id=$1::uuid FOR UPDATE", id).Scan(&status); err != nil {
 		httpx.Err(w, http.StatusNotFound, "error", "No Reimbursement matches the given query.")
 		return
 	}
 	if status != "submitted" {
-		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED", "仅已提交的报销可驳回。")
+		httpx.Err(w, http.StatusConflict, "REIMB_NOT_SUBMITTED",
+			"仅已提交的报销可驳回（该报销当前为「"+reimbStatusLabel(status)+"」）。")
 		return
 	}
 	reason, _ := str(decodeBody(r), "reason")
-	if _, err := h.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE fin_reimbursement SET status='rejected', remark=$2, updated_at=now() WHERE id=$1::uuid`,
 		id, reason); err != nil {
 		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "更新失败")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交事务失败")
 		return
 	}
 	h.echo(w, r, ReimbursementsCfg, "rb.id = $1::uuid", id)

@@ -228,9 +228,20 @@ if (DB && orderNo) {
           AND tc.table_name <> 'ops_waybill'`], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
     const wbSel = `SELECT id FROM ops_waybill WHERE waybill_no='${waybillNo}'`;
     const sql = [
-      `DELETE FROM fin_statement_payment WHERE statement_id IN (
-         SELECT statement_id FROM fin_statement_line WHERE waybill_no='${waybillNo}');`,
+      // 对账单要连表头一起清。
+      //
+      // 原先只删了明细和收款记录，表头留在库里——于是每跑一轮就多一张
+      // "有金额、没明细"的对账单。在演示库上攒了 4 张之后被资金不变量
+      // 用例逮住：表头 3587.50、明细合计 0。那个数字是拿去跟客户对话的，
+      // 库里躺着几张对不上账的孤儿单，比不清运单更难看。
+      // 只删被清空的那些表头：generate 有可能把别的运单也归集进同一张单，
+      // 那种还有明细的不能碰。
+      `CREATE TEMP TABLE _walk_st AS
+         SELECT DISTINCT statement_id AS id FROM fin_statement_line WHERE waybill_no='${waybillNo}';`,
+      `DELETE FROM fin_statement_payment WHERE statement_id IN (SELECT id FROM _walk_st);`,
       `DELETE FROM fin_statement_line WHERE waybill_no='${waybillNo}';`,
+      `DELETE FROM fin_statement s WHERE s.id IN (SELECT id FROM _walk_st)
+         AND NOT EXISTS (SELECT 1 FROM fin_statement_line l WHERE l.statement_id = s.id);`,
       ...refs.map((t) => `DELETE FROM ${t} WHERE waybill_id IN (${wbSel});`),
       `DELETE FROM ops_waybill WHERE waybill_no='${waybillNo}';`,
       `DELETE FROM ops_order_event WHERE order_id IN (SELECT id FROM ops_order WHERE order_no='${orderNo}');`,

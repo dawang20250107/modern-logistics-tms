@@ -229,10 +229,28 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "开启事务失败")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var from, party, amount, resolution string
 	var waybillID *string
-	_ = h.DB.QueryRow(ctx, `SELECT status, responsibility_party, amount::text, resolution, waybill_id::text
-		FROM ops_exception WHERE id=$1::uuid`, id).Scan(&from, &party, &amount, &resolution, &waybillID)
+	// 读状态必须在事务里、并且锁住这一行。
+	//
+	// 下面那个 `from == "closed"` 的守卫原先读在事务**外面**，
+	// 写又不带状态条件——串行点两次挡得住，并发就一起穿过去。
+	// 实测 6 个并发关闭：**6 个都返回 200，落了 6 条应付，
+	// 800 元的赔付计成 4800**。前端重试一次、或者两个调度同时处理
+	// 同一条异常，承运商就被多扣几倍。
+	if err := tx.QueryRow(ctx, `SELECT status, responsibility_party, amount::text, resolution, waybill_id::text
+		FROM ops_exception WHERE id=$1::uuid FOR UPDATE`, id).
+		Scan(&from, &party, &amount, &resolution, &waybillID); err != nil {
+		httpx.Err(w, http.StatusNotFound, "error", "No ExceptionRecord matches the given query.")
+		return
+	}
 
 	// 已关闭的异常不能再关一次。
 	//
@@ -259,7 +277,7 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 	if v, has := body["resolution"].(string); has {
 		resolution = v
 	}
-	if _, err := h.DB.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE ops_exception SET status='closed', responsibility_party=$2,
 		  amount=$3::numeric, resolution=$4, updated_at=now() WHERE id=$1::uuid`,
 		id, party, amount, resolution); err != nil {
@@ -269,12 +287,12 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 	// 责任金额 > 0 且挂了运单 → 落一条应付费用，把异常成本带进对账
 	if waybillID != nil {
 		var positive bool
-		_ = h.DB.QueryRow(ctx, `SELECT $1::numeric > 0`, amount).Scan(&positive)
+		_ = tx.QueryRow(ctx, `SELECT $1::numeric > 0`, amount).Scan(&positive)
 		if positive {
 			eid, _ := uuid.NewV7()
 			// 其余 NOT NULL 列按模型层的 blank/default 补零值；occurred_at 保持 NULL
 			// （Django 的 create() 没传，就不该被网关擅自填成"现在"）
-			if _, err := h.DB.Exec(ctx, `
+			if _, err := tx.Exec(ctx, `
 				INSERT INTO fin_expense_record (id, created_at, updated_at, waybill_id, direction,
 				  expense_item_code, amount, risk_status, source_system, external_id,
 				  currency, remark, payee_ref, payee_type, charge_method, matched_condition,
@@ -288,6 +306,10 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Err(w, http.StatusInternalServerError, "INTERNAL", "提交事务失败")
+		return
 	}
 	h.event(r, id, "close", from, "closed", me.ID, resolution,
 		map[string]any{"responsibility_party": party, "amount": amount})

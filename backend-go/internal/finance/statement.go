@@ -207,6 +207,21 @@ func (h *Handler) GenerateStatement(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 一条明细都没有就不该建单。
+	//
+	// 原先照建不误：一张有单号、有账期、金额 0、明细 0 的草稿对账单，
+	// 出现在客户的对账中心里。财务选错账期点一下，就得去解释并作废一张
+	// 正式编号的单据——而对账单号是连号的，这个号就这么烧掉了。
+	// 演示库里攒下 235 张空单（每跑一轮用例多 4 张）才注意到这件事。
+	//
+	// 归集不到通常只有两种原因，都写进提示里，省得财务对着空列表猜。
+	if len(lines) == 0 {
+		httpx.Err(w, http.StatusConflict, "STATEMENT_EMPTY",
+			"这个账期内没有可对账的费用，没有生成对账单。"+
+				"常见原因：运单的费用还没生成，或者这些费用已经进过别的对账单。")
+		return
+	}
+
 	var cpName string
 	table := "md_customer"
 	if req.CounterpartyType == "carrier" {

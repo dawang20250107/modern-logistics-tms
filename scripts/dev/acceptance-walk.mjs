@@ -46,7 +46,7 @@ const jpost = async (p, data) => {
   return { status: r.status(), body: await r.json().catch(() => ({})) };
 };
 
-let orderNo = "", waybillNo = "";
+let orderNo = "", waybillNo = "", tempDriverID = "";
 try {
   // ── 1. 建一单 ──
   // 建单接口收的是 {fields:{…}}（也认 text/cargo_items），不是把字段平铺在顶层。
@@ -83,8 +83,22 @@ try {
             WHERE driver_id IS NOT NULL AND status IN
               ('dispatched','loaded','departed','in_transit','arrived')`).split(",") : [],
   );
-  const driver = (drivers?.items ?? []).find((d) => d.id_no && d.phone && !busy.has(d.id));
-  if (!carrier || !driver) { bad("第 3 步：库里没有可用的承运商或有身份证号的司机"); throw new Error("stop"); }
+  let driver = (drivers?.items ?? []).find((d) => d.id_no && d.phone && !busy.has(d.id));
+  // 新播种的库里 **5 个演示司机全都在跑车**（8 张演示运单里 6 张是在途状态，
+  // 正好把 5 个司机占满）。所以这里不能"找不到就报库里没司机"——
+  // 那句话是真的，但它说的不是产品的问题，而这条走查会因此在 CI 上长红。
+  // 找不到就自己造一个，跑完删掉。
+  if (!driver) {
+    const mk = await jpost("/api/v1/drivers", {
+      name: "验收走查司机 " + MARK, phone: "138" + String(Date.now()).slice(-8),
+      id_no: "310101199001" + String(Date.now() % 1000000).padStart(6, "0"),
+      license_no: "SH" + MARK, license_type: "A2", employment_type: "fulltime", is_active: true,
+    });
+    driver = mk.body?.data;
+    if (!driver?.id) { bad(`第 3 步：没有空闲司机，且新建司机失败：${mk.status} ${JSON.stringify(mk.body).slice(0, 160)}`); throw new Error("stop"); }
+    tempDriverID = driver.id;
+  }
+  if (!carrier) { bad("第 3 步：库里没有可用的承运商"); throw new Error("stop"); }
   for (const act of ["confirm", "pool"]) await jpost(`/api/v1/orders/${orderID}/${act}`, {});
   await jpost(`/api/v1/orders/${orderID}/claim`, {});
   const disp = await jpost(`/api/v1/orders/${orderID}/dispatch`, {
@@ -221,6 +235,8 @@ if (DB && orderNo) {
       `DELETE FROM ops_waybill WHERE waybill_no='${waybillNo}';`,
       `DELETE FROM ops_order_event WHERE order_id IN (SELECT id FROM ops_order WHERE order_no='${orderNo}');`,
       `DELETE FROM ops_order WHERE order_no='${orderNo}';`,
+      // 自己造的司机也要清掉，否则演示库里的司机会一轮轮攒下来
+      ...(tempDriverID ? [`DELETE FROM md_driver WHERE id='${tempDriverID}'::uuid;`] : []),
     ].join("\n");
     execFileSync("psql", [DB, "-tAq", "-c", sql], { encoding: "utf8" });
   } catch (e) {

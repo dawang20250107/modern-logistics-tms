@@ -128,6 +128,19 @@ func newPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 // buildRouter 被调用几十次，每次都漏 6 个永不退出的 goroutine 继续打库——
 // 于是用例之间会互相干扰，池关掉之后还会刷一屏 "closed pool"。
 // 分成两个参数，调用方就能明确表达"这批后台任务活多久"。
+// inlineSafeMedia 允许按原类型内联发出的媒体类型。
+//
+// 判据是"浏览器拿它当页面渲染时会不会执行脚本"：
+// 图片和纯文本不会；PDF 会跑自己的脚本，但那是在阅读器的沙箱里，
+// 拿不到页面的同源上下文——而回单和证件必须能在界面上直接看，
+// 所以这两类留在名单里。其余一律降成八位字节流强制下载。
+var inlineSafeMedia = map[string]bool{
+	"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true,
+	"image/bmp": true, "image/tiff": true,
+	"application/pdf": true,
+	"text/plain":      true, "text/csv": true,
+}
+
 func buildRouter(startCtx, workerCtx context.Context, pool *pgxpool.Pool, cfg config.Config) http.Handler {
 	// 媒体存放。配错（比如 MEDIA_BACKEND=s3 但少了 S3_BUCKET）就直接退出，
 	// 不静默退回本地盘——退回去会让多副本部署"看起来正常"地间歇丢文件。
@@ -513,8 +526,33 @@ func buildRouter(startCtx, workerCtx context.Context, pool *pgxpool.Pool, cfg co
 				return
 			}
 			defer rc.Close()
+			// nosniff 只挡住"浏览器自己猜类型"，挡不住**声明出来就是 text/html**。
+			//
+			// 三条上传路径都用 http.DetectContentType 按内容嗅探类型：
+			// 传一个 .html 上去，存下来的类型就是 text/html，
+			// 再从 /media/ 原样吐出来——**在应用自己的域名下执行脚本**。
+			// 实测传 `<script>alert(document.domain)</script>`，
+			// GET 回来是 200 + Content-Type: text/html，内容原样。
+			//
+			// 最短的攻击路径是司机端：/api/v1/driver/credentials 是**自助上传**，
+			// 只要司机令牌（手机号 + 身份证后 6 位）就能传。司机种一个 HTML 当"证件"，
+			// 客服在后台点开那条链接，脚本就带着客服的会话在同源里跑起来了。
+			//
+			// 所以按"这个类型能不能安全地内联"来发：能的照常（图片和 PDF 要在
+			// 界面上直接显示，回单照片、证件都是这么看的），不能的一律降成
+			// 八位字节流并强制下载。已经存进去的文件也一起被这条挡住，
+			// 不用去翻历史数据。
+			ct, dispo := info.ContentType, ""
+			if !inlineSafeMedia[strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))] {
+				ct, dispo = "application/octet-stream", "attachment"
+			}
 			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("Content-Type", info.ContentType)
+			w.Header().Set("Content-Type", ct)
+			if dispo != "" {
+				// 文件名是 UUID+扩展名（上传时就不收用户给的名字），
+				// 这里不拼用户输入，没有头注入的面。
+				w.Header().Set("Content-Disposition", dispo)
+			}
 			if info.Size >= 0 {
 				w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 			}

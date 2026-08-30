@@ -580,4 +580,22 @@ func (s *seeder) expensesAndStatements() {
 		  FROM (SELECT statement_id, sum(amount) AS sum_amt, count(*) AS n
 		          FROM fin_statement_line GROUP BY statement_id) t
 		 WHERE t.statement_id = s.id AND s.id = $1::uuid`, sid)
+
+	// 那笔"收了六成"要有对应的核销记录。
+	//
+	// 原先只把 settled_amount 写成六成，**一条核销明细都没有**：
+	// 界面上写着「已核销 ¥37,800」，点进核销记录是空的。
+	// 而 settled_amount == Σ 核销明细 正是核销逻辑（事务 + FOR UPDATE +
+	// 未结余额校验）一直在维持的那条不变式——演示数据从第一天起就破坏了它。
+	//
+	// 这和"不伪造签收人"不是一回事：核销记录是内部记账行（方式 + 流水号），
+	// 不是签收照片那种法律凭证。既然要演示一张部分结算的单，
+	// 那就把支撑它的那一行也写出来，而不是让金额凭空成立。
+	s.exec("statement payment", `
+		INSERT INTO fin_statement_payment (id, created_at, updated_at, statement_id,
+		  amount, method, paid_at, reference_no, remark)
+		SELECT $1::uuid, now(), now(), s.id, s.settled_amount, 'bank_transfer',
+		       now() - interval '3 days', 'SEEDPAY000001', '演示数据：首期回款六成'
+		  FROM fin_statement s WHERE s.id = $2::uuid AND s.settled_amount > 0
+		ON CONFLICT DO NOTHING`, id("stmtpay/SEED1"), sid)
 }

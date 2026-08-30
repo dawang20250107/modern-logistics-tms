@@ -108,6 +108,22 @@ nodrv=$(psql -d "$DB" -tAc "SELECT count(*) FROM ops_waybill
   WHERE status IN ('departed','in_transit','arrived') AND driver_id IS NULL")
 [ "$nodrv" = "0" ] && ok "在途运单都有司机" || bad "$nodrv 张在途运单没有司机"
 
+# 钱的三条守恒。核销逻辑（事务 + FOR UPDATE + 未结余额校验）一直在维持它们，
+# 而演示数据曾经从第一天起就破坏了第二条：settled_amount 写成六成，
+# **一条核销明细都没有**——界面写着「已核销 ¥37,800」，点进去是空的。
+# 金额不能凭空成立，和"回单不能凭空宣布已核验"是同一件事。
+badsum=$(psql -d "$DB" -tAc "SELECT count(*) FROM (
+  SELECT s.id FROM fin_statement s LEFT JOIN fin_statement_line l ON l.statement_id=s.id
+  GROUP BY s.id, s.total_amount HAVING s.total_amount <> COALESCE(sum(l.amount),0)) t")
+[ "$badsum" = "0" ] && ok "对账单表头金额 = 明细行合计" || bad "$badsum 张对账单的表头金额和明细行对不上"
+badpay=$(psql -d "$DB" -tAc "SELECT count(*) FROM (
+  SELECT s.id FROM fin_statement s LEFT JOIN fin_statement_payment p ON p.statement_id=s.id
+  GROUP BY s.id, s.settled_amount HAVING s.settled_amount <> COALESCE(sum(p.amount),0)) t")
+[ "$badpay" = "0" ] && ok "已核销额 = 核销明细合计" \
+  || bad "$badpay 张对账单标着已核销，却没有对应的核销记录（钱不能凭空成立）"
+overpay=$(psql -d "$DB" -tAc "SELECT count(*) FROM fin_statement WHERE settled_amount > total_amount")
+[ "$overpay" = "0" ] && ok "没有超额核销" || bad "$overpay 张对账单核销额超过了应收额"
+
 perms=$(psql -d "$DB" -tAc 'SELECT count(*) FROM iam_permission')
 [ "$perms" -ge 15 ] && ok "权限点 $perms 个" || bad "权限点只有 $perms 个"
 

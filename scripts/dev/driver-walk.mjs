@@ -151,6 +151,43 @@ try {
     await page.waitForTimeout(1500);
     note(`按下「${label}」`);
   }
+  // ── 4. 证件自助上传 ──
+  // 这是**第五条上传路径**，而且和管理端「资源库传证件」不是同一个接口：
+  // 那条走通用 CRUD 引擎，这条是司机端自己的 handler，各解各的 multipart。
+  // 前面四条上传路径查出四个问题、全部返回 2xx，所以这条一样要真传一次再取回来。
+  const credBefore = Number(q(`SELECT count(*) FROM md_driver_credential
+    WHERE driver_id=(SELECT id FROM md_driver WHERE phone='${phone}') AND self_uploaded`));
+  const credUp = page.locator(".driver-wb").filter({ hasText: "证件上传" });
+  if (!(await credUp.count())) {
+    bad("司机端没有「证件上传」这一块——司机没法自助建档");
+  } else {
+    await credUp.locator('input[type="file"]').setInputFiles(PHOTO);
+    await page.waitForResponse(
+      (r) => r.url().includes("/driver/credentials") && r.request().method() === "POST",
+      { timeout: 20000 },
+    ).catch(() => bad("按下「选择照片」后 20 秒内没有发出 /driver/credentials 请求"));
+    await page.waitForTimeout(1500);
+    const credRow = q(`SELECT coalesce(file,'')||'|'||ocr_status FROM md_driver_credential
+      WHERE driver_id=(SELECT id FROM md_driver WHERE phone='${phone}') AND self_uploaded
+      ORDER BY created_at DESC LIMIT 1`);
+    const credAfter = Number(q(`SELECT count(*) FROM md_driver_credential
+      WHERE driver_id=(SELECT id FROM md_driver WHERE phone='${phone}') AND self_uploaded`));
+    if (credAfter !== credBefore + 1) {
+      bad(`证件记录没有 +1（${credBefore} → ${credAfter}）——界面报"已上传"而库里没有`);
+    } else {
+      const [credFile, ocr] = credRow.split("|");
+      if (!credFile) {
+        bad("证件记录里 file 是空的——图传上去了但没落库（saveMedia 失败被吞掉了？）");
+      } else {
+        const r = await fetch(`${API}/media/${credFile}`);
+        const b = Buffer.from(await r.arrayBuffer());
+        if (r.status !== 200) bad(`证件图取不回来：GET /media/${credFile} → ${r.status}`);
+        else if (!b.equals(readFileSync(PHOTO))) bad(`取回来的证件图和刚传的那张不一样（${b.length} vs ${readFileSync(PHOTO).length} 字节）`);
+        else note(`✓ 证件自助上传：/media/${credFile} 取回来就是刚传的那张（ocr_status=${ocr}）`);
+      }
+    }
+  }
+
 } finally {
   await browser.close();
 }
@@ -192,5 +229,7 @@ const badWrites = writes.filter((w) => w.status >= 400);
 if (badWrites.length) for (const w of badWrites) bad(`写请求 ${w.status} ${w.path}`);
 if (pageErrors.length) for (const e of pageErrors) bad(`未捕获异常：${e}`);
 
-console.log(fail.length ? `\n✗ 司机端发现 ${fail.length} 个问题` : "\n✓ 司机端：登录 → 看到本人运单 → 拍照打卡 → 库里有记录、状态推进、照片取得回来");
+console.log(fail.length
+  ? `\n✗ 司机端发现 ${fail.length} 个问题`
+  : "\n✓ 司机端：登录 → 看到本人运单 → 拍照打卡 → 证件自助上传 → 回库核对（记录、状态推进、两张图都取得回来）");
 process.exit(fail.length ? 1 : 0);

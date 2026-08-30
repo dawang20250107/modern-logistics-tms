@@ -122,6 +122,86 @@ async function upload(label, url, linkSel) {
   note(`✓ ${label} → ${hit} 200，内容与本次上传一致`);
 }
 
+
+// 回单核验：**真按那两颗按钮，再回库里看运单的回单状态动没动**。
+//
+// 这一块的接口和用例都齐了（receiptconfirm_test.go 四条，含并发那条），
+// 界面上的调用点也被 reachable-actions.py 盯着。但那两样都不证明
+// "按下去会发生什么"：一个查的是后端行为，一个查的是源码里有没有这行字符。
+// 中间还隔着按钮的禁用条件、权限判断、以及点完之后列表刷不刷新。
+//
+// 结算认的是运单的 receipt_status=audited，而唯一能把它推到那一档的
+// 就是逐张核验通过。所以这里两个方向都按一遍：
+// 核验通过 → 运单该是 audited；驳回 → 该退回来（不能还挂着 audited）。
+async function receiptVerify(wb) {
+  const dsn = process.env.DATABASE_URL;
+  if (!dsn) {
+    note("· 回单核验：没有 DATABASE_URL，按了也没法回库核对，跳过");
+    return;
+  }
+  const q = (sql) => {
+    try {
+      return execFileSync("psql", [dsn, "-tAq", "-c", sql], { encoding: "utf8" }).trim();
+    } catch { return null; }
+  };
+  const wbStatus = () => q(`SELECT receipt_status FROM ops_waybill WHERE waybill_no='${wb.waybill_no}'`);
+
+  const panel = page.locator('.panel:has-text("电子回单")');
+  const pass = panel.getByRole("button", { name: "核验通过" }).first();
+  if ((await pass.count()) === 0) {
+    fail.push("回单核验：运单详情的回单区没有「核验通过」按钮——" +
+      "界面上唯一能动回单状态的只剩运单列表那个批量「标已回收」，" +
+      "而它不看下面挂的是哪张回单");
+    return;
+  }
+  await pass.click();
+  await page.waitForTimeout(1500);
+  const afterPass = wbStatus();
+  if (afterPass !== "audited") {
+    fail.push(`回单核验：按了「核验通过」，运单的回单状态是 ${afterPass}，期望 audited——` +
+      "按钮点得动但账没动，而结算认的就是这一档");
+    return;
+  }
+  note(`✓ 回单核验 → 运单 ${wb.waybill_no} 的回单状态 ${afterPass}`);
+
+  // 驳回那半边：改判之后运单上的「已核销」必须跟着撤销，
+  // 否则一张被否掉的回单还挂着"凭证齐全"，回单付的单子就凭它放行结算。
+  const reject = panel.getByRole("button", { name: "驳回" }).first();
+  if ((await reject.count()) === 0) {
+    fail.push("回单核验：只有「核验通过」没有「驳回」——错核的回单再也退不回来");
+    return;
+  }
+  await reject.click();
+  // 驳回走 confirmAction 二次确认
+  const confirmBtn = page.getByRole("button", { name: "驳回" }).last();
+  await page.waitForTimeout(400);
+  if (await confirmBtn.isVisible().catch(() => false)) await confirmBtn.click();
+  await page.waitForTimeout(1500);
+  const afterReject = wbStatus();
+  // 判据不能写成"驳回之后就该退出 audited"。**一张运单可以挂多张回单**，
+  // 只要还有别的通过了核验，运单仍然算凭证齐全（后端
+  // TestReceiptStillAuditedWhenAnotherConfirmedExists 钉的就是这条）。
+  //
+  // 第一版就是写死的"驳回后不该还是 audited"，第一次跑碰巧绿——那时这张
+  // 运单上没有别的已核验回单。走查每跑一轮就多留一张，攒出一张 confirmed
+  // 之后它开始报红，而**代码是对的、红的是判据**。照着这种红去改代码，
+  // 就会把"还有别的回单通过着"也一并撤销核销。
+  const stillConfirmed = Number(q(`SELECT count(*) FROM ops_receipt
+    WHERE waybill_id=(SELECT id FROM ops_waybill WHERE waybill_no='${wb.waybill_no}')
+      AND status='confirmed'`) ?? -1);
+  const want = stillConfirmed > 0 ? "audited" : "not-audited";
+  const got = afterReject === "audited" ? "audited" : "not-audited";
+  if (want !== got) {
+    fail.push(`回单驳回：这张运单还有 ${stillConfirmed} 张通过核验的回单，` +
+      `运单的回单状态却是 ${afterReject}——` +
+      (stillConfirmed > 0
+        ? "还有凭证成立的回单，不该撤销核销"
+        : "一张通过的都没有了还挂着已核销，凭证不成立而结算照放行"));
+    return;
+  }
+  note(`✓ 回单驳回 → 运单回单状态 ${afterReject}（这张运单还有 ${stillConfirmed} 张已核验回单）`);
+}
+
 await login();
 
 const order = await pick("/orders?page_size=1");
@@ -134,6 +214,7 @@ if (order) {
 }
 if (waybill) {
   await upload("电子回单", `${BASE}/waybills/${waybill.waybill_no}`, '.panel:has-text("电子回单") a[href]');
+  await receiptVerify(waybill);
 } else {
   fail.push("电子回单：库里没有运单可用");
 }
